@@ -1,0 +1,14 @@
+{
+  "protocol_version": 1,
+  "payload": {
+    "type": "Metrics",
+    "data": {
+      "ticks": 10,
+      "epochs": 0,
+      "survivors_last_epoch": 0,
+      "organisms": 500,
+      "synapse_ops_last_tick": 2010,
+      "actions_applied_last_tick": 284
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "config": {
+    "columns": 20,
+    "rows": 20,
+    "steps_per_epoch": 20,
+    "steps_per_second": 5,
+    "num_organisms": 500,
+    "num_neurons": 2,
+    "max_num_neurons": 20,
+    "num_synapses": 4,
+    "vision_depth": 3,
+    "action_potential_length": 1,
+    "mutation_chance": 0.04,
+    "mutation_magnitude": 1.0,
+    "unfit_kill_probability": 0.95,
+    "offspring_fill_ratio": 0.2,
+    "survival_rule": {
+      "CenterBandX": {
+        "min_fraction": 0.25,
+        "max_fraction": 0.75
+      }
+    }
+  },
+  "seed": 42
+}

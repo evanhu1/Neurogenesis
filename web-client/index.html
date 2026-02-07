@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NeuroGenesis Renderer</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <aside class="panel controls">
+        <h1>NeuroGenesis</h1>
+        <div class="meta" id="session-meta">No session</div>
+        <div class="row">
+          <button id="btn-create">Create Session</button>
+          <button id="btn-reset">Reset</button>
+        </div>
+        <div class="row">
+          <button id="btn-start">Start</button>
+          <button id="btn-pause">Pause</button>
+        </div>
+        <div class="row">
+          <button id="btn-step">Step 1</button>
+          <button id="btn-epoch">Epoch 1</button>
+        </div>
+        <div class="row">
+          <button id="btn-scatter">Scatter</button>
+          <button id="btn-survivors">Process Survivors</button>
+        </div>
+        <div class="metrics" id="metrics"></div>
+      </aside>
+
+      <main class="viewport">
+        <canvas id="world-canvas" width="900" height="900"></canvas>
+      </main>
+
+      <aside class="panel inspector">
+        <h2>Brain Inspector</h2>
+        <div id="focus-meta">Click an organism</div>
+        <canvas id="brain-canvas" width="420" height="560"></canvas>
+      </aside>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

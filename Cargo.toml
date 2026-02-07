@@ -1,0 +1,31 @@
+[workspace]
+members = [
+  "sim-core",
+  "sim-protocol",
+  "sim-server",
+  "sim-cli",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "MIT"
+
+[workspace.dependencies]
+anyhow = "1"
+axum = { version = "0.8", features = ["ws", "macros", "json"] }
+clap = { version = "4", features = ["derive"] }
+futures = "0.3"
+rand = "0.9"
+rand_chacha = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+uuid = { version = "1", features = ["serde", "v4"] }
+criterion = "0.7"
+toml = "0.9"
+tower-http = { version = "0.6", features = ["cors"] }
