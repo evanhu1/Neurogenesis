@@ -1,6 +1,6 @@
+use rand::seq::SliceRandom;
 use rand::Rng;
 use rand::SeedableRng;
-use rand::seq::SliceRandom;
 use rand_chacha::ChaCha8Rng;
 use sim_protocol::{
     ActionNeuronState, ActionType, BrainState, FacingDirection, InterNeuronState, MetricsSnapshot,
@@ -8,7 +8,8 @@ use sim_protocol::{
     SensoryNeuronState, SensoryReceptorType, SynapseEdge, TickDelta, WorldConfig, WorldSnapshot,
 };
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::f64::consts::PI;
 use thiserror::Error;
 
 const SYNAPSE_STRENGTH_MAX: f32 = 8.0;
@@ -33,16 +34,102 @@ pub struct Simulation {
 }
 
 #[derive(Default)]
-struct ActionResolution {
-    moved: Option<((i32, i32), (i32, i32))>,
-    meal: bool,
-    birth: bool,
-}
-
-#[derive(Default)]
 struct BrainEvaluation {
     actions: [bool; 3],
     synapse_ops: u64,
+}
+
+#[derive(Clone, Copy)]
+struct SnapshotOrganismState {
+    q: i32,
+    r: i32,
+    facing: FacingDirection,
+    turns_since_last_meal: u32,
+    move_confidence: f32,
+}
+
+#[derive(Clone)]
+struct TurnSnapshot {
+    world_width: i32,
+    occupancy: Vec<Option<OrganismId>>,
+    ordered_ids: Vec<OrganismId>,
+    organism_states: Vec<SnapshotOrganismState>,
+    id_to_index: HashMap<OrganismId, usize>,
+}
+
+impl TurnSnapshot {
+    fn organism(&self, id: OrganismId) -> Option<SnapshotOrganismState> {
+        let idx = self.id_to_index.get(&id)?;
+        self.organism_states.get(*idx).copied()
+    }
+
+    fn in_bounds(&self, q: i32, r: i32) -> bool {
+        q >= 0 && r >= 0 && q < self.world_width && r < self.world_width
+    }
+
+    fn cell_index(&self, q: i32, r: i32) -> Option<usize> {
+        if !self.in_bounds(q, r) {
+            return None;
+        }
+        Some(r as usize * self.world_width as usize + q as usize)
+    }
+
+    fn occupant_at(&self, q: i32, r: i32) -> Option<OrganismId> {
+        let idx = self.cell_index(q, r)?;
+        self.occupancy[idx]
+    }
+}
+
+#[derive(Clone, Copy)]
+struct OrganismIntent {
+    id: OrganismId,
+    from: (i32, i32),
+    facing_after_turn: FacingDirection,
+    wants_move: bool,
+    move_target: Option<(i32, i32)>,
+    move_confidence: f32,
+    synapse_ops: u64,
+}
+
+#[derive(Clone, Copy)]
+struct MoveCandidate {
+    actor: OrganismId,
+    from: (i32, i32),
+    target: (i32, i32),
+    confidence: f32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MoveResolutionKind {
+    MoveOnly,
+    EatAndReplace { prey: OrganismId },
+}
+
+#[derive(Clone, Copy)]
+struct MoveResolution {
+    actor: OrganismId,
+    from: (i32, i32),
+    to: (i32, i32),
+    kind: MoveResolutionKind,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SpawnRequestKind {
+    StarvationReplacement,
+    Reproduction { parent: OrganismId },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct SpawnRequest {
+    kind: SpawnRequestKind,
+}
+
+#[derive(Default)]
+struct CommitResult {
+    moves: Vec<OrganismMove>,
+    removed: Vec<OrganismId>,
+    meals: u64,
+    eaters: HashSet<OrganismId>,
 }
 
 impl Simulation {
@@ -144,149 +231,414 @@ impl Simulation {
     }
 
     fn tick(&mut self) -> TickDelta {
-        let mut moves = Vec::new();
-        let mut synapse_ops = 0_u64;
-        let mut actions_applied = 0_u64;
-        let mut meals = 0_u64;
-        let mut starvations = 0_u64;
-        let mut births = 0_u64;
+        let snapshot = self.build_turn_snapshot();
+        let intents = self.build_intents(&snapshot);
+        let synapse_ops = intents.iter().map(|intent| intent.synapse_ops).sum::<u64>();
 
-        let actor_ids: Vec<OrganismId> = self.organisms.iter().map(|o| o.id).collect();
-
-        for organism_id in actor_ids {
-            let Some(idx) = self.organism_index(organism_id) else {
-                continue;
-            };
-
-            self.organisms[idx].turns_since_last_meal =
-                self.organisms[idx].turns_since_last_meal.saturating_add(1);
-
-            if self.organisms[idx].turns_since_last_meal >= self.config.turns_to_starve {
-                if self.remove_organism(organism_id).is_some() {
-                    starvations += 1;
-                    if self.spawn_replacement_in_center().is_some() {
-                        births += 1;
-                    }
-                }
-                continue;
-            }
-
-            let (position, facing) = {
-                let org = &self.organisms[idx];
-                ((org.q, org.r), org.facing)
-            };
-
-            let occupancy_snapshot = self.occupancy.clone();
-            let evaluation = {
-                let brain = &mut self.organisms[idx].brain;
-                evaluate_brain(
-                    brain,
-                    position,
-                    facing,
-                    organism_id,
-                    self.config.world_width as i32,
-                    &occupancy_snapshot,
-                )
-            };
-            synapse_ops += evaluation.synapse_ops;
-
-            let resolution = self.apply_actions(organism_id, evaluation.actions);
-            if let Some((from, to)) = resolution.moved {
-                actions_applied += 1;
-                moves.push(OrganismMove {
-                    id: organism_id,
-                    from,
-                    to,
-                });
-            }
-            if resolution.meal {
-                meals += 1;
-            }
-            if resolution.birth {
-                births += 1;
-            }
-        }
+        let resolutions = self.resolve_moves(&snapshot, &intents);
+        let mut spawn_requests = Vec::new();
+        let commit = self.commit_phase(&intents, &resolutions, &mut spawn_requests);
+        let (starvations, starved_removed) =
+            self.lifecycle_phase(&commit.eaters, &mut spawn_requests);
+        let spawned = self.resolve_spawn_requests(&spawn_requests);
+        let births = spawned.len() as u64;
+        self.debug_assert_consistent_state();
 
         self.turn = self.turn.saturating_add(1);
         self.metrics.turns = self.turn;
         self.metrics.organisms = self.organisms.len() as u32;
         self.metrics.synapse_ops_last_turn = synapse_ops;
-        self.metrics.actions_applied_last_turn = actions_applied;
-        self.metrics.meals_last_turn = meals;
+        self.metrics.actions_applied_last_turn = commit.moves.len() as u64;
+        self.metrics.meals_last_turn = commit.meals;
         self.metrics.starvations_last_turn = starvations;
         self.metrics.births_last_turn = births;
 
         TickDelta {
             turn: self.turn,
-            moves,
+            moves: commit.moves,
+            removed: commit.removed.into_iter().chain(starved_removed).collect(),
+            spawned,
             metrics: self.metrics.clone(),
         }
     }
 
-    fn apply_actions(
-        &mut self,
-        organism_id: OrganismId,
-        action_outcomes: [bool; 3],
-    ) -> ActionResolution {
-        let mut result = ActionResolution::default();
-        let Some(mut idx) = self.organism_index(organism_id) else {
-            return result;
-        };
+    fn build_turn_snapshot(&self) -> TurnSnapshot {
+        let mut ordered: Vec<&OrganismState> = self.organisms.iter().collect();
+        ordered.sort_by_key(|organism| organism.id);
 
-        let turn_left = action_outcomes[action_index(ActionType::TurnLeft)];
-        let turn_right = action_outcomes[action_index(ActionType::TurnRight)];
-        if turn_left ^ turn_right {
-            let facing = self.organisms[idx].facing;
-            self.organisms[idx].facing = if turn_left {
-                rotate_left(facing)
-            } else {
-                rotate_right(facing)
+        let mut ordered_ids = Vec::with_capacity(ordered.len());
+        let mut organism_states = Vec::with_capacity(ordered.len());
+        let mut id_to_index = HashMap::with_capacity(ordered.len());
+
+        for (idx, organism) in ordered.into_iter().enumerate() {
+            ordered_ids.push(organism.id);
+            organism_states.push(SnapshotOrganismState {
+                q: organism.q,
+                r: organism.r,
+                facing: organism.facing,
+                turns_since_last_meal: organism.turns_since_last_meal,
+                move_confidence: move_confidence_signal(&organism.brain),
+            });
+            id_to_index.insert(organism.id, idx);
+        }
+
+        TurnSnapshot {
+            world_width: self.config.world_width as i32,
+            occupancy: self.occupancy.clone(),
+            ordered_ids,
+            organism_states,
+            id_to_index,
+        }
+    }
+
+    fn build_intents(&mut self, snapshot: &TurnSnapshot) -> Vec<OrganismIntent> {
+        let index_by_id: HashMap<OrganismId, usize> = self
+            .organisms
+            .iter()
+            .enumerate()
+            .map(|(idx, organism)| (organism.id, idx))
+            .collect();
+
+        let mut intents = Vec::with_capacity(snapshot.ordered_ids.len());
+        for organism_id in &snapshot.ordered_ids {
+            let Some(snapshot_state) = snapshot.organism(*organism_id) else {
+                continue;
             };
+            let Some(organism_idx) = index_by_id.get(organism_id).copied() else {
+                continue;
+            };
+            let _turns_since_last_meal = snapshot_state.turns_since_last_meal;
+
+            let evaluation = {
+                let brain = &mut self.organisms[organism_idx].brain;
+                evaluate_brain(
+                    brain,
+                    (snapshot_state.q, snapshot_state.r),
+                    snapshot_state.facing,
+                    *organism_id,
+                    snapshot.world_width,
+                    &snapshot.occupancy,
+                )
+            };
+
+            let facing_after_turn = facing_after_turn(
+                snapshot_state.facing,
+                evaluation.actions[1],
+                evaluation.actions[2],
+            );
+            let wants_move = evaluation.actions[action_index(ActionType::MoveForward)];
+            let move_target = if wants_move {
+                let target = hex_neighbor((snapshot_state.q, snapshot_state.r), facing_after_turn);
+                snapshot.in_bounds(target.0, target.1).then_some(target)
+            } else {
+                None
+            };
+
+            intents.push(OrganismIntent {
+                id: *organism_id,
+                from: (snapshot_state.q, snapshot_state.r),
+                facing_after_turn,
+                wants_move,
+                move_target,
+                move_confidence: snapshot_state.move_confidence,
+                synapse_ops: evaluation.synapse_ops,
+            });
+        }
+        intents
+    }
+
+    fn resolve_moves(
+        &self,
+        snapshot: &TurnSnapshot,
+        intents: &[OrganismIntent],
+    ) -> Vec<MoveResolution> {
+        let mut contenders: HashMap<(i32, i32), Vec<MoveCandidate>> = HashMap::new();
+        for intent in intents {
+            if !intent.wants_move {
+                continue;
+            }
+            let Some(target) = intent.move_target else {
+                continue;
+            };
+            contenders.entry(target).or_default().push(MoveCandidate {
+                actor: intent.id,
+                from: intent.from,
+                target,
+                confidence: intent.move_confidence,
+            });
         }
 
-        if !action_outcomes[action_index(ActionType::MoveForward)] {
-            return result;
+        let mut winners = Vec::with_capacity(contenders.len());
+        for contenders_for_target in contenders.into_values() {
+            if let Some(winner) = contenders_for_target
+                .into_iter()
+                .max_by(compare_move_candidates)
+            {
+                winners.push(winner);
+            }
+        }
+        winners.sort_by_key(|winner| winner.actor);
+
+        let moving_ids: HashSet<OrganismId> = winners.iter().map(|winner| winner.actor).collect();
+        let mut resolutions = Vec::with_capacity(winners.len());
+        for winner in winners {
+            let kind = match snapshot.occupant_at(winner.target.0, winner.target.1) {
+                Some(occupant) if !moving_ids.contains(&occupant) => {
+                    MoveResolutionKind::EatAndReplace { prey: occupant }
+                }
+                _ => MoveResolutionKind::MoveOnly,
+            };
+            resolutions.push(MoveResolution {
+                actor: winner.actor,
+                from: winner.from,
+                to: winner.target,
+                kind,
+            });
         }
 
-        let from = (self.organisms[idx].q, self.organisms[idx].r);
-        let to = hex_neighbor(from, self.organisms[idx].facing);
-        if !self.in_bounds(to.0, to.1) {
-            return result;
+        resolutions
+    }
+
+    fn commit_phase(
+        &mut self,
+        intents: &[OrganismIntent],
+        resolutions: &[MoveResolution],
+        spawn_requests: &mut Vec<SpawnRequest>,
+    ) -> CommitResult {
+        let intent_by_id: HashMap<OrganismId, OrganismIntent> =
+            intents.iter().map(|intent| (intent.id, *intent)).collect();
+        for organism in &mut self.organisms {
+            if let Some(intent) = intent_by_id.get(&organism.id) {
+                organism.facing = intent.facing_after_turn;
+            }
         }
 
-        match self.occupant_at(to.0, to.1) {
-            None => {
-                if self.move_organism_to(organism_id, to.0, to.1) {
-                    result.moved = Some((from, to));
+        let mut move_by_actor: HashMap<OrganismId, (i32, i32)> = HashMap::new();
+        let mut prey_kills = HashSet::new();
+        let mut removed = Vec::new();
+        let mut eaters = HashSet::new();
+        let mut meals = 0_u64;
+        for resolution in resolutions {
+            move_by_actor.insert(resolution.actor, resolution.to);
+            if let MoveResolutionKind::EatAndReplace { prey } = resolution.kind {
+                if prey_kills.insert(prey) {
+                    removed.push(prey);
+                }
+                eaters.insert(resolution.actor);
+                meals += 1;
+                spawn_requests.push(SpawnRequest {
+                    kind: SpawnRequestKind::Reproduction {
+                        parent: resolution.actor,
+                    },
+                });
+            }
+        }
+
+        self.organisms
+            .retain(|organism| !prey_kills.contains(&organism.id));
+
+        for organism in &mut self.organisms {
+            if let Some((next_q, next_r)) = move_by_actor.get(&organism.id).copied() {
+                organism.q = next_q;
+                organism.r = next_r;
+                if eaters.contains(&organism.id) {
+                    organism.turns_since_last_meal = 0;
+                    organism.meals_eaten = organism.meals_eaten.saturating_add(1);
                 }
             }
-            Some(prey_id) if prey_id != organism_id => {
-                if self.remove_organism(prey_id).is_none() {
-                    return result;
-                }
-
-                if !self.move_organism_to(organism_id, to.0, to.1) {
-                    return result;
-                }
-
-                idx = match self.organism_index(organism_id) {
-                    Some(value) => value,
-                    None => return result,
-                };
-
-                self.organisms[idx].turns_since_last_meal = 0;
-                self.organisms[idx].meals_eaten = self.organisms[idx].meals_eaten.saturating_add(1);
-                result.meal = true;
-                result.moved = Some((from, to));
-
-                if self.spawn_offspring_from_parent(organism_id).is_some() {
-                    result.birth = true;
-                }
-            }
-            _ => {}
         }
 
-        result
+        self.rebuild_occupancy();
+        let moves = resolutions
+            .iter()
+            .map(|resolution| OrganismMove {
+                id: resolution.actor,
+                from: resolution.from,
+                to: resolution.to,
+            })
+            .collect();
+        CommitResult {
+            moves,
+            removed,
+            meals,
+            eaters,
+        }
+    }
+
+    fn lifecycle_phase(
+        &mut self,
+        eaters: &HashSet<OrganismId>,
+        spawn_requests: &mut Vec<SpawnRequest>,
+    ) -> (u64, Vec<OrganismId>) {
+        self.organisms.sort_by_key(|organism| organism.id);
+
+        let mut starved_ids = Vec::new();
+        for organism in &mut self.organisms {
+            if eaters.contains(&organism.id) {
+                continue;
+            }
+            organism.turns_since_last_meal = organism.turns_since_last_meal.saturating_add(1);
+            if organism.turns_since_last_meal >= self.config.turns_to_starve {
+                starved_ids.push(organism.id);
+            }
+        }
+
+        if starved_ids.is_empty() {
+            return (0, Vec::new());
+        }
+
+        let starved_set: HashSet<OrganismId> = starved_ids.iter().copied().collect();
+        self.organisms
+            .retain(|organism| !starved_set.contains(&organism.id));
+        self.rebuild_occupancy();
+
+        for _ in &starved_ids {
+            spawn_requests.push(SpawnRequest {
+                kind: SpawnRequestKind::StarvationReplacement,
+            });
+        }
+        (starved_ids.len() as u64, starved_ids)
+    }
+
+    fn resolve_spawn_requests(&mut self, queue: &[SpawnRequest]) -> Vec<OrganismState> {
+        let mut spawned = Vec::new();
+        for request in queue {
+            let Some((q, r)) = self.sample_center_weighted_spawn_position() else {
+                continue;
+            };
+
+            let id = self.alloc_organism_id();
+            let organism = match request.kind {
+                SpawnRequestKind::StarvationReplacement => OrganismState {
+                    id,
+                    q,
+                    r,
+                    facing: self.random_facing(),
+                    turns_since_last_meal: 0,
+                    meals_eaten: 0,
+                    brain: self.generate_brain(),
+                },
+                SpawnRequestKind::Reproduction { parent } => {
+                    let Some(parent_state) = self
+                        .organisms
+                        .iter()
+                        .find(|organism| organism.id == parent)
+                        .cloned()
+                    else {
+                        continue;
+                    };
+
+                    let mut brain = parent_state.brain;
+                    self.mutate_brain(&mut brain);
+                    OrganismState {
+                        id,
+                        q,
+                        r,
+                        facing: parent_state.facing,
+                        turns_since_last_meal: 0,
+                        meals_eaten: 0,
+                        brain,
+                    }
+                }
+            };
+
+            if self.add_organism(organism.clone()) {
+                spawned.push(organism);
+            }
+        }
+
+        self.organisms.sort_by_key(|organism| organism.id);
+        spawned
+    }
+
+    fn sample_center_weighted_spawn_position(&mut self) -> Option<(i32, i32)> {
+        if self.organisms.len() >= world_capacity(self.config.world_width) {
+            return None;
+        }
+
+        let width = self.config.world_width as i32;
+        let attempts = (world_capacity(self.config.world_width) * 4).max(64);
+        let center = (width as f64 - 1.0) / 2.0;
+        let spread = (self.config.center_spawn_max_fraction
+            - self.config.center_spawn_min_fraction)
+            .abs()
+            .max(0.05);
+        let sigma = (width as f64 * f64::from(spread) / 2.0).max(0.5);
+
+        for _ in 0..attempts {
+            let (z_q, z_r) = self.sample_standard_normal_pair();
+            let q = (center + z_q * sigma).round() as i32;
+            let r = (center + z_r * sigma).round() as i32;
+            if !self.in_bounds(q, r) {
+                continue;
+            }
+            if self.occupant_at(q, r).is_none() {
+                return Some((q, r));
+            }
+        }
+
+        self.nearest_empty_to_center()
+    }
+
+    fn sample_standard_normal_pair(&mut self) -> (f64, f64) {
+        let u1 = loop {
+            let sample = self.rng.random::<f64>();
+            if sample > f64::EPSILON {
+                break sample;
+            }
+        };
+        let u2 = self.rng.random::<f64>();
+
+        let radius = (-2.0 * u1.ln()).sqrt();
+        let theta = 2.0 * PI * u2;
+        (radius * theta.cos(), radius * theta.sin())
+    }
+
+    fn nearest_empty_to_center(&self) -> Option<(i32, i32)> {
+        let width = self.config.world_width as i32;
+        let center = (width as f64 - 1.0) / 2.0;
+
+        let mut best: Option<((i32, i32), f64)> = None;
+        for r in 0..width {
+            for q in 0..width {
+                if self.occupant_at(q, r).is_some() {
+                    continue;
+                }
+                let distance = (q as f64 - center).powi(2) + (r as f64 - center).powi(2);
+                match best {
+                    None => best = Some(((q, r), distance)),
+                    Some(((best_q, best_r), best_distance))
+                        if distance < best_distance
+                            || (distance == best_distance && (r, q) < (best_r, best_q)) =>
+                    {
+                        best = Some(((q, r), distance));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        best.map(|(position, _)| position)
+    }
+
+    fn debug_assert_consistent_state(&self) {
+        if cfg!(debug_assertions) {
+            debug_assert_eq!(
+                self.organisms.len(),
+                self.occupancy.iter().flatten().count(),
+                "occupancy vector count should match organism count",
+            );
+            for organism in &self.organisms {
+                let idx = self
+                    .cell_index(organism.q, organism.r)
+                    .expect("organism position must remain in bounds");
+                debug_assert_eq!(
+                    self.occupancy[idx],
+                    Some(organism.id),
+                    "occupancy must point at organism occupying that cell",
+                );
+            }
+        }
     }
 
     fn spawn_initial_population(&mut self) {
@@ -314,63 +666,6 @@ impl Simulation {
         }
 
         self.organisms.sort_by_key(|o| o.id);
-    }
-
-    fn spawn_replacement_in_center(&mut self) -> Option<OrganismId> {
-        let (q, r) = self.random_spawn_position_in_center()?;
-        let id = self.alloc_organism_id();
-        let brain = self.generate_brain();
-        let facing = self.random_facing();
-        let organism = OrganismState {
-            id,
-            q,
-            r,
-            facing,
-            turns_since_last_meal: 0,
-            meals_eaten: 0,
-            brain,
-        };
-        if self.add_organism(organism) {
-            Some(id)
-        } else {
-            None
-        }
-    }
-
-    fn spawn_offspring_from_parent(&mut self, parent_id: OrganismId) -> Option<OrganismId> {
-        let parent = self.organisms.iter().find(|o| o.id == parent_id)?.clone();
-        let (q, r) = self.random_spawn_position_in_center()?;
-        let id = self.alloc_organism_id();
-        let mut brain = parent.brain;
-        self.mutate_brain(&mut brain);
-
-        let child = OrganismState {
-            id,
-            q,
-            r,
-            facing: parent.facing,
-            turns_since_last_meal: 0,
-            meals_eaten: 0,
-            brain,
-        };
-
-        if self.add_organism(child) {
-            Some(id)
-        } else {
-            None
-        }
-    }
-
-    fn random_spawn_position_in_center(&mut self) -> Option<(i32, i32)> {
-        let mut candidates = self.empty_positions_in_center();
-        if candidates.is_empty() {
-            candidates = self.empty_positions();
-        }
-        if candidates.is_empty() {
-            return None;
-        }
-        let idx = self.rng.random_range(0..candidates.len());
-        Some(candidates.swap_remove(idx))
     }
 
     fn mutate_brain(&mut self, brain: &mut BrainState) {
@@ -496,52 +791,21 @@ impl Simulation {
         true
     }
 
+    fn rebuild_occupancy(&mut self) {
+        self.occupancy.fill(None);
+        for organism in &self.organisms {
+            let idx = self
+                .cell_index(organism.q, organism.r)
+                .expect("organism must remain in bounds");
+            debug_assert!(self.occupancy[idx].is_none());
+            self.occupancy[idx] = Some(organism.id);
+        }
+    }
+
     fn alloc_organism_id(&mut self) -> OrganismId {
         let id = OrganismId(self.next_organism_id);
         self.next_organism_id += 1;
         id
-    }
-
-    fn move_organism_to(&mut self, id: OrganismId, q: i32, r: i32) -> bool {
-        let Some(org_idx) = self.organism_index(id) else {
-            return false;
-        };
-
-        let from = (self.organisms[org_idx].q, self.organisms[org_idx].r);
-        if from == (q, r) {
-            return false;
-        }
-
-        let Some(to_idx) = self.cell_index(q, r) else {
-            return false;
-        };
-        if self.occupancy[to_idx].is_some() {
-            return false;
-        }
-
-        let from_idx = self.cell_index(from.0, from.1).expect("organism position in bounds");
-        self.occupancy[from_idx] = None;
-        self.occupancy[to_idx] = Some(id);
-
-        self.organisms[org_idx].q = q;
-        self.organisms[org_idx].r = r;
-        true
-    }
-
-    fn remove_organism(&mut self, id: OrganismId) -> Option<OrganismState> {
-        let idx = self.organism_index(id)?;
-        let organism = self.organisms.swap_remove(idx);
-        let cell_idx = self
-            .cell_index(organism.q, organism.r)
-            .expect("organism position in bounds");
-        if self.occupancy[cell_idx] == Some(id) {
-            self.occupancy[cell_idx] = None;
-        }
-        Some(organism)
-    }
-
-    fn organism_index(&self, id: OrganismId) -> Option<usize> {
-        self.organisms.iter().position(|o| o.id == id)
     }
 
     fn occupant_at(&self, q: i32, r: i32) -> Option<OrganismId> {
@@ -571,25 +835,6 @@ impl Simulation {
         let mut out = Vec::new();
         for r in 0..width {
             for q in 0..width {
-                if self.occupant_at(q, r).is_none() {
-                    out.push((q, r));
-                }
-            }
-        }
-        out
-    }
-
-    fn empty_positions_in_center(&self) -> Vec<(i32, i32)> {
-        let width = self.config.world_width as i32;
-        let min = (self.config.world_width as f32 * self.config.center_spawn_min_fraction) as i32;
-        let max = (self.config.world_width as f32 * self.config.center_spawn_max_fraction) as i32;
-
-        let mut out = Vec::new();
-        for r in 0..width {
-            for q in 0..width {
-                if q < min || q >= max || r < min || r >= max {
-                    continue;
-                }
                 if self.occupant_at(q, r).is_none() {
                     out.push((q, r));
                 }
@@ -694,6 +939,37 @@ fn action_index(action: ActionType) -> usize {
         ActionType::TurnLeft => 1,
         ActionType::TurnRight => 2,
     }
+}
+
+fn compare_move_candidates(a: &MoveCandidate, b: &MoveCandidate) -> Ordering {
+    a.confidence
+        .total_cmp(&b.confidence)
+        .then_with(|| b.actor.cmp(&a.actor))
+}
+
+fn facing_after_turn(
+    current: FacingDirection,
+    turn_left_active: bool,
+    turn_right_active: bool,
+) -> FacingDirection {
+    if turn_left_active ^ turn_right_active {
+        if turn_left_active {
+            rotate_left(current)
+        } else {
+            rotate_right(current)
+        }
+    } else {
+        current
+    }
+}
+
+fn move_confidence_signal(brain: &BrainState) -> f32 {
+    brain
+        .inter
+        .iter()
+        .map(|inter| inter.neuron.activation)
+        .max_by(f32::total_cmp)
+        .unwrap_or(0.0)
 }
 
 fn make_neuron(id: NeuronId, neuron_type: NeuronType, bias: f32) -> NeuronState {
@@ -972,7 +1248,9 @@ fn create_synapse(brain: &mut BrainState, pre: NeuronId, post: NeuronId, weight:
 
 fn remove_neuron_references(brain: &mut BrainState, target: NeuronId) {
     for sensory in &mut brain.sensory {
-        sensory.synapses.retain(|edge| edge.post_neuron_id != target);
+        sensory
+            .synapses
+            .retain(|edge| edge.post_neuron_id != target);
         sensory.neuron.parent_ids.retain(|id| *id != target);
     }
 
@@ -1029,8 +1307,8 @@ fn perturb_random_synapse<R: Rng + ?Sized>(
 
         let idx = rng.random_range(0..sensory.synapses.len());
         let delta = rng.random_range(-magnitude..magnitude);
-        sensory.synapses[idx].weight =
-            (sensory.synapses[idx].weight + delta).clamp(-SYNAPSE_STRENGTH_MAX, SYNAPSE_STRENGTH_MAX);
+        sensory.synapses[idx].weight = (sensory.synapses[idx].weight + delta)
+            .clamp(-SYNAPSE_STRENGTH_MAX, SYNAPSE_STRENGTH_MAX);
         return;
     }
 
@@ -1055,6 +1333,136 @@ pub fn compare_snapshots(a: &WorldSnapshot, b: &WorldSnapshot) -> Ordering {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::{HashMap, HashSet};
+
+    fn test_config(world_width: u32, num_organisms: u32) -> WorldConfig {
+        WorldConfig {
+            world_width,
+            num_organisms,
+            num_neurons: 1,
+            num_synapses: 0,
+            turns_to_starve: 10,
+            mutation_chance: 0.0,
+            ..WorldConfig::default()
+        }
+    }
+
+    fn forced_brain(
+        wants_move: bool,
+        turn_left: bool,
+        turn_right: bool,
+        confidence: f32,
+    ) -> BrainState {
+        let sensory = vec![make_sensory_neuron(0, SensoryReceptorType::Look)];
+        let inter = vec![InterNeuronState {
+            neuron: NeuronState {
+                neuron_id: NeuronId(1000),
+                neuron_type: NeuronType::Inter,
+                bias: 0.0,
+                activation: confidence,
+                parent_ids: Vec::new(),
+            },
+            synapses: Vec::new(),
+        }];
+        let action = vec![
+            make_action_neuron(
+                2000,
+                ActionType::MoveForward,
+                if wants_move { 1.0 } else { -1.0 },
+            ),
+            make_action_neuron(
+                2001,
+                ActionType::TurnLeft,
+                if turn_left { 1.0 } else { -1.0 },
+            ),
+            make_action_neuron(
+                2002,
+                ActionType::TurnRight,
+                if turn_right { 1.0 } else { -1.0 },
+            ),
+        ];
+
+        BrainState {
+            sensory,
+            inter,
+            action,
+            synapse_count: 0,
+        }
+    }
+
+    fn make_organism(
+        id: u64,
+        q: i32,
+        r: i32,
+        facing: FacingDirection,
+        wants_move: bool,
+        turn_left: bool,
+        turn_right: bool,
+        confidence: f32,
+        turns_since_last_meal: u32,
+    ) -> OrganismState {
+        OrganismState {
+            id: OrganismId(id),
+            q,
+            r,
+            facing,
+            turns_since_last_meal,
+            meals_eaten: 0,
+            brain: forced_brain(wants_move, turn_left, turn_right, confidence),
+        }
+    }
+
+    fn configure_sim(sim: &mut Simulation, mut organisms: Vec<OrganismState>) {
+        organisms.sort_by_key(|organism| organism.id);
+        sim.organisms = organisms;
+        sim.next_organism_id = sim
+            .organisms
+            .iter()
+            .map(|organism| organism.id.0)
+            .max()
+            .map_or(0, |max_id| max_id + 1);
+        sim.occupancy = vec![None; world_capacity(sim.config.world_width)];
+        for organism in &sim.organisms {
+            let idx = sim
+                .cell_index(organism.q, organism.r)
+                .expect("test organism should be in bounds");
+            assert!(
+                sim.occupancy[idx].is_none(),
+                "test setup should not overlap"
+            );
+            sim.occupancy[idx] = Some(organism.id);
+        }
+        sim.turn = 0;
+        sim.metrics = MetricsSnapshot::default();
+        sim.metrics.organisms = sim.organisms.len() as u32;
+    }
+
+    fn tick_once(sim: &mut Simulation) -> TickDelta {
+        sim.step_n(1).into_iter().next().expect("exactly one delta")
+    }
+
+    fn move_map(delta: &TickDelta) -> HashMap<OrganismId, ((i32, i32), (i32, i32))> {
+        delta
+            .moves
+            .iter()
+            .map(|movement| (movement.id, (movement.from, movement.to)))
+            .collect()
+    }
+
+    fn assert_no_overlap(sim: &Simulation) {
+        let mut seen = HashSet::new();
+        for organism in &sim.organisms {
+            assert!(
+                seen.insert((organism.q, organism.r)),
+                "organisms should not overlap",
+            );
+            let idx = sim
+                .cell_index(organism.q, organism.r)
+                .expect("organism should remain in bounds");
+            assert_eq!(sim.occupancy[idx], Some(organism.id));
+        }
+        assert_eq!(sim.organisms.len(), sim.occupancy.iter().flatten().count());
+    }
 
     #[test]
     fn deterministic_seed() {
@@ -1103,18 +1511,15 @@ mod tests {
         };
         let sim = Simulation::new(cfg, 3).expect("simulation should initialize");
         assert_eq!(sim.organisms.len(), 9);
-        assert_eq!(sim.occupancy.iter().filter(|cell| cell.is_some()).count(), 9);
+        assert_eq!(
+            sim.occupancy.iter().filter(|cell| cell.is_some()).count(),
+            9
+        );
     }
 
     #[test]
     fn look_sensor_returns_binary_occupancy() {
-        let cfg = WorldConfig {
-            world_width: 5,
-            num_organisms: 2,
-            num_neurons: 0,
-            num_synapses: 0,
-            ..WorldConfig::default()
-        };
+        let cfg = test_config(5, 2);
         let mut sim = Simulation::new(cfg, 7).expect("simulation should initialize");
 
         sim.organisms[0].q = 2;
@@ -1150,95 +1555,363 @@ mod tests {
 
     #[test]
     fn turn_actions_rotate_facing() {
-        let cfg = WorldConfig {
-            world_width: 5,
-            num_organisms: 1,
-            num_neurons: 0,
-            num_synapses: 0,
-            ..WorldConfig::default()
-        };
-        let mut sim = Simulation::new(cfg, 2).expect("simulation should initialize");
-        let id = sim.organisms[0].id;
-        sim.organisms[0].facing = FacingDirection::East;
-
-        let left = sim.apply_actions(id, [false, true, false]);
-        assert!(left.moved.is_none());
-        assert_eq!(sim.organisms[0].facing, FacingDirection::NorthEast);
-
-        let right = sim.apply_actions(id, [false, false, true]);
-        assert!(right.moved.is_none());
-        assert_eq!(sim.organisms[0].facing, FacingDirection::East);
+        assert_eq!(
+            facing_after_turn(FacingDirection::East, true, false),
+            FacingDirection::NorthEast
+        );
+        assert_eq!(
+            facing_after_turn(FacingDirection::East, false, true),
+            FacingDirection::SouthEast
+        );
+        assert_eq!(
+            facing_after_turn(FacingDirection::East, true, true),
+            FacingDirection::East
+        );
     }
 
     #[test]
-    fn move_forward_into_occupied_cell_eats_and_reproduces() {
-        let cfg = WorldConfig {
-            world_width: 6,
-            num_organisms: 2,
-            num_neurons: 0,
-            num_synapses: 0,
-            mutation_chance: 0.0,
-            ..WorldConfig::default()
-        };
+    fn move_into_cell_vacated_same_turn_succeeds() {
+        let cfg = test_config(5, 2);
         let mut sim = Simulation::new(cfg, 11).expect("simulation should initialize");
+        configure_sim(
+            &mut sim,
+            vec![
+                make_organism(0, 1, 1, FacingDirection::East, true, false, false, 0.8, 0),
+                make_organism(
+                    1,
+                    2,
+                    1,
+                    FacingDirection::SouthEast,
+                    true,
+                    false,
+                    false,
+                    0.7,
+                    0,
+                ),
+            ],
+        );
 
-        let predator_id = sim.organisms[0].id;
-        let prey_id = sim.organisms[1].id;
+        let delta = tick_once(&mut sim);
+        let moves = move_map(&delta);
+        assert_eq!(moves.len(), 2);
+        assert_eq!(moves.get(&OrganismId(0)), Some(&((1, 1), (2, 1))));
+        assert_eq!(moves.get(&OrganismId(1)), Some(&((2, 1), (2, 2))));
+        assert_eq!(delta.metrics.meals_last_turn, 0);
+    }
 
-        sim.organisms[0].q = 1;
-        sim.organisms[0].r = 2;
-        sim.organisms[0].facing = FacingDirection::East;
-        sim.organisms[0].turns_since_last_meal = 5;
+    #[test]
+    fn two_organism_swap_resolves_deterministically() {
+        let cfg = test_config(5, 2);
+        let mut sim = Simulation::new(cfg, 12).expect("simulation should initialize");
+        configure_sim(
+            &mut sim,
+            vec![
+                make_organism(0, 1, 1, FacingDirection::East, true, false, false, 0.4, 0),
+                make_organism(1, 2, 1, FacingDirection::West, true, false, false, 0.3, 0),
+            ],
+        );
 
-        sim.organisms[1].q = 2;
-        sim.organisms[1].r = 2;
+        let delta = tick_once(&mut sim);
+        let moves = move_map(&delta);
+        assert_eq!(moves.get(&OrganismId(0)), Some(&((1, 1), (2, 1))));
+        assert_eq!(moves.get(&OrganismId(1)), Some(&((2, 1), (1, 1))));
+        assert_eq!(delta.metrics.meals_last_turn, 0);
+    }
 
-        sim.occupancy.fill(None);
-        for org in &sim.organisms {
-            let idx = sim.cell_index(org.q, org.r).expect("in-bounds test setup");
-            sim.occupancy[idx] = Some(org.id);
-        }
+    #[test]
+    fn multi_attacker_single_target_uses_confidence_winner() {
+        let cfg = test_config(5, 2);
+        let mut sim = Simulation::new(cfg, 13).expect("simulation should initialize");
+        configure_sim(
+            &mut sim,
+            vec![
+                make_organism(0, 0, 1, FacingDirection::East, true, false, false, 0.9, 0),
+                make_organism(
+                    1,
+                    1,
+                    0,
+                    FacingDirection::SouthEast,
+                    true,
+                    false,
+                    false,
+                    0.1,
+                    0,
+                ),
+            ],
+        );
 
-        let resolution = sim.apply_actions(predator_id, [true, false, false]);
-        assert!(resolution.meal);
-        assert!(resolution.birth);
-        assert_eq!(sim.organisms.len(), 2);
-        assert!(sim.organism_index(prey_id).is_none());
+        let delta = tick_once(&mut sim);
+        let moves = move_map(&delta);
+        assert_eq!(moves.len(), 1);
+        assert_eq!(moves.get(&OrganismId(0)), Some(&((0, 1), (1, 1))));
+    }
 
+    #[test]
+    fn multi_attacker_single_target_tie_breaks_by_id() {
+        let cfg = test_config(5, 2);
+        let mut sim = Simulation::new(cfg, 14).expect("simulation should initialize");
+        configure_sim(
+            &mut sim,
+            vec![
+                make_organism(0, 0, 1, FacingDirection::East, true, false, false, 0.5, 0),
+                make_organism(
+                    1,
+                    1,
+                    0,
+                    FacingDirection::SouthEast,
+                    true,
+                    false,
+                    false,
+                    0.5,
+                    0,
+                ),
+            ],
+        );
+
+        let delta = tick_once(&mut sim);
+        let moves = move_map(&delta);
+        assert_eq!(moves.len(), 1);
+        assert_eq!(moves.get(&OrganismId(0)), Some(&((0, 1), (1, 1))));
+    }
+
+    #[test]
+    fn attacker_vs_escaping_prey_has_no_eat_when_prey_escapes() {
+        let cfg = test_config(6, 2);
+        let mut sim = Simulation::new(cfg, 15).expect("simulation should initialize");
+        configure_sim(
+            &mut sim,
+            vec![
+                make_organism(0, 1, 1, FacingDirection::East, true, false, false, 0.7, 0),
+                make_organism(1, 2, 1, FacingDirection::East, true, false, false, 0.6, 0),
+            ],
+        );
+
+        let delta = tick_once(&mut sim);
+        let moves = move_map(&delta);
+        assert_eq!(moves.get(&OrganismId(0)), Some(&((1, 1), (2, 1))));
+        assert_eq!(moves.get(&OrganismId(1)), Some(&((2, 1), (3, 1))));
+        assert_eq!(delta.metrics.meals_last_turn, 0);
+        assert!(sim
+            .organisms
+            .iter()
+            .any(|organism| organism.id == OrganismId(1)));
+    }
+
+    #[test]
+    fn multi_node_cycle_resolves_without_conflict() {
+        let cfg = test_config(6, 3);
+        let mut sim = Simulation::new(cfg, 16).expect("simulation should initialize");
+        configure_sim(
+            &mut sim,
+            vec![
+                make_organism(
+                    0,
+                    1,
+                    1,
+                    FacingDirection::SouthEast,
+                    true,
+                    false,
+                    false,
+                    0.7,
+                    0,
+                ),
+                make_organism(1, 2, 1, FacingDirection::West, true, false, false, 0.6, 0),
+                make_organism(
+                    2,
+                    1,
+                    2,
+                    FacingDirection::NorthEast,
+                    true,
+                    false,
+                    false,
+                    0.5,
+                    0,
+                ),
+            ],
+        );
+
+        let delta = tick_once(&mut sim);
+        let moves = move_map(&delta);
+        assert_eq!(moves.len(), 3);
+        assert_eq!(moves.get(&OrganismId(0)), Some(&((1, 1), (1, 2))));
+        assert_eq!(moves.get(&OrganismId(2)), Some(&((1, 2), (2, 1))));
+        assert_eq!(moves.get(&OrganismId(1)), Some(&((2, 1), (1, 1))));
+        assert_eq!(delta.metrics.meals_last_turn, 0);
+    }
+
+    #[test]
+    fn contested_occupied_target_where_occupant_remains_uses_eat_path() {
+        let cfg = test_config(5, 3);
+        let mut sim = Simulation::new(cfg, 17).expect("simulation should initialize");
+        configure_sim(
+            &mut sim,
+            vec![
+                make_organism(0, 1, 1, FacingDirection::East, true, false, false, 0.9, 0),
+                make_organism(1, 2, 1, FacingDirection::West, false, false, false, 0.1, 0),
+                make_organism(
+                    2,
+                    1,
+                    2,
+                    FacingDirection::NorthEast,
+                    true,
+                    false,
+                    false,
+                    0.2,
+                    0,
+                ),
+            ],
+        );
+
+        let delta = tick_once(&mut sim);
+        let moves = move_map(&delta);
+        assert_eq!(moves.len(), 1);
+        assert_eq!(moves.get(&OrganismId(0)), Some(&((1, 1), (2, 1))));
+        assert_eq!(delta.metrics.meals_last_turn, 1);
+        assert!(sim
+            .organisms
+            .iter()
+            .all(|organism| organism.id != OrganismId(1)));
+    }
+
+    #[test]
+    fn starvation_and_reproduction_interact_in_same_turn() {
+        let mut cfg = test_config(6, 4);
+        cfg.turns_to_starve = 2;
+
+        let mut sim = Simulation::new(cfg, 18).expect("simulation should initialize");
+        configure_sim(
+            &mut sim,
+            vec![
+                make_organism(0, 1, 1, FacingDirection::East, true, false, false, 0.9, 1),
+                make_organism(1, 2, 1, FacingDirection::West, false, false, false, 0.1, 0),
+                make_organism(2, 0, 0, FacingDirection::East, false, false, false, 0.2, 1),
+                make_organism(3, 4, 4, FacingDirection::West, false, false, false, 0.2, 0),
+            ],
+        );
+
+        let delta = tick_once(&mut sim);
+        assert_eq!(delta.metrics.meals_last_turn, 1);
+        assert_eq!(delta.metrics.starvations_last_turn, 1);
+        assert_eq!(delta.metrics.births_last_turn, 2);
+        assert_eq!(delta.removed, vec![OrganismId(1), OrganismId(2)]);
+        assert_eq!(delta.spawned.len(), 2);
+        assert_eq!(sim.organisms.len(), 4);
         let predator = sim
             .organisms
             .iter()
-            .find(|org| org.id == predator_id)
-            .expect("predator should remain");
-        assert_eq!((predator.q, predator.r), (2, 2));
+            .find(|organism| organism.id == OrganismId(0))
+            .expect("predator should survive");
         assert_eq!(predator.turns_since_last_meal, 0);
-        assert_eq!(predator.meals_eaten, 1);
     }
 
     #[test]
-    fn starvation_spawns_replacement_in_center_region() {
-        let cfg = WorldConfig {
-            world_width: 8,
-            num_organisms: 1,
-            num_neurons: 0,
-            num_synapses: 0,
-            turns_to_starve: 1,
-            ..WorldConfig::default()
-        };
+    fn spawn_queue_order_is_deterministic_under_limited_space() {
+        let cfg = test_config(2, 3);
         let mut sim = Simulation::new(cfg, 19).expect("simulation should initialize");
-        let original_id = sim.organisms[0].id;
+        configure_sim(
+            &mut sim,
+            vec![
+                make_organism(
+                    0,
+                    0,
+                    0,
+                    FacingDirection::NorthEast,
+                    true,
+                    false,
+                    false,
+                    0.9,
+                    0,
+                ),
+                make_organism(1, 1, 0, FacingDirection::West, false, false, false, 0.1, 0),
+                make_organism(2, 0, 1, FacingDirection::East, false, false, false, 0.1, 0),
+            ],
+        );
+        let parent_brain = sim.organisms[0].brain.clone();
+        let parent_facing = sim.organisms[0].facing;
 
-        sim.step_n(1);
+        let spawned = sim.resolve_spawn_requests(&[
+            SpawnRequest {
+                kind: SpawnRequestKind::Reproduction {
+                    parent: OrganismId(0),
+                },
+            },
+            SpawnRequest {
+                kind: SpawnRequestKind::StarvationReplacement,
+            },
+        ]);
 
-        assert_eq!(sim.organisms.len(), 1);
-        assert_ne!(sim.organisms[0].id, original_id);
-        assert_eq!(sim.metrics.starvations_last_turn, 1);
-        assert_eq!(sim.metrics.births_last_turn, 1);
+        assert_eq!(spawned.len(), 1);
+        let child = sim
+            .organisms
+            .iter()
+            .find(|organism| organism.id == OrganismId(3))
+            .expect("first spawn request should consume final empty slot");
+        assert_eq!(child.brain, parent_brain);
+        assert_eq!(child.facing, parent_facing);
+    }
 
-        let min = (sim.config.world_width as f32 * sim.config.center_spawn_min_fraction) as i32;
-        let max = (sim.config.world_width as f32 * sim.config.center_spawn_max_fraction) as i32;
-        let spawned = &sim.organisms[0];
-        assert!(spawned.q >= min && spawned.q < max);
-        assert!(spawned.r >= min && spawned.r < max);
+    #[test]
+    fn no_overlap_invariant_holds_after_mixed_turn() {
+        let mut cfg = test_config(6, 4);
+        cfg.turns_to_starve = 2;
+
+        let mut sim = Simulation::new(cfg, 20).expect("simulation should initialize");
+        configure_sim(
+            &mut sim,
+            vec![
+                make_organism(0, 1, 1, FacingDirection::East, true, false, false, 0.9, 1),
+                make_organism(1, 2, 1, FacingDirection::West, false, false, false, 0.1, 0),
+                make_organism(2, 0, 0, FacingDirection::East, false, false, false, 0.2, 1),
+                make_organism(3, 4, 4, FacingDirection::West, true, false, false, 0.4, 0),
+            ],
+        );
+
+        let _ = tick_once(&mut sim);
+        assert_no_overlap(&sim);
+    }
+
+    #[test]
+    fn targeted_complex_resolution_snapshot_is_deterministic() {
+        let mut cfg = test_config(6, 4);
+        cfg.turns_to_starve = 3;
+
+        let scenario = vec![
+            make_organism(0, 1, 1, FacingDirection::East, true, false, false, 0.9, 1),
+            make_organism(
+                1,
+                2,
+                1,
+                FacingDirection::SouthEast,
+                true,
+                false,
+                false,
+                0.7,
+                0,
+            ),
+            make_organism(2, 2, 2, FacingDirection::West, true, false, false, 0.6, 1),
+            make_organism(
+                3,
+                1,
+                2,
+                FacingDirection::NorthEast,
+                true,
+                false,
+                false,
+                0.8,
+                0,
+            ),
+        ];
+
+        let mut a = Simulation::new(cfg.clone(), 21).expect("simulation should initialize");
+        configure_sim(&mut a, scenario.clone());
+        a.step_n(3);
+        let a_snapshot = serde_json::to_string(&a.snapshot()).expect("serialize snapshot");
+
+        let mut b = Simulation::new(cfg, 21).expect("simulation should initialize");
+        configure_sim(&mut b, scenario);
+        b.step_n(3);
+        let b_snapshot = serde_json::to_string(&b.snapshot()).expect("serialize snapshot");
+
+        assert_eq!(a_snapshot, b_snapshot);
     }
 }

@@ -191,6 +191,8 @@ pub struct OrganismMove {
 pub struct TickDelta {
     pub turn: u64,
     pub moves: Vec<OrganismMove>,
+    pub removed: Vec<OrganismId>,
+    pub spawned: Vec<OrganismState>,
     pub metrics: MetricsSnapshot,
 }
 

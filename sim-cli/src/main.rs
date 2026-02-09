@@ -337,8 +337,9 @@ fn load_config(path: Option<PathBuf>) -> Result<WorldConfig> {
 fn write_output(text: String, out: Option<PathBuf>) -> Result<()> {
     if let Some(path) = out {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed creating output directory {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| {
+                format!("failed creating output directory {}", parent.display())
+            })?;
         }
         fs::write(&path, text).with_context(|| format!("failed writing {}", path.display()))?;
         println!("wrote output to {}", path.display());

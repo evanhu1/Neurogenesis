@@ -106,6 +106,8 @@ export type CreateSessionResponse = {
 export type TickDelta = {
   turn: number;
   moves: Array<{ id: OrganismId; from: [number, number]; to: [number, number] }>;
+  removed: OrganismId[];
+  spawned: OrganismState[];
   metrics: MetricsSnapshot;
 };
 

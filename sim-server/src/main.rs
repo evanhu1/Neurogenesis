@@ -14,7 +14,7 @@ use sim_protocol::{
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::sync::{Mutex, RwLock, broadcast};
+use tokio::sync::{broadcast, Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tower_http::cors::CorsLayer;
 use tracing::{error, info};
@@ -196,7 +196,9 @@ async fn step_session(
 
     for delta in &deltas {
         let _ = session.events.send(ServerEvent::TickDelta(delta.clone()));
-        let _ = session.events.send(ServerEvent::Metrics(delta.metrics.clone()));
+        let _ = session
+            .events
+            .send(ServerEvent::Metrics(delta.metrics.clone()));
     }
     let _ = session
         .events

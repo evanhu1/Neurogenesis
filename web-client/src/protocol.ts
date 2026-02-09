@@ -10,12 +10,17 @@ export function applyTickDelta(snapshot: WorldSnapshot, delta: TickDelta): World
   for (const move of delta.moves) {
     movements.set(unwrapId(move.id), move.to);
   }
+  const removed = new Set(delta.removed.map((id) => unwrapId(id)));
 
-  const organisms = snapshot.organisms.map((organism: OrganismState) => {
-    const next = movements.get(unwrapId(organism.id));
-    if (!next) return organism;
-    return { ...organism, q: next[0], r: next[1] };
-  });
+  const organisms = snapshot.organisms
+    .filter((organism: OrganismState) => !removed.has(unwrapId(organism.id)))
+    .map((organism: OrganismState) => {
+      const next = movements.get(unwrapId(organism.id));
+      if (!next) return organism;
+      return { ...organism, q: next[0], r: next[1] };
+    })
+    .concat(delta.spawned)
+    .sort((a, b) => unwrapId(a.id) - unwrapId(b.id));
 
   return {
     ...snapshot,
