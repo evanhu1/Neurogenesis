@@ -1,6 +1,6 @@
 # NeuroGenesis
 
-Neuromorphic digital brains grown from scratch with simulated evolution in Rust.
+Neuromorphic brains grown from scratch with simulated evolution in Rust.
 
 ## Layout
 

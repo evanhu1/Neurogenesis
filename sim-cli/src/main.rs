@@ -21,7 +21,7 @@ enum Commands {
         #[arg(long)]
         config: Option<PathBuf>,
         #[arg(long, default_value_t = 100)]
-        epochs: u32,
+        turns: u32,
         #[arg(long, default_value_t = 42)]
         seed: u64,
         #[arg(long, value_enum, default_value_t = OutputFormat::Pretty)]
@@ -33,7 +33,7 @@ enum Commands {
         #[arg(long)]
         config: Option<PathBuf>,
         #[arg(long, default_value_t = 1)]
-        ticks: u32,
+        turns: u32,
         #[arg(long, default_value_t = 42)]
         seed: u64,
         #[arg(long, default_value_t = false)]
@@ -42,8 +42,8 @@ enum Commands {
     Benchmark {
         #[arg(long)]
         config: Option<PathBuf>,
-        #[arg(long, default_value_t = 20)]
-        epochs: u32,
+        #[arg(long, default_value_t = 200)]
+        turns: u32,
         #[arg(long, default_value_t = 42)]
         seed: u64,
         #[arg(long)]
@@ -57,7 +57,7 @@ enum Commands {
         #[arg(long)]
         config: Option<PathBuf>,
         #[arg(long, default_value_t = 50)]
-        epochs: u32,
+        turns: u32,
         #[arg(long, default_value_t = 42)]
         seed: u64,
         #[arg(long, value_enum, default_value_t = ExportFormat::Jsonl)]
@@ -85,26 +85,26 @@ enum ExportFormat {
 
 #[derive(Debug, Serialize)]
 struct RunSummary {
-    epochs: u32,
+    turns: u32,
     seed: u64,
-    final_epoch: u64,
+    final_turn: u64,
     organism_count: usize,
-    survivors_last_epoch: u32,
+    meals_last_turn: u64,
+    starvations_last_turn: u64,
 }
 
 #[derive(Debug, Serialize)]
 struct StepSummary {
-    ticks: u32,
-    final_tick_in_epoch: u32,
-    actions_applied_last_tick: u64,
+    turns: u32,
+    final_turn: u64,
+    actions_applied_last_turn: u64,
 }
 
 #[derive(Debug, Serialize)]
 struct BenchmarkSummary {
-    epochs: u32,
+    turns: u32,
     elapsed_ms: u128,
-    avg_ms_per_epoch: f64,
-    avg_ms_per_tick: f64,
+    avg_ms_per_turn: f64,
     normalized_us_per_unit: f64,
     final_metrics: MetricsSnapshot,
 }
@@ -115,65 +115,67 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Run {
             config,
-            epochs,
+            turns,
             seed,
             format,
             out,
-        } => run_command(config, epochs, seed, format, out),
+        } => run_command(config, turns, seed, format, out),
         Commands::Step {
             config,
-            ticks,
+            turns,
             seed,
             print_state,
-        } => step_command(config, ticks, seed, print_state),
+        } => step_command(config, turns, seed, print_state),
         Commands::Benchmark {
             config,
-            epochs,
+            turns,
             seed,
             organisms,
             neurons,
             synapses,
-        } => benchmark_command(config, epochs, seed, organisms, neurons, synapses),
+        } => benchmark_command(config, turns, seed, organisms, neurons, synapses),
         Commands::Export {
             config,
-            epochs,
+            turns,
             seed,
             format,
             out,
-        } => export_command(config, epochs, seed, format, out),
+        } => export_command(config, turns, seed, format, out),
         Commands::Replay { input } => replay_command(input),
     }
 }
 
 fn run_command(
     config_path: Option<PathBuf>,
-    epochs: u32,
+    turns: u32,
     seed: u64,
     format: OutputFormat,
     out: Option<PathBuf>,
 ) -> Result<()> {
     let cfg = load_config(config_path)?;
     let mut sim = Simulation::new(cfg, seed)?;
-    sim.epoch_n(epochs);
+    sim.step_n(turns);
     let snapshot = sim.snapshot();
 
     let summary = RunSummary {
-        epochs,
+        turns,
         seed,
-        final_epoch: snapshot.epoch,
+        final_turn: snapshot.turn,
         organism_count: snapshot.organisms.len(),
-        survivors_last_epoch: snapshot.metrics.survivors_last_epoch,
+        meals_last_turn: snapshot.metrics.meals_last_turn,
+        starvations_last_turn: snapshot.metrics.starvations_last_turn,
     };
 
     match format {
         OutputFormat::Pretty => {
             let text = format!(
-                "epochs={} seed={} final_epoch={} organisms={} survivors_last_epoch={}",
-                summary.epochs,
+                "turns={} seed={} final_turn={} organisms={} meals_last_turn={} starvations_last_turn={}",
+                summary.turns,
                 summary.seed,
-                summary.final_epoch,
+                summary.final_turn,
                 summary.organism_count,
-                summary.survivors_last_epoch
+                summary.meals_last_turn,
+                summary.starvations_last_turn
             );
             write_output(text, out)?;
         }
@@ -188,19 +190,19 @@ fn run_command(
 
 fn step_command(
     config_path: Option<PathBuf>,
-    ticks: u32,
+    turns: u32,
     seed: u64,
     print_state: bool,
 ) -> Result<()> {
     let cfg = load_config(config_path)?;
     let mut sim = Simulation::new(cfg, seed)?;
-    sim.step_n(ticks.max(1));
+    sim.step_n(turns.max(1));
     let snapshot = sim.snapshot();
 
     let summary = StepSummary {
-        ticks: ticks.max(1),
-        final_tick_in_epoch: snapshot.tick_in_epoch,
-        actions_applied_last_tick: snapshot.metrics.actions_applied_last_tick,
+        turns: turns.max(1),
+        final_turn: snapshot.turn,
+        actions_applied_last_turn: snapshot.metrics.actions_applied_last_turn,
     };
 
     println!("{}", serde_json::to_string_pretty(&summary)?);
@@ -213,7 +215,7 @@ fn step_command(
 
 fn benchmark_command(
     config_path: Option<PathBuf>,
-    epochs: u32,
+    turns: u32,
     seed: u64,
     organisms: Option<u32>,
     neurons: Option<u32>,
@@ -232,21 +234,18 @@ fn benchmark_command(
 
     let mut sim = Simulation::new(cfg.clone(), seed)?;
     let start = Instant::now();
-    sim.epoch_n(epochs.max(1));
+    sim.step_n(turns.max(1));
     let elapsed = start.elapsed();
     let snapshot = sim.snapshot();
 
-    let total_ticks = (epochs.max(1) as u128) * (cfg.steps_per_epoch as u128);
     let complexity = (cfg.num_organisms.max(1) as f64)
         * ((cfg.num_neurons + cfg.num_synapses).max(1) as f64)
-        * (cfg.steps_per_epoch.max(1) as f64)
-        * (epochs.max(1) as f64);
+        * (turns.max(1) as f64);
 
     let summary = BenchmarkSummary {
-        epochs: epochs.max(1),
+        turns: turns.max(1),
         elapsed_ms: elapsed.as_millis(),
-        avg_ms_per_epoch: elapsed.as_secs_f64() * 1000.0 / epochs.max(1) as f64,
-        avg_ms_per_tick: elapsed.as_secs_f64() * 1000.0 / total_ticks.max(1) as f64,
+        avg_ms_per_turn: elapsed.as_secs_f64() * 1000.0 / turns.max(1) as f64,
         normalized_us_per_unit: elapsed.as_secs_f64() * 1_000_000.0 / complexity.max(1.0),
         final_metrics: snapshot.metrics,
     };
@@ -257,14 +256,14 @@ fn benchmark_command(
 
 fn export_command(
     config_path: Option<PathBuf>,
-    epochs: u32,
+    turns: u32,
     seed: u64,
     format: ExportFormat,
     out: PathBuf,
 ) -> Result<()> {
     let cfg = load_config(config_path)?;
     let mut sim = Simulation::new(cfg, seed)?;
-    let lines = sim.export_trace_jsonl(epochs);
+    let lines = sim.export_trace_jsonl(turns);
 
     let payload = match format {
         ExportFormat::Jsonl => lines.join("\n"),
@@ -311,11 +310,12 @@ fn replay_command(input: PathBuf) -> Result<()> {
 
     let last = snapshots.last().context("replay input is empty")?;
     let summary = RunSummary {
-        epochs: last.epoch as u32,
+        turns: last.turn as u32,
         seed: last.rng_seed,
-        final_epoch: last.epoch,
+        final_turn: last.turn,
         organism_count: last.organisms.len(),
-        survivors_last_epoch: last.metrics.survivors_last_epoch,
+        meals_last_turn: last.metrics.meals_last_turn,
+        starvations_last_turn: last.metrics.starvations_last_turn,
     };
 
     println!("{}", serde_json::to_string_pretty(&summary)?);
@@ -337,9 +337,8 @@ fn load_config(path: Option<PathBuf>) -> Result<WorldConfig> {
 fn write_output(text: String, out: Option<PathBuf>) -> Result<()> {
     if let Some(path) = out {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).with_context(|| {
-                format!("failed creating output directory {}", parent.display())
-            })?;
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed creating output directory {}", parent.display()))?;
         }
         fs::write(&path, text).with_context(|| format!("failed writing {}", path.display()))?;
         println!("wrote output to {}", path.display());

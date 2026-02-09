@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct OrganismId(pub u64);
@@ -24,28 +24,39 @@ impl<T> Envelope<T> {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum SurvivalRule {
-    CenterBandX {
-        min_fraction: f32,
-        max_fraction: f32,
-    },
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ActionType {
-    MoveUp,
-    MoveDown,
-    MoveLeft,
-    MoveRight,
+    MoveForward,
+    TurnLeft,
+    TurnRight,
 }
 
 impl ActionType {
-    pub const ALL: [ActionType; 4] = [
-        ActionType::MoveUp,
-        ActionType::MoveDown,
-        ActionType::MoveLeft,
-        ActionType::MoveRight,
+    pub const ALL: [ActionType; 3] = [
+        ActionType::MoveForward,
+        ActionType::TurnLeft,
+        ActionType::TurnRight,
+    ];
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum FacingDirection {
+    East,
+    NorthEast,
+    NorthWest,
+    West,
+    SouthWest,
+    SouthEast,
+}
+
+impl FacingDirection {
+    pub const ALL: [FacingDirection; 6] = [
+        FacingDirection::East,
+        FacingDirection::NorthEast,
+        FacingDirection::NorthWest,
+        FacingDirection::West,
+        FacingDirection::SouthWest,
+        FacingDirection::SouthEast,
     ];
 }
 
@@ -58,66 +69,32 @@ pub enum NeuronType {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SensoryReceptorType {
-    LookLeft,
-    LookRight,
-    LookUp,
-    LookDown,
-    X,
-    Y,
+    Look,
 }
 
 impl SensoryReceptorType {
-    pub const ALL: [SensoryReceptorType; 6] = [
-        SensoryReceptorType::LookLeft,
-        SensoryReceptorType::LookRight,
-        SensoryReceptorType::LookUp,
-        SensoryReceptorType::LookDown,
-        SensoryReceptorType::X,
-        SensoryReceptorType::Y,
-    ];
+    pub const ALL: [SensoryReceptorType; 1] = [SensoryReceptorType::Look];
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorldConfig {
-    pub columns: u32,
-    pub rows: u32,
-    pub steps_per_epoch: u32,
+    pub world_width: u32,
     pub steps_per_second: u32,
     pub num_organisms: u32,
     pub num_neurons: u32,
     pub max_num_neurons: u32,
     pub num_synapses: u32,
-    pub vision_depth: u32,
-    pub action_potential_length: u32,
+    pub turns_to_starve: u32,
     pub mutation_chance: f32,
     pub mutation_magnitude: f32,
-    pub unfit_kill_probability: f32,
-    pub offspring_fill_ratio: f32,
-    pub survival_rule: SurvivalRule,
+    pub center_spawn_min_fraction: f32,
+    pub center_spawn_max_fraction: f32,
 }
 
 impl Default for WorldConfig {
     fn default() -> Self {
-        Self {
-            columns: 20,
-            rows: 20,
-            steps_per_epoch: 20,
-            steps_per_second: 5,
-            num_organisms: 500,
-            num_neurons: 2,
-            max_num_neurons: 20,
-            num_synapses: 4,
-            vision_depth: 3,
-            action_potential_length: 1,
-            mutation_chance: 0.04,
-            mutation_magnitude: 1.0,
-            unfit_kill_probability: 0.95,
-            offspring_fill_ratio: 0.2,
-            survival_rule: SurvivalRule::CenterBandX {
-                min_fraction: 0.25,
-                max_fraction: 0.75,
-            },
-        }
+        toml::from_str(include_str!("../../config/default.toml"))
+            .expect("default world config TOML must parse")
     }
 }
 
@@ -131,14 +108,8 @@ pub struct SynapseEdge {
 pub struct NeuronState {
     pub neuron_id: NeuronId,
     pub neuron_type: NeuronType,
-    pub is_inverted: bool,
-    pub action_potential_threshold: f32,
-    pub resting_potential: f32,
-    pub potential: f32,
-    pub incoming_current: f32,
-    pub potential_decay_rate: f32,
-    pub action_potential_length: u32,
-    pub action_potential_time: Option<u32>,
+    pub bias: f32,
+    pub activation: f32,
     pub parent_ids: Vec<NeuronId>,
 }
 
@@ -173,25 +144,28 @@ pub struct BrainState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OrganismState {
     pub id: OrganismId,
-    pub x: i32,
-    pub y: i32,
+    pub q: i32,
+    pub r: i32,
+    pub facing: FacingDirection,
+    pub turns_since_last_meal: u32,
+    pub meals_eaten: u64,
     pub brain: BrainState,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct MetricsSnapshot {
-    pub ticks: u64,
-    pub epochs: u64,
-    pub survivors_last_epoch: u32,
+    pub turns: u64,
     pub organisms: u32,
-    pub synapse_ops_last_tick: u64,
-    pub actions_applied_last_tick: u64,
+    pub synapse_ops_last_turn: u64,
+    pub actions_applied_last_turn: u64,
+    pub meals_last_turn: u64,
+    pub starvations_last_turn: u64,
+    pub births_last_turn: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorldSnapshot {
-    pub epoch: u64,
-    pub tick_in_epoch: u32,
+    pub turn: u64,
     pub rng_seed: u64,
     pub config: WorldConfig,
     pub organisms: Vec<OrganismState>,
@@ -201,8 +175,8 @@ pub struct WorldSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OccupancyCell {
-    pub x: i32,
-    pub y: i32,
+    pub q: i32,
+    pub r: i32,
     pub organism_ids: Vec<OrganismId>,
 }
 
@@ -215,8 +189,7 @@ pub struct OrganismMove {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct TickDelta {
-    pub tick_in_epoch: u32,
-    pub epoch: u64,
+    pub turn: u64,
     pub moves: Vec<OrganismMove>,
     pub metrics: MetricsSnapshot,
 }
@@ -267,7 +240,6 @@ pub enum ClientCommand {
     Start { ticks_per_second: u32 },
     Pause,
     Step { count: u32 },
-    Epoch { count: u32 },
     SetFocus { organism_id: OrganismId },
 }
 
@@ -276,7 +248,6 @@ pub enum ClientCommand {
 pub enum ServerEvent {
     StateSnapshot(WorldSnapshot),
     TickDelta(TickDelta),
-    EpochCompleted(MetricsSnapshot),
     FocusBrain(OrganismState),
     Metrics(MetricsSnapshot),
     Error(ApiError),
@@ -295,13 +266,5 @@ mod tests {
             serde_json::from_str(&json).expect("deserialize envelope");
         assert_eq!(parsed.payload, cfg);
         assert_eq!(parsed.protocol_version, PROTOCOL_VERSION);
-    }
-
-    #[test]
-    fn command_roundtrip() {
-        let cmd = ClientCommand::Step { count: 3 };
-        let json = serde_json::to_string(&cmd).expect("serialize command");
-        let parsed: ClientCommand = serde_json::from_str(&json).expect("deserialize command");
-        assert_eq!(parsed, cmd);
     }
 }

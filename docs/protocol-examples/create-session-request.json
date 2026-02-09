@@ -4,7 +4,7 @@
     "rows": 20,
     "steps_per_epoch": 20,
     "steps_per_second": 5,
-    "num_organisms": 500,
+    "num_organisms": 200,
     "num_neurons": 2,
     "max_num_neurons": 20,
     "num_synapses": 4,

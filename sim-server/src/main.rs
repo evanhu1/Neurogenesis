@@ -14,7 +14,7 @@ use sim_protocol::{
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::sync::{broadcast, Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, broadcast};
 use tokio::task::JoinHandle;
 use tower_http::cors::CorsLayer;
 use tracing::{error, info};
@@ -48,12 +48,6 @@ struct HealthResponse {
 #[derive(Serialize)]
 struct StepResponse {
     deltas: Vec<sim_protocol::TickDelta>,
-    snapshot: WorldSnapshot,
-}
-
-#[derive(Serialize)]
-struct EpochResponse {
-    metrics: Vec<sim_protocol::MetricsSnapshot>,
     snapshot: WorldSnapshot,
 }
 
@@ -118,12 +112,6 @@ fn build_app(state: AppState) -> Router {
         .route("/v1/sessions/{id}", get(get_session_metadata))
         .route("/v1/sessions/{id}/state", get(get_state))
         .route("/v1/sessions/{id}/step", post(step_session))
-        .route("/v1/sessions/{id}/epoch", post(epoch_session))
-        .route("/v1/sessions/{id}/scatter", post(scatter_session))
-        .route(
-            "/v1/sessions/{id}/survivors/process",
-            post(process_survivors),
-        )
         .route("/v1/sessions/{id}/reset", post(reset_session))
         .route("/v1/sessions/{id}/focus", post(set_focus))
         .route("/v1/sessions/{id}/stream", get(stream_session))
@@ -208,64 +196,13 @@ async fn step_session(
 
     for delta in &deltas {
         let _ = session.events.send(ServerEvent::TickDelta(delta.clone()));
-        let _ = session
-            .events
-            .send(ServerEvent::Metrics(delta.metrics.clone()));
+        let _ = session.events.send(ServerEvent::Metrics(delta.metrics.clone()));
     }
+    let _ = session
+        .events
+        .send(ServerEvent::StateSnapshot(snapshot.clone()));
 
     Ok(Json(Envelope::new(StepResponse { deltas, snapshot })))
-}
-
-async fn epoch_session(
-    Path(id): Path<Uuid>,
-    State(state): State<AppState>,
-    Json(req): Json<CountRequest>,
-) -> Result<Json<Envelope<EpochResponse>>, AppError> {
-    let session = get_session(&state, id).await?;
-    let mut sim = session.simulation.lock().await;
-    let metrics = sim.epoch_n(req.count.max(1));
-    let snapshot = sim.snapshot();
-    drop(sim);
-
-    for m in &metrics {
-        let _ = session.events.send(ServerEvent::EpochCompleted(m.clone()));
-    }
-
-    Ok(Json(Envelope::new(EpochResponse { metrics, snapshot })))
-}
-
-async fn scatter_session(
-    Path(id): Path<Uuid>,
-    State(state): State<AppState>,
-) -> Result<Json<Envelope<WorldSnapshot>>, AppError> {
-    let session = get_session(&state, id).await?;
-    let mut sim = session.simulation.lock().await;
-    sim.scatter();
-    let snapshot = sim.snapshot();
-    drop(sim);
-
-    let _ = session
-        .events
-        .send(ServerEvent::StateSnapshot(snapshot.clone()));
-
-    Ok(Json(Envelope::new(snapshot)))
-}
-
-async fn process_survivors(
-    Path(id): Path<Uuid>,
-    State(state): State<AppState>,
-) -> Result<Json<Envelope<WorldSnapshot>>, AppError> {
-    let session = get_session(&state, id).await?;
-    let mut sim = session.simulation.lock().await;
-    sim.process_survivors();
-    let snapshot = sim.snapshot();
-    drop(sim);
-
-    let _ = session
-        .events
-        .send(ServerEvent::StateSnapshot(snapshot.clone()));
-
-    Ok(Json(Envelope::new(snapshot)))
 }
 
 async fn reset_session(
@@ -394,20 +331,13 @@ async fn handle_command(command: ClientCommand, session: Arc<Session>) -> Result
         ClientCommand::Step { count } => {
             let mut sim = session.simulation.lock().await;
             let deltas = sim.step_n(count.max(1));
+            let snapshot = sim.snapshot();
             drop(sim);
             for delta in deltas {
                 let _ = session.events.send(ServerEvent::TickDelta(delta.clone()));
                 let _ = session.events.send(ServerEvent::Metrics(delta.metrics));
             }
-            Ok(())
-        }
-        ClientCommand::Epoch { count } => {
-            let mut sim = session.simulation.lock().await;
-            let metrics = sim.epoch_n(count.max(1));
-            drop(sim);
-            for metric in metrics {
-                let _ = session.events.send(ServerEvent::EpochCompleted(metric));
-            }
+            let _ = session.events.send(ServerEvent::StateSnapshot(snapshot));
             Ok(())
         }
         ClientCommand::SetFocus { organism_id } => {
@@ -440,9 +370,11 @@ async fn session_start(session: Arc<Session>, ticks_per_second: u32) {
                 rt.ticks_per_second.max(1)
             };
 
-            let delta = {
+            let (delta, snapshot) = {
                 let mut sim = session_for_task.simulation.lock().await;
-                sim.step_n(1).into_iter().next()
+                let delta = sim.step_n(1).into_iter().next();
+                let snapshot = sim.snapshot();
+                (delta, snapshot)
             };
 
             if let Some(delta) = delta {
@@ -452,6 +384,9 @@ async fn session_start(session: Arc<Session>, ticks_per_second: u32) {
                 let _ = session_for_task
                     .events
                     .send(ServerEvent::Metrics(delta.metrics));
+                let _ = session_for_task
+                    .events
+                    .send(ServerEvent::StateSnapshot(snapshot));
             }
 
             tokio::time::sleep(Duration::from_millis((1000_u64 / tps as u64).max(1))).await;
@@ -567,7 +502,6 @@ mod tests {
             .await
             .expect("websocket connect should succeed");
 
-        // Initial snapshot event
         let first = stream
             .next()
             .await
@@ -581,7 +515,6 @@ mod tests {
             serde_json::from_str(&text).expect("initial server event should deserialize");
         assert!(matches!(env.payload, ServerEvent::StateSnapshot(_)));
 
-        // Send step command and expect TickDelta
         let cmd = Envelope::new(ClientCommand::Step { count: 1 });
         stream
             .send(WsMessage::Text(
