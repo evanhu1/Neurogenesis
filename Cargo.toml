@@ -3,7 +3,6 @@ members = [
   "sim-core",
   "sim-protocol",
   "sim-server",
-  "sim-cli",
 ]
 resolver = "2"
 
@@ -15,7 +14,6 @@ license = "MIT"
 [workspace.dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["ws", "macros", "json"] }
-clap = { version = "4", features = ["derive"] }
 futures = "0.3"
 rand = "0.9"
 rand_chacha = "0.9"

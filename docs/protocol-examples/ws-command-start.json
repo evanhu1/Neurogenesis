@@ -1,9 +1,0 @@
-{
-  "protocol_version": 1,
-  "payload": {
-    "type": "Start",
-    "data": {
-      "ticks_per_second": 10
-    }
-  }
-}

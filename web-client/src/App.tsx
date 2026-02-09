@@ -16,6 +16,7 @@ import { DEFAULT_CONFIG } from './types';
 
 const apiBase = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8080';
 const wsBase = apiBase.replace('http://', 'ws://').replace('https://', 'wss://');
+const protocolVersion = 2;
 
 export default function App() {
   const [session, setSession] = useState<SessionMetadata | null>(null);
@@ -26,6 +27,7 @@ export default function App() {
   const [errorText, setErrorText] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const preferEnvelopeHttpBodyRef = useRef(false);
   const sessionRef = useRef<SessionMetadata | null>(null);
   const snapshotRef = useRef<WorldSnapshot | null>(null);
   const focusedOrganismIdRef = useRef<number | null>(null);
@@ -46,20 +48,77 @@ export default function App() {
 
   const request = useCallback(
     async <T,>(path: string, method: string, body?: unknown): Promise<T> => {
-      const response = await fetch(`${apiBase}${path}`, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: body ? JSON.stringify(body) : undefined,
-      });
+      const send = async (wrapBodyInEnvelope: boolean) => {
+        const response = await fetch(`${apiBase}${path}`, {
+          method,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body:
+            body === undefined
+              ? undefined
+              : JSON.stringify(
+                  wrapBodyInEnvelope
+                    ? { protocol_version: protocolVersion, payload: body }
+                    : body,
+                ),
+        });
 
-      const json = await response.json();
-      if (!response.ok) {
-        throw new Error(json?.payload?.message ?? 'request failed');
+        const text = await response.text();
+        let parsed: unknown = null;
+        if (text) {
+          try {
+            parsed = JSON.parse(text);
+          } catch {
+            parsed = null;
+          }
+        }
+        return { response, text, parsed };
+      };
+
+      let { response, text, parsed } = await send(preferEnvelopeHttpBodyRef.current);
+      const startedWrapped = preferEnvelopeHttpBodyRef.current;
+
+      if (
+        !startedWrapped &&
+        response.status === 422 &&
+        body !== undefined &&
+        /protocol_version|payload/i.test(text)
+      ) {
+        ({ response, text, parsed } = await send(true));
+        if (response.ok) {
+          preferEnvelopeHttpBodyRef.current = true;
+        }
       }
 
-      return (json as Envelope<T>).payload;
+      const parsedRecord =
+        parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+      const payload = parsedRecord?.payload;
+
+      if (!response.ok) {
+        let message: string | null = null;
+        if (payload && typeof payload === 'object') {
+          const payloadRecord = payload as Record<string, unknown>;
+          if (typeof payloadRecord.message === 'string') {
+            message = payloadRecord.message;
+          }
+        }
+        if (!message && typeof parsedRecord?.message === 'string') {
+          message = parsedRecord.message;
+        }
+        if (!message && text.trim()) {
+          message = text.trim();
+        }
+        throw new Error(message ?? `request failed (${response.status})`);
+      }
+
+      if (payload !== undefined) {
+        return payload as T;
+      }
+      if (parsedRecord) {
+        return parsedRecord as unknown as T;
+      }
+      throw new Error('request succeeded but response was not JSON');
     },
     [],
   );
@@ -159,14 +218,16 @@ export default function App() {
 
   const onReset = useCallback(() => {
     if (!session) return;
-    void request<WorldSnapshot>(`/v1/sessions/${session.id}/reset`, 'POST', { seed: null }).then(
-      (nextSnapshot) => {
+    void request<WorldSnapshot>(`/v1/sessions/${session.id}/reset`, 'POST', { seed: null })
+      .then((nextSnapshot) => {
         setSnapshot(nextSnapshot);
         setFocusedOrganismId(null);
         setFocusedBrain(null);
         setFocusMetaText('Click an organism');
-      },
-    );
+      })
+      .catch((err) => {
+        setErrorText(err instanceof Error ? err.message : 'Failed to reset session');
+      });
   }, [request, session]);
 
   const onWorldCanvasClick = useCallback(
@@ -187,6 +248,8 @@ export default function App() {
 
       void request(`/v1/sessions/${session.id}/focus`, 'POST', {
         organism_id: selectedId,
+      }).catch((err) => {
+        setErrorText(err instanceof Error ? err.message : 'Failed to focus organism');
       });
     },
     [request, session, snapshot],

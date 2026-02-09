@@ -1,9 +1,0 @@
-{
-  "protocol_version": 1,
-  "payload": {
-    "type": "Step",
-    "data": {
-      "count": 1
-    }
-  }
-}

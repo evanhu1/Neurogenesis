@@ -7,7 +7,6 @@ Neuromorphic brains grown from scratch with simulated evolution in Rust.
 - `sim-core`: deterministic simulation engine
 - `sim-protocol`: shared protocol types
 - `sim-server`: HTTP + WS simulation server
-- `sim-cli`: headless CLI runner
 - `web-client`: HTML5 canvas renderer
 
 ## Quickstart
@@ -17,14 +16,6 @@ Neuromorphic brains grown from scratch with simulated evolution in Rust.
 3. Start server: `cargo run -p sim-server`
 4. In another shell: `cd web-client && npm install && npm run dev`
 5. Open `http://127.0.0.1:5173`
-
-## CLI Examples
-
-- `cargo run -p sim-cli -- run --epochs 100 --seed 42`
-- `cargo run -p sim-cli -- step --ticks 1 --print-state`
-- `cargo run -p sim-cli -- benchmark --epochs 20`
-- `cargo run -p sim-cli -- export --epochs 50 --out runs/run-001.jsonl`
-- `cargo run -p sim-cli -- replay --input runs/run-001.jsonl`
 
 ## Config
 

@@ -5,9 +5,8 @@
 This repository is a Rust workspace plus a TypeScript web client.
 
 - `sim-core/`: deterministic simulation engine and core logic.
-- `sim-protocol/`: shared API/protocol types used by server, CLI, and UI.
+- `sim-protocol/`: shared API/protocol types used by server and UI.
 - `sim-server/`: Axum HTTP + WebSocket server (`src/main.rs`).
-- `sim-cli/`: headless runner and export/replay tooling.
 - `web-client/`: React + Vite canvas UI (`src/`), static entry in `index.html`.
 - `config/default.toml`: baseline simulation configuration.
 - `docs/`: API/behavior docs and protocol examples.
@@ -19,7 +18,6 @@ This repository is a Rust workspace plus a TypeScript web client.
 - `make fmt`: format all Rust code with `rustfmt`.
 - `make lint`: run `clippy` with warnings treated as errors.
 - `cargo run -p sim-server`: start backend on `127.0.0.1:8080` by default.
-- `cargo run -p sim-cli -- run --epochs 100 --seed 42`: run a CLI simulation.
 - `cd web-client && npm run dev`: run frontend locally (Vite).
 - `cd web-client && npm run build && npm run typecheck`: production build + TS
   checks.

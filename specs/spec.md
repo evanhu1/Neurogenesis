@@ -4,7 +4,7 @@ This document reflects the implemented behavior across:
 
 - `sim-core` (authoritative turn runner)
 - `sim-protocol` (wire/data model)
-- `sim-server` + `sim-cli` (runtime surfaces)
+- `sim-server` (runtime surface)
 - `web-client` (delta/state application)
 
 ## 1. World Model
