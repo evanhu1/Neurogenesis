@@ -179,6 +179,7 @@ pub(crate) fn action_index(action: ActionType) -> usize {
         ActionType::MoveForward => 0,
         ActionType::TurnLeft => 1,
         ActionType::TurnRight => 2,
+        ActionType::Reproduce => 3,
     }
 }
 

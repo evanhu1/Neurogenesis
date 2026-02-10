@@ -9,6 +9,34 @@ use sim_protocol::{
 };
 use std::collections::{HashMap, HashSet};
 
+trait IntoEnergy {
+    fn into_energy(self) -> f32;
+}
+
+impl IntoEnergy for i32 {
+    fn into_energy(self) -> f32 {
+        self as f32
+    }
+}
+
+impl IntoEnergy for u32 {
+    fn into_energy(self) -> f32 {
+        self as f32
+    }
+}
+
+impl IntoEnergy for f32 {
+    fn into_energy(self) -> f32 {
+        self
+    }
+}
+
+impl IntoEnergy for f64 {
+    fn into_energy(self) -> f32 {
+        self as f32
+    }
+}
+
 fn test_config(world_width: u32, num_organisms: u32) -> WorldConfig {
     let mut config = WorldConfig {
         world_width,
@@ -18,7 +46,6 @@ fn test_config(world_width: u32, num_organisms: u32) -> WorldConfig {
     config.seed_species_config = SpeciesConfig {
         num_neurons: 1,
         num_synapses: 0,
-        turns_to_starve: 10,
         mutation_chance: 0.0,
         ..config.seed_species_config
     };
@@ -47,6 +74,10 @@ fn forced_brain(
             post_neuron_id: NeuronId(2002),
             weight: if turn_right { 8.0 } else { -8.0 },
         },
+        SynapseEdge {
+            post_neuron_id: NeuronId(2003),
+            weight: -8.0,
+        },
     ];
     let inter = vec![InterNeuronState {
         neuron: NeuronState {
@@ -63,6 +94,7 @@ fn forced_brain(
         make_action_neuron(2000, ActionType::MoveForward),
         make_action_neuron(2001, ActionType::TurnLeft),
         make_action_neuron(2002, ActionType::TurnRight),
+        make_action_neuron(2003, ActionType::Reproduce),
     ];
     for action_neuron in &mut action {
         action_neuron.neuron.parent_ids = vec![inter_id];
@@ -72,7 +104,7 @@ fn forced_brain(
         sensory,
         inter,
         action,
-        synapse_count: 3,
+        synapse_count: 4,
     }
 }
 
@@ -85,8 +117,9 @@ fn make_organism(
     turn_left: bool,
     turn_right: bool,
     confidence: f32,
-    turns_since_last_consumption: u32,
+    energy: impl IntoEnergy,
 ) -> OrganismState {
+    let energy = energy.into_energy();
     OrganismState {
         id: OrganismId(id),
         species_id: SpeciesId(0),
@@ -94,9 +127,83 @@ fn make_organism(
         r,
         age_turns: 0,
         facing,
-        turns_since_last_consumption,
+        energy: if energy <= 0.0 { 10.0 } else { energy },
         consumptions_count: 0,
+        reproductions_count: 0,
         brain: forced_brain(wants_move, turn_left, turn_right, confidence),
+    }
+}
+
+fn enable_reproduce_action(organism: &mut OrganismState) {
+    let inter_id = organism.brain.inter[0].neuron.neuron_id;
+    let mut found = false;
+    for synapse in &mut organism.brain.inter[0].synapses {
+        if synapse.post_neuron_id == NeuronId(2003) {
+            synapse.weight = 8.0;
+            found = true;
+            break;
+        }
+    }
+    if !found {
+        organism.brain.inter[0].synapses.push(SynapseEdge {
+            post_neuron_id: NeuronId(2003),
+            weight: 8.0,
+        });
+        organism.brain.inter[0]
+            .synapses
+            .sort_by(|a, b| a.post_neuron_id.cmp(&b.post_neuron_id));
+        organism.brain.synapse_count = organism.brain.synapse_count.saturating_add(1);
+    }
+    if let Some(action) = organism
+        .brain
+        .action
+        .iter_mut()
+        .find(|action| action.action_type == ActionType::Reproduce)
+    {
+        action.neuron.parent_ids = vec![inter_id];
+    }
+}
+
+fn reproduction_request_from_parent(sim: &Simulation, parent_id: OrganismId) -> SpawnRequest {
+    let parent = sim
+        .organisms
+        .iter()
+        .find(|organism| organism.id == parent_id)
+        .expect("parent should exist for reproduction request");
+    let (q, r) = crate::grid::hex_neighbor(
+        (parent.q, parent.r),
+        crate::grid::opposite_direction(parent.facing),
+    );
+    SpawnRequest {
+        kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
+            species_id: parent.species_id,
+            parent_facing: parent.facing,
+            parent_brain: parent.brain.clone(),
+            q,
+            r,
+        }),
+    }
+}
+
+fn reproduction_request_at(
+    sim: &Simulation,
+    parent_id: OrganismId,
+    q: i32,
+    r: i32,
+) -> SpawnRequest {
+    let parent = sim
+        .organisms
+        .iter()
+        .find(|organism| organism.id == parent_id)
+        .expect("parent should exist for reproduction request");
+    SpawnRequest {
+        kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
+            species_id: parent.species_id,
+            parent_facing: parent.facing,
+            parent_brain: parent.brain.clone(),
+            q,
+            r,
+        }),
     }
 }
 
@@ -476,8 +583,18 @@ fn contested_occupied_target_where_occupant_remains_uses_consume_path() {
     configure_sim(
         &mut sim,
         vec![
-            make_organism(0, 1, 1, FacingDirection::East, true, false, false, 0.9, 0),
-            make_organism(1, 2, 1, FacingDirection::West, false, false, false, 0.1, 0),
+            make_organism(0, 1, 1, FacingDirection::East, true, false, false, 0.9, 6.0),
+            make_organism(
+                1,
+                2,
+                1,
+                FacingDirection::West,
+                false,
+                false,
+                false,
+                0.1,
+                3.0,
+            ),
             make_organism(
                 2,
                 1,
@@ -501,28 +618,66 @@ fn contested_occupied_target_where_occupant_remains_uses_consume_path() {
         .organisms
         .iter()
         .all(|organism| organism.id != OrganismId(1)));
+    let predator = sim
+        .organisms
+        .iter()
+        .find(|organism| organism.id == OrganismId(0))
+        .expect("predator should survive");
+    assert_eq!(predator.energy, 7.0);
 }
 
 #[test]
 fn starvation_and_reproduction_interact_in_same_turn() {
     let mut cfg = test_config(6, 4);
-    cfg.seed_species_config.turns_to_starve = 2;
-
+    cfg.reproduction_energy_cost = 5.0;
     let mut sim = Simulation::new(cfg, 18).expect("simulation should initialize");
+    let mut reproducer =
+        make_organism(0, 1, 1, FacingDirection::East, true, false, false, 0.9, 6.0);
+    enable_reproduce_action(&mut reproducer);
     configure_sim(
         &mut sim,
         vec![
-            make_organism(0, 1, 1, FacingDirection::East, true, false, false, 0.9, 1),
-            make_organism(1, 2, 1, FacingDirection::West, false, false, false, 0.1, 0),
-            make_organism(2, 0, 0, FacingDirection::East, false, false, false, 0.2, 1),
-            make_organism(3, 4, 4, FacingDirection::West, false, false, false, 0.2, 0),
+            reproducer,
+            make_organism(
+                1,
+                2,
+                1,
+                FacingDirection::West,
+                false,
+                false,
+                false,
+                0.1,
+                3.0,
+            ),
+            make_organism(
+                2,
+                0,
+                0,
+                FacingDirection::East,
+                false,
+                false,
+                false,
+                0.2,
+                1.0,
+            ),
+            make_organism(
+                3,
+                4,
+                4,
+                FacingDirection::West,
+                false,
+                false,
+                false,
+                0.2,
+                6.0,
+            ),
         ],
     );
 
     let delta = tick_once(&mut sim);
     assert_eq!(delta.metrics.consumptions_last_turn, 1);
+    assert_eq!(delta.metrics.reproductions_last_turn, 1);
     assert_eq!(delta.metrics.starvations_last_turn, 1);
-    assert_eq!(delta.metrics.births_last_turn, 2);
     assert_eq!(
         delta
             .removed_positions
@@ -542,7 +697,9 @@ fn starvation_and_reproduction_interact_in_same_turn() {
         .iter()
         .find(|organism| organism.id == OrganismId(0))
         .expect("consumer should survive");
-    assert_eq!(consumer.turns_since_last_consumption, 0);
+    assert_eq!(consumer.consumptions_count, 1);
+    assert_eq!(consumer.reproductions_count, 1);
+    assert!(consumer.energy > 0.0);
 }
 
 #[test]
@@ -570,11 +727,7 @@ fn spawn_queue_order_is_deterministic_under_limited_space() {
     let parent_brain = sim.organisms[0].brain.clone();
 
     let spawned = sim.resolve_spawn_requests(&[
-        SpawnRequest {
-            kind: SpawnRequestKind::Reproduction {
-                parent: OrganismId(0),
-            },
-        },
+        reproduction_request_at(&sim, OrganismId(0), 1, 1),
         SpawnRequest {
             kind: SpawnRequestKind::StarvationReplacement,
         },
@@ -624,11 +777,8 @@ fn reproduction_offspring_brain_runtime_state_is_reset() {
     parent.brain.action[1].neuron.is_active = true;
     let parent_brain = parent.brain.clone();
 
-    let spawned = sim.resolve_spawn_requests(&[SpawnRequest {
-        kind: SpawnRequestKind::Reproduction {
-            parent: OrganismId(0),
-        },
-    }]);
+    let spawned =
+        sim.resolve_spawn_requests(&[reproduction_request_from_parent(&sim, OrganismId(0))]);
 
     assert_eq!(spawned.len(), 1);
     let child = &spawned[0];
@@ -685,11 +835,8 @@ fn reproduction_spawn_is_opposite_of_parent_facing() {
         )],
     );
 
-    let spawned = sim.resolve_spawn_requests(&[SpawnRequest {
-        kind: SpawnRequestKind::Reproduction {
-            parent: OrganismId(0),
-        },
-    }]);
+    let spawned =
+        sim.resolve_spawn_requests(&[reproduction_request_from_parent(&sim, OrganismId(0))]);
     assert_eq!(spawned.len(), 1);
     let child = &spawned[0];
     assert_eq!(child.species_id, SpeciesId(0));
@@ -697,10 +844,163 @@ fn reproduction_spawn_is_opposite_of_parent_facing() {
 }
 
 #[test]
-fn no_overlap_invariant_holds_after_mixed_turn() {
-    let mut cfg = test_config(6, 4);
-    cfg.seed_species_config.turns_to_starve = 2;
+fn reproduce_action_requires_enough_energy() {
+    let cfg = test_config(7, 1);
+    let mut sim = Simulation::new(cfg, 71).expect("simulation should initialize");
+    let mut parent = make_organism(
+        0,
+        3,
+        3,
+        FacingDirection::East,
+        false,
+        false,
+        false,
+        0.7,
+        5.0,
+    );
+    enable_reproduce_action(&mut parent);
+    configure_sim(&mut sim, vec![parent]);
 
+    let delta = tick_once(&mut sim);
+    assert_eq!(delta.metrics.reproductions_last_turn, 0);
+    assert!(delta.spawned.is_empty());
+    let parent_after = sim
+        .organisms
+        .iter()
+        .find(|organism| organism.id == OrganismId(0))
+        .expect("parent should remain alive");
+    assert_eq!(parent_after.reproductions_count, 0);
+    assert_eq!(parent_after.energy, 4.0);
+}
+
+#[test]
+fn reproduce_action_fails_when_spawn_cell_blocked() {
+    let cfg = test_config(7, 2);
+    let mut sim = Simulation::new(cfg, 72).expect("simulation should initialize");
+    let mut parent = make_organism(
+        0,
+        3,
+        3,
+        FacingDirection::East,
+        false,
+        false,
+        false,
+        0.7,
+        30.0,
+    );
+    enable_reproduce_action(&mut parent);
+    configure_sim(
+        &mut sim,
+        vec![
+            parent,
+            make_organism(
+                1,
+                2,
+                3,
+                FacingDirection::West,
+                false,
+                false,
+                false,
+                0.2,
+                10.0,
+            ),
+        ],
+    );
+
+    let delta = tick_once(&mut sim);
+    assert_eq!(delta.metrics.reproductions_last_turn, 0);
+    assert!(delta.spawned.is_empty());
+    let parent_after = sim
+        .organisms
+        .iter()
+        .find(|organism| organism.id == OrganismId(0))
+        .expect("parent should remain alive");
+    assert_eq!(parent_after.reproductions_count, 0);
+    assert_eq!(parent_after.energy, 29.0);
+}
+
+#[test]
+fn reproduce_action_succeeds_when_energy_and_space_allow_it() {
+    let cfg = test_config(7, 1);
+    let mut sim = Simulation::new(cfg, 73).expect("simulation should initialize");
+    let mut parent = make_organism(
+        0,
+        3,
+        3,
+        FacingDirection::East,
+        false,
+        false,
+        false,
+        0.7,
+        30.0,
+    );
+    enable_reproduce_action(&mut parent);
+    configure_sim(&mut sim, vec![parent]);
+
+    let delta = tick_once(&mut sim);
+    assert_eq!(delta.metrics.reproductions_last_turn, 1);
+    assert_eq!(delta.spawned.len(), 1);
+    assert_eq!((delta.spawned[0].q, delta.spawned[0].r), (2, 3));
+
+    let parent_after = sim
+        .organisms
+        .iter()
+        .find(|organism| organism.id == OrganismId(0))
+        .expect("parent should remain alive");
+    assert_eq!(parent_after.reproductions_count, 1);
+    assert_eq!(parent_after.energy, 9.0);
+}
+
+#[test]
+fn move_energy_cost_applies_only_to_successful_moves() {
+    let cfg = test_config(5, 2);
+    let mut sim = Simulation::new(cfg, 74).expect("simulation should initialize");
+    configure_sim(
+        &mut sim,
+        vec![
+            make_organism(
+                0,
+                0,
+                1,
+                FacingDirection::East,
+                true,
+                false,
+                false,
+                0.6,
+                10.0,
+            ),
+            make_organism(
+                1,
+                1,
+                0,
+                FacingDirection::SouthEast,
+                true,
+                false,
+                false,
+                0.6,
+                10.0,
+            ),
+        ],
+    );
+
+    let _ = tick_once(&mut sim);
+    let winner = sim
+        .organisms
+        .iter()
+        .find(|organism| organism.id == OrganismId(0))
+        .expect("winner should survive");
+    let loser = sim
+        .organisms
+        .iter()
+        .find(|organism| organism.id == OrganismId(1))
+        .expect("loser should survive");
+    assert_eq!(winner.energy, 8.0);
+    assert_eq!(loser.energy, 9.0);
+}
+
+#[test]
+fn no_overlap_invariant_holds_after_mixed_turn() {
+    let cfg = test_config(6, 4);
     let mut sim = Simulation::new(cfg, 20).expect("simulation should initialize");
     configure_sim(
         &mut sim,
@@ -718,8 +1018,7 @@ fn no_overlap_invariant_holds_after_mixed_turn() {
 
 #[test]
 fn targeted_complex_resolution_snapshot_is_deterministic() {
-    let mut cfg = test_config(6, 4);
-    cfg.seed_species_config.turns_to_starve = 3;
+    let cfg = test_config(6, 4);
 
     let scenario = vec![
         make_organism(0, 1, 1, FacingDirection::East, true, false, false, 0.9, 1),

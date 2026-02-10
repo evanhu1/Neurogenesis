@@ -19,21 +19,26 @@ This document reflects the implemented behavior across:
 
 ## 2. Config (`WorldConfig` + `SpeciesConfig`)
 
-Fields:
+World-level fields:
 
 - `world_width`
 - `steps_per_second`
 - `num_organisms`
 - `center_spawn_min_fraction`
 - `center_spawn_max_fraction`
-- `seed_species_config`:
-  - `num_neurons`
-  - `max_num_neurons`
-  - `num_synapses`
-  - `turns_to_starve`
-  - `mutation_chance`
-  - `mutation_magnitude`
-  - `mutation_operations`
+- `starting_energy`
+- `reproduction_energy_cost`
+- `move_action_energy_cost`
+- `seed_species_config`
+
+Species-level fields:
+
+- `num_neurons`
+- `max_num_neurons`
+- `num_synapses`
+- `mutation_chance`
+- `mutation_magnitude`
+- `mutation_operations`
 
 Runtime species model:
 
@@ -42,24 +47,6 @@ Runtime species model:
 - Registry is exposed on every world snapshot as `species_registry`.
 - Current limitation: world initialization seeds exactly one species at
   `species_id = 0` from `seed_species_config`.
-
-World-level fields:
-
-- `world_width`
-- `steps_per_second`
-- `num_organisms`
-- `center_spawn_min_fraction`
-- `center_spawn_max_fraction`
-
-Species-level fields:
-
-- `num_neurons`
-- `max_num_neurons`
-- `num_synapses`
-- `turns_to_starve`
-- `mutation_chance`
-- `mutation_magnitude`
-- `mutation_operations`
 
 ## 3. Turn Runner Pipeline
 
@@ -71,7 +58,7 @@ Build immutable start-of-turn state:
 
 - occupancy snapshot
 - stable organism ordering by `OrganismId`
-- organism pose/facing/hunger snapshot
+- organism pose/facing snapshot
 - per-organism move confidence from hidden-state signal
 
 Move confidence is derived from the `MoveForward` action activation at turn
@@ -85,6 +72,7 @@ For each living organism in stable ID order:
 - compute `facing_after_turn` from turn actions
 - compute `wants_move`
 - compute in-bounds `move_target` if `wants_move`
+- compute `wants_reproduce`
 - attach deterministic confidence from snapshot phase
 
 No world mutation happens here.
@@ -112,32 +100,48 @@ In one commit pass:
 
 - apply facing updates for all organisms
 - apply resolved movement results
-- apply consumption kills (current source type: consumed organism)
-- reset consumer hunger (`turns_since_last_consumption = 0`)
+- apply successful movement energy cost (`move_action_energy_cost`)
+- apply consumption kills
+- transfer consumed organism energy to the consumer
 - increment consumer consumptions (`consumptions_count += 1`)
-- enqueue reproduction spawn requests for successful consumptions
 
-### 3.5 Lifecycle Phase (Starvation)
+Move cost is charged only for successful committed moves.
+
+### 3.5 Reproduction Action Phase
 
 Still inside the same runner turn:
 
-- non-consumers increment `turns_since_last_consumption`
-- organisms at/above starvation threshold die
+- organism must have `Reproduce` action active
+- organism must have enough energy (`>= reproduction_energy_cost`)
+- spawn cell must be the hex opposite current facing and must be unblocked
+- same-cell reproduction conflicts are resolved deterministically by organism ID
+  order (first reservation wins)
+- on success:
+  - reproduction spawn request is queued
+  - `reproduction_energy_cost` is deducted immediately
+  - organism `reproductions_count` increments
+  - world metric `reproductions_last_turn` increments
+- on failure (insufficient energy / blocked cell / out-of-bounds): no side
+  effects
+
+### 3.6 Lifecycle Phase (Energy Decay + Starvation)
+
+Still inside the same runner turn:
+
+- each surviving organism loses `1.0` energy
+- organisms with `energy <= 0.0` die of starvation
 - starvation replacement spawn requests are enqueued
 
-### 3.6 Spawn Resolution Phase
+### 3.7 Spawn Resolution Phase
 
 Spawn queue is processed deterministically in enqueue order:
 
-- reproduction requests (from commit phase) then starvation replacements
-- spawn is skipped if no empty cells remain
+- reproduction requests then starvation replacements
+- spawn is skipped if placement is invalid or no empty cells remain
 - starvation replacement spawn location uses center-weighted radial Gaussian
   sampling in the annulus defined by:
   - `center_spawn_min_fraction`
   - `center_spawn_max_fraction`
-- reproduction spawn location is exactly one hex opposite the parent's facing
-- reproduction spawn is skipped when that opposite hex is out-of-bounds or
-  occupied
 - starvation replacement uses deterministic nearest-empty fallback when random
   sampling misses valid empty cells
 
@@ -145,20 +149,22 @@ Spawn kinds:
 
 - starvation replacement: random species sampled from current registry,
   freshly generated brain from that species DNA
-- reproduction spawn: parent-derived offspring with opposite facing + mutation,
-  inheriting parent `species_id`
+- reproduction spawn: parent-derived offspring with opposite-facing child,
+  mutation applied, inheriting parent species DNA
 
-### 3.7 Metrics + Delta Phase
+All spawned organisms start with `starting_energy`.
 
-After turn commit/lifecycle/spawn:
+### 3.8 Metrics + Delta Phase
+
+After turn commit/reproduction/lifecycle/spawn:
 
 - `turn += 1`
 - metrics are finalized:
   - `synapse_ops_last_turn`
-  - `actions_applied_last_turn` (successful resolved moves)
+  - `actions_applied_last_turn` (successful moves + successful reproductions)
   - `consumptions_last_turn`
+  - `reproductions_last_turn`
   - `starvations_last_turn`
-  - `births_last_turn`
 - turn delta is emitted from committed results
 
 ## 4. Brain Evaluation Model
@@ -173,6 +179,13 @@ After turn commit/lifecycle/spawn:
 - Action neuron active when activation `> 0.5`.
 - `synapse_ops_last_turn` counts traversed edge contributions during intent
   evaluation.
+
+Action set:
+
+- `MoveForward`
+- `TurnLeft`
+- `TurnRight`
+- `Reproduce`
 
 ## 5. Movement/Facing Semantics
 
@@ -219,8 +232,8 @@ Weights remain clamped to `[-8.0, 8.0]`.
 - `spawned` (`OrganismState[]`)
 - `metrics`
 
-This allows clients to apply move/consume/starve/spawn effects incrementally without
-waiting for full snapshots.
+This allows clients to apply move/consume/starve/spawn effects incrementally
+without waiting for full snapshots.
 
 `WorldSnapshot` also contains:
 
@@ -245,7 +258,7 @@ waiting for full snapshots.
   - applying committed `moves`
   - appending `spawned`
   - sorting organisms by ID
-- Still accepts periodic full snapshots as source of truth sync.
+- Still accepts periodic full snapshots as source-of-truth sync.
 
 ## 9. Determinism
 
@@ -254,6 +267,7 @@ For fixed config/seed and command sequence:
 - snapshot/intent/move/spawn ordering is deterministic
 - move conflict tie-breaks are deterministic (`OrganismId`)
 - spawn queue ordering is deterministic
+- reproduction-cell reservation ordering is deterministic
 - RNG usage order is deterministic
 
 Covered by deterministic seed tests, targeted complex-turn determinism tests,

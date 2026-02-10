@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct OrganismId(pub u64);
@@ -33,13 +33,15 @@ pub enum ActionType {
     MoveForward,
     TurnLeft,
     TurnRight,
+    Reproduce,
 }
 
 impl ActionType {
-    pub const ALL: [ActionType; 3] = [
+    pub const ALL: [ActionType; 4] = [
         ActionType::MoveForward,
         ActionType::TurnLeft,
         ActionType::TurnRight,
+        ActionType::Reproduce,
     ];
 }
 
@@ -85,7 +87,6 @@ pub struct SpeciesConfig {
     pub num_neurons: u32,
     pub max_num_neurons: u32,
     pub num_synapses: u32,
-    pub turns_to_starve: u32,
     pub mutation_chance: f32,
     pub mutation_magnitude: f32,
     pub mutation_operations: u32,
@@ -104,6 +105,9 @@ pub struct WorldConfig {
     pub num_organisms: u32,
     pub center_spawn_min_fraction: f32,
     pub center_spawn_max_fraction: f32,
+    pub starting_energy: f32,
+    pub reproduction_energy_cost: f32,
+    pub move_action_energy_cost: f32,
     #[serde(
         default = "default_seed_species_config",
         alias = "species_config",
@@ -179,8 +183,9 @@ pub struct OrganismState {
     pub r: i32,
     pub age_turns: u64,
     pub facing: FacingDirection,
-    pub turns_since_last_consumption: u32,
+    pub energy: f32,
     pub consumptions_count: u64,
+    pub reproductions_count: u64,
     pub brain: BrainState,
 }
 
@@ -198,8 +203,8 @@ pub struct MetricsSnapshot {
     pub synapse_ops_last_turn: u64,
     pub actions_applied_last_turn: u64,
     pub consumptions_last_turn: u64,
+    pub reproductions_last_turn: u64,
     pub starvations_last_turn: u64,
-    pub births_last_turn: u64,
     pub fitness: FitnessStats,
 }
 

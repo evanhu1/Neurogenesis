@@ -14,6 +14,9 @@ export type WorldConfig = {
   num_organisms: number;
   center_spawn_min_fraction: number;
   center_spawn_max_fraction: number;
+  starting_energy: number;
+  reproduction_energy_cost: number;
+  move_action_energy_cost: number;
   seed_species_config: SpeciesConfig;
 };
 
@@ -21,7 +24,6 @@ export type SpeciesConfig = {
   num_neurons: number;
   max_num_neurons: number;
   num_synapses: number;
-  turns_to_starve: number;
   mutation_chance: number;
   mutation_magnitude: number;
   mutation_operations: number;
@@ -76,8 +78,9 @@ export type OrganismState = {
   r: number;
   age_turns: number;
   facing: FacingDirection;
-  turns_since_last_consumption: number;
+  energy: number;
   consumptions_count: number;
+  reproductions_count: number;
   brain: BrainState;
 };
 
@@ -93,8 +96,8 @@ export type MetricsSnapshot = {
   synapse_ops_last_turn: number;
   actions_applied_last_turn: number;
   consumptions_last_turn: number;
+  reproductions_last_turn: number;
   starvations_last_turn: number;
-  births_last_turn: number;
   fitness: FitnessStats;
 };
 
@@ -177,11 +180,13 @@ function parseDefaultConfigToml(tomlText: string): WorldConfig {
     num_organisms: parseRequiredNumber(worldLevel, 'num_organisms'),
     center_spawn_min_fraction: parseRequiredNumber(worldLevel, 'center_spawn_min_fraction'),
     center_spawn_max_fraction: parseRequiredNumber(worldLevel, 'center_spawn_max_fraction'),
+    starting_energy: parseRequiredNumber(worldLevel, 'starting_energy'),
+    reproduction_energy_cost: parseRequiredNumber(worldLevel, 'reproduction_energy_cost'),
+    move_action_energy_cost: parseRequiredNumber(worldLevel, 'move_action_energy_cost'),
     seed_species_config: {
       num_neurons: parseRequiredNumber(speciesSource, 'num_neurons'),
       max_num_neurons: parseRequiredNumber(speciesSource, 'max_num_neurons'),
       num_synapses: parseRequiredNumber(speciesSource, 'num_synapses'),
-      turns_to_starve: parseRequiredNumber(speciesSource, 'turns_to_starve'),
       mutation_chance: parseRequiredNumber(speciesSource, 'mutation_chance'),
       mutation_magnitude: parseRequiredNumber(speciesSource, 'mutation_magnitude'),
       mutation_operations: parseRequiredNumber(speciesSource, 'mutation_operations'),

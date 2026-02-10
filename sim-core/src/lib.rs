@@ -1,8 +1,8 @@
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use sim_protocol::{
-    MetricsSnapshot, OccupancyCell, OrganismId, OrganismState, SpeciesConfig, SpeciesId, TickDelta,
-    WorldConfig, WorldSnapshot,
+    BrainState, FacingDirection, MetricsSnapshot, OccupancyCell, OrganismId, OrganismState,
+    SpeciesConfig, SpeciesId, TickDelta, WorldConfig, WorldSnapshot,
 };
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -41,17 +41,26 @@ pub struct Simulation {
 
 #[derive(Default)]
 struct BrainEvaluation {
-    actions: [bool; 3],
+    actions: [bool; 4],
     synapse_ops: u64,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum SpawnRequestKind {
-    StarvationReplacement,
-    Reproduction { parent: OrganismId },
+#[derive(Clone)]
+struct ReproductionSpawn {
+    species_id: SpeciesId,
+    parent_facing: FacingDirection,
+    parent_brain: BrainState,
+    q: i32,
+    r: i32,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone)]
+enum SpawnRequestKind {
+    StarvationReplacement,
+    Reproduction(ReproductionSpawn),
+}
+
+#[derive(Clone)]
 struct SpawnRequest {
     kind: SpawnRequestKind,
 }
@@ -213,15 +222,25 @@ fn validate_world_config(config: &WorldConfig) -> Result<(), SimError> {
             "center_spawn_min_fraction must be less than center_spawn_max_fraction".to_owned(),
         ));
     }
+    if config.starting_energy <= 0.0 {
+        return Err(SimError::InvalidConfig(
+            "starting_energy must be greater than zero".to_owned(),
+        ));
+    }
+    if config.reproduction_energy_cost < 0.0 {
+        return Err(SimError::InvalidConfig(
+            "reproduction_energy_cost must be >= 0".to_owned(),
+        ));
+    }
+    if config.move_action_energy_cost < 0.0 {
+        return Err(SimError::InvalidConfig(
+            "move_action_energy_cost must be >= 0".to_owned(),
+        ));
+    }
     Ok(())
 }
 
 fn validate_species_config(config: &SpeciesConfig) -> Result<(), SimError> {
-    if config.turns_to_starve == 0 {
-        return Err(SimError::InvalidConfig(
-            "turns_to_starve must be >= 1".to_owned(),
-        ));
-    }
     if !(0.0..=1.0).contains(&config.mutation_chance) {
         return Err(SimError::InvalidConfig(
             "mutation_chance must be within [0, 1]".to_owned(),

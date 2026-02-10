@@ -1,7 +1,7 @@
 use crate::brain::{action_index, evaluate_brain, move_confidence_signal};
-use crate::grid::{hex_neighbor, rotate_left, rotate_right};
+use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right};
 use crate::Simulation;
-use crate::{SpawnRequest, SpawnRequestKind};
+use crate::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 use sim_protocol::{
     ActionType, FacingDirection, FitnessStats, OrganismId, OrganismMove, OrganismState,
     RemovedOrganismPosition, TickDelta,
@@ -14,7 +14,6 @@ struct SnapshotOrganismState {
     q: i32,
     r: i32,
     facing: FacingDirection,
-    turns_since_last_consumption: u32,
     move_confidence: f32,
 }
 
@@ -56,6 +55,7 @@ struct OrganismIntent {
     from: (i32, i32),
     facing_after_turn: FacingDirection,
     wants_move: bool,
+    wants_reproduce: bool,
     move_target: Option<(i32, i32)>,
     move_confidence: f32,
     synapse_ops: u64,
@@ -88,7 +88,6 @@ struct CommitResult {
     moves: Vec<OrganismMove>,
     removed_positions: Vec<RemovedOrganismPosition>,
     consumptions: u64,
-    consumers: HashSet<OrganismId>,
 }
 
 impl Simulation {
@@ -99,21 +98,20 @@ impl Simulation {
 
         let resolutions = self.resolve_moves(&snapshot, &intents);
         let mut spawn_requests = Vec::new();
-        let commit = self.commit_phase(&intents, &resolutions, &mut spawn_requests);
-        let (starvations, starved_removed_positions) =
-            self.lifecycle_phase(&commit.consumers, &mut spawn_requests);
+        let commit = self.commit_phase(&intents, &resolutions);
+        let reproductions = self.reproduction_phase(&intents, &mut spawn_requests);
+        let (starvations, starved_removed_positions) = self.lifecycle_phase(&mut spawn_requests);
         self.increment_age_for_survivors();
         let spawned = self.resolve_spawn_requests(&spawn_requests);
-        let births = spawned.len() as u64;
         self.debug_assert_consistent_state();
 
         self.turn = self.turn.saturating_add(1);
         self.metrics.turns = self.turn;
         self.metrics.synapse_ops_last_turn = synapse_ops;
-        self.metrics.actions_applied_last_turn = commit.moves.len() as u64;
+        self.metrics.actions_applied_last_turn = commit.moves.len() as u64 + reproductions;
         self.metrics.consumptions_last_turn = commit.consumptions;
+        self.metrics.reproductions_last_turn = reproductions;
         self.metrics.starvations_last_turn = starvations;
-        self.metrics.births_last_turn = births;
         self.refresh_population_metrics();
 
         let mut removed_positions = commit.removed_positions;
@@ -142,7 +140,6 @@ impl Simulation {
                 q: organism.q,
                 r: organism.r,
                 facing: organism.facing,
-                turns_since_last_consumption: organism.turns_since_last_consumption,
                 move_confidence: move_confidence_signal(&organism.brain),
             });
             id_to_index.insert(organism.id, idx);
@@ -173,7 +170,6 @@ impl Simulation {
             let Some(organism_idx) = index_by_id.get(organism_id).copied() else {
                 continue;
             };
-            let _turns_since_last_consumption = snapshot_state.turns_since_last_consumption;
 
             let evaluation = {
                 let brain = &mut self.organisms[organism_idx].brain;
@@ -192,6 +188,7 @@ impl Simulation {
             let facing_after_turn =
                 facing_after_turn(snapshot_state.facing, turn_left_active, turn_right_active);
             let wants_move = evaluation.actions[action_index(ActionType::MoveForward)];
+            let wants_reproduce = evaluation.actions[action_index(ActionType::Reproduce)];
             let move_target = if wants_move {
                 let target = hex_neighbor((snapshot_state.q, snapshot_state.r), facing_after_turn);
                 snapshot.in_bounds(target.0, target.1).then_some(target)
@@ -204,6 +201,7 @@ impl Simulation {
                 from: (snapshot_state.q, snapshot_state.r),
                 facing_after_turn,
                 wants_move,
+                wants_reproduce,
                 move_target,
                 move_confidence: snapshot_state.move_confidence,
                 synapse_ops: evaluation.synapse_ops,
@@ -270,7 +268,6 @@ impl Simulation {
         &mut self,
         intents: &[OrganismIntent],
         resolutions: &[MoveResolution],
-        spawn_requests: &mut Vec<SpawnRequest>,
     ) -> CommitResult {
         let intent_by_id: HashMap<OrganismId, OrganismIntent> =
             intents.iter().map(|intent| (intent.id, *intent)).collect();
@@ -287,8 +284,13 @@ impl Simulation {
             .iter()
             .map(|organism| (organism.id, (organism.q, organism.r)))
             .collect();
+        let energy_by_id: HashMap<OrganismId, f32> = self
+            .organisms
+            .iter()
+            .map(|organism| (organism.id, organism.energy))
+            .collect();
         let mut removed_positions = Vec::new();
-        let mut consumers = HashSet::new();
+        let mut consumed_energy_by_actor: HashMap<OrganismId, f32> = HashMap::new();
         let mut consumptions = 0_u64;
 
         for resolution in resolutions {
@@ -302,14 +304,13 @@ impl Simulation {
                             r,
                         });
                     }
+                    let consumed_energy =
+                        energy_by_id.get(&consumed_organism).copied().unwrap_or(0.0);
+                    *consumed_energy_by_actor
+                        .entry(resolution.actor)
+                        .or_insert(0.0) += consumed_energy;
                 }
-                consumers.insert(resolution.actor);
                 consumptions += 1;
-                spawn_requests.push(SpawnRequest {
-                    kind: SpawnRequestKind::Reproduction {
-                        parent: resolution.actor,
-                    },
-                });
             }
         }
 
@@ -320,10 +321,11 @@ impl Simulation {
             if let Some((next_q, next_r)) = move_by_actor.get(&organism.id).copied() {
                 organism.q = next_q;
                 organism.r = next_r;
-                if consumers.contains(&organism.id) {
-                    organism.turns_since_last_consumption = 0;
-                    organism.consumptions_count = organism.consumptions_count.saturating_add(1);
-                }
+                organism.energy -= self.config.move_action_energy_cost;
+            }
+            if let Some(consumed_energy) = consumed_energy_by_actor.get(&organism.id).copied() {
+                organism.energy += consumed_energy;
+                organism.consumptions_count = organism.consumptions_count.saturating_add(1);
             }
         }
 
@@ -341,29 +343,73 @@ impl Simulation {
             moves,
             removed_positions,
             consumptions,
-            consumers,
         }
+    }
+
+    fn reproduction_phase(
+        &mut self,
+        intents: &[OrganismIntent],
+        spawn_requests: &mut Vec<SpawnRequest>,
+    ) -> u64 {
+        let intent_by_id: HashMap<OrganismId, OrganismIntent> =
+            intents.iter().map(|intent| (intent.id, *intent)).collect();
+        let mut reserved_spawn_cells = HashSet::new();
+        let mut successful_reproductions = 0_u64;
+        let world_width = self.config.world_width as i32;
+        let reproduction_energy_cost = self.config.reproduction_energy_cost;
+        let occupancy_snapshot = self.occupancy.clone();
+
+        self.organisms.sort_by_key(|organism| organism.id);
+        for organism in &mut self.organisms {
+            let Some(intent) = intent_by_id.get(&organism.id) else {
+                continue;
+            };
+            if !intent.wants_reproduce {
+                continue;
+            }
+            if organism.energy < reproduction_energy_cost {
+                continue;
+            }
+
+            let Some((q, r)) =
+                reproduction_target(world_width, organism.q, organism.r, organism.facing)
+            else {
+                continue;
+            };
+            if occupancy_snapshot_cell(&occupancy_snapshot, world_width, q, r).is_some()
+                || reserved_spawn_cells.contains(&(q, r))
+            {
+                continue;
+            }
+
+            spawn_requests.push(SpawnRequest {
+                kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
+                    species_id: organism.species_id,
+                    parent_facing: organism.facing,
+                    parent_brain: organism.brain.clone(),
+                    q,
+                    r,
+                }),
+            });
+            reserved_spawn_cells.insert((q, r));
+            organism.energy -= reproduction_energy_cost;
+            organism.reproductions_count = organism.reproductions_count.saturating_add(1);
+            successful_reproductions += 1;
+        }
+
+        successful_reproductions
     }
 
     fn lifecycle_phase(
         &mut self,
-        consumers: &HashSet<OrganismId>,
         spawn_requests: &mut Vec<SpawnRequest>,
     ) -> (u64, Vec<RemovedOrganismPosition>) {
         self.organisms.sort_by_key(|organism| organism.id);
 
         let mut starved_ids = Vec::new();
-        let species_registry = &self.species_registry;
         for organism in &mut self.organisms {
-            if consumers.contains(&organism.id) {
-                continue;
-            }
-            let Some(species_config) = species_registry.get(&organism.species_id) else {
-                continue;
-            };
-            organism.turns_since_last_consumption =
-                organism.turns_since_last_consumption.saturating_add(1);
-            if organism.turns_since_last_consumption >= species_config.turns_to_starve {
+            organism.energy -= 1.0;
+            if organism.energy <= 0.0 {
                 starved_ids.push(organism.id);
             }
         }
@@ -443,6 +489,30 @@ fn compare_move_candidates(a: &MoveCandidate, b: &MoveCandidate) -> Ordering {
     a.confidence
         .total_cmp(&b.confidence)
         .then_with(|| b.actor.cmp(&a.actor))
+}
+
+fn occupancy_snapshot_cell(
+    occupancy: &[Option<OrganismId>],
+    world_width: i32,
+    q: i32,
+    r: i32,
+) -> Option<OrganismId> {
+    if q < 0 || r < 0 || q >= world_width || r >= world_width {
+        return None;
+    }
+    let idx = r as usize * world_width as usize + q as usize;
+    occupancy[idx]
+}
+
+fn reproduction_target(
+    world_width: i32,
+    parent_q: i32,
+    parent_r: i32,
+    parent_facing: FacingDirection,
+) -> Option<(i32, i32)> {
+    let opposite_facing = opposite_direction(parent_facing);
+    let (q, r) = hex_neighbor((parent_q, parent_r), opposite_facing);
+    (q >= 0 && r >= 0 && q < world_width && r < world_width).then_some((q, r))
 }
 
 pub(crate) fn facing_after_turn(

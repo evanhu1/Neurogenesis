@@ -1,5 +1,5 @@
 use crate::brain::reset_brain_runtime_state;
-use crate::grid::{hex_neighbor, opposite_direction};
+use crate::grid::opposite_direction;
 use crate::Simulation;
 use crate::{world_capacity, SpawnRequest, SpawnRequestKind};
 use rand::seq::SliceRandom;
@@ -11,7 +11,7 @@ impl Simulation {
     pub(crate) fn resolve_spawn_requests(&mut self, queue: &[SpawnRequest]) -> Vec<OrganismState> {
         let mut spawned = Vec::new();
         for request in queue {
-            let organism = match request.kind {
+            let organism = match &request.kind {
                 SpawnRequestKind::StarvationReplacement => {
                     let Some((q, r)) = self.sample_center_weighted_spawn_position() else {
                         continue;
@@ -29,45 +29,32 @@ impl Simulation {
                         r,
                         age_turns: 0,
                         facing: self.random_facing(),
-                        turns_since_last_consumption: 0,
+                        energy: self.config.starting_energy,
                         consumptions_count: 0,
+                        reproductions_count: 0,
                         brain: self.generate_brain(&species_config),
                     }
                 }
-                SpawnRequestKind::Reproduction { parent } => {
-                    let Some(parent_state) = self
-                        .organisms
-                        .iter()
-                        .find(|organism| organism.id == parent)
-                        .cloned()
-                    else {
-                        continue;
-                    };
-                    let Some((q, r)) = self.sample_reproduction_spawn_position(
-                        parent_state.q,
-                        parent_state.r,
-                        parent_state.facing,
-                    ) else {
-                        continue;
-                    };
+                SpawnRequestKind::Reproduction(reproduction) => {
                     let Some(species_config) =
-                        self.species_config(parent_state.species_id).cloned()
+                        self.species_config(reproduction.species_id).cloned()
                     else {
                         continue;
                     };
 
-                    let mut brain = parent_state.brain;
+                    let mut brain = reproduction.parent_brain.clone();
                     self.mutate_brain(&mut brain, &species_config);
                     reset_brain_runtime_state(&mut brain);
                     OrganismState {
                         id: self.alloc_organism_id(),
-                        species_id: parent_state.species_id,
-                        q,
-                        r,
+                        species_id: reproduction.species_id,
+                        q: reproduction.q,
+                        r: reproduction.r,
                         age_turns: 0,
-                        facing: opposite_direction(parent_state.facing),
-                        turns_since_last_consumption: 0,
+                        facing: opposite_direction(reproduction.parent_facing),
+                        energy: self.config.starting_energy,
                         consumptions_count: 0,
+                        reproductions_count: 0,
                         brain,
                     }
                 }
@@ -125,24 +112,6 @@ impl Simulation {
 
         self.nearest_empty_to_point(center, center, Some((min_radius_sq, max_radius_sq)))
             .or_else(|| self.nearest_empty_to_point(center, center, None))
-    }
-
-    fn sample_reproduction_spawn_position(
-        &self,
-        parent_q: i32,
-        parent_r: i32,
-        parent_facing: FacingDirection,
-    ) -> Option<(i32, i32)> {
-        if self.organisms.len() >= world_capacity(self.config.world_width) {
-            return None;
-        }
-
-        let opposite_facing = opposite_direction(parent_facing);
-        let (q, r) = hex_neighbor((parent_q, parent_r), opposite_facing);
-        if !self.in_bounds(q, r) {
-            return None;
-        }
-        (self.occupant_at(q, r).is_none()).then_some((q, r))
     }
 
     fn sample_standard_normal_pair(&mut self) -> (f64, f64) {
@@ -220,8 +189,9 @@ impl Simulation {
                 r,
                 age_turns: 0,
                 facing,
-                turns_since_last_consumption: 0,
+                energy: self.config.starting_energy,
                 consumptions_count: 0,
+                reproductions_count: 0,
                 brain,
             };
             let added = self.add_organism(organism);

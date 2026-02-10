@@ -1,74 +1,70 @@
 # TASKS
 
-## Goal
+## Coordination Rules
 
-Split config DNA into:
+- Keep frontend data types/models in sync with backend data types/models as
+  changes are made.
+- Update `specs/spec.md` continuously so it stays fully aligned with the
+  implemented system behavior.
+- Keep turn-runner behavior updates explicitly documented in `specs/spec.md`
+  because `specs/TURN_RUNNER_SPEC.md` is not present in this repo.
 
-- `WorldConfig`: session/world-level parameters.
-- `SpeciesConfig`: per-species evolutionary parameters.
-- `WorldConfig.seed_species_config`: the seed DNA used only at world
-  initialization/reset time.
+## Sequential Implementation Tasks
 
-Runtime model target:
-
-- `Simulation` stores all current species as a stable integer ID ->
-  `SpeciesConfig` mapping.
-- Runtime species registry is exposed in protocol snapshots.
-- Every organism stores a `species_id` reference.
-- This change supports multiple species structurally, but this iteration only
-  initializes and uses one species (no speciation/new-species creation logic).
-- `SpeciesId` is `u32`; seeded species starts at ID `0`.
-
-Proposed field split:
-
-- `WorldConfig`: `world_width`, `steps_per_second`, `num_organisms`,
-  `center_spawn_min_fraction`, `center_spawn_max_fraction`.
-- `SpeciesConfig`: `num_neurons`, `max_num_neurons`, `num_synapses`,
-  `turns_to_starve`, `mutation_chance`, `mutation_magnitude`,
-  `mutation_operations`.
-
-## Sequence
-
-1. Define `SpeciesConfig` in `sim-protocol/src/lib.rs` and move species fields
-   out of `WorldConfig`.
-2. Rename the nested seed field to `seed_species_config` in `WorldConfig` and
-   update serde/default behavior.
-3. Update `config/default.toml` to the new shape (world keys + nested
-   `seed_species_config` keys) while preserving default behavior.
-4. Add a stable integer species ID type and wire it through protocol/core
-   models where needed (`SpeciesId`, `species_id` on organism state, etc.).
-5. Add runtime species registry to `Simulation` (species ID -> `SpeciesConfig`)
-   plus deterministic ID allocation for future species additions.
-6. Initialize/reset simulation species registry from
-   `WorldConfig.seed_species_config` with exactly one species for now (for
-   species ID `0`).
-7. Refactor sim-core execution paths to resolve per-organism species config
-   through `species_id` instead of directly from world config:
-   `sim-core/src/brain.rs`, `sim-core/src/spawn.rs`, `sim-core/src/turn.rs`,
-   `sim-core/src/grid.rs`, and `sim-core/src/lib.rs`.
-8. Ensure all spawn paths assign and preserve organism `species_id` correctly:
-   initial population, starvation replacement, and reproduction.
-   Reproduction inherits parent `species_id`; starvation replacement picks a
-   random species from the current registry.
-9. Split validation into world-level and species-level validation, including
-   validation of `seed_species_config`.
-10. Update protocol payloads and snapshots for new schema/fields, including
-    config nesting, exposed species registry, and organism species linkage;
-    bump `PROTOCOL_VERSION` because wire JSON changes.
-11. Update `sim-server/src/main.rs` and tests to compile and run with the new
-    config and organism/species model.
-12. Update web client types and parsers (`web-client/src/types.ts`) for
-    `seed_species_config`, `SpeciesConfig`, and organism `species_id`; adjust
-    consuming code as needed.
-13. Update docs in `specs/spec.md` to document:
-    world DNA (`WorldConfig`),
-    seed species DNA (`seed_species_config`),
-    runtime species registry semantics,
-    and current single-species limitation.
-14. Update tests in `sim-core`, `sim-protocol`, `sim-server`, and regenerate
-    `sim-core/tests/fixtures/golden_seed42_turn30.json` for the new snapshot
-    schema.
-15. Verify end-to-end with:
-    `cargo test --workspace`,
-    `cargo check --workspace`,
-    `cd web-client && npm run typecheck && npm run build`.
+1. Lock behavioral semantics for energy-based lifecycle and reproduction in the
+   turn runner before coding:
+   - Define exact per-turn order for: movement, move-energy spend, reproduce
+     action validation, reproduce-energy spend, baseline energy decay, and
+     starvation removal.
+   - Define whether move-energy cost is charged on move attempt or successful
+     committed move.
+   - Define whether consumption changes energy (and how).
+2. Update protocol/config schemas (`sim-protocol`) and defaults:
+   - Add world-level energy knobs to `WorldConfig` and `config/default.toml`:
+     `starting_energy`, `reproduction_energy_cost`, `move_action_energy_cost`.
+   - Add `ActionType::Reproduce` and extend `ActionType::ALL`.
+   - Replace `OrganismState.turns_since_last_consumption` with
+     `OrganismState.energy: f32`.
+   - Add/confirm per-organism successful reproduction metric field.
+   - Add world metric `reproductions_last_turn` and remove
+     `births_last_turn`.
+   - Remove species starvation dependency (`turns_to_starve`) entirely.
+3. Refactor `sim-core` turn-runner state structures:
+   - Expand brain evaluation action slots from 3 to 4.
+   - Add reproduce intent capture in `build_intents`.
+   - Remove hunger snapshot state and use energy snapshot state.
+4. Rework `commit_phase` + lifecycle handling in `sim-core/src/turn.rs`:
+   - Remove consume-triggered reproduction queueing.
+   - Apply move energy cost using the chosen semantics.
+   - Resolve reproduce action attempts using post-commit occupancy checks:
+     insufficient energy or blocked spawn cell => no-op; otherwise enqueue spawn
+     and deduct reproduction energy.
+   - Increment organism + world reproduction success metrics on successful
+     reproduce actions.
+   - Apply per-turn baseline energy decay and starvation at `energy <= 0.0`.
+5. Update spawn logic in `sim-core/src/spawn.rs`:
+   - Initialize new organisms with `starting_energy`.
+   - Keep reproduction placement opposite parent facing; skip when blocked/OOB.
+   - Ensure starvation replacements also start with configured energy.
+6. Remove hunger-based fields and logic across core:
+   - Delete all `turns_since_last_consumption` reads/writes and associated
+     validation.
+   - Remove now-obsolete `turns_to_starve` validation/use across the project.
+7. Update frontend protocol mirror/types and UI strings (`web-client`):
+   - Parse new world config energy fields.
+   - Replace focused-organism stats line from hunger counter to energy.
+   - Add reproduction success metric display if introduced in protocol.
+8. Update and expand tests:
+   - Update existing helpers for 4 action neurons (include `Reproduce`).
+   - Add deterministic tests for reproduce success/failure cases:
+     insufficient energy, blocked spawn, enough energy + free spawn.
+   - Add tests for move-energy spending and starvation at zero energy.
+   - Update/rebaseline golden fixture(s) affected by action-set and lifecycle
+     changes.
+9. Update docs/spec:
+   - Revise config, action set, turn pipeline, lifecycle, and metrics sections
+     in `specs/spec.md` to match the new energy budget model.
+10. Validate end-to-end:
+   - Run `cargo check --workspace`, `cargo test --workspace`, and
+     `cd web-client && npm run typecheck` to confirm protocol/core/client
+     consistency.

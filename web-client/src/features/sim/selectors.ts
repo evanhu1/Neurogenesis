@@ -12,8 +12,8 @@ export function formatMetrics(snapshot: WorldSnapshot | null): string {
     `turn=${snapshot.turn}`,
     `organisms=${snapshot.metrics.organisms}`,
     `consumptions_last_turn=${snapshot.metrics.consumptions_last_turn}`,
+    `reproductions_last_turn=${snapshot.metrics.reproductions_last_turn}`,
     `starvations_last_turn=${snapshot.metrics.starvations_last_turn}`,
-    `births_last_turn=${snapshot.metrics.births_last_turn}`,
     `synapse_ops_last_turn=${snapshot.metrics.synapse_ops_last_turn}`,
     `actions_last_turn=${snapshot.metrics.actions_applied_last_turn}`,
   ].join('\n');
@@ -47,8 +47,9 @@ export function formatFocusedStats(focusedOrganism: OrganismState | null): strin
     `position=(${focusedOrganism.q}, ${focusedOrganism.r})`,
     `facing=${focusedOrganism.facing}`,
     `age_turns=${focusedOrganism.age_turns}`,
-    `turns_since_last_consumption=${focusedOrganism.turns_since_last_consumption}`,
+    `energy=${focusedOrganism.energy.toFixed(2)}`,
     `consumptions_count=${focusedOrganism.consumptions_count}`,
+    `reproductions_count=${focusedOrganism.reproductions_count}`,
     `synapse_count=${focusedOrganism.brain.synapse_count}`,
   ].join('\n');
 }
