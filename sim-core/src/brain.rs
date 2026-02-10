@@ -3,7 +3,7 @@ use crate::{BrainEvaluation, Simulation, DEFAULT_BIAS, SYNAPSE_STRENGTH_MAX};
 use rand::Rng;
 use sim_protocol::{
     ActionNeuronState, ActionType, BrainState, InterNeuronState, NeuronId, NeuronState, NeuronType,
-    OrganismId, SensoryNeuronState, SensoryReceptorType, SynapseEdge,
+    OrganismId, SensoryNeuronState, SensoryReceptorType, SpeciesConfig, SynapseEdge,
 };
 use std::collections::HashMap;
 
@@ -11,19 +11,19 @@ const ACTION_ACTIVATION_THRESHOLD: f32 = 0.5;
 const MAX_MUTATION_OPERATION_ATTEMPTS: usize = 8;
 
 impl Simulation {
-    pub(crate) fn mutate_brain(&mut self, brain: &mut BrainState) {
-        if self.rng.random::<f32>() > self.config.mutation_chance {
+    pub(crate) fn mutate_brain(&mut self, brain: &mut BrainState, species_config: &SpeciesConfig) {
+        if self.rng.random::<f32>() > species_config.mutation_chance {
             return;
         }
 
-        let operations = self.config.mutation_operations.max(1) as usize;
+        let operations = species_config.mutation_operations.max(1) as usize;
         for _ in 0..operations {
             let mut applied = false;
             for _ in 0..MAX_MUTATION_OPERATION_ATTEMPTS {
                 applied = if self.rng.random::<f32>() < 0.5 {
-                    self.apply_topology_mutation(brain)
+                    self.apply_topology_mutation(brain, species_config)
                 } else {
-                    self.apply_synapse_mutation(brain)
+                    self.apply_synapse_mutation(brain, species_config)
                 };
                 if applied {
                     break;
@@ -37,10 +37,14 @@ impl Simulation {
         brain.synapse_count = count_synapses(brain) as u32;
     }
 
-    fn apply_topology_mutation(&mut self, brain: &mut BrainState) -> bool {
+    fn apply_topology_mutation(
+        &mut self,
+        brain: &mut BrainState,
+        species_config: &SpeciesConfig,
+    ) -> bool {
         match self.rng.random_range(0..3) {
             0 => {
-                if brain.inter.len() as u32 >= self.config.max_num_neurons {
+                if brain.inter.len() as u32 >= species_config.max_num_neurons {
                     return false;
                 }
 
@@ -58,7 +62,7 @@ impl Simulation {
                 true
             }
             1 => {
-                if brain.inter.len() <= self.minimum_inter_neurons() {
+                if brain.inter.len() <= self.minimum_inter_neurons(species_config) {
                     return false;
                 }
                 let idx = self.rng.random_range(0..brain.inter.len());
@@ -71,7 +75,7 @@ impl Simulation {
                 if brain.inter.is_empty() {
                     return false;
                 }
-                let magnitude = self.config.mutation_magnitude.clamp(0.05, 8.0);
+                let magnitude = species_config.mutation_magnitude.clamp(0.05, 8.0);
                 let idx = self.rng.random_range(0..brain.inter.len());
                 let bias = &mut brain.inter[idx].neuron.bias;
                 *bias = (*bias + self.rng.random_range(-magnitude..magnitude)).clamp(-8.0, 8.0);
@@ -80,7 +84,11 @@ impl Simulation {
         }
     }
 
-    fn apply_synapse_mutation(&mut self, brain: &mut BrainState) -> bool {
+    fn apply_synapse_mutation(
+        &mut self,
+        brain: &mut BrainState,
+        species_config: &SpeciesConfig,
+    ) -> bool {
         match self.rng.random_range(0..3) {
             0 => create_random_synapse_with_retries(
                 brain,
@@ -102,20 +110,25 @@ impl Simulation {
                     return false;
                 }
                 let pre = outputs[self.rng.random_range(0..outputs.len())];
-                perturb_random_synapse(brain, pre, self.config.mutation_magnitude, &mut self.rng);
+                perturb_random_synapse(
+                    brain,
+                    pre,
+                    species_config.mutation_magnitude,
+                    &mut self.rng,
+                );
                 true
             }
         }
     }
 
-    pub(crate) fn generate_brain(&mut self) -> BrainState {
+    pub(crate) fn generate_brain(&mut self, species_config: &SpeciesConfig) -> BrainState {
         let mut sensory = Vec::new();
         for (idx, receptor_type) in SensoryReceptorType::ALL.into_iter().enumerate() {
             sensory.push(make_sensory_neuron(idx as u32, receptor_type));
         }
 
         let mut inter = Vec::new();
-        for i in 0..self.config.num_neurons {
+        for i in 0..species_config.num_neurons {
             inter.push(InterNeuronState {
                 neuron: make_neuron(NeuronId(1000 + i), NeuronType::Inter, self.random_bias()),
                 synapses: Vec::new(),
@@ -134,7 +147,7 @@ impl Simulation {
             synapse_count: 0,
         };
 
-        for _ in 0..self.config.num_synapses {
+        for _ in 0..species_config.num_synapses {
             if !create_random_synapse_with_retries(
                 &mut brain,
                 &mut self.rng,
@@ -152,8 +165,8 @@ impl Simulation {
         self.rng.random_range(-1.0..1.0)
     }
 
-    fn minimum_inter_neurons(&self) -> usize {
-        if self.config.num_neurons > 0 {
+    fn minimum_inter_neurons(&self, species_config: &SpeciesConfig) -> usize {
+        if species_config.num_neurons > 0 {
             1
         } else {
             0

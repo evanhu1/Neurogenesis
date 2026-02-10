@@ -1,85 +1,74 @@
 # TASKS
 
-## Coordination Rules
+## Goal
 
-- Keep frontend data types/models in sync with backend data types/models as
-  changes are made.
-- Update `specs/spec.md` continuously so it stays fully aligned with the
-  implemented system behavior.
-- Treat `specs/TURN_RUNNER_SPEC.md` as the source of truth for the centralized
-  runner design and resolution semantics.
+Split config DNA into:
 
-## Sequential Implementation Tasks
+- `WorldConfig`: session/world-level parameters.
+- `SpeciesConfig`: per-species evolutionary parameters.
+- `WorldConfig.seed_species_config`: the seed DNA used only at world
+  initialization/reset time.
 
-1. Add centralized turn-runner data structures in `sim-core`:
-   - `TurnSnapshot`
-   - `OrganismIntent`
-   - `MoveCandidate` / `MoveResolution`
-   - `SpawnRequest`
-   - any helper indexes needed for O(1) lookups.
-2. Implement Snapshot Phase to build immutable start-of-turn state:
-   - occupancy snapshot
-   - stable organism ordering by `OrganismId`
-   - pose/facing/hunger state
-   - per-organism move confidence value derived from the hidden-state signal
-     required by the spec.
-3. Implement Intent Phase:
-   - evaluate every organism brain against the same frozen snapshot
-   - compute `facing_after_turn`, `wants_move`, `move_target` (if in bounds)
-   - attach deterministic move confidence for conflict resolution.
-4. Implement global Move Resolution Phase:
-   - resolve all intents simultaneously
-   - use highest confidence as primary winner rule
-   - use deterministic tie-break fallback (`OrganismId`) for equal confidence
-   - support empty-target moves, occupied-target contesting, and vacated-target
-     entry in the same turn.
-5. Extend Move Resolution Phase for graph cases:
-   - support two-way swaps and longer move cycles
-   - ensure cycle handling remains deterministic and conflict-safe.
-6. Implement Commit Phase (single atomic commit):
-   - apply all facing updates
-   - apply resolved moves
-   - apply eat-and-replace kills
-   - update eater lifecycle fields (`turns_since_last_meal`, `meals_eaten`)
-   - enqueue reproduction spawn requests.
-7. Implement Lifecycle Phase (starvation) inside the same runner:
-   - increment hunger for non-eaters
-   - apply starvation deaths
-   - enqueue starvation replacement spawn requests.
-8. Implement Spawn Resolution Phase:
-   - process queued spawns in deterministic order
-   - if full, skip spawn
-   - spawn on empty hexes sampled from a center-weighted Gaussian distribution
-     per spec.
-9. Integrate Metrics + Delta Phase:
-   - finalize `turn` increment and all per-turn metrics
-   - produce accurate movement deltas from committed results.
-10. Remove/retire old per-organism immediate action path so only the centralized
-    runner mutates movement/eat/starve/spawn outcomes.
-11. Update API/client-facing integration points as needed:
-    - ensure server event flow and web-client state application match centralized
-      commit semantics.
-12. Sync `specs/spec.md` with the final implemented behavior after code changes
-    are complete.
+Runtime model target:
 
-## Final Testing Phase (Move Resolution Focus)
+- `Simulation` stores all current species as a stable integer ID ->
+  `SpeciesConfig` mapping.
+- Runtime species registry is exposed in protocol snapshots.
+- Every organism stores a `species_id` reference.
+- This change supports multiple species structurally, but this iteration only
+  initializes and uses one species (no speciation/new-species creation logic).
+- `SpeciesId` is `u32`; seeded species starts at ID `0`.
 
-13. Add a concentrated move-resolution test suite in `sim-core` covering:
-    - move into cell vacated in same turn
-    - two-organism swap
-    - multi-attacker single target (confidence winner + deterministic tie break)
-    - attacker vs escaping prey
-    - multi-node cycle resolution
-    - contested occupied target where occupant remains (eat path).
-14. Add lifecycle + resolution interaction tests:
-    - starvation/reproduction interactions in the same centralized turn
-    - spawn-queue processing order under limited free space
-    - no-overlap invariant after mixed move/eat/starve/spawn turns.
-15. Add determinism regression tests for centralized resolution:
-    - same seed/config => identical snapshots
-    - targeted scenario snapshots for complex resolution turns.
-16. Run full verification only after the above tests are in place:
-    - `cargo test --workspace`
-    - `cargo check --workspace`
-    - `cd web-client && npm run typecheck`
-    - `cd web-client && npm run build`.
+Proposed field split:
+
+- `WorldConfig`: `world_width`, `steps_per_second`, `num_organisms`,
+  `center_spawn_min_fraction`, `center_spawn_max_fraction`.
+- `SpeciesConfig`: `num_neurons`, `max_num_neurons`, `num_synapses`,
+  `turns_to_starve`, `mutation_chance`, `mutation_magnitude`,
+  `mutation_operations`.
+
+## Sequence
+
+1. Define `SpeciesConfig` in `sim-protocol/src/lib.rs` and move species fields
+   out of `WorldConfig`.
+2. Rename the nested seed field to `seed_species_config` in `WorldConfig` and
+   update serde/default behavior.
+3. Update `config/default.toml` to the new shape (world keys + nested
+   `seed_species_config` keys) while preserving default behavior.
+4. Add a stable integer species ID type and wire it through protocol/core
+   models where needed (`SpeciesId`, `species_id` on organism state, etc.).
+5. Add runtime species registry to `Simulation` (species ID -> `SpeciesConfig`)
+   plus deterministic ID allocation for future species additions.
+6. Initialize/reset simulation species registry from
+   `WorldConfig.seed_species_config` with exactly one species for now (for
+   species ID `0`).
+7. Refactor sim-core execution paths to resolve per-organism species config
+   through `species_id` instead of directly from world config:
+   `sim-core/src/brain.rs`, `sim-core/src/spawn.rs`, `sim-core/src/turn.rs`,
+   `sim-core/src/grid.rs`, and `sim-core/src/lib.rs`.
+8. Ensure all spawn paths assign and preserve organism `species_id` correctly:
+   initial population, starvation replacement, and reproduction.
+   Reproduction inherits parent `species_id`; starvation replacement picks a
+   random species from the current registry.
+9. Split validation into world-level and species-level validation, including
+   validation of `seed_species_config`.
+10. Update protocol payloads and snapshots for new schema/fields, including
+    config nesting, exposed species registry, and organism species linkage;
+    bump `PROTOCOL_VERSION` because wire JSON changes.
+11. Update `sim-server/src/main.rs` and tests to compile and run with the new
+    config and organism/species model.
+12. Update web client types and parsers (`web-client/src/types.ts`) for
+    `seed_species_config`, `SpeciesConfig`, and organism `species_id`; adjust
+    consuming code as needed.
+13. Update docs in `specs/spec.md` to document:
+    world DNA (`WorldConfig`),
+    seed species DNA (`seed_species_config`),
+    runtime species registry semantics,
+    and current single-species limitation.
+14. Update tests in `sim-core`, `sim-protocol`, `sim-server`, and regenerate
+    `sim-core/tests/fixtures/golden_seed42_turn30.json` for the new snapshot
+    schema.
+15. Verify end-to-end with:
+    `cargo test --workspace`,
+    `cargo check --workspace`,
+    `cd web-client && npm run typecheck && npm run build`.

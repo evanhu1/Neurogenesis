@@ -29,4 +29,8 @@ A default config is available at `config/default.toml`.
       together, neurons that fire out of sync lose their link). Synaptogenesis
       should not be random
 - [ ] Implement temporal credit assignment
-- [ ] Experiment with local gradient descent
+- [ ] Experiment with local gradient descent in the brain.
+- [ ] Create multiple concentric evolution loops. Innermost is the organism
+      loop. Evolve worlds, with a world DNA substrate that sets the "laws of
+      physics" and is mutated. The fitness of a world is the max fitness
+      achieved by life in that world.

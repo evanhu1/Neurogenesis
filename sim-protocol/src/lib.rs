@@ -1,13 +1,17 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct OrganismId(pub u64);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NeuronId(pub u32);
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SpeciesId(pub u32);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Envelope<T> {
@@ -77,10 +81,7 @@ impl SensoryReceptorType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct WorldConfig {
-    pub world_width: u32,
-    pub steps_per_second: u32,
-    pub num_organisms: u32,
+pub struct SpeciesConfig {
     pub num_neurons: u32,
     pub max_num_neurons: u32,
     pub num_synapses: u32,
@@ -88,15 +89,42 @@ pub struct WorldConfig {
     pub mutation_chance: f32,
     pub mutation_magnitude: f32,
     pub mutation_operations: u32,
+}
+
+impl Default for SpeciesConfig {
+    fn default() -> Self {
+        default_world_config().seed_species_config
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WorldConfig {
+    pub world_width: u32,
+    pub steps_per_second: u32,
+    pub num_organisms: u32,
     pub center_spawn_min_fraction: f32,
     pub center_spawn_max_fraction: f32,
+    #[serde(
+        default = "default_seed_species_config",
+        alias = "species_config",
+        alias = "seed_config"
+    )]
+    pub seed_species_config: SpeciesConfig,
 }
 
 impl Default for WorldConfig {
     fn default() -> Self {
-        toml::from_str(include_str!("../../config/default.toml"))
-            .expect("default world config TOML must parse")
+        default_world_config()
     }
+}
+
+fn default_world_config() -> WorldConfig {
+    toml::from_str(include_str!("../../config/default.toml"))
+        .expect("default world config TOML must parse")
+}
+
+fn default_seed_species_config() -> SpeciesConfig {
+    default_world_config().seed_species_config
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -146,6 +174,7 @@ pub struct BrainState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OrganismState {
     pub id: OrganismId,
+    pub species_id: SpeciesId,
     pub q: i32,
     pub r: i32,
     pub age_turns: u64,
@@ -179,6 +208,7 @@ pub struct WorldSnapshot {
     pub turn: u64,
     pub rng_seed: u64,
     pub config: WorldConfig,
+    pub species_registry: BTreeMap<SpeciesId, SpeciesConfig>,
     pub organisms: Vec<OrganismState>,
     pub occupancy: Vec<OccupancyCell>,
     pub metrics: MetricsSnapshot,

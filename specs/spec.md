@@ -17,21 +17,49 @@ This document reflects the implemented behavior across:
 - Invariant after every turn: at most one organism per cell and occupancy table
   matches organism positions.
 
-## 2. Config (`WorldConfig`)
+## 2. Config (`WorldConfig` + `SpeciesConfig`)
 
 Fields:
 
 - `world_width`
 - `steps_per_second`
 - `num_organisms`
+- `center_spawn_min_fraction`
+- `center_spawn_max_fraction`
+- `seed_species_config`:
+  - `num_neurons`
+  - `max_num_neurons`
+  - `num_synapses`
+  - `turns_to_starve`
+  - `mutation_chance`
+  - `mutation_magnitude`
+  - `mutation_operations`
+
+Runtime species model:
+
+- Organisms reference species by stable `species_id` (`u32`).
+- `Simulation` keeps a species registry (`species_id -> SpeciesConfig`).
+- Registry is exposed on every world snapshot as `species_registry`.
+- Current limitation: world initialization seeds exactly one species at
+  `species_id = 0` from `seed_species_config`.
+
+World-level fields:
+
+- `world_width`
+- `steps_per_second`
+- `num_organisms`
+- `center_spawn_min_fraction`
+- `center_spawn_max_fraction`
+
+Species-level fields:
+
 - `num_neurons`
 - `max_num_neurons`
 - `num_synapses`
 - `turns_to_starve`
 - `mutation_chance`
 - `mutation_magnitude`
-- `center_spawn_min_fraction`
-- `center_spawn_max_fraction`
+- `mutation_operations`
 
 ## 3. Turn Runner Pipeline
 
@@ -115,8 +143,10 @@ Spawn queue is processed deterministically in enqueue order:
 
 Spawn kinds:
 
-- starvation replacement: random newly generated brain
-- reproduction spawn: parent-derived offspring with opposite facing + mutation
+- starvation replacement: random species sampled from current registry,
+  freshly generated brain from that species DNA
+- reproduction spawn: parent-derived offspring with opposite facing + mutation,
+  inheriting parent `species_id`
 
 ### 3.7 Metrics + Delta Phase
 
@@ -191,6 +221,11 @@ Weights remain clamped to `[-8.0, 8.0]`.
 
 This allows clients to apply move/consume/starve/spawn effects incrementally without
 waiting for full snapshots.
+
+`WorldSnapshot` also contains:
+
+- `species_registry`: runtime species DNA map (`species_id -> SpeciesConfig`)
+- organism `species_id` in every `OrganismState`
 
 ## 8. Runtime Surfaces
 

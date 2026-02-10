@@ -1,10 +1,11 @@
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use sim_protocol::{
-    MetricsSnapshot, OccupancyCell, OrganismId, OrganismState, TickDelta, WorldConfig,
-    WorldSnapshot,
+    MetricsSnapshot, OccupancyCell, OrganismId, OrganismState, SpeciesConfig, SpeciesId, TickDelta,
+    WorldConfig, WorldSnapshot,
 };
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use thiserror::Error;
 
 mod brain;
@@ -27,6 +28,8 @@ pub enum SimError {
 #[derive(Debug, Clone)]
 pub struct Simulation {
     config: WorldConfig,
+    species_registry: BTreeMap<SpeciesId, SpeciesConfig>,
+    next_species_id: u32,
     turn: u64,
     seed: u64,
     rng: ChaCha8Rng,
@@ -55,11 +58,14 @@ struct SpawnRequest {
 
 impl Simulation {
     pub fn new(config: WorldConfig, seed: u64) -> Result<Self, SimError> {
-        validate_config(&config)?;
+        validate_world_config(&config)?;
+        validate_species_config(&config.seed_species_config)?;
 
         let capacity = world_capacity(config.world_width);
         let mut sim = Self {
             config,
+            species_registry: BTreeMap::new(),
+            next_species_id: 0,
             turn: 0,
             seed,
             rng: ChaCha8Rng::seed_from_u64(seed),
@@ -69,6 +75,7 @@ impl Simulation {
             metrics: MetricsSnapshot::default(),
         };
 
+        sim.initialize_species_registry_from_seed();
         sim.spawn_initial_population();
         sim.refresh_population_metrics();
         Ok(sim)
@@ -101,6 +108,7 @@ impl Simulation {
             turn: self.turn,
             rng_seed: self.seed,
             config: self.config.clone(),
+            species_registry: self.species_registry.clone(),
             organisms,
             occupancy,
             metrics: self.metrics.clone(),
@@ -111,10 +119,13 @@ impl Simulation {
         self.seed = seed.unwrap_or(self.seed);
         self.rng = ChaCha8Rng::seed_from_u64(self.seed);
         self.turn = 0;
+        self.species_registry.clear();
+        self.next_species_id = 0;
         self.next_organism_id = 0;
         self.organisms.clear();
         self.occupancy.fill(None);
         self.metrics = MetricsSnapshot::default();
+        self.initialize_species_registry_from_seed();
         self.spawn_initial_population();
         self.refresh_population_metrics();
     }
@@ -154,13 +165,32 @@ impl Simulation {
     pub fn metrics(&self) -> &MetricsSnapshot {
         &self.metrics
     }
+
+    fn initialize_species_registry_from_seed(&mut self) {
+        self.species_registry.clear();
+        self.next_species_id = 0;
+        let species_id = self.alloc_species_id();
+        debug_assert_eq!(species_id, SpeciesId(0));
+        self.species_registry
+            .insert(species_id, self.config.seed_species_config.clone());
+    }
+
+    pub(crate) fn alloc_species_id(&mut self) -> SpeciesId {
+        let id = SpeciesId(self.next_species_id);
+        self.next_species_id = self.next_species_id.saturating_add(1);
+        id
+    }
+
+    pub(crate) fn species_config(&self, species_id: SpeciesId) -> Option<&SpeciesConfig> {
+        self.species_registry.get(&species_id)
+    }
 }
 
 fn world_capacity(width: u32) -> usize {
     width as usize * width as usize
 }
 
-fn validate_config(config: &WorldConfig) -> Result<(), SimError> {
+fn validate_world_config(config: &WorldConfig) -> Result<(), SimError> {
     if config.world_width == 0 {
         return Err(SimError::InvalidConfig(
             "world_width must be greater than zero".to_owned(),
@@ -171,6 +201,22 @@ fn validate_config(config: &WorldConfig) -> Result<(), SimError> {
             "num_organisms must be greater than zero".to_owned(),
         ));
     }
+    if !(0.0..=1.0).contains(&config.center_spawn_min_fraction)
+        || !(0.0..=1.0).contains(&config.center_spawn_max_fraction)
+    {
+        return Err(SimError::InvalidConfig(
+            "center spawn fractions must be within [0, 1]".to_owned(),
+        ));
+    }
+    if config.center_spawn_min_fraction >= config.center_spawn_max_fraction {
+        return Err(SimError::InvalidConfig(
+            "center_spawn_min_fraction must be less than center_spawn_max_fraction".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_species_config(config: &SpeciesConfig) -> Result<(), SimError> {
     if config.turns_to_starve == 0 {
         return Err(SimError::InvalidConfig(
             "turns_to_starve must be >= 1".to_owned(),
@@ -186,16 +232,9 @@ fn validate_config(config: &WorldConfig) -> Result<(), SimError> {
             "mutation_operations must be >= 1".to_owned(),
         ));
     }
-    if !(0.0..=1.0).contains(&config.center_spawn_min_fraction)
-        || !(0.0..=1.0).contains(&config.center_spawn_max_fraction)
-    {
+    if config.max_num_neurons < config.num_neurons {
         return Err(SimError::InvalidConfig(
-            "center spawn fractions must be within [0, 1]".to_owned(),
-        ));
-    }
-    if config.center_spawn_min_fraction >= config.center_spawn_max_fraction {
-        return Err(SimError::InvalidConfig(
-            "center_spawn_min_fraction must be less than center_spawn_max_fraction".to_owned(),
+            "max_num_neurons must be >= num_neurons".to_owned(),
         ));
     }
     Ok(())

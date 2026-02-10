@@ -1,6 +1,7 @@
 import defaultConfigToml from '../../config/default.toml?raw';
 
 export type OrganismId = { 0: number } | number;
+export type SpeciesId = { 0: number } | number;
 
 export type Envelope<T> = {
   protocol_version: number;
@@ -11,6 +12,12 @@ export type WorldConfig = {
   world_width: number;
   steps_per_second: number;
   num_organisms: number;
+  center_spawn_min_fraction: number;
+  center_spawn_max_fraction: number;
+  seed_species_config: SpeciesConfig;
+};
+
+export type SpeciesConfig = {
   num_neurons: number;
   max_num_neurons: number;
   num_synapses: number;
@@ -18,8 +25,6 @@ export type WorldConfig = {
   mutation_chance: number;
   mutation_magnitude: number;
   mutation_operations: number;
-  center_spawn_min_fraction: number;
-  center_spawn_max_fraction: number;
 };
 
 export type SynapseEdge = { post_neuron_id: number | { 0: number }; weight: number };
@@ -66,6 +71,7 @@ export type FacingDirection =
 
 export type OrganismState = {
   id: OrganismId;
+  species_id: SpeciesId;
   q: number;
   r: number;
   age_turns: number;
@@ -96,6 +102,7 @@ export type WorldSnapshot = {
   turn: number;
   rng_seed: number;
   config: WorldConfig;
+  species_registry: Record<string, SpeciesConfig>;
   organisms: OrganismState[];
   occupancy: Array<{ q: number; r: number; organism_ids: OrganismId[] }>;
   metrics: MetricsSnapshot;
@@ -134,12 +141,17 @@ function parseRequiredNumber(map: Record<string, number>, key: string): number {
 }
 
 function parseDefaultConfigToml(tomlText: string): WorldConfig {
-  const topLevel: Record<string, number> = {};
+  const worldLevel: Record<string, number> = {};
+  const seedSpeciesLevel: Record<string, number> = {};
+  let section = '';
 
   for (const rawLine of tomlText.split('\n')) {
     const line = rawLine.split('#')[0].trim();
     if (!line) continue;
-    if (line.startsWith('[') && line.endsWith(']')) continue;
+    if (line.startsWith('[') && line.endsWith(']')) {
+      section = line.slice(1, -1).trim();
+      continue;
+    }
 
     const eqIdx = line.indexOf('=');
     if (eqIdx === -1) continue;
@@ -151,22 +163,29 @@ function parseDefaultConfigToml(tomlText: string): WorldConfig {
       continue;
     }
 
-    topLevel[key] = value;
+    if (section === 'seed_species_config') {
+      seedSpeciesLevel[key] = value;
+    } else {
+      worldLevel[key] = value;
+    }
   }
+  const speciesSource = Object.keys(seedSpeciesLevel).length > 0 ? seedSpeciesLevel : worldLevel;
 
   return {
-    world_width: parseRequiredNumber(topLevel, 'world_width'),
-    steps_per_second: parseRequiredNumber(topLevel, 'steps_per_second'),
-    num_organisms: parseRequiredNumber(topLevel, 'num_organisms'),
-    num_neurons: parseRequiredNumber(topLevel, 'num_neurons'),
-    max_num_neurons: parseRequiredNumber(topLevel, 'max_num_neurons'),
-    num_synapses: parseRequiredNumber(topLevel, 'num_synapses'),
-    turns_to_starve: parseRequiredNumber(topLevel, 'turns_to_starve'),
-    mutation_chance: parseRequiredNumber(topLevel, 'mutation_chance'),
-    mutation_magnitude: parseRequiredNumber(topLevel, 'mutation_magnitude'),
-    mutation_operations: parseRequiredNumber(topLevel, 'mutation_operations'),
-    center_spawn_min_fraction: parseRequiredNumber(topLevel, 'center_spawn_min_fraction'),
-    center_spawn_max_fraction: parseRequiredNumber(topLevel, 'center_spawn_max_fraction'),
+    world_width: parseRequiredNumber(worldLevel, 'world_width'),
+    steps_per_second: parseRequiredNumber(worldLevel, 'steps_per_second'),
+    num_organisms: parseRequiredNumber(worldLevel, 'num_organisms'),
+    center_spawn_min_fraction: parseRequiredNumber(worldLevel, 'center_spawn_min_fraction'),
+    center_spawn_max_fraction: parseRequiredNumber(worldLevel, 'center_spawn_max_fraction'),
+    seed_species_config: {
+      num_neurons: parseRequiredNumber(speciesSource, 'num_neurons'),
+      max_num_neurons: parseRequiredNumber(speciesSource, 'max_num_neurons'),
+      num_synapses: parseRequiredNumber(speciesSource, 'num_synapses'),
+      turns_to_starve: parseRequiredNumber(speciesSource, 'turns_to_starve'),
+      mutation_chance: parseRequiredNumber(speciesSource, 'mutation_chance'),
+      mutation_magnitude: parseRequiredNumber(speciesSource, 'mutation_magnitude'),
+      mutation_operations: parseRequiredNumber(speciesSource, 'mutation_operations'),
+    },
   };
 }
 

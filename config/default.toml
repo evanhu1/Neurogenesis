@@ -1,6 +1,10 @@
 world_width = 50
 steps_per_second = 5
 num_organisms = 400
+center_spawn_min_fraction = 0.25
+center_spawn_max_fraction = 0.75
+
+[seed_species_config]
 num_neurons = 4
 max_num_neurons = 20
 num_synapses = 8
@@ -8,5 +12,3 @@ turns_to_starve = 40
 mutation_chance = 0.05
 mutation_magnitude = 1.0
 mutation_operations = 1
-center_spawn_min_fraction = 0.25
-center_spawn_max_fraction = 0.75

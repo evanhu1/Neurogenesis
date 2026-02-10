@@ -5,20 +5,24 @@ use crate::brain::{
 use crate::turn::facing_after_turn;
 use sim_protocol::{
     ActionType, BrainState, FacingDirection, InterNeuronState, NeuronId, NeuronState, NeuronType,
-    SensoryReceptorType, SynapseEdge,
+    SensoryReceptorType, SpeciesConfig, SpeciesId, SynapseEdge,
 };
 use std::collections::{HashMap, HashSet};
 
 fn test_config(world_width: u32, num_organisms: u32) -> WorldConfig {
-    WorldConfig {
+    let mut config = WorldConfig {
         world_width,
         num_organisms,
+        ..WorldConfig::default()
+    };
+    config.seed_species_config = SpeciesConfig {
         num_neurons: 1,
         num_synapses: 0,
         turns_to_starve: 10,
         mutation_chance: 0.0,
-        ..WorldConfig::default()
-    }
+        ..config.seed_species_config
+    };
+    config
 }
 
 fn forced_brain(
@@ -85,6 +89,7 @@ fn make_organism(
 ) -> OrganismState {
     OrganismState {
         id: OrganismId(id),
+        species_id: SpeciesId(0),
         q,
         r,
         age_turns: 0,
@@ -219,23 +224,21 @@ fn config_validation_rejects_zero_world_width() {
 
 #[test]
 fn config_validation_rejects_zero_mutation_operations() {
-    let cfg = WorldConfig {
-        mutation_operations: 0,
-        ..WorldConfig::default()
-    };
+    let mut cfg = WorldConfig::default();
+    cfg.seed_species_config.mutation_operations = 0;
     let err = Simulation::new(cfg, 1).expect_err("expected invalid config error");
     assert!(err.to_string().contains("mutation_operations"));
 }
 
 #[test]
 fn population_is_capped_by_world_capacity_without_overlap() {
-    let cfg = WorldConfig {
+    let mut cfg = WorldConfig {
         world_width: 3,
         num_organisms: 20,
-        num_neurons: 0,
-        num_synapses: 0,
         ..WorldConfig::default()
     };
+    cfg.seed_species_config.num_neurons = 0;
+    cfg.seed_species_config.num_synapses = 0;
     let sim = Simulation::new(cfg, 3).expect("simulation should initialize");
     assert_eq!(sim.organisms.len(), 9);
     assert_eq!(
@@ -503,7 +506,7 @@ fn contested_occupied_target_where_occupant_remains_uses_consume_path() {
 #[test]
 fn starvation_and_reproduction_interact_in_same_turn() {
     let mut cfg = test_config(6, 4);
-    cfg.turns_to_starve = 2;
+    cfg.seed_species_config.turns_to_starve = 2;
 
     let mut sim = Simulation::new(cfg, 18).expect("simulation should initialize");
     configure_sim(
@@ -529,6 +532,10 @@ fn starvation_and_reproduction_interact_in_same_turn() {
         vec![OrganismId(1), OrganismId(2)]
     );
     assert_eq!(delta.spawned.len(), 2);
+    assert!(delta
+        .spawned
+        .iter()
+        .all(|organism| organism.species_id == SpeciesId(0)));
     assert_eq!(sim.organisms.len(), 4);
     let consumer = sim
         .organisms
@@ -580,13 +587,14 @@ fn spawn_queue_order_is_deterministic_under_limited_space() {
         .find(|organism| organism.id == OrganismId(3))
         .expect("first spawn request should consume final empty slot");
     assert_eq!((child.q, child.r), (1, 1));
+    assert_eq!(child.species_id, SpeciesId(0));
     assert_ne!(child.brain, parent_brain);
 }
 
 #[test]
 fn reproduction_offspring_brain_runtime_state_is_reset() {
     let mut cfg = test_config(8, 1);
-    cfg.mutation_chance = 0.0;
+    cfg.seed_species_config.mutation_chance = 0.0;
     let mut sim = Simulation::new(cfg, 31).expect("simulation should initialize");
     configure_sim(
         &mut sim,
@@ -627,6 +635,7 @@ fn reproduction_offspring_brain_runtime_state_is_reset() {
     let mut expected_child_brain = parent_brain;
     reset_brain_runtime_state(&mut expected_child_brain);
     assert_eq!(child.brain, expected_child_brain);
+    assert_eq!(child.species_id, SpeciesId(0));
     assert_eq!(child.facing, FacingDirection::West);
 }
 
@@ -644,6 +653,7 @@ fn starvation_spawn_respects_center_min_fraction_when_space_exists() {
 
     assert_eq!(spawned.len(), 1);
     let child = &spawned[0];
+    assert_eq!(child.species_id, SpeciesId(0));
     let center = (cfg.world_width as f64 - 1.0) / 2.0;
     let distance = ((child.q as f64 - center).powi(2) + (child.r as f64 - center).powi(2)).sqrt();
     let min_radius = cfg.world_width as f64 * f64::from(cfg.center_spawn_min_fraction) / 2.0;
@@ -658,7 +668,7 @@ fn reproduction_spawn_is_opposite_of_parent_facing() {
     let mut cfg = test_config(40, 1);
     cfg.center_spawn_min_fraction = 0.45;
     cfg.center_spawn_max_fraction = 0.55;
-    cfg.mutation_chance = 0.0;
+    cfg.seed_species_config.mutation_chance = 0.0;
     let mut sim = Simulation::new(cfg, 30).expect("simulation should initialize");
     configure_sim(
         &mut sim,
@@ -682,13 +692,14 @@ fn reproduction_spawn_is_opposite_of_parent_facing() {
     }]);
     assert_eq!(spawned.len(), 1);
     let child = &spawned[0];
+    assert_eq!(child.species_id, SpeciesId(0));
     assert_eq!((child.q, child.r), (0, 1));
 }
 
 #[test]
 fn no_overlap_invariant_holds_after_mixed_turn() {
     let mut cfg = test_config(6, 4);
-    cfg.turns_to_starve = 2;
+    cfg.seed_species_config.turns_to_starve = 2;
 
     let mut sim = Simulation::new(cfg, 20).expect("simulation should initialize");
     configure_sim(
@@ -708,7 +719,7 @@ fn no_overlap_invariant_holds_after_mixed_turn() {
 #[test]
 fn targeted_complex_resolution_snapshot_is_deterministic() {
     let mut cfg = test_config(6, 4);
-    cfg.turns_to_starve = 3;
+    cfg.seed_species_config.turns_to_starve = 3;
 
     let scenario = vec![
         make_organism(0, 1, 1, FacingDirection::East, true, false, false, 0.9, 1),

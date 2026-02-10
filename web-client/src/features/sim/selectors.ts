@@ -43,6 +43,7 @@ export function formatFocusedStats(focusedOrganism: OrganismState | null): strin
   if (!focusedOrganism) return 'No organism selected';
   return [
     `id=${unwrapId(focusedOrganism.id)}`,
+    `species_id=${unwrapId(focusedOrganism.species_id)}`,
     `position=(${focusedOrganism.q}, ${focusedOrganism.r})`,
     `facing=${focusedOrganism.facing}`,
     `age_turns=${focusedOrganism.age_turns}`,

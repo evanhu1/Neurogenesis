@@ -353,13 +353,17 @@ impl Simulation {
         self.organisms.sort_by_key(|organism| organism.id);
 
         let mut starved_ids = Vec::new();
+        let species_registry = &self.species_registry;
         for organism in &mut self.organisms {
             if consumers.contains(&organism.id) {
                 continue;
             }
+            let Some(species_config) = species_registry.get(&organism.species_id) else {
+                continue;
+            };
             organism.turns_since_last_consumption =
                 organism.turns_since_last_consumption.saturating_add(1);
-            if organism.turns_since_last_consumption >= self.config.turns_to_starve {
+            if organism.turns_since_last_consumption >= species_config.turns_to_starve {
                 starved_ids.push(organism.id);
             }
         }

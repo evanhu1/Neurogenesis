@@ -4,7 +4,7 @@ use crate::Simulation;
 use crate::{world_capacity, SpawnRequest, SpawnRequestKind};
 use rand::seq::SliceRandom;
 use rand::Rng;
-use sim_protocol::{FacingDirection, OrganismId, OrganismState};
+use sim_protocol::{FacingDirection, OrganismId, OrganismState, SpeciesId};
 use std::f64::consts::PI;
 
 impl Simulation {
@@ -16,15 +16,22 @@ impl Simulation {
                     let Some((q, r)) = self.sample_center_weighted_spawn_position() else {
                         continue;
                     };
+                    let Some(species_id) = self.sample_random_species_id() else {
+                        continue;
+                    };
+                    let Some(species_config) = self.species_config(species_id).cloned() else {
+                        continue;
+                    };
                     OrganismState {
                         id: self.alloc_organism_id(),
+                        species_id,
                         q,
                         r,
                         age_turns: 0,
                         facing: self.random_facing(),
                         turns_since_last_consumption: 0,
                         consumptions_count: 0,
-                        brain: self.generate_brain(),
+                        brain: self.generate_brain(&species_config),
                     }
                 }
                 SpawnRequestKind::Reproduction { parent } => {
@@ -43,12 +50,18 @@ impl Simulation {
                     ) else {
                         continue;
                     };
+                    let Some(species_config) =
+                        self.species_config(parent_state.species_id).cloned()
+                    else {
+                        continue;
+                    };
 
                     let mut brain = parent_state.brain;
-                    self.mutate_brain(&mut brain);
+                    self.mutate_brain(&mut brain, &species_config);
                     reset_brain_runtime_state(&mut brain);
                     OrganismState {
                         id: self.alloc_organism_id(),
+                        species_id: parent_state.species_id,
                         q,
                         r,
                         age_turns: 0,
@@ -67,6 +80,14 @@ impl Simulation {
 
         self.organisms.sort_by_key(|organism| organism.id);
         spawned
+    }
+
+    fn sample_random_species_id(&mut self) -> Option<SpeciesId> {
+        if self.species_registry.is_empty() {
+            return None;
+        }
+        let species_ids: Vec<SpeciesId> = self.species_registry.keys().copied().collect();
+        Some(species_ids[self.rng.random_range(0..species_ids.len())])
     }
 
     fn sample_center_weighted_spawn_position(&mut self) -> Option<(i32, i32)> {
@@ -176,6 +197,12 @@ impl Simulation {
     }
 
     pub(crate) fn spawn_initial_population(&mut self) {
+        let Some((&seed_species_id, seed_species_config)) = self.species_registry.first_key_value()
+        else {
+            return;
+        };
+        let seed_species_config = seed_species_config.clone();
+
         let mut open_positions = self.empty_positions();
         open_positions.shuffle(&mut self.rng);
 
@@ -184,10 +211,11 @@ impl Simulation {
                 .pop()
                 .expect("initial population requires at least one unique cell per organism");
             let id = self.alloc_organism_id();
-            let brain = self.generate_brain();
+            let brain = self.generate_brain(&seed_species_config);
             let facing = self.random_facing();
             let organism = OrganismState {
                 id,
+                species_id: seed_species_id,
                 q,
                 r,
                 age_turns: 0,
