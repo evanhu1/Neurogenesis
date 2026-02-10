@@ -17,6 +17,7 @@ export type WorldConfig = {
   turns_to_starve: number;
   mutation_chance: number;
   mutation_magnitude: number;
+  mutation_operations: number;
   center_spawn_min_fraction: number;
   center_spawn_max_fraction: number;
 };
@@ -69,15 +70,15 @@ export type OrganismState = {
   r: number;
   age_turns: number;
   facing: FacingDirection;
-  turns_since_last_meal: number;
-  meals_eaten: number;
+  turns_since_last_consumption: number;
+  consumptions_count: number;
   brain: BrainState;
 };
 
-export type EvolutionStats = {
-  mean_age_turns: number;
-  median_age_turns: number;
-  max_age_turns: number;
+export type FitnessStats = {
+  mean_fitness: number;
+  median_fitness: number;
+  max_fitness: number;
 };
 
 export type MetricsSnapshot = {
@@ -85,10 +86,10 @@ export type MetricsSnapshot = {
   organisms: number;
   synapse_ops_last_turn: number;
   actions_applied_last_turn: number;
-  meals_last_turn: number;
+  consumptions_last_turn: number;
   starvations_last_turn: number;
   births_last_turn: number;
-  evolution: EvolutionStats;
+  fitness: FitnessStats;
 };
 
 export type WorldSnapshot = {
@@ -163,6 +164,7 @@ function parseDefaultConfigToml(tomlText: string): WorldConfig {
     turns_to_starve: parseRequiredNumber(topLevel, 'turns_to_starve'),
     mutation_chance: parseRequiredNumber(topLevel, 'mutation_chance'),
     mutation_magnitude: parseRequiredNumber(topLevel, 'mutation_magnitude'),
+    mutation_operations: parseRequiredNumber(topLevel, 'mutation_operations'),
     center_spawn_min_fraction: parseRequiredNumber(topLevel, 'center_spawn_min_fraction'),
     center_spawn_max_fraction: parseRequiredNumber(topLevel, 'center_spawn_max_fraction'),
   };

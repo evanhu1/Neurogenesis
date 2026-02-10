@@ -7,6 +7,7 @@ type WorldCanvasProps = {
   snapshot: WorldSnapshot | null;
   focusedOrganismId: number | null;
   deadFlashCells: Array<{ q: number; r: number }> | null;
+  bornFlashCells: Array<{ q: number; r: number }> | null;
   onOrganismSelect: (organism: OrganismState) => void;
 };
 
@@ -14,12 +15,14 @@ export function WorldCanvas({
   snapshot,
   focusedOrganismId,
   deadFlashCells,
+  bornFlashCells,
   onOrganismSelect,
 }: WorldCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const snapshotRef = useRef<WorldSnapshot | null>(snapshot);
   const focusedOrganismIdRef = useRef<number | null>(focusedOrganismId);
   const deadFlashCellsRef = useRef<Array<{ q: number; r: number }> | null>(deadFlashCells);
+  const bornFlashCellsRef = useRef<Array<{ q: number; r: number }> | null>(bornFlashCells);
   const onOrganismSelectRef = useRef(onOrganismSelect);
   const {
     viewportRef,
@@ -43,6 +46,10 @@ export function WorldCanvas({
   useEffect(() => {
     deadFlashCellsRef.current = deadFlashCells;
   }, [deadFlashCells]);
+
+  useEffect(() => {
+    bornFlashCellsRef.current = bornFlashCells;
+  }, [bornFlashCells]);
 
   useEffect(() => {
     onOrganismSelectRef.current = onOrganismSelect;
@@ -111,6 +118,7 @@ export function WorldCanvas({
             focusedOrganismIdRef.current,
             viewportRef.current,
             deadFlashCellsRef.current,
+            bornFlashCellsRef.current,
           );
         }
       }
@@ -135,4 +143,3 @@ export function WorldCanvas({
     />
   );
 }
-

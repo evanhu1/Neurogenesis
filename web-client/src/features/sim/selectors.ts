@@ -11,7 +11,7 @@ export function formatMetrics(snapshot: WorldSnapshot | null): string {
   return [
     `turn=${snapshot.turn}`,
     `organisms=${snapshot.metrics.organisms}`,
-    `meals_last_turn=${snapshot.metrics.meals_last_turn}`,
+    `consumptions_last_turn=${snapshot.metrics.consumptions_last_turn}`,
     `starvations_last_turn=${snapshot.metrics.starvations_last_turn}`,
     `births_last_turn=${snapshot.metrics.births_last_turn}`,
     `synapse_ops_last_turn=${snapshot.metrics.synapse_ops_last_turn}`,
@@ -19,13 +19,13 @@ export function formatMetrics(snapshot: WorldSnapshot | null): string {
   ].join('\n');
 }
 
-export function formatEvolutionStats(snapshot: WorldSnapshot | null): string {
-  if (!snapshot) return 'No evolution stats';
-  const evolution = snapshot.metrics.evolution;
+export function formatFitnessStats(snapshot: WorldSnapshot | null): string {
+  if (!snapshot) return 'No fitness stats';
+  const fitness = snapshot.metrics.fitness;
   return [
-    `mean_age_turns=${evolution.mean_age_turns.toFixed(2)}`,
-    `median_age_turns=${evolution.median_age_turns.toFixed(2)}`,
-    `max_age_turns=${evolution.max_age_turns}`,
+    `mean_fitness=${fitness.mean_fitness.toFixed(2)}`,
+    `median_fitness=${fitness.median_fitness.toFixed(2)}`,
+    `max_fitness=${fitness.max_fitness}`,
   ].join('\n');
 }
 
@@ -46,9 +46,8 @@ export function formatFocusedStats(focusedOrganism: OrganismState | null): strin
     `position=(${focusedOrganism.q}, ${focusedOrganism.r})`,
     `facing=${focusedOrganism.facing}`,
     `age_turns=${focusedOrganism.age_turns}`,
-    `turns_since_last_meal=${focusedOrganism.turns_since_last_meal}`,
-    `meals_eaten=${focusedOrganism.meals_eaten}`,
+    `turns_since_last_consumption=${focusedOrganism.turns_since_last_consumption}`,
+    `consumptions_count=${focusedOrganism.consumptions_count}`,
     `synapse_count=${focusedOrganism.brain.synapse_count}`,
   ].join('\n');
 }
-

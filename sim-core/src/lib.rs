@@ -181,6 +181,11 @@ fn validate_config(config: &WorldConfig) -> Result<(), SimError> {
             "mutation_chance must be within [0, 1]".to_owned(),
         ));
     }
+    if config.mutation_operations == 0 {
+        return Err(SimError::InvalidConfig(
+            "mutation_operations must be >= 1".to_owned(),
+        ));
+    }
     if !(0.0..=1.0).contains(&config.center_spawn_min_fraction)
         || !(0.0..=1.0).contains(&config.center_spawn_max_fraction)
     {

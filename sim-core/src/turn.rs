@@ -3,7 +3,7 @@ use crate::grid::{hex_neighbor, rotate_left, rotate_right};
 use crate::Simulation;
 use crate::{SpawnRequest, SpawnRequestKind};
 use sim_protocol::{
-    ActionType, EvolutionStats, FacingDirection, OrganismId, OrganismMove, OrganismState,
+    ActionType, FacingDirection, FitnessStats, OrganismId, OrganismMove, OrganismState,
     RemovedOrganismPosition, TickDelta,
 };
 use std::cmp::Ordering;
@@ -14,7 +14,7 @@ struct SnapshotOrganismState {
     q: i32,
     r: i32,
     facing: FacingDirection,
-    turns_since_last_meal: u32,
+    turns_since_last_consumption: u32,
     move_confidence: f32,
 }
 
@@ -72,7 +72,7 @@ struct MoveCandidate {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum MoveResolutionKind {
     MoveOnly,
-    EatAndReplace { prey: OrganismId },
+    ConsumeAndReplace { consumed_organism: OrganismId },
 }
 
 #[derive(Clone, Copy)]
@@ -87,8 +87,8 @@ struct MoveResolution {
 struct CommitResult {
     moves: Vec<OrganismMove>,
     removed_positions: Vec<RemovedOrganismPosition>,
-    meals: u64,
-    eaters: HashSet<OrganismId>,
+    consumptions: u64,
+    consumers: HashSet<OrganismId>,
 }
 
 impl Simulation {
@@ -101,7 +101,7 @@ impl Simulation {
         let mut spawn_requests = Vec::new();
         let commit = self.commit_phase(&intents, &resolutions, &mut spawn_requests);
         let (starvations, starved_removed_positions) =
-            self.lifecycle_phase(&commit.eaters, &mut spawn_requests);
+            self.lifecycle_phase(&commit.consumers, &mut spawn_requests);
         self.increment_age_for_survivors();
         let spawned = self.resolve_spawn_requests(&spawn_requests);
         let births = spawned.len() as u64;
@@ -111,7 +111,7 @@ impl Simulation {
         self.metrics.turns = self.turn;
         self.metrics.synapse_ops_last_turn = synapse_ops;
         self.metrics.actions_applied_last_turn = commit.moves.len() as u64;
-        self.metrics.meals_last_turn = commit.meals;
+        self.metrics.consumptions_last_turn = commit.consumptions;
         self.metrics.starvations_last_turn = starvations;
         self.metrics.births_last_turn = births;
         self.refresh_population_metrics();
@@ -142,7 +142,7 @@ impl Simulation {
                 q: organism.q,
                 r: organism.r,
                 facing: organism.facing,
-                turns_since_last_meal: organism.turns_since_last_meal,
+                turns_since_last_consumption: organism.turns_since_last_consumption,
                 move_confidence: move_confidence_signal(&organism.brain),
             });
             id_to_index.insert(organism.id, idx);
@@ -173,7 +173,7 @@ impl Simulation {
             let Some(organism_idx) = index_by_id.get(organism_id).copied() else {
                 continue;
             };
-            let _turns_since_last_meal = snapshot_state.turns_since_last_meal;
+            let _turns_since_last_consumption = snapshot_state.turns_since_last_consumption;
 
             let evaluation = {
                 let brain = &mut self.organisms[organism_idx].brain;
@@ -249,7 +249,9 @@ impl Simulation {
         for winner in winners {
             let kind = match snapshot.occupant_at(winner.target.0, winner.target.1) {
                 Some(occupant) if !moving_ids.contains(&occupant) => {
-                    MoveResolutionKind::EatAndReplace { prey: occupant }
+                    MoveResolutionKind::ConsumeAndReplace {
+                        consumed_organism: occupant,
+                    }
                 }
                 _ => MoveResolutionKind::MoveOnly,
             };
@@ -279,26 +281,30 @@ impl Simulation {
         }
 
         let mut move_by_actor: HashMap<OrganismId, (i32, i32)> = HashMap::new();
-        let mut prey_kills = HashSet::new();
+        let mut consumed_organism_ids = HashSet::new();
         let positions_by_id: HashMap<OrganismId, (i32, i32)> = self
             .organisms
             .iter()
             .map(|organism| (organism.id, (organism.q, organism.r)))
             .collect();
         let mut removed_positions = Vec::new();
-        let mut eaters = HashSet::new();
-        let mut meals = 0_u64;
+        let mut consumers = HashSet::new();
+        let mut consumptions = 0_u64;
 
         for resolution in resolutions {
             move_by_actor.insert(resolution.actor, resolution.to);
-            if let MoveResolutionKind::EatAndReplace { prey } = resolution.kind {
-                if prey_kills.insert(prey) {
-                    if let Some((q, r)) = positions_by_id.get(&prey).copied() {
-                        removed_positions.push(RemovedOrganismPosition { id: prey, q, r });
+            if let MoveResolutionKind::ConsumeAndReplace { consumed_organism } = resolution.kind {
+                if consumed_organism_ids.insert(consumed_organism) {
+                    if let Some((q, r)) = positions_by_id.get(&consumed_organism).copied() {
+                        removed_positions.push(RemovedOrganismPosition {
+                            id: consumed_organism,
+                            q,
+                            r,
+                        });
                     }
                 }
-                eaters.insert(resolution.actor);
-                meals += 1;
+                consumers.insert(resolution.actor);
+                consumptions += 1;
                 spawn_requests.push(SpawnRequest {
                     kind: SpawnRequestKind::Reproduction {
                         parent: resolution.actor,
@@ -308,15 +314,15 @@ impl Simulation {
         }
 
         self.organisms
-            .retain(|organism| !prey_kills.contains(&organism.id));
+            .retain(|organism| !consumed_organism_ids.contains(&organism.id));
 
         for organism in &mut self.organisms {
             if let Some((next_q, next_r)) = move_by_actor.get(&organism.id).copied() {
                 organism.q = next_q;
                 organism.r = next_r;
-                if eaters.contains(&organism.id) {
-                    organism.turns_since_last_meal = 0;
-                    organism.meals_eaten = organism.meals_eaten.saturating_add(1);
+                if consumers.contains(&organism.id) {
+                    organism.turns_since_last_consumption = 0;
+                    organism.consumptions_count = organism.consumptions_count.saturating_add(1);
                 }
             }
         }
@@ -334,25 +340,26 @@ impl Simulation {
         CommitResult {
             moves,
             removed_positions,
-            meals,
-            eaters,
+            consumptions,
+            consumers,
         }
     }
 
     fn lifecycle_phase(
         &mut self,
-        eaters: &HashSet<OrganismId>,
+        consumers: &HashSet<OrganismId>,
         spawn_requests: &mut Vec<SpawnRequest>,
     ) -> (u64, Vec<RemovedOrganismPosition>) {
         self.organisms.sort_by_key(|organism| organism.id);
 
         let mut starved_ids = Vec::new();
         for organism in &mut self.organisms {
-            if eaters.contains(&organism.id) {
+            if consumers.contains(&organism.id) {
                 continue;
             }
-            organism.turns_since_last_meal = organism.turns_since_last_meal.saturating_add(1);
-            if organism.turns_since_last_meal >= self.config.turns_to_starve {
+            organism.turns_since_last_consumption =
+                organism.turns_since_last_consumption.saturating_add(1);
+            if organism.turns_since_last_consumption >= self.config.turns_to_starve {
                 starved_ids.push(organism.id);
             }
         }
@@ -395,35 +402,35 @@ impl Simulation {
 
     pub(crate) fn refresh_population_metrics(&mut self) {
         self.metrics.organisms = self.organisms.len() as u32;
-        self.metrics.evolution = self.compute_evolution_stats();
+        self.metrics.fitness = self.compute_fitness_stats();
     }
 
-    fn compute_evolution_stats(&self) -> EvolutionStats {
+    fn compute_fitness_stats(&self) -> FitnessStats {
         if self.organisms.is_empty() {
-            return EvolutionStats::default();
+            return FitnessStats::default();
         }
 
-        let mut ages: Vec<u64> = self
+        let mut fitnesses: Vec<u64> = self
             .organisms
             .iter()
             .map(|organism| organism.age_turns)
             .collect();
-        ages.sort_unstable();
+        fitnesses.sort_unstable();
 
-        let count = ages.len();
-        let total_age: u64 = ages.iter().sum();
-        let mean_age_turns = total_age as f64 / count as f64;
-        let median_age_turns = if count % 2 == 1 {
-            ages[count / 2] as f64
+        let count = fitnesses.len();
+        let total_fitness: u64 = fitnesses.iter().sum();
+        let mean_fitness = total_fitness as f64 / count as f64;
+        let median_fitness = if count % 2 == 1 {
+            fitnesses[count / 2] as f64
         } else {
-            (ages[count / 2 - 1] as f64 + ages[count / 2] as f64) / 2.0
+            (fitnesses[count / 2 - 1] as f64 + fitnesses[count / 2] as f64) / 2.0
         };
-        let max_age_turns = ages[count - 1];
+        let max_fitness = fitnesses[count - 1];
 
-        EvolutionStats {
-            mean_age_turns,
-            median_age_turns,
-            max_age_turns,
+        FitnessStats {
+            mean_fitness,
+            median_fitness,
+            max_fitness,
         }
     }
 }

@@ -1,3 +1,5 @@
+use crate::brain::reset_brain_runtime_state;
+use crate::grid::hex_neighbor;
 use crate::Simulation;
 use crate::{world_capacity, SpawnRequest, SpawnRequestKind};
 use rand::seq::SliceRandom;
@@ -9,22 +11,22 @@ impl Simulation {
     pub(crate) fn resolve_spawn_requests(&mut self, queue: &[SpawnRequest]) -> Vec<OrganismState> {
         let mut spawned = Vec::new();
         for request in queue {
-            let Some((q, r)) = self.sample_center_weighted_spawn_position() else {
-                continue;
-            };
-
-            let id = self.alloc_organism_id();
             let organism = match request.kind {
-                SpawnRequestKind::StarvationReplacement => OrganismState {
-                    id,
-                    q,
-                    r,
-                    age_turns: 0,
-                    facing: self.random_facing(),
-                    turns_since_last_meal: 0,
-                    meals_eaten: 0,
-                    brain: self.generate_brain(),
-                },
+                SpawnRequestKind::StarvationReplacement => {
+                    let Some((q, r)) = self.sample_center_weighted_spawn_position() else {
+                        continue;
+                    };
+                    OrganismState {
+                        id: self.alloc_organism_id(),
+                        q,
+                        r,
+                        age_turns: 0,
+                        facing: self.random_facing(),
+                        turns_since_last_consumption: 0,
+                        consumptions_count: 0,
+                        brain: self.generate_brain(),
+                    }
+                }
                 SpawnRequestKind::Reproduction { parent } => {
                     let Some(parent_state) = self
                         .organisms
@@ -34,17 +36,25 @@ impl Simulation {
                     else {
                         continue;
                     };
+                    let Some((q, r)) = self.sample_reproduction_spawn_position(
+                        parent_state.q,
+                        parent_state.r,
+                        parent_state.facing,
+                    ) else {
+                        continue;
+                    };
 
                     let mut brain = parent_state.brain;
                     self.mutate_brain(&mut brain);
+                    reset_brain_runtime_state(&mut brain);
                     OrganismState {
-                        id,
+                        id: self.alloc_organism_id(),
                         q,
                         r,
                         age_turns: 0,
                         facing: parent_state.facing,
-                        turns_since_last_meal: 0,
-                        meals_eaten: 0,
+                        turns_since_last_consumption: 0,
+                        consumptions_count: 0,
                         brain,
                     }
                 }
@@ -67,17 +77,24 @@ impl Simulation {
         let width = self.config.world_width as i32;
         let attempts = (world_capacity(self.config.world_width) * 4).max(64);
         let center = (width as f64 - 1.0) / 2.0;
-        let spread = (self.config.center_spawn_max_fraction
-            - self.config.center_spawn_min_fraction)
-            .abs()
-            .max(0.05);
-        let sigma = (width as f64 * f64::from(spread) / 2.0).max(0.5);
+        let min_radius = width as f64 * f64::from(self.config.center_spawn_min_fraction) / 2.0;
+        let max_radius = width as f64 * f64::from(self.config.center_spawn_max_fraction) / 2.0;
+        let radius_sigma = ((max_radius - min_radius) / 2.0).max(0.5);
+        let radius_mean = (min_radius + max_radius) / 2.0;
+        let min_radius_sq = min_radius * min_radius;
+        let max_radius_sq = max_radius * max_radius;
 
         for _ in 0..attempts {
-            let (z_q, z_r) = self.sample_standard_normal_pair();
-            let q = (center + z_q * sigma).round() as i32;
-            let r = (center + z_r * sigma).round() as i32;
+            let (z_radius, _) = self.sample_standard_normal_pair();
+            let theta = self.rng.random_range(0.0..(2.0 * PI));
+            let radius = (radius_mean + z_radius * radius_sigma).clamp(min_radius, max_radius);
+            let q = (center + radius * theta.cos()).round() as i32;
+            let r = (center + radius * theta.sin()).round() as i32;
             if !self.in_bounds(q, r) {
+                continue;
+            }
+            let distance_sq = (q as f64 - center).powi(2) + (r as f64 - center).powi(2);
+            if distance_sq < min_radius_sq || distance_sq > max_radius_sq {
                 continue;
             }
             if self.occupant_at(q, r).is_none() {
@@ -85,7 +102,26 @@ impl Simulation {
             }
         }
 
-        self.nearest_empty_to_center()
+        self.nearest_empty_to_point(center, center, Some((min_radius_sq, max_radius_sq)))
+            .or_else(|| self.nearest_empty_to_point(center, center, None))
+    }
+
+    fn sample_reproduction_spawn_position(
+        &self,
+        parent_q: i32,
+        parent_r: i32,
+        parent_facing: FacingDirection,
+    ) -> Option<(i32, i32)> {
+        if self.organisms.len() >= world_capacity(self.config.world_width) {
+            return None;
+        }
+
+        let opposite_facing = opposite_direction(parent_facing);
+        let (q, r) = hex_neighbor((parent_q, parent_r), opposite_facing);
+        if !self.in_bounds(q, r) {
+            return None;
+        }
+        (self.occupant_at(q, r).is_none()).then_some((q, r))
     }
 
     fn sample_standard_normal_pair(&mut self) -> (f64, f64) {
@@ -102,9 +138,13 @@ impl Simulation {
         (radius * theta.cos(), radius * theta.sin())
     }
 
-    fn nearest_empty_to_center(&self) -> Option<(i32, i32)> {
+    fn nearest_empty_to_point(
+        &self,
+        point_q: f64,
+        point_r: f64,
+        radius_sq_bounds: Option<(f64, f64)>,
+    ) -> Option<(i32, i32)> {
         let width = self.config.world_width as i32;
-        let center = (width as f64 - 1.0) / 2.0;
 
         let mut best: Option<((i32, i32), f64)> = None;
         for r in 0..width {
@@ -112,12 +152,18 @@ impl Simulation {
                 if self.occupant_at(q, r).is_some() {
                     continue;
                 }
-                let distance = (q as f64 - center).powi(2) + (r as f64 - center).powi(2);
+                let distance = (q as f64 - point_q).powi(2) + (r as f64 - point_r).powi(2);
+                if let Some((min_radius_sq, max_radius_sq)) = radius_sq_bounds {
+                    if distance < min_radius_sq || distance > max_radius_sq {
+                        continue;
+                    }
+                }
                 match best {
                     None => best = Some(((q, r), distance)),
                     Some(((best_q, best_r), best_distance))
                         if distance < best_distance
-                            || (distance == best_distance && (r, q) < (best_r, best_q)) =>
+                            || ((distance - best_distance).abs() <= f64::EPSILON
+                                && (r, q) < (best_r, best_q)) =>
                     {
                         best = Some(((q, r), distance));
                     }
@@ -146,8 +192,8 @@ impl Simulation {
                 r,
                 age_turns: 0,
                 facing,
-                turns_since_last_meal: 0,
-                meals_eaten: 0,
+                turns_since_last_consumption: 0,
+                consumptions_count: 0,
                 brain,
             };
             let added = self.add_organism(organism);
@@ -182,5 +228,16 @@ impl Simulation {
             }
         }
         positions
+    }
+}
+
+fn opposite_direction(facing: FacingDirection) -> FacingDirection {
+    match facing {
+        FacingDirection::East => FacingDirection::West,
+        FacingDirection::NorthEast => FacingDirection::SouthWest,
+        FacingDirection::NorthWest => FacingDirection::SouthEast,
+        FacingDirection::West => FacingDirection::East,
+        FacingDirection::SouthWest => FacingDirection::NorthEast,
+        FacingDirection::SouthEast => FacingDirection::NorthWest,
     }
 }

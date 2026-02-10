@@ -103,6 +103,7 @@ export function renderWorld(
   focusedOrganismId: number | null,
   viewport: WorldViewport,
   deadFlashCells: Array<{ q: number; r: number }> | null,
+  bornFlashCells: Array<{ q: number; r: number }> | null,
 ) {
   const width = canvas.width;
   const height = canvas.height;
@@ -140,6 +141,15 @@ export function renderWorld(
       const center = hexCenter(layout, cell.q, cell.r);
       traceHex(ctx, center.x, center.y, layout.size - 0.5);
       ctx.fillStyle = 'rgba(248, 113, 113, 0.42)';
+      ctx.fill();
+    }
+  }
+
+  if (bornFlashCells) {
+    for (const cell of bornFlashCells) {
+      const center = hexCenter(layout, cell.q, cell.r);
+      traceHex(ctx, center.x, center.y, layout.size - 0.5);
+      ctx.fillStyle = 'rgba(134, 239, 172, 0.45)';
       ctx.fill();
     }
   }
@@ -199,14 +209,22 @@ export function renderBrain(
   const action = focusedBrain.action;
 
   const layers: Array<
-    Array<{ id: number; label: string; type: string; activation: number; isActive: boolean }>
+    Array<{
+      id: number;
+      type: string;
+      label?: string;
+      activation: number;
+      bias: number;
+      isActive: boolean;
+    }>
   > = [];
   layers.push(
     sensory.map((neuron) => ({
       id: unwrapId(neuron.neuron.neuron_id),
-      label: neuron.receptor_type,
       type: 'sensory',
+      label: neuron.receptor_type,
       activation: neuron.neuron.activation,
+      bias: neuron.neuron.bias,
       isActive: neuron.neuron.is_active,
     })),
   );
@@ -218,9 +236,9 @@ export function renderBrain(
     layers.push(
       slice.map((neuron) => ({
         id: unwrapId(neuron.neuron.neuron_id),
-        label: `I${unwrapId(neuron.neuron.neuron_id)}`,
         type: 'inter',
         activation: neuron.neuron.activation,
+        bias: neuron.neuron.bias,
         isActive: neuron.neuron.is_active,
       })),
     );
@@ -229,9 +247,10 @@ export function renderBrain(
   layers.push(
     action.map((neuron) => ({
       id: unwrapId(neuron.neuron.neuron_id),
-      label: neuron.action_type,
       type: 'action',
+      label: neuron.action_type,
       activation: neuron.neuron.activation,
+      bias: neuron.neuron.bias,
       isActive: neuron.neuron.is_active,
     })),
   );
@@ -239,7 +258,15 @@ export function renderBrain(
   const xGap = width / Math.max(2, layers.length);
   const positions = new Map<
     number,
-    { x: number; y: number; type: string; activation: number; label: string; isActive: boolean }
+    {
+      x: number;
+      y: number;
+      type: string;
+      label?: string;
+      activation: number;
+      bias: number;
+      isActive: boolean;
+    }
   >();
 
   layers.forEach((layer, layerIndex) => {
@@ -251,8 +278,9 @@ export function renderBrain(
         x,
         y,
         type: node.type,
-        activation: node.activation,
         label: node.label,
+        activation: node.activation,
+        bias: node.bias,
         isActive: node.isActive,
       });
     });
@@ -291,6 +319,47 @@ export function renderBrain(
     ctx.textBaseline = 'alphabetic';
   };
 
+  const drawDirectedSynapse = (
+    pre: { x: number; y: number },
+    post: { x: number; y: number },
+    color: string,
+    lineWidth: number,
+  ) => {
+    const vx = post.x - pre.x;
+    const vy = post.y - pre.y;
+    const length = Math.hypot(vx, vy);
+    if (length < 1) return;
+
+    const ux = vx / length;
+    const uy = vy / length;
+    const nx = -uy;
+    const ny = ux;
+
+    const nodeRadius = 10;
+    const arrowLength = Math.max(6, lineWidth * 4);
+    const arrowHalfWidth = Math.max(3, lineWidth * 2.2);
+
+    const tipX = post.x - ux * (nodeRadius + 1);
+    const tipY = post.y - uy * (nodeRadius + 1);
+    const baseX = tipX - ux * arrowLength;
+    const baseY = tipY - uy * arrowLength;
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    ctx.beginPath();
+    ctx.moveTo(pre.x, pre.y);
+    ctx.lineTo(baseX, baseY);
+    ctx.stroke();
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(baseX + nx * arrowHalfWidth, baseY + ny * arrowHalfWidth);
+    ctx.lineTo(baseX - nx * arrowHalfWidth, baseY - ny * arrowHalfWidth);
+    ctx.closePath();
+    ctx.fill();
+  };
+
   ctx.lineWidth = 1;
   for (const neuron of sensory) {
     const pre = positions.get(unwrapId(neuron.neuron.neuron_id));
@@ -298,12 +367,9 @@ export function renderBrain(
     for (const synapse of neuron.synapses) {
       const post = positions.get(unwrapId(synapse.post_neuron_id));
       if (!post) continue;
-      ctx.strokeStyle = synapse.weight >= 0 ? 'rgba(17,103,177,0.6)' : 'rgba(177,28,59,0.7)';
-      ctx.lineWidth = Math.max(0.5, (Math.abs(synapse.weight) / 8) * 2);
-      ctx.beginPath();
-      ctx.moveTo(pre.x, pre.y);
-      ctx.lineTo(post.x, post.y);
-      ctx.stroke();
+      const strokeColor = synapse.weight >= 0 ? 'rgba(17,103,177,0.6)' : 'rgba(177,28,59,0.7)';
+      const strokeWidth = Math.max(0.5, (Math.abs(synapse.weight) / 8) * 2);
+      drawDirectedSynapse(pre, post, strokeColor, strokeWidth);
       drawSynapseWeightLabel(pre, post, synapse.weight);
     }
   }
@@ -314,12 +380,9 @@ export function renderBrain(
     for (const synapse of neuron.synapses) {
       const post = positions.get(unwrapId(synapse.post_neuron_id));
       if (!post) continue;
-      ctx.strokeStyle = synapse.weight >= 0 ? 'rgba(17,103,177,0.55)' : 'rgba(177,28,59,0.65)';
-      ctx.lineWidth = Math.max(0.5, (Math.abs(synapse.weight) / 8) * 2);
-      ctx.beginPath();
-      ctx.moveTo(pre.x, pre.y);
-      ctx.lineTo(post.x, post.y);
-      ctx.stroke();
+      const strokeColor = synapse.weight >= 0 ? 'rgba(17,103,177,0.55)' : 'rgba(177,28,59,0.65)';
+      const strokeWidth = Math.max(0.5, (Math.abs(synapse.weight) / 8) * 2);
+      drawDirectedSynapse(pre, post, strokeColor, strokeWidth);
       drawSynapseWeightLabel(pre, post, synapse.weight);
     }
   }
@@ -337,9 +400,14 @@ export function renderBrain(
 
     ctx.fillStyle = '#10233f';
     ctx.font = '11px Space Grotesk';
-    ctx.fillText(node.label, node.x + 12, node.y + 4);
+    const hasLabel = typeof node.label === 'string' && node.label.length > 0;
+    if (hasLabel) {
+      ctx.fillText(node.label as string, node.x + 12, node.y + 4);
+    }
     ctx.fillStyle = '#43556f';
-    ctx.fillText(node.activation.toFixed(2), node.x + 12, node.y + 16);
+    const metricsY = hasLabel ? node.y + 16 : node.y + 4;
+    ctx.fillText(`h=${node.activation.toFixed(2)}`, node.x + 12, metricsY);
+    ctx.fillText(`b=${node.bias.toFixed(2)}`, node.x + 12, metricsY + 12);
   }
 }
 

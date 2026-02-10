@@ -46,8 +46,8 @@ Build immutable start-of-turn state:
 - organism pose/facing/hunger snapshot
 - per-organism move confidence from hidden-state signal
 
-Move confidence is derived from the current hidden/inter-neuron activations at
-turn start (`max(inter.activation)`, fallback `0.0` when no inter neurons).
+Move confidence is derived from the `MoveForward` action activation at turn
+start (fallback `0.0` when missing).
 
 ### 3.2 Intent Phase
 
@@ -73,7 +73,7 @@ Rules:
 - one winner per target cell
 - if target is empty: winner moves in
 - if target occupant is also moving this turn: winner moves in (vacated-target)
-- if target occupant is not moving: winner performs eat-and-replace
+- if target occupant is not moving: winner performs consume-and-replace
 
 Cycles (swap and longer cycles) are naturally supported because winners are
 resolved globally and moves commit atomically.
@@ -84,16 +84,16 @@ In one commit pass:
 
 - apply facing updates for all organisms
 - apply resolved movement results
-- apply eat kills
-- reset eater hunger (`turns_since_last_meal = 0`)
-- increment eater meals (`meals_eaten += 1`)
-- enqueue reproduction spawn requests for successful eats
+- apply consumption kills (current source type: consumed organism)
+- reset consumer hunger (`turns_since_last_consumption = 0`)
+- increment consumer consumptions (`consumptions_count += 1`)
+- enqueue reproduction spawn requests for successful consumptions
 
 ### 3.5 Lifecycle Phase (Starvation)
 
 Still inside the same runner turn:
 
-- non-eaters increment `turns_since_last_meal`
+- non-consumers increment `turns_since_last_consumption`
 - organisms at/above starvation threshold die
 - starvation replacement spawn requests are enqueued
 
@@ -103,10 +103,15 @@ Spawn queue is processed deterministically in enqueue order:
 
 - reproduction requests (from commit phase) then starvation replacements
 - spawn is skipped if no empty cells remain
-- spawn location uses center-weighted Gaussian sampling over the map, accepting
-  only empty in-bounds cells
-- if Gaussian attempts miss all empty cells, nearest-empty-to-center fallback is
-  used deterministically
+- starvation replacement spawn location uses center-weighted radial Gaussian
+  sampling in the annulus defined by:
+  - `center_spawn_min_fraction`
+  - `center_spawn_max_fraction`
+- reproduction spawn location is exactly one hex opposite the parent's facing
+- reproduction spawn is skipped when that opposite hex is out-of-bounds or
+  occupied
+- starvation replacement uses deterministic nearest-empty fallback when random
+  sampling misses valid empty cells
 
 Spawn kinds:
 
@@ -121,7 +126,7 @@ After turn commit/lifecycle/spawn:
 - metrics are finalized:
   - `synapse_ops_last_turn`
   - `actions_applied_last_turn` (successful resolved moves)
-  - `meals_last_turn`
+  - `consumptions_last_turn`
   - `starvations_last_turn`
   - `births_last_turn`
 - turn delta is emitted from committed results
@@ -166,10 +171,11 @@ Turn behavior:
 Applied to reproduction offspring only:
 
 - skipped when RNG exceeds `mutation_chance`
-- operations count: `round(max(1.0, mutation_magnitude))`
+- operations count: `mutation_operations` (must be `>= 1`)
 - operation split:
   - topology mutation (add/remove inter neuron or bias mutation)
   - synapse mutation (add/remove/perturb synapse)
+- each operation retries a bounded number of times to reduce no-op mutations
 
 Weights remain clamped to `[-8.0, 8.0]`.
 
@@ -183,7 +189,7 @@ Weights remain clamped to `[-8.0, 8.0]`.
 - `spawned` (`OrganismState[]`)
 - `metrics`
 
-This allows clients to apply move/eat/starve/spawn effects incrementally without
+This allows clients to apply move/consume/starve/spawn effects incrementally without
 waiting for full snapshots.
 
 ## 8. Runtime Surfaces

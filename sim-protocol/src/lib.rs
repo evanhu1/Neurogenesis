@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct OrganismId(pub u64);
@@ -87,8 +87,14 @@ pub struct WorldConfig {
     pub turns_to_starve: u32,
     pub mutation_chance: f32,
     pub mutation_magnitude: f32,
+    #[serde(default = "default_mutation_operations")]
+    pub mutation_operations: u32,
     pub center_spawn_min_fraction: f32,
     pub center_spawn_max_fraction: f32,
+}
+
+fn default_mutation_operations() -> u32 {
+    1
 }
 
 impl Default for WorldConfig {
@@ -149,16 +155,16 @@ pub struct OrganismState {
     pub r: i32,
     pub age_turns: u64,
     pub facing: FacingDirection,
-    pub turns_since_last_meal: u32,
-    pub meals_eaten: u64,
+    pub turns_since_last_consumption: u32,
+    pub consumptions_count: u64,
     pub brain: BrainState,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct EvolutionStats {
-    pub mean_age_turns: f64,
-    pub median_age_turns: f64,
-    pub max_age_turns: u64,
+pub struct FitnessStats {
+    pub mean_fitness: f64,
+    pub median_fitness: f64,
+    pub max_fitness: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -167,10 +173,10 @@ pub struct MetricsSnapshot {
     pub organisms: u32,
     pub synapse_ops_last_turn: u64,
     pub actions_applied_last_turn: u64,
-    pub meals_last_turn: u64,
+    pub consumptions_last_turn: u64,
     pub starvations_last_turn: u64,
     pub births_last_turn: u64,
-    pub evolution: EvolutionStats,
+    pub fitness: FitnessStats,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

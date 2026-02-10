@@ -16,6 +16,7 @@ import { apiBase, SPEED_LEVELS, wsBase } from '../constants';
 import { clearPersistedSessionId, loadPersistedSessionId, persistSessionId } from '../storage';
 
 type DeadCellFlashState = { turn: number; cells: Array<{ q: number; r: number }> } | null;
+type BornCellFlashState = { turn: number; cells: Array<{ q: number; r: number }> } | null;
 
 export type SimulationSessionState = {
   session: SessionMetadata | null;
@@ -27,6 +28,7 @@ export type SimulationSessionState = {
   speedLevelIndex: number;
   errorText: string | null;
   deadFlashCells: Array<{ q: number; r: number }> | null;
+  bornFlashCells: Array<{ q: number; r: number }> | null;
   createSession: () => Promise<void>;
   resetSession: () => void;
   toggleRun: () => void;
@@ -44,6 +46,7 @@ export function useSimulationSession(): SimulationSessionState {
   const [speedLevelIndex, setSpeedLevelIndex] = useState(1);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [deadCellFlashState, setDeadCellFlashState] = useState<DeadCellFlashState>(null);
+  const [bornCellFlashState, setBornCellFlashState] = useState<BornCellFlashState>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const request = useMemo(() => createSimHttpClient(apiBase), []);
@@ -53,6 +56,9 @@ export function useSimulationSession(): SimulationSessionState {
       case 'StateSnapshot': {
         const nextSnapshot = event.data as WorldSnapshot;
         setDeadCellFlashState((prev) =>
+          prev !== null && prev.turn !== nextSnapshot.turn ? null : prev,
+        );
+        setBornCellFlashState((prev) =>
           prev !== null && prev.turn !== nextSnapshot.turn ? null : prev,
         );
         setSnapshot(nextSnapshot);
@@ -79,6 +85,22 @@ export function useSimulationSession(): SimulationSessionState {
             setDeadCellFlashState(cells.length > 0 ? { turn: delta.turn, cells } : null);
           } else {
             setDeadCellFlashState((currentFlash) =>
+              currentFlash !== null && delta.turn > currentFlash.turn ? null : currentFlash,
+            );
+          }
+
+          if (delta.spawned.length > 0) {
+            const seenCells = new Set<string>();
+            const cells: Array<{ q: number; r: number }> = [];
+            for (const spawned of delta.spawned) {
+              const key = `${spawned.q},${spawned.r}`;
+              if (seenCells.has(key)) continue;
+              seenCells.add(key);
+              cells.push({ q: spawned.q, r: spawned.r });
+            }
+            setBornCellFlashState(cells.length > 0 ? { turn: delta.turn, cells } : null);
+          } else {
+            setBornCellFlashState((currentFlash) =>
               currentFlash !== null && delta.turn > currentFlash.turn ? null : currentFlash,
             );
           }
@@ -138,6 +160,7 @@ export function useSimulationSession(): SimulationSessionState {
       setFocusedOrganism(null);
       setIsRunning(false);
       setDeadCellFlashState(null);
+      setBornCellFlashState(null);
       persistSessionId(metadata.id);
       connectWs(metadata.id);
     },
@@ -213,6 +236,7 @@ export function useSimulationSession(): SimulationSessionState {
         setFocusedOrganismId(null);
         setFocusedOrganism(null);
         setDeadCellFlashState(null);
+        setBornCellFlashState(null);
       })
       .catch((err) => {
         setErrorText(err instanceof Error ? err.message : 'Failed to reset session');
@@ -282,6 +306,13 @@ export function useSimulationSession(): SimulationSessionState {
     return deadCellFlashState.cells;
   }, [deadCellFlashState, snapshot]);
 
+  const bornFlashCells = useMemo(() => {
+    if (!snapshot) return null;
+    if (!bornCellFlashState) return null;
+    if (bornCellFlashState.turn !== snapshot.turn) return null;
+    return bornCellFlashState.cells;
+  }, [bornCellFlashState, snapshot]);
+
   return {
     session,
     snapshot,
@@ -292,6 +323,7 @@ export function useSimulationSession(): SimulationSessionState {
     speedLevelIndex,
     errorText,
     deadFlashCells,
+    bornFlashCells,
     createSession,
     resetSession,
     toggleRun,

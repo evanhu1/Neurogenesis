@@ -8,6 +8,7 @@ use sim_protocol::{
 use std::collections::HashMap;
 
 const ACTION_ACTIVATION_THRESHOLD: f32 = 0.5;
+const MAX_MUTATION_OPERATION_ATTEMPTS: usize = 8;
 
 impl Simulation {
     pub(crate) fn mutate_brain(&mut self, brain: &mut BrainState) {
@@ -15,23 +16,32 @@ impl Simulation {
             return;
         }
 
-        let operations = self.config.mutation_magnitude.max(1.0).round() as usize;
+        let operations = self.config.mutation_operations.max(1) as usize;
         for _ in 0..operations {
-            if self.rng.random::<f32>() < 0.5 {
-                self.apply_topology_mutation(brain);
-            } else {
-                self.apply_synapse_mutation(brain);
+            let mut applied = false;
+            for _ in 0..MAX_MUTATION_OPERATION_ATTEMPTS {
+                applied = if self.rng.random::<f32>() < 0.5 {
+                    self.apply_topology_mutation(brain)
+                } else {
+                    self.apply_synapse_mutation(brain)
+                };
+                if applied {
+                    break;
+                }
+            }
+            if !applied {
+                break;
             }
         }
 
         brain.synapse_count = count_synapses(brain) as u32;
     }
 
-    fn apply_topology_mutation(&mut self, brain: &mut BrainState) {
+    fn apply_topology_mutation(&mut self, brain: &mut BrainState) -> bool {
         match self.rng.random_range(0..3) {
             0 => {
                 if brain.inter.len() as u32 >= self.config.max_num_neurons {
-                    return;
+                    return false;
                 }
 
                 let next_id = next_inter_neuron_id(brain);
@@ -40,47 +50,60 @@ impl Simulation {
                     synapses: Vec::new(),
                 });
 
-                let _ = create_random_synapse(brain, &mut self.rng);
+                let _ = create_random_synapse_with_retries(
+                    brain,
+                    &mut self.rng,
+                    MAX_MUTATION_OPERATION_ATTEMPTS,
+                );
+                true
             }
             1 => {
-                if brain.inter.is_empty() {
-                    return;
+                if brain.inter.len() <= self.minimum_inter_neurons() {
+                    return false;
                 }
                 let idx = self.rng.random_range(0..brain.inter.len());
                 let removed_id = brain.inter[idx].neuron.neuron_id;
                 brain.inter.remove(idx);
                 remove_neuron_references(brain, removed_id);
+                true
             }
             _ => {
-                if !brain.inter.is_empty() {
-                    let idx = self.rng.random_range(0..brain.inter.len());
-                    let bias = &mut brain.inter[idx].neuron.bias;
-                    *bias = (*bias + self.rng.random_range(-1.0..1.0)).clamp(-8.0, 8.0);
+                if brain.inter.is_empty() {
+                    return false;
                 }
+                let magnitude = self.config.mutation_magnitude.clamp(0.05, 8.0);
+                let idx = self.rng.random_range(0..brain.inter.len());
+                let bias = &mut brain.inter[idx].neuron.bias;
+                *bias = (*bias + self.rng.random_range(-magnitude..magnitude)).clamp(-8.0, 8.0);
+                true
             }
         }
     }
 
-    fn apply_synapse_mutation(&mut self, brain: &mut BrainState) {
+    fn apply_synapse_mutation(&mut self, brain: &mut BrainState) -> bool {
         match self.rng.random_range(0..3) {
-            0 => {
-                let _ = create_random_synapse(brain, &mut self.rng);
-            }
+            0 => create_random_synapse_with_retries(
+                brain,
+                &mut self.rng,
+                MAX_MUTATION_OPERATION_ATTEMPTS,
+            ),
             1 => {
-                let outputs = output_neuron_ids(brain);
+                let outputs = output_neuron_ids_with_synapses(brain);
                 if outputs.is_empty() {
-                    return;
+                    return false;
                 }
                 let pre = outputs[self.rng.random_range(0..outputs.len())];
                 remove_random_synapse(brain, pre, &mut self.rng);
+                true
             }
             _ => {
-                let outputs = output_neuron_ids(brain);
+                let outputs = output_neuron_ids_with_synapses(brain);
                 if outputs.is_empty() {
-                    return;
+                    return false;
                 }
                 let pre = outputs[self.rng.random_range(0..outputs.len())];
                 perturb_random_synapse(brain, pre, self.config.mutation_magnitude, &mut self.rng);
+                true
             }
         }
     }
@@ -112,13 +135,13 @@ impl Simulation {
         };
 
         for _ in 0..self.config.num_synapses {
-            let Some((pre, post)) = random_synapse_endpoints(&brain, &mut self.rng) else {
+            if !create_random_synapse_with_retries(
+                &mut brain,
+                &mut self.rng,
+                MAX_MUTATION_OPERATION_ATTEMPTS,
+            ) {
                 break;
-            };
-            let weight = self
-                .rng
-                .random_range(-SYNAPSE_STRENGTH_MAX..SYNAPSE_STRENGTH_MAX);
-            let _ = create_synapse(&mut brain, pre, post, weight);
+            }
         }
 
         brain.synapse_count = count_synapses(&brain) as u32;
@@ -127,6 +150,14 @@ impl Simulation {
 
     fn random_bias(&mut self) -> f32 {
         self.rng.random_range(-1.0..1.0)
+    }
+
+    fn minimum_inter_neurons(&self) -> usize {
+        if self.config.num_neurons > 0 {
+            1
+        } else {
+            0
+        }
     }
 }
 
@@ -140,11 +171,26 @@ pub(crate) fn action_index(action: ActionType) -> usize {
 
 pub(crate) fn move_confidence_signal(brain: &BrainState) -> f32 {
     brain
-        .inter
+        .action
         .iter()
-        .map(|inter| inter.neuron.activation)
-        .max_by(f32::total_cmp)
+        .find(|action| action.action_type == ActionType::MoveForward)
+        .map(|action| action.neuron.activation)
         .unwrap_or(0.0)
+}
+
+pub(crate) fn reset_brain_runtime_state(brain: &mut BrainState) {
+    for sensory in &mut brain.sensory {
+        sensory.neuron.activation = 0.0;
+        sensory.neuron.is_active = false;
+    }
+    for inter in &mut brain.inter {
+        inter.neuron.activation = 0.0;
+        inter.neuron.is_active = false;
+    }
+    for action in &mut brain.action {
+        action.neuron.activation = 0.0;
+        action.neuron.is_active = false;
+    }
 }
 
 fn make_neuron(id: NeuronId, neuron_type: NeuronType, bias: f32) -> NeuronState {
@@ -367,12 +413,41 @@ fn create_random_synapse<R: Rng + ?Sized>(brain: &mut BrainState, rng: &mut R) -
     create_synapse(brain, pre, post, weight)
 }
 
+fn create_random_synapse_with_retries<R: Rng + ?Sized>(
+    brain: &mut BrainState,
+    rng: &mut R,
+    max_attempts: usize,
+) -> bool {
+    for _ in 0..max_attempts.max(1) {
+        if create_random_synapse(brain, rng) {
+            return true;
+        }
+    }
+    false
+}
+
 fn post_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
     brain
         .inter
         .iter()
         .map(|neuron| neuron.neuron.neuron_id)
         .chain(brain.action.iter().map(|neuron| neuron.neuron.neuron_id))
+        .collect()
+}
+
+fn output_neuron_ids_with_synapses(brain: &BrainState) -> Vec<NeuronId> {
+    brain
+        .sensory
+        .iter()
+        .filter(|sensory| !sensory.synapses.is_empty())
+        .map(|sensory| sensory.neuron.neuron_id)
+        .chain(
+            brain
+                .inter
+                .iter()
+                .filter(|inter| !inter.synapses.is_empty())
+                .map(|inter| inter.neuron.neuron_id),
+        )
         .collect()
 }
 

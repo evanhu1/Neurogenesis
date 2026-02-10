@@ -2,7 +2,7 @@ import type { ChangeEvent } from 'react';
 
 type ControlPanelProps = {
   sessionMeta: string;
-  evolutionStatsText: string;
+  fitnessStatsText: string;
   metricsText: string;
   errorText: string | null;
   isRunning: boolean;
@@ -17,7 +17,7 @@ type ControlPanelProps = {
 
 export function ControlPanel({
   sessionMeta,
-  evolutionStatsText,
+  fitnessStatsText,
   metricsText,
   errorText,
   isRunning,
@@ -84,9 +84,9 @@ export function ControlPanel({
         <ControlButton label="Step 100" onClick={() => onStep(100)} />
       </div>
 
-      <h3 className="mt-3 text-sm font-semibold uppercase tracking-wide text-ink/80">Evolution Stats</h3>
+      <h3 className="mt-3 text-sm font-semibold uppercase tracking-wide text-ink/80">Fitness Stats</h3>
       <pre className="mt-2 whitespace-pre-wrap rounded-xl bg-slate-100/80 p-3 font-mono text-xs">
-        {evolutionStatsText}
+        {fitnessStatsText}
       </pre>
 
       <h3 className="mt-3 text-sm font-semibold uppercase tracking-wide text-ink/80">Runtime Metrics</h3>
@@ -118,4 +118,3 @@ function ControlButton({ label, onClick }: ControlButtonProps) {
     </button>
   );
 }
-

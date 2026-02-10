@@ -1,5 +1,7 @@
 use super::*;
-use crate::brain::{look_sensor_value, make_action_neuron, make_sensory_neuron};
+use crate::brain::{
+    look_sensor_value, make_action_neuron, make_sensory_neuron, reset_brain_runtime_state,
+};
 use crate::turn::facing_after_turn;
 use sim_protocol::{
     ActionType, BrainState, FacingDirection, InterNeuronState, NeuronId, NeuronState, NeuronType,
@@ -79,7 +81,7 @@ fn make_organism(
     turn_left: bool,
     turn_right: bool,
     confidence: f32,
-    turns_since_last_meal: u32,
+    turns_since_last_consumption: u32,
 ) -> OrganismState {
     OrganismState {
         id: OrganismId(id),
@@ -87,8 +89,8 @@ fn make_organism(
         r,
         age_turns: 0,
         facing,
-        turns_since_last_meal,
-        meals_eaten: 0,
+        turns_since_last_consumption,
+        consumptions_count: 0,
         brain: forced_brain(wants_move, turn_left, turn_right, confidence),
     }
 }
@@ -159,7 +161,7 @@ fn deterministic_seed() {
 }
 
 #[test]
-fn evolution_stats_track_mean_median_and_max_age() {
+fn fitness_stats_track_mean_median_and_max() {
     let cfg = test_config(4, 4);
     let mut sim = Simulation::new(cfg, 99).expect("simulation should initialize");
 
@@ -186,10 +188,10 @@ fn evolution_stats_track_mean_median_and_max_age() {
     );
 
     let _ = tick_once(&mut sim);
-    let evolution = &sim.metrics().evolution;
-    assert_eq!(evolution.max_age_turns, 11);
-    assert!((evolution.mean_age_turns - 6.5).abs() < f64::EPSILON);
-    assert!((evolution.median_age_turns - 6.0).abs() < f64::EPSILON);
+    let fitness = &sim.metrics().fitness;
+    assert_eq!(fitness.max_fitness, 11);
+    assert!((fitness.mean_fitness - 6.5).abs() < f64::EPSILON);
+    assert!((fitness.median_fitness - 6.0).abs() < f64::EPSILON);
 }
 
 #[test]
@@ -213,6 +215,16 @@ fn config_validation_rejects_zero_world_width() {
     };
     let err = Simulation::new(cfg, 1).expect_err("expected invalid config error");
     assert!(err.to_string().contains("world_width"));
+}
+
+#[test]
+fn config_validation_rejects_zero_mutation_operations() {
+    let cfg = WorldConfig {
+        mutation_operations: 0,
+        ..WorldConfig::default()
+    };
+    let err = Simulation::new(cfg, 1).expect_err("expected invalid config error");
+    assert!(err.to_string().contains("mutation_operations"));
 }
 
 #[test]
@@ -311,7 +323,7 @@ fn move_into_cell_vacated_same_turn_succeeds() {
     assert_eq!(moves.len(), 2);
     assert_eq!(moves.get(&OrganismId(0)), Some(&((1, 1), (2, 1))));
     assert_eq!(moves.get(&OrganismId(1)), Some(&((2, 1), (2, 2))));
-    assert_eq!(delta.metrics.meals_last_turn, 0);
+    assert_eq!(delta.metrics.consumptions_last_turn, 0);
 }
 
 #[test]
@@ -330,7 +342,7 @@ fn two_organism_swap_resolves_deterministically() {
     let moves = move_map(&delta);
     assert_eq!(moves.get(&OrganismId(0)), Some(&((1, 1), (2, 1))));
     assert_eq!(moves.get(&OrganismId(1)), Some(&((2, 1), (1, 1))));
-    assert_eq!(delta.metrics.meals_last_turn, 0);
+    assert_eq!(delta.metrics.consumptions_last_turn, 0);
 }
 
 #[test]
@@ -390,7 +402,7 @@ fn multi_attacker_single_target_tie_breaks_by_id() {
 }
 
 #[test]
-fn attacker_vs_escaping_prey_has_no_eat_when_prey_escapes() {
+fn attacker_vs_escaping_target_has_no_consumption_when_target_escapes() {
     let cfg = test_config(6, 2);
     let mut sim = Simulation::new(cfg, 15).expect("simulation should initialize");
     configure_sim(
@@ -405,7 +417,7 @@ fn attacker_vs_escaping_prey_has_no_eat_when_prey_escapes() {
     let moves = move_map(&delta);
     assert_eq!(moves.get(&OrganismId(0)), Some(&((1, 1), (2, 1))));
     assert_eq!(moves.get(&OrganismId(1)), Some(&((2, 1), (3, 1))));
-    assert_eq!(delta.metrics.meals_last_turn, 0);
+    assert_eq!(delta.metrics.consumptions_last_turn, 0);
     assert!(sim
         .organisms
         .iter()
@@ -451,11 +463,11 @@ fn multi_node_cycle_resolves_without_conflict() {
     assert_eq!(moves.get(&OrganismId(0)), Some(&((1, 1), (1, 2))));
     assert_eq!(moves.get(&OrganismId(2)), Some(&((1, 2), (2, 1))));
     assert_eq!(moves.get(&OrganismId(1)), Some(&((2, 1), (1, 1))));
-    assert_eq!(delta.metrics.meals_last_turn, 0);
+    assert_eq!(delta.metrics.consumptions_last_turn, 0);
 }
 
 #[test]
-fn contested_occupied_target_where_occupant_remains_uses_eat_path() {
+fn contested_occupied_target_where_occupant_remains_uses_consume_path() {
     let cfg = test_config(5, 3);
     let mut sim = Simulation::new(cfg, 17).expect("simulation should initialize");
     configure_sim(
@@ -481,7 +493,7 @@ fn contested_occupied_target_where_occupant_remains_uses_eat_path() {
     let moves = move_map(&delta);
     assert_eq!(moves.len(), 1);
     assert_eq!(moves.get(&OrganismId(0)), Some(&((1, 1), (2, 1))));
-    assert_eq!(delta.metrics.meals_last_turn, 1);
+    assert_eq!(delta.metrics.consumptions_last_turn, 1);
     assert!(sim
         .organisms
         .iter()
@@ -505,21 +517,25 @@ fn starvation_and_reproduction_interact_in_same_turn() {
     );
 
     let delta = tick_once(&mut sim);
-    assert_eq!(delta.metrics.meals_last_turn, 1);
+    assert_eq!(delta.metrics.consumptions_last_turn, 1);
     assert_eq!(delta.metrics.starvations_last_turn, 1);
     assert_eq!(delta.metrics.births_last_turn, 2);
     assert_eq!(
-        delta.removed_positions.iter().map(|entry| entry.id).collect::<Vec<_>>(),
+        delta
+            .removed_positions
+            .iter()
+            .map(|entry| entry.id)
+            .collect::<Vec<_>>(),
         vec![OrganismId(1), OrganismId(2)]
     );
     assert_eq!(delta.spawned.len(), 2);
     assert_eq!(sim.organisms.len(), 4);
-    let predator = sim
+    let consumer = sim
         .organisms
         .iter()
         .find(|organism| organism.id == OrganismId(0))
-        .expect("predator should survive");
-    assert_eq!(predator.turns_since_last_meal, 0);
+        .expect("consumer should survive");
+    assert_eq!(consumer.turns_since_last_consumption, 0);
 }
 
 #[test]
@@ -545,7 +561,6 @@ fn spawn_queue_order_is_deterministic_under_limited_space() {
         ],
     );
     let parent_brain = sim.organisms[0].brain.clone();
-    let parent_facing = sim.organisms[0].facing;
 
     let spawned = sim.resolve_spawn_requests(&[
         SpawnRequest {
@@ -564,8 +579,109 @@ fn spawn_queue_order_is_deterministic_under_limited_space() {
         .iter()
         .find(|organism| organism.id == OrganismId(3))
         .expect("first spawn request should consume final empty slot");
-    assert_eq!(child.brain, parent_brain);
-    assert_eq!(child.facing, parent_facing);
+    assert_eq!((child.q, child.r), (1, 1));
+    assert_ne!(child.brain, parent_brain);
+}
+
+#[test]
+fn reproduction_offspring_brain_runtime_state_is_reset() {
+    let mut cfg = test_config(8, 1);
+    cfg.mutation_chance = 0.0;
+    let mut sim = Simulation::new(cfg, 31).expect("simulation should initialize");
+    configure_sim(
+        &mut sim,
+        vec![make_organism(
+            0,
+            3,
+            3,
+            FacingDirection::East,
+            true,
+            true,
+            false,
+            0.8,
+            0,
+        )],
+    );
+
+    let parent = sim
+        .organisms
+        .iter_mut()
+        .find(|organism| organism.id == OrganismId(0))
+        .expect("parent should exist");
+    parent.brain.sensory[0].neuron.activation = 1.0;
+    parent.brain.sensory[0].neuron.is_active = true;
+    parent.brain.action[0].neuron.activation = 0.91;
+    parent.brain.action[0].neuron.is_active = true;
+    parent.brain.action[1].neuron.activation = 0.73;
+    parent.brain.action[1].neuron.is_active = true;
+    let parent_brain = parent.brain.clone();
+
+    let spawned = sim.resolve_spawn_requests(&[SpawnRequest {
+        kind: SpawnRequestKind::Reproduction {
+            parent: OrganismId(0),
+        },
+    }]);
+
+    assert_eq!(spawned.len(), 1);
+    let child = &spawned[0];
+    let mut expected_child_brain = parent_brain;
+    reset_brain_runtime_state(&mut expected_child_brain);
+    assert_eq!(child.brain, expected_child_brain);
+}
+
+#[test]
+fn starvation_spawn_respects_center_min_fraction_when_space_exists() {
+    let mut cfg = test_config(31, 1);
+    cfg.center_spawn_min_fraction = 0.40;
+    cfg.center_spawn_max_fraction = 0.60;
+    let mut sim = Simulation::new(cfg.clone(), 29).expect("simulation should initialize");
+    configure_sim(&mut sim, vec![]);
+
+    let spawned = sim.resolve_spawn_requests(&[SpawnRequest {
+        kind: SpawnRequestKind::StarvationReplacement,
+    }]);
+
+    assert_eq!(spawned.len(), 1);
+    let child = &spawned[0];
+    let center = (cfg.world_width as f64 - 1.0) / 2.0;
+    let distance = ((child.q as f64 - center).powi(2) + (child.r as f64 - center).powi(2)).sqrt();
+    let min_radius = cfg.world_width as f64 * f64::from(cfg.center_spawn_min_fraction) / 2.0;
+    assert!(
+        distance + 0.75 >= min_radius,
+        "expected spawn distance {distance} to respect min radius {min_radius}"
+    );
+}
+
+#[test]
+fn reproduction_spawn_is_opposite_of_parent_facing() {
+    let mut cfg = test_config(40, 1);
+    cfg.center_spawn_min_fraction = 0.45;
+    cfg.center_spawn_max_fraction = 0.55;
+    cfg.mutation_chance = 0.0;
+    let mut sim = Simulation::new(cfg, 30).expect("simulation should initialize");
+    configure_sim(
+        &mut sim,
+        vec![make_organism(
+            0,
+            1,
+            1,
+            FacingDirection::East,
+            false,
+            false,
+            false,
+            0.2,
+            0,
+        )],
+    );
+
+    let spawned = sim.resolve_spawn_requests(&[SpawnRequest {
+        kind: SpawnRequestKind::Reproduction {
+            parent: OrganismId(0),
+        },
+    }]);
+    assert_eq!(spawned.len(), 1);
+    let child = &spawned[0];
+    assert_eq!((child.q, child.r), (0, 1));
 }
 
 #[test]
