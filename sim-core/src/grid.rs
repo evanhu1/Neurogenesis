@@ -36,6 +36,17 @@ pub(crate) fn hex_neighbor(position: (i32, i32), facing: FacingDirection) -> (i3
     }
 }
 
+pub(crate) fn opposite_direction(direction: FacingDirection) -> FacingDirection {
+    match direction {
+        FacingDirection::East => FacingDirection::West,
+        FacingDirection::NorthEast => FacingDirection::SouthWest,
+        FacingDirection::NorthWest => FacingDirection::SouthEast,
+        FacingDirection::West => FacingDirection::East,
+        FacingDirection::SouthWest => FacingDirection::NorthEast,
+        FacingDirection::SouthEast => FacingDirection::NorthWest,
+    }
+}
+
 impl Simulation {
     pub(crate) fn debug_assert_consistent_state(&self) {
         if cfg!(debug_assertions) {

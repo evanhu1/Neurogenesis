@@ -116,7 +116,7 @@ Spawn queue is processed deterministically in enqueue order:
 Spawn kinds:
 
 - starvation replacement: random newly generated brain
-- reproduction spawn: parent clone + mutation
+- reproduction spawn: parent-derived offspring with opposite facing + mutation
 
 ### 3.7 Metrics + Delta Phase
 

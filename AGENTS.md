@@ -2,9 +2,13 @@
 
 ## Project Structure & Module Organization
 
-This repository is a Rust workspace plus a TypeScript web client.
-
-- `sim-core/`: deterministic simulation engine and core logic.
+- `sim-core/`: deterministic simulation engine and core logic. Split into
+  modules:
+  - `lib.rs`: simulation struct, config validation, shared glue.
+  - `turn.rs`: turn pipeline and move/consume/starvation resolution.
+  - `brain.rs`: network evaluation, mutation, and topology/synapse operators.
+  - `spawn.rs`: initial spawn + reproduction/replacement spawn placement.
+- `grid.rs`: hex-grid geometry and occupancy helpers.
 - `sim-protocol/`: shared API/protocol types used by server and UI.
 - `sim-server/`: Axum HTTP + WebSocket server (`src/main.rs`).
 - `web-client/`: React + TailwindCSS + Vite canvas UI (`src/`), static entry in

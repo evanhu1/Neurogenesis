@@ -87,14 +87,9 @@ pub struct WorldConfig {
     pub turns_to_starve: u32,
     pub mutation_chance: f32,
     pub mutation_magnitude: f32,
-    #[serde(default = "default_mutation_operations")]
     pub mutation_operations: u32,
     pub center_spawn_min_fraction: f32,
     pub center_spawn_max_fraction: f32,
-}
-
-fn default_mutation_operations() -> u32 {
-    1
 }
 
 impl Default for WorldConfig {

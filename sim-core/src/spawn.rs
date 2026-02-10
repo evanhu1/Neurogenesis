@@ -1,5 +1,5 @@
 use crate::brain::reset_brain_runtime_state;
-use crate::grid::hex_neighbor;
+use crate::grid::{hex_neighbor, opposite_direction};
 use crate::Simulation;
 use crate::{world_capacity, SpawnRequest, SpawnRequestKind};
 use rand::seq::SliceRandom;
@@ -52,7 +52,7 @@ impl Simulation {
                         q,
                         r,
                         age_turns: 0,
-                        facing: parent_state.facing,
+                        facing: opposite_direction(parent_state.facing),
                         turns_since_last_consumption: 0,
                         consumptions_count: 0,
                         brain,
@@ -228,16 +228,5 @@ impl Simulation {
             }
         }
         positions
-    }
-}
-
-fn opposite_direction(facing: FacingDirection) -> FacingDirection {
-    match facing {
-        FacingDirection::East => FacingDirection::West,
-        FacingDirection::NorthEast => FacingDirection::SouthWest,
-        FacingDirection::NorthWest => FacingDirection::SouthEast,
-        FacingDirection::West => FacingDirection::East,
-        FacingDirection::SouthWest => FacingDirection::NorthEast,
-        FacingDirection::SouthEast => FacingDirection::NorthWest,
     }
 }

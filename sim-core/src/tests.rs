@@ -627,6 +627,7 @@ fn reproduction_offspring_brain_runtime_state_is_reset() {
     let mut expected_child_brain = parent_brain;
     reset_brain_runtime_state(&mut expected_child_brain);
     assert_eq!(child.brain, expected_child_brain);
+    assert_eq!(child.facing, FacingDirection::West);
 }
 
 #[test]
