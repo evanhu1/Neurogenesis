@@ -1,10 +1,20 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
-import type { WorldViewport } from '../../../canvas';
+import { computeBaseHexSize, type WorldViewport } from '../../../canvas';
 
 const MIN_WORLD_ZOOM = 0.65;
-const MAX_WORLD_ZOOM = 4;
+const BASE_MAX_WORLD_ZOOM = 4;
+const ABSOLUTE_MAX_WORLD_ZOOM = 48;
+const TARGET_HEX_RADIUS_PX = 48;
 const WORLD_ZOOM_STEP = 1.12;
 const DEFAULT_WORLD_VIEWPORT: WorldViewport = { zoom: 1, panX: 0, panY: 0 };
+
+function computeMaxWorldZoom(canvas: HTMLCanvasElement, worldWidth: number | null | undefined): number {
+  if (!worldWidth || worldWidth <= 0) return BASE_MAX_WORLD_ZOOM;
+  const baseHexSize = computeBaseHexSize(canvas.width, canvas.height, worldWidth);
+  if (!Number.isFinite(baseHexSize) || baseHexSize <= 0) return BASE_MAX_WORLD_ZOOM;
+  const zoomForTargetHexSize = TARGET_HEX_RADIUS_PX / baseHexSize;
+  return Math.min(ABSOLUTE_MAX_WORLD_ZOOM, Math.max(BASE_MAX_WORLD_ZOOM, zoomForTargetHexSize));
+}
 
 function isInteractiveTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -39,14 +49,21 @@ export function useWorldViewport() {
   }, [viewport]);
 
   const zoomAtPointer = useCallback(
-    (canvas: HTMLCanvasElement, clientX: number, clientY: number, deltaY: number) => {
+    (
+      canvas: HTMLCanvasElement,
+      clientX: number,
+      clientY: number,
+      deltaY: number,
+      worldWidth: number | null | undefined,
+    ) => {
       const rect = canvas.getBoundingClientRect();
       const xPx = ((clientX - rect.left) / rect.width) * canvas.width;
       const yPx = ((clientY - rect.top) / rect.height) * canvas.height;
 
       setViewport((prev) => {
         const zoomFactor = deltaY < 0 ? WORLD_ZOOM_STEP : 1 / WORLD_ZOOM_STEP;
-        const nextZoom = Math.max(MIN_WORLD_ZOOM, Math.min(MAX_WORLD_ZOOM, prev.zoom * zoomFactor));
+        const maxWorldZoom = computeMaxWorldZoom(canvas, worldWidth);
+        const nextZoom = Math.max(MIN_WORLD_ZOOM, Math.min(maxWorldZoom, prev.zoom * zoomFactor));
         if (nextZoom === prev.zoom) return prev;
 
         const worldX = (xPx - canvas.width / 2 - prev.panX) / prev.zoom + canvas.width / 2;

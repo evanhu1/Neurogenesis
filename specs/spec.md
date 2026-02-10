@@ -130,25 +130,17 @@ Still inside the same runner turn:
 
 - each surviving organism loses `1.0` energy
 - organisms with `energy <= 0.0` die of starvation
-- starvation replacement spawn requests are enqueued
+- starvation only removes organisms from the world (no replacement spawn)
 
 ### 3.7 Spawn Resolution Phase
 
 Spawn queue is processed deterministically in enqueue order:
 
-- reproduction requests then starvation replacements
+- reproduction requests only
 - spawn is skipped if placement is invalid or no empty cells remain
-- starvation replacement spawn location uses center-weighted radial Gaussian
-  sampling in the annulus defined by:
-  - `center_spawn_min_fraction`
-  - `center_spawn_max_fraction`
-- starvation replacement uses deterministic nearest-empty fallback when random
-  sampling misses valid empty cells
 
 Spawn kinds:
 
-- starvation replacement: random species sampled from current registry,
-  freshly generated brain from that species DNA
 - reproduction spawn: parent-derived offspring with opposite-facing child,
   mutation applied, inheriting parent species DNA
 

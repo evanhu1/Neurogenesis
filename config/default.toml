@@ -1,10 +1,10 @@
-world_width = 50
+world_width = 100
 steps_per_second = 5
 num_organisms = 400
 center_spawn_min_fraction = 0.25
 center_spawn_max_fraction = 0.75
-starting_energy = 40.0
-reproduction_energy_cost = 20.0
+starting_energy = 100.0
+reproduction_energy_cost = 100.0
 move_action_energy_cost = 1.0
 
 [seed_species_config]

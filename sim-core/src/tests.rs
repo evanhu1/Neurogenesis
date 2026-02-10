@@ -407,6 +407,39 @@ fn turn_actions_rotate_facing() {
 }
 
 #[test]
+fn only_highest_activation_action_runs_each_turn() {
+    let cfg = test_config(6, 1);
+    let mut sim = Simulation::new(cfg, 75).expect("simulation should initialize");
+    configure_sim(
+        &mut sim,
+        vec![make_organism(
+            0,
+            2,
+            2,
+            FacingDirection::East,
+            true,
+            true,
+            false,
+            0.8,
+            10.0,
+        )],
+    );
+
+    let delta = tick_once(&mut sim);
+    assert_eq!(delta.moves.len(), 1);
+    assert_eq!(delta.moves[0].id, OrganismId(0));
+    assert_eq!(delta.moves[0].to, (3, 2));
+    assert_eq!(delta.metrics.reproductions_last_turn, 0);
+
+    let organism = sim
+        .organisms
+        .iter()
+        .find(|organism| organism.id == OrganismId(0))
+        .expect("organism should remain alive");
+    assert_eq!(organism.facing, FacingDirection::East);
+}
+
+#[test]
 fn move_into_cell_vacated_same_turn_succeeds() {
     let cfg = test_config(5, 2);
     let mut sim = Simulation::new(cfg, 11).expect("simulation should initialize");
@@ -623,7 +656,7 @@ fn contested_occupied_target_where_occupant_remains_uses_consume_path() {
         .iter()
         .find(|organism| organism.id == OrganismId(0))
         .expect("predator should survive");
-    assert_eq!(predator.energy, 7.0);
+    assert_eq!(predator.energy, 6.0);
 }
 
 #[test]
@@ -676,7 +709,7 @@ fn starvation_and_reproduction_interact_in_same_turn() {
 
     let delta = tick_once(&mut sim);
     assert_eq!(delta.metrics.consumptions_last_turn, 1);
-    assert_eq!(delta.metrics.reproductions_last_turn, 1);
+    assert_eq!(delta.metrics.reproductions_last_turn, 0);
     assert_eq!(delta.metrics.starvations_last_turn, 1);
     assert_eq!(
         delta
@@ -686,19 +719,15 @@ fn starvation_and_reproduction_interact_in_same_turn() {
             .collect::<Vec<_>>(),
         vec![OrganismId(1), OrganismId(2)]
     );
-    assert_eq!(delta.spawned.len(), 2);
-    assert!(delta
-        .spawned
-        .iter()
-        .all(|organism| organism.species_id == SpeciesId(0)));
-    assert_eq!(sim.organisms.len(), 4);
+    assert!(delta.spawned.is_empty());
+    assert_eq!(sim.organisms.len(), 2);
     let consumer = sim
         .organisms
         .iter()
         .find(|organism| organism.id == OrganismId(0))
         .expect("consumer should survive");
     assert_eq!(consumer.consumptions_count, 1);
-    assert_eq!(consumer.reproductions_count, 1);
+    assert_eq!(consumer.reproductions_count, 0);
     assert!(consumer.energy > 0.0);
 }
 
@@ -728,9 +757,7 @@ fn spawn_queue_order_is_deterministic_under_limited_space() {
 
     let spawned = sim.resolve_spawn_requests(&[
         reproduction_request_at(&sim, OrganismId(0), 1, 1),
-        SpawnRequest {
-            kind: SpawnRequestKind::StarvationReplacement,
-        },
+        reproduction_request_at(&sim, OrganismId(1), 1, 1),
     ]);
 
     assert_eq!(spawned.len(), 1);
@@ -790,27 +817,49 @@ fn reproduction_offspring_brain_runtime_state_is_reset() {
 }
 
 #[test]
-fn starvation_spawn_respects_center_min_fraction_when_space_exists() {
-    let mut cfg = test_config(31, 1);
-    cfg.center_spawn_min_fraction = 0.40;
-    cfg.center_spawn_max_fraction = 0.60;
-    let mut sim = Simulation::new(cfg.clone(), 29).expect("simulation should initialize");
-    configure_sim(&mut sim, vec![]);
-
-    let spawned = sim.resolve_spawn_requests(&[SpawnRequest {
-        kind: SpawnRequestKind::StarvationReplacement,
-    }]);
-
-    assert_eq!(spawned.len(), 1);
-    let child = &spawned[0];
-    assert_eq!(child.species_id, SpeciesId(0));
-    let center = (cfg.world_width as f64 - 1.0) / 2.0;
-    let distance = ((child.q as f64 - center).powi(2) + (child.r as f64 - center).powi(2)).sqrt();
-    let min_radius = cfg.world_width as f64 * f64::from(cfg.center_spawn_min_fraction) / 2.0;
-    assert!(
-        distance + 0.75 >= min_radius,
-        "expected spawn distance {distance} to respect min radius {min_radius}"
+fn starvation_does_not_spawn_replacements() {
+    let cfg = test_config(6, 2);
+    let mut sim = Simulation::new(cfg, 29).expect("simulation should initialize");
+    configure_sim(
+        &mut sim,
+        vec![
+            make_organism(
+                0,
+                1,
+                1,
+                FacingDirection::East,
+                false,
+                false,
+                false,
+                0.2,
+                1.0,
+            ),
+            make_organism(
+                1,
+                4,
+                4,
+                FacingDirection::West,
+                false,
+                false,
+                false,
+                0.2,
+                5.0,
+            ),
+        ],
     );
+
+    let delta = tick_once(&mut sim);
+    assert_eq!(delta.metrics.starvations_last_turn, 1);
+    assert!(delta.spawned.is_empty());
+    assert_eq!(
+        delta
+            .removed_positions
+            .iter()
+            .map(|entry| entry.id)
+            .collect::<Vec<_>>(),
+        vec![OrganismId(0)]
+    );
+    assert_eq!(sim.organisms.len(), 1);
 }
 
 #[test]
@@ -921,7 +970,8 @@ fn reproduce_action_fails_when_spawn_cell_blocked() {
 
 #[test]
 fn reproduce_action_succeeds_when_energy_and_space_allow_it() {
-    let cfg = test_config(7, 1);
+    let mut cfg = test_config(7, 1);
+    cfg.reproduction_energy_cost = 20.0;
     let mut sim = Simulation::new(cfg, 73).expect("simulation should initialize");
     let mut parent = make_organism(
         0,
@@ -949,6 +999,36 @@ fn reproduce_action_succeeds_when_energy_and_space_allow_it() {
         .expect("parent should remain alive");
     assert_eq!(parent_after.reproductions_count, 1);
     assert_eq!(parent_after.energy, 9.0);
+}
+
+#[test]
+fn reproduce_action_fails_when_turn_upkeep_leaves_insufficient_energy() {
+    let cfg = test_config(7, 1);
+    let mut sim = Simulation::new(cfg, 75).expect("simulation should initialize");
+    let mut parent = make_organism(
+        0,
+        3,
+        3,
+        FacingDirection::East,
+        false,
+        false,
+        false,
+        0.7,
+        100.0,
+    );
+    enable_reproduce_action(&mut parent);
+    configure_sim(&mut sim, vec![parent]);
+
+    let delta = tick_once(&mut sim);
+    assert_eq!(delta.metrics.reproductions_last_turn, 0);
+    assert!(delta.spawned.is_empty());
+    let parent_after = sim
+        .organisms
+        .iter()
+        .find(|organism| organism.id == OrganismId(0))
+        .expect("parent should remain alive");
+    assert_eq!(parent_after.reproductions_count, 0);
+    assert_eq!(parent_after.energy, 99.0);
 }
 
 #[test]

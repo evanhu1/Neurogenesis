@@ -88,7 +88,13 @@ export function WorldCanvas({
 
     const onWheel = (evt: WheelEvent) => {
       evt.preventDefault();
-      zoomAtPointer(canvas, evt.clientX, evt.clientY, evt.deltaY);
+      zoomAtPointer(
+        canvas,
+        evt.clientX,
+        evt.clientY,
+        evt.deltaY,
+        snapshotRef.current?.config.world_width ?? null,
+      );
     };
 
     canvas.addEventListener('wheel', onWheel, { passive: false });

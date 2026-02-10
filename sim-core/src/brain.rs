@@ -5,6 +5,7 @@ use sim_protocol::{
     ActionNeuronState, ActionType, BrainState, InterNeuronState, NeuronId, NeuronState, NeuronType,
     OrganismId, SensoryNeuronState, SensoryReceptorType, SpeciesConfig, SynapseEdge,
 };
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 const ACTION_ACTIVATION_THRESHOLD: f32 = 0.5;
@@ -183,15 +184,6 @@ pub(crate) fn action_index(action: ActionType) -> usize {
     }
 }
 
-pub(crate) fn move_confidence_signal(brain: &BrainState) -> f32 {
-    brain
-        .action
-        .iter()
-        .find(|action| action.action_type == ActionType::MoveForward)
-        .map(|action| action.neuron.activation)
-        .unwrap_or(0.0)
-}
-
 pub(crate) fn reset_brain_runtime_state(brain: &mut BrainState) {
     for sensory in &mut brain.sensory {
         sensory.neuron.activation = 0.0;
@@ -338,12 +330,32 @@ pub(crate) fn evaluate_brain(
     for action in &mut brain.action {
         if let Some(idx) = action_index_map.get(&action.neuron.neuron_id) {
             action.neuron.activation = sigmoid(action_inputs[*idx]);
-            action.neuron.is_active = action.neuron.activation > ACTION_ACTIVATION_THRESHOLD;
-            result.actions[action_index(action.action_type)] = action.neuron.is_active;
+            result.action_activations[action_index(action.action_type)] = action.neuron.activation;
         }
     }
 
+    if let Some(selected_idx) = select_action(result.action_activations) {
+        result.actions[selected_idx] = true;
+    }
+
+    for action in &mut brain.action {
+        let idx = action_index(action.action_type);
+        action.neuron.is_active = result.actions[idx];
+    }
+
     result
+}
+
+fn select_action(activations: [f32; 4]) -> Option<usize> {
+    let mut best_idx = 0usize;
+    let mut best_activation = activations[0];
+    for (idx, activation) in activations.into_iter().enumerate().skip(1) {
+        if activation.total_cmp(&best_activation) == Ordering::Greater {
+            best_idx = idx;
+            best_activation = activation;
+        }
+    }
+    (best_activation > ACTION_ACTIVATION_THRESHOLD).then_some(best_idx)
 }
 
 fn sigmoid(x: f32) -> f32 {

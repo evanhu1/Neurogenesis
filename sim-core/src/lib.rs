@@ -42,6 +42,7 @@ pub struct Simulation {
 #[derive(Default)]
 struct BrainEvaluation {
     actions: [bool; 4],
+    action_activations: [f32; 4],
     synapse_ops: u64,
 }
 
@@ -56,7 +57,6 @@ struct ReproductionSpawn {
 
 #[derive(Clone)]
 enum SpawnRequestKind {
-    StarvationReplacement,
     Reproduction(ReproductionSpawn),
 }
 

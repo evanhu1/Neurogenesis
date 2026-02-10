@@ -1,4 +1,4 @@
-use crate::brain::{action_index, evaluate_brain, move_confidence_signal};
+use crate::brain::{action_index, evaluate_brain};
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right};
 use crate::Simulation;
 use crate::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
@@ -14,7 +14,6 @@ struct SnapshotOrganismState {
     q: i32,
     r: i32,
     facing: FacingDirection,
-    move_confidence: f32,
 }
 
 #[derive(Clone)]
@@ -92,6 +91,7 @@ struct CommitResult {
 
 impl Simulation {
     pub(crate) fn tick(&mut self) -> TickDelta {
+        let (starvations, starved_removed_positions) = self.lifecycle_phase();
         let snapshot = self.build_turn_snapshot();
         let intents = self.build_intents(&snapshot);
         let synapse_ops = intents.iter().map(|intent| intent.synapse_ops).sum::<u64>();
@@ -100,7 +100,6 @@ impl Simulation {
         let mut spawn_requests = Vec::new();
         let commit = self.commit_phase(&intents, &resolutions);
         let reproductions = self.reproduction_phase(&intents, &mut spawn_requests);
-        let (starvations, starved_removed_positions) = self.lifecycle_phase(&mut spawn_requests);
         self.increment_age_for_survivors();
         let spawned = self.resolve_spawn_requests(&spawn_requests);
         self.debug_assert_consistent_state();
@@ -140,7 +139,6 @@ impl Simulation {
                 q: organism.q,
                 r: organism.r,
                 facing: organism.facing,
-                move_confidence: move_confidence_signal(&organism.brain),
             });
             id_to_index.insert(organism.id, idx);
         }
@@ -189,6 +187,8 @@ impl Simulation {
                 facing_after_turn(snapshot_state.facing, turn_left_active, turn_right_active);
             let wants_move = evaluation.actions[action_index(ActionType::MoveForward)];
             let wants_reproduce = evaluation.actions[action_index(ActionType::Reproduce)];
+            let move_confidence =
+                evaluation.action_activations[action_index(ActionType::MoveForward)];
             let move_target = if wants_move {
                 let target = hex_neighbor((snapshot_state.q, snapshot_state.r), facing_after_turn);
                 snapshot.in_bounds(target.0, target.1).then_some(target)
@@ -203,7 +203,7 @@ impl Simulation {
                 wants_move,
                 wants_reproduce,
                 move_target,
-                move_confidence: snapshot_state.move_confidence,
+                move_confidence,
                 synapse_ops: evaluation.synapse_ops,
             });
         }
@@ -400,10 +400,7 @@ impl Simulation {
         successful_reproductions
     }
 
-    fn lifecycle_phase(
-        &mut self,
-        spawn_requests: &mut Vec<SpawnRequest>,
-    ) -> (u64, Vec<RemovedOrganismPosition>) {
+    fn lifecycle_phase(&mut self) -> (u64, Vec<RemovedOrganismPosition>) {
         self.organisms.sort_by_key(|organism| organism.id);
 
         let mut starved_ids = Vec::new();
@@ -434,11 +431,6 @@ impl Simulation {
             .retain(|organism| !starved_set.contains(&organism.id));
         self.rebuild_occupancy();
 
-        for _ in &starved_ids {
-            spawn_requests.push(SpawnRequest {
-                kind: SpawnRequestKind::StarvationReplacement,
-            });
-        }
         (starved_ids.len() as u64, starved_positions)
     }
 }

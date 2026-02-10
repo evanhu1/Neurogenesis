@@ -41,10 +41,20 @@ function toWorldSpace(
   };
 }
 
+export function computeBaseHexSize(
+  canvasWidth: number,
+  canvasHeight: number,
+  worldWidth: number,
+): number {
+  const widthFactor = SQRT_3 * (1.5 * Math.max(0, worldWidth - 1) + 1);
+  const heightFactor = 1.5 * Math.max(0, worldWidth - 1) + 2;
+  return Math.min(canvasWidth / widthFactor, canvasHeight / heightFactor);
+}
+
 function buildHexLayout(canvasWidth: number, canvasHeight: number, worldWidth: number): HexLayout {
   const widthFactor = SQRT_3 * (1.5 * Math.max(0, worldWidth - 1) + 1);
   const heightFactor = 1.5 * Math.max(0, worldWidth - 1) + 2;
-  const size = Math.min(canvasWidth / widthFactor, canvasHeight / heightFactor);
+  const size = computeBaseHexSize(canvasWidth, canvasHeight, worldWidth);
 
   const worldPixelWidth = widthFactor * size;
   const worldPixelHeight = heightFactor * size;
