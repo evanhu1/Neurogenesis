@@ -3,11 +3,11 @@ use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right};
 use crate::Simulation;
 use crate::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 use sim_protocol::{
-    ActionType, FacingDirection, FitnessStats, OrganismId, OrganismMove, OrganismState,
+    ActionType, FacingDirection, OrganismId, OrganismMove, OrganismState, SpeciesId,
     RemovedOrganismPosition, TickDelta,
 };
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Clone, Copy)]
 struct SnapshotOrganismState {
@@ -444,36 +444,18 @@ impl Simulation {
 
     pub(crate) fn refresh_population_metrics(&mut self) {
         self.metrics.organisms = self.organisms.len() as u32;
-        self.metrics.fitness = self.compute_fitness_stats();
+        self.metrics.species_counts = self.compute_species_counts();
     }
 
-    fn compute_fitness_stats(&self) -> FitnessStats {
-        if self.organisms.is_empty() {
-            return FitnessStats::default();
+    fn compute_species_counts(&self) -> BTreeMap<SpeciesId, u32> {
+        let mut species_counts = BTreeMap::new();
+        for organism in &self.organisms {
+            species_counts
+                .entry(organism.species_id)
+                .and_modify(|count| *count = count.saturating_add(1))
+                .or_insert(1);
         }
-
-        let mut fitnesses: Vec<u64> = self
-            .organisms
-            .iter()
-            .map(|organism| organism.age_turns)
-            .collect();
-        fitnesses.sort_unstable();
-
-        let count = fitnesses.len();
-        let total_fitness: u64 = fitnesses.iter().sum();
-        let mean_fitness = total_fitness as f64 / count as f64;
-        let median_fitness = if count % 2 == 1 {
-            fitnesses[count / 2] as f64
-        } else {
-            (fitnesses[count / 2 - 1] as f64 + fitnesses[count / 2] as f64) / 2.0
-        };
-        let max_fitness = fitnesses[count - 1];
-
-        FitnessStats {
-            mean_fitness,
-            median_fitness,
-            max_fitness,
-        }
+        species_counts
     }
 }
 

@@ -1,8 +1,9 @@
 import type { ChangeEvent } from 'react';
+import type { SpeciesPopulationPoint } from '../../sim/hooks/useSimulationSession';
 
 type ControlPanelProps = {
   sessionMeta: string;
-  fitnessStatsText: string;
+  speciesPopulationHistory: SpeciesPopulationPoint[];
   metricsText: string;
   errorText: string | null;
   isRunning: boolean;
@@ -17,7 +18,7 @@ type ControlPanelProps = {
 
 export function ControlPanel({
   sessionMeta,
-  fitnessStatsText,
+  speciesPopulationHistory,
   metricsText,
   errorText,
   isRunning,
@@ -85,9 +86,7 @@ export function ControlPanel({
       </div>
 
       <h3 className="mt-3 text-sm font-semibold uppercase tracking-wide text-ink/80">Fitness Stats</h3>
-      <pre className="mt-2 whitespace-pre-wrap rounded-xl bg-slate-100/80 p-3 font-mono text-xs">
-        {fitnessStatsText}
-      </pre>
+      <SpeciesPopulationChart history={speciesPopulationHistory} />
 
       <h3 className="mt-3 text-sm font-semibold uppercase tracking-wide text-ink/80">Runtime Metrics</h3>
       <pre className="mt-3 whitespace-pre-wrap rounded-xl bg-slate-100/80 p-3 font-mono text-xs">
@@ -116,5 +115,132 @@ function ControlButton({ label, onClick }: ControlButtonProps) {
     >
       {label}
     </button>
+  );
+}
+
+const CHART_COLORS = ['#0f766e', '#1d4ed8', '#b45309', '#dc2626', '#7e22ce', '#be185d'];
+
+function SpeciesPopulationChart({ history }: { history: SpeciesPopulationPoint[] }) {
+  if (history.length === 0) {
+    return (
+      <div className="mt-2 rounded-xl bg-slate-100/80 p-3 font-mono text-xs text-ink/70">
+        No species population history yet
+      </div>
+    );
+  }
+
+  const speciesIds = Array.from(
+    history.reduce((set, point) => {
+      for (const speciesId of Object.keys(point.speciesCounts)) {
+        set.add(speciesId);
+      }
+      return set;
+    }, new Set<string>()),
+  ).sort((a, b) => Number(a) - Number(b));
+
+  if (speciesIds.length === 0) {
+    return (
+      <div className="mt-2 rounded-xl bg-slate-100/80 p-3 font-mono text-xs text-ink/70">
+        No species data available
+      </div>
+    );
+  }
+
+  const chartWidth = 300;
+  const chartHeight = 180;
+  const padLeft = 36;
+  const padRight = 12;
+  const padTop = 10;
+  const padBottom = 24;
+  const innerWidth = chartWidth - padLeft - padRight;
+  const innerHeight = chartHeight - padTop - padBottom;
+
+  const maxCount = Math.max(
+    1,
+    ...history.flatMap((point) =>
+      speciesIds.map((speciesId) => point.speciesCounts[speciesId] ?? 0),
+    ),
+  );
+
+  const turnStart = history[0]?.turn ?? 0;
+  const turnEnd = history[history.length - 1]?.turn ?? 0;
+
+  return (
+    <div className="mt-2 rounded-xl bg-slate-100/80 p-3">
+      <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="h-44 w-full rounded-lg bg-white/70">
+        <title>Species population over turns</title>
+        <line
+          x1={padLeft}
+          y1={padTop}
+          x2={padLeft}
+          y2={chartHeight - padBottom}
+          stroke="#94a3b8"
+          strokeWidth={1}
+        />
+        <line
+          x1={padLeft}
+          y1={chartHeight - padBottom}
+          x2={chartWidth - padRight}
+          y2={chartHeight - padBottom}
+          stroke="#94a3b8"
+          strokeWidth={1}
+        />
+        {speciesIds.map((speciesId, speciesIdx) => {
+          const points = history
+            .map((point, index) => {
+              const x =
+                history.length === 1
+                  ? padLeft + innerWidth / 2
+                  : padLeft + (index / (history.length - 1)) * innerWidth;
+              const count = point.speciesCounts[speciesId] ?? 0;
+              const y = padTop + ((maxCount - count) / maxCount) * innerHeight;
+              return `${x.toFixed(2)},${y.toFixed(2)}`;
+            })
+            .join(' ');
+
+          return (
+            <polyline
+              key={speciesId}
+              points={points}
+              fill="none"
+              stroke={CHART_COLORS[speciesIdx % CHART_COLORS.length]}
+              strokeWidth={2.25}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          );
+        })}
+        <text x={4} y={padTop + 8} className="fill-slate-500 text-[10px] font-mono">
+          {maxCount}
+        </text>
+        <text
+          x={padLeft}
+          y={chartHeight - 6}
+          className="fill-slate-500 text-[10px] font-mono"
+          textAnchor="start"
+        >
+          {turnStart}
+        </text>
+        <text
+          x={chartWidth - padRight}
+          y={chartHeight - 6}
+          className="fill-slate-500 text-[10px] font-mono"
+          textAnchor="end"
+        >
+          {turnEnd}
+        </text>
+      </svg>
+      <div className="mt-2 flex flex-wrap gap-2 font-mono text-[11px] text-ink/80">
+        {speciesIds.map((speciesId, speciesIdx) => (
+          <div key={speciesId} className="flex items-center gap-1 rounded bg-white/70 px-2 py-1">
+            <span
+              className="inline-block h-2.5 w-2.5 rounded-full"
+              style={{ backgroundColor: CHART_COLORS[speciesIdx % CHART_COLORS.length] }}
+            />
+            <span>{`species ${speciesId}`}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

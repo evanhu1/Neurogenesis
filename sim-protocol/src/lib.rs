@@ -190,13 +190,6 @@ pub struct OrganismState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct FitnessStats {
-    pub mean_fitness: f64,
-    pub median_fitness: f64,
-    pub max_fitness: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct MetricsSnapshot {
     pub turns: u64,
     pub organisms: u32,
@@ -205,7 +198,7 @@ pub struct MetricsSnapshot {
     pub consumptions_last_turn: u64,
     pub reproductions_last_turn: u64,
     pub starvations_last_turn: u64,
-    pub fitness: FitnessStats,
+    pub species_counts: BTreeMap<SpeciesId, u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

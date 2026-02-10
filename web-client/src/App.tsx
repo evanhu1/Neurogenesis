@@ -3,7 +3,6 @@ import { ControlPanel } from './features/layout/components/ControlPanel';
 import { InspectorPanel } from './features/layout/components/InspectorPanel';
 import { useSimulationSession } from './features/sim/hooks/useSimulationSession';
 import {
-  formatFitnessStats,
   formatFocusedStats,
   formatFocusMeta,
   formatMetrics,
@@ -16,10 +15,6 @@ export default function App() {
 
   const sessionMeta = useMemo(() => formatSessionMeta(simulation.session), [simulation.session]);
   const metricsText = useMemo(() => formatMetrics(simulation.snapshot), [simulation.snapshot]);
-  const fitnessStatsText = useMemo(
-    () => formatFitnessStats(simulation.snapshot),
-    [simulation.snapshot],
-  );
   const focusMetaText = useMemo(
     () => formatFocusMeta(simulation.focusedOrganismId, simulation.focusedOrganism),
     [simulation.focusedOrganism, simulation.focusedOrganismId],
@@ -34,7 +29,7 @@ export default function App() {
       <div className="mx-auto grid h-full max-w-[1720px] gap-4 xl:grid-cols-[320px_minmax(480px,1fr)_460px]">
         <ControlPanel
           sessionMeta={sessionMeta}
-          fitnessStatsText={fitnessStatsText}
+          speciesPopulationHistory={simulation.speciesPopulationHistory}
           metricsText={metricsText}
           errorText={simulation.errorText}
           isRunning={simulation.isRunning}

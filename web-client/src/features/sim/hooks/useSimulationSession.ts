@@ -18,9 +18,15 @@ import { clearPersistedSessionId, loadPersistedSessionId, persistSessionId } fro
 type DeadCellFlashState = { turn: number; cells: Array<{ q: number; r: number }> } | null;
 type BornCellFlashState = { turn: number; cells: Array<{ q: number; r: number }> } | null;
 
+export type SpeciesPopulationPoint = {
+  turn: number;
+  speciesCounts: Record<string, number>;
+};
+
 export type SimulationSessionState = {
   session: SessionMetadata | null;
   snapshot: WorldSnapshot | null;
+  speciesPopulationHistory: SpeciesPopulationPoint[];
   focusedOrganismId: number | null;
   focusedOrganism: OrganismState | null;
   isRunning: boolean;
@@ -40,6 +46,9 @@ export type SimulationSessionState = {
 export function useSimulationSession(): SimulationSessionState {
   const [session, setSession] = useState<SessionMetadata | null>(null);
   const [snapshot, setSnapshot] = useState<WorldSnapshot | null>(null);
+  const [speciesPopulationHistory, setSpeciesPopulationHistory] = useState<
+    SpeciesPopulationPoint[]
+  >([]);
   const [focusedOrganismId, setFocusedOrganismId] = useState<number | null>(null);
   const [focusedOrganism, setFocusedOrganism] = useState<OrganismState | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -50,6 +59,21 @@ export function useSimulationSession(): SimulationSessionState {
 
   const wsRef = useRef<WebSocket | null>(null);
   const request = useMemo(() => createSimHttpClient(apiBase), []);
+
+  const buildSpeciesPopulationPoint = useCallback(
+    (sourceSnapshot: WorldSnapshot): SpeciesPopulationPoint => {
+      const speciesCounts = Object.fromEntries(
+        Object.entries(sourceSnapshot.metrics.species_counts).sort(
+          ([speciesA], [speciesB]) => Number(speciesA) - Number(speciesB),
+        ),
+      );
+      return {
+        turn: sourceSnapshot.turn,
+        speciesCounts,
+      };
+    },
+    [],
+  );
 
   const handleServerEvent = useCallback((event: ServerEvent) => {
     switch (event.type) {
@@ -274,6 +298,33 @@ export function useSimulationSession(): SimulationSessionState {
   }, [snapshot, focusedOrganismId]);
 
   useEffect(() => {
+    if (!snapshot) {
+      setSpeciesPopulationHistory([]);
+      return;
+    }
+
+    const point = buildSpeciesPopulationPoint(snapshot);
+    setSpeciesPopulationHistory((previous) => {
+      const latest = previous[previous.length - 1];
+      if (!latest) {
+        return [point];
+      }
+
+      if (point.turn < latest.turn) {
+        return [point];
+      }
+
+      if (point.turn === latest.turn) {
+        const next = previous.slice();
+        next[next.length - 1] = point;
+        return next;
+      }
+
+      return previous.concat(point);
+    });
+  }, [buildSpeciesPopulationPoint, snapshot]);
+
+  useEffect(() => {
     let cancelled = false;
 
     const restoreOrCreateSession = async () => {
@@ -316,6 +367,7 @@ export function useSimulationSession(): SimulationSessionState {
   return {
     session,
     snapshot,
+    speciesPopulationHistory,
     focusedOrganismId,
     focusedOrganism,
     isRunning,

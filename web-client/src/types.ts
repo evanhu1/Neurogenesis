@@ -84,12 +84,6 @@ export type OrganismState = {
   brain: BrainState;
 };
 
-export type FitnessStats = {
-  mean_fitness: number;
-  median_fitness: number;
-  max_fitness: number;
-};
-
 export type MetricsSnapshot = {
   turns: number;
   organisms: number;
@@ -98,7 +92,7 @@ export type MetricsSnapshot = {
   consumptions_last_turn: number;
   reproductions_last_turn: number;
   starvations_last_turn: number;
-  fitness: FitnessStats;
+  species_counts: Record<string, number>;
 };
 
 export type WorldSnapshot = {

@@ -19,16 +19,6 @@ export function formatMetrics(snapshot: WorldSnapshot | null): string {
   ].join('\n');
 }
 
-export function formatFitnessStats(snapshot: WorldSnapshot | null): string {
-  if (!snapshot) return 'No fitness stats';
-  const fitness = snapshot.metrics.fitness;
-  return [
-    `mean_fitness=${fitness.mean_fitness.toFixed(2)}`,
-    `median_fitness=${fitness.median_fitness.toFixed(2)}`,
-    `max_fitness=${fitness.max_fitness}`,
-  ].join('\n');
-}
-
 export function formatFocusMeta(
   focusedOrganismId: number | null,
   focusedOrganism: OrganismState | null,
