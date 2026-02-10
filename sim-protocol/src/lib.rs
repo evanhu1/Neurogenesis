@@ -110,6 +110,8 @@ pub struct NeuronState {
     pub neuron_type: NeuronType,
     pub bias: f32,
     pub activation: f32,
+    #[serde(default)]
+    pub is_active: bool,
     pub parent_ids: Vec<NeuronId>,
 }
 
@@ -130,7 +132,6 @@ pub struct InterNeuronState {
 pub struct ActionNeuronState {
     pub neuron: NeuronState,
     pub action_type: ActionType,
-    pub is_active: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -146,10 +147,18 @@ pub struct OrganismState {
     pub id: OrganismId,
     pub q: i32,
     pub r: i32,
+    pub age_turns: u64,
     pub facing: FacingDirection,
     pub turns_since_last_meal: u32,
     pub meals_eaten: u64,
     pub brain: BrainState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct EvolutionStats {
+    pub mean_age_turns: f64,
+    pub median_age_turns: f64,
+    pub max_age_turns: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -161,6 +170,7 @@ pub struct MetricsSnapshot {
     pub meals_last_turn: u64,
     pub starvations_last_turn: u64,
     pub births_last_turn: u64,
+    pub evolution: EvolutionStats,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -187,11 +197,18 @@ pub struct OrganismMove {
     pub to: (i32, i32),
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RemovedOrganismPosition {
+    pub id: OrganismId,
+    pub q: i32,
+    pub r: i32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct TickDelta {
     pub turn: u64,
     pub moves: Vec<OrganismMove>,
-    pub removed: Vec<OrganismId>,
+    pub removed_positions: Vec<RemovedOrganismPosition>,
     pub spawned: Vec<OrganismState>,
     pub metrics: MetricsSnapshot,
 }

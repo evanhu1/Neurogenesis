@@ -1,9 +1,8 @@
-use rand::Rng;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use sim_protocol::{
-    FacingDirection, MetricsSnapshot, OccupancyCell, OrganismId, OrganismState, TickDelta,
-    WorldConfig, WorldSnapshot,
+    MetricsSnapshot, OccupancyCell, OrganismId, OrganismState, TickDelta, WorldConfig,
+    WorldSnapshot,
 };
 use std::cmp::Ordering;
 use thiserror::Error;
@@ -71,7 +70,7 @@ impl Simulation {
         };
 
         sim.spawn_initial_population();
-        sim.metrics.organisms = sim.organisms.len() as u32;
+        sim.refresh_population_metrics();
         Ok(sim)
     }
 
@@ -117,7 +116,7 @@ impl Simulation {
         self.occupancy.fill(None);
         self.metrics = MetricsSnapshot::default();
         self.spawn_initial_population();
-        self.metrics.organisms = self.organisms.len() as u32;
+        self.refresh_population_metrics();
     }
 
     pub fn step_n(&mut self, count: u32) -> Vec<TickDelta> {
@@ -154,99 +153,6 @@ impl Simulation {
 
     pub fn metrics(&self) -> &MetricsSnapshot {
         &self.metrics
-    }
-
-    fn debug_assert_consistent_state(&self) {
-        if cfg!(debug_assertions) {
-            debug_assert_eq!(
-                self.organisms.len(),
-                self.occupancy.iter().flatten().count(),
-                "occupancy vector count should match organism count",
-            );
-            for organism in &self.organisms {
-                let idx = self
-                    .cell_index(organism.q, organism.r)
-                    .expect("organism position must remain in bounds");
-                debug_assert_eq!(
-                    self.occupancy[idx],
-                    Some(organism.id),
-                    "occupancy must point at organism occupying that cell",
-                );
-            }
-        }
-    }
-
-    fn random_bias(&mut self) -> f32 {
-        self.rng.random_range(-1.0..1.0)
-    }
-
-    fn random_facing(&mut self) -> FacingDirection {
-        FacingDirection::ALL[self.rng.random_range(0..FacingDirection::ALL.len())]
-    }
-
-    fn add_organism(&mut self, organism: OrganismState) -> bool {
-        let Some(cell_idx) = self.cell_index(organism.q, organism.r) else {
-            return false;
-        };
-        if self.occupancy[cell_idx].is_some() {
-            return false;
-        }
-
-        self.occupancy[cell_idx] = Some(organism.id);
-        self.organisms.push(organism);
-        true
-    }
-
-    fn rebuild_occupancy(&mut self) {
-        self.occupancy.fill(None);
-        for organism in &self.organisms {
-            let idx = self
-                .cell_index(organism.q, organism.r)
-                .expect("organism must remain in bounds");
-            debug_assert!(self.occupancy[idx].is_none());
-            self.occupancy[idx] = Some(organism.id);
-        }
-    }
-
-    fn alloc_organism_id(&mut self) -> OrganismId {
-        let id = OrganismId(self.next_organism_id);
-        self.next_organism_id += 1;
-        id
-    }
-
-    fn occupant_at(&self, q: i32, r: i32) -> Option<OrganismId> {
-        let idx = self.cell_index(q, r)?;
-        self.occupancy[idx]
-    }
-
-    fn in_bounds(&self, q: i32, r: i32) -> bool {
-        let width = self.config.world_width as i32;
-        q >= 0 && r >= 0 && q < width && r < width
-    }
-
-    fn cell_index(&self, q: i32, r: i32) -> Option<usize> {
-        if !self.in_bounds(q, r) {
-            return None;
-        }
-        let width = self.config.world_width as usize;
-        Some(r as usize * width + q as usize)
-    }
-
-    fn target_population(&self) -> usize {
-        (self.config.num_organisms as usize).min(world_capacity(self.config.world_width))
-    }
-
-    fn empty_positions(&self) -> Vec<(i32, i32)> {
-        let width = self.config.world_width as i32;
-        let mut positions = Vec::new();
-        for r in 0..width {
-            for q in 0..width {
-                if self.occupant_at(q, r).is_none() {
-                    positions.push((q, r));
-                }
-            }
-        }
-        positions
     }
 }
 

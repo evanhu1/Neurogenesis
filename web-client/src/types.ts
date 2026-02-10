@@ -28,6 +28,7 @@ export type NeuronState = {
   neuron_type: 'Sensory' | 'Inter' | 'Action' | string;
   bias: number;
   activation: number;
+  is_active: boolean;
   parent_ids: Array<number | { 0: number }>;
 };
 
@@ -45,7 +46,6 @@ export type InterNeuronState = {
 export type ActionNeuronState = {
   neuron: NeuronState;
   action_type: string;
-  is_active: boolean;
 };
 
 export type BrainState = {
@@ -67,10 +67,17 @@ export type OrganismState = {
   id: OrganismId;
   q: number;
   r: number;
+  age_turns: number;
   facing: FacingDirection;
   turns_since_last_meal: number;
   meals_eaten: number;
   brain: BrainState;
+};
+
+export type EvolutionStats = {
+  mean_age_turns: number;
+  median_age_turns: number;
+  max_age_turns: number;
 };
 
 export type MetricsSnapshot = {
@@ -81,6 +88,7 @@ export type MetricsSnapshot = {
   meals_last_turn: number;
   starvations_last_turn: number;
   births_last_turn: number;
+  evolution: EvolutionStats;
 };
 
 export type WorldSnapshot = {
@@ -106,7 +114,7 @@ export type CreateSessionResponse = {
 export type TickDelta = {
   turn: number;
   moves: Array<{ id: OrganismId; from: [number, number]; to: [number, number] }>;
-  removed: OrganismId[];
+  removed_positions: Array<{ id: OrganismId; q: number; r: number }>;
   spawned: OrganismState[];
   metrics: MetricsSnapshot;
 };

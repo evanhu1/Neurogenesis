@@ -2,7 +2,7 @@ use crate::Simulation;
 use crate::{world_capacity, SpawnRequest, SpawnRequestKind};
 use rand::seq::SliceRandom;
 use rand::Rng;
-use sim_protocol::OrganismState;
+use sim_protocol::{FacingDirection, OrganismId, OrganismState};
 use std::f64::consts::PI;
 
 impl Simulation {
@@ -19,6 +19,7 @@ impl Simulation {
                     id,
                     q,
                     r,
+                    age_turns: 0,
                     facing: self.random_facing(),
                     turns_since_last_meal: 0,
                     meals_eaten: 0,
@@ -40,6 +41,7 @@ impl Simulation {
                         id,
                         q,
                         r,
+                        age_turns: 0,
                         facing: parent_state.facing,
                         turns_since_last_meal: 0,
                         meals_eaten: 0,
@@ -142,6 +144,7 @@ impl Simulation {
                 id,
                 q,
                 r,
+                age_turns: 0,
                 facing,
                 turns_since_last_meal: 0,
                 meals_eaten: 0,
@@ -152,5 +155,32 @@ impl Simulation {
         }
 
         self.organisms.sort_by_key(|organism| organism.id);
+    }
+
+    fn random_facing(&mut self) -> FacingDirection {
+        FacingDirection::ALL[self.rng.random_range(0..FacingDirection::ALL.len())]
+    }
+
+    fn alloc_organism_id(&mut self) -> OrganismId {
+        let id = OrganismId(self.next_organism_id);
+        self.next_organism_id += 1;
+        id
+    }
+
+    fn target_population(&self) -> usize {
+        (self.config.num_organisms as usize).min(world_capacity(self.config.world_width))
+    }
+
+    fn empty_positions(&self) -> Vec<(i32, i32)> {
+        let width = self.config.world_width as i32;
+        let mut positions = Vec::new();
+        for r in 0..width {
+            for q in 0..width {
+                if self.occupant_at(q, r).is_none() {
+                    positions.push((q, r));
+                }
+            }
+        }
+        positions
     }
 }

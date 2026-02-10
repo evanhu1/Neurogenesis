@@ -2,8 +2,8 @@ use super::*;
 use crate::brain::{look_sensor_value, make_action_neuron, make_sensory_neuron};
 use crate::turn::facing_after_turn;
 use sim_protocol::{
-    ActionType, BrainState, InterNeuronState, NeuronId, NeuronState, NeuronType,
-    SensoryReceptorType,
+    ActionType, BrainState, FacingDirection, InterNeuronState, NeuronId, NeuronState, NeuronType,
+    SensoryReceptorType, SynapseEdge,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -26,39 +26,47 @@ fn forced_brain(
     confidence: f32,
 ) -> BrainState {
     let sensory = vec![make_sensory_neuron(0, SensoryReceptorType::Look)];
+    let inter_id = NeuronId(1000);
+    let inter_bias = 1.0;
+    let inter_synapses = vec![
+        SynapseEdge {
+            post_neuron_id: NeuronId(2000),
+            weight: if wants_move { 8.0 } else { -8.0 },
+        },
+        SynapseEdge {
+            post_neuron_id: NeuronId(2001),
+            weight: if turn_left { 8.0 } else { -8.0 },
+        },
+        SynapseEdge {
+            post_neuron_id: NeuronId(2002),
+            weight: if turn_right { 8.0 } else { -8.0 },
+        },
+    ];
     let inter = vec![InterNeuronState {
         neuron: NeuronState {
-            neuron_id: NeuronId(1000),
+            neuron_id: inter_id,
             neuron_type: NeuronType::Inter,
-            bias: 0.0,
+            bias: inter_bias,
             activation: confidence,
+            is_active: confidence > 0.0,
             parent_ids: Vec::new(),
         },
-        synapses: Vec::new(),
+        synapses: inter_synapses,
     }];
-    let action = vec![
-        make_action_neuron(
-            2000,
-            ActionType::MoveForward,
-            if wants_move { 1.0 } else { -1.0 },
-        ),
-        make_action_neuron(
-            2001,
-            ActionType::TurnLeft,
-            if turn_left { 1.0 } else { -1.0 },
-        ),
-        make_action_neuron(
-            2002,
-            ActionType::TurnRight,
-            if turn_right { 1.0 } else { -1.0 },
-        ),
+    let mut action = vec![
+        make_action_neuron(2000, ActionType::MoveForward),
+        make_action_neuron(2001, ActionType::TurnLeft),
+        make_action_neuron(2002, ActionType::TurnRight),
     ];
+    for action_neuron in &mut action {
+        action_neuron.neuron.parent_ids = vec![inter_id];
+    }
 
     BrainState {
         sensory,
         inter,
         action,
-        synapse_count: 0,
+        synapse_count: 3,
     }
 }
 
@@ -77,6 +85,7 @@ fn make_organism(
         id: OrganismId(id),
         q,
         r,
+        age_turns: 0,
         facing,
         turns_since_last_meal,
         meals_eaten: 0,
@@ -106,7 +115,7 @@ fn configure_sim(sim: &mut Simulation, mut organisms: Vec<OrganismState>) {
     }
     sim.turn = 0;
     sim.metrics = MetricsSnapshot::default();
-    sim.metrics.organisms = sim.organisms.len() as u32;
+    sim.refresh_population_metrics();
 }
 
 fn tick_once(sim: &mut Simulation) -> TickDelta {
@@ -147,6 +156,40 @@ fn deterministic_seed() {
         compare_snapshots(&a.snapshot(), &b.snapshot()),
         Ordering::Equal
     );
+}
+
+#[test]
+fn evolution_stats_track_mean_median_and_max_age() {
+    let cfg = test_config(4, 4);
+    let mut sim = Simulation::new(cfg, 99).expect("simulation should initialize");
+
+    configure_sim(
+        &mut sim,
+        vec![
+            OrganismState {
+                age_turns: 2,
+                ..make_organism(0, 0, 0, FacingDirection::East, false, false, false, 0.1, 0)
+            },
+            OrganismState {
+                age_turns: 4,
+                ..make_organism(1, 1, 0, FacingDirection::East, false, false, false, 0.1, 0)
+            },
+            OrganismState {
+                age_turns: 6,
+                ..make_organism(2, 2, 0, FacingDirection::East, false, false, false, 0.1, 0)
+            },
+            OrganismState {
+                age_turns: 10,
+                ..make_organism(3, 3, 0, FacingDirection::East, false, false, false, 0.1, 0)
+            },
+        ],
+    );
+
+    let _ = tick_once(&mut sim);
+    let evolution = &sim.metrics().evolution;
+    assert_eq!(evolution.max_age_turns, 11);
+    assert!((evolution.mean_age_turns - 6.5).abs() < f64::EPSILON);
+    assert!((evolution.median_age_turns - 6.0).abs() < f64::EPSILON);
 }
 
 #[test]
@@ -465,7 +508,10 @@ fn starvation_and_reproduction_interact_in_same_turn() {
     assert_eq!(delta.metrics.meals_last_turn, 1);
     assert_eq!(delta.metrics.starvations_last_turn, 1);
     assert_eq!(delta.metrics.births_last_turn, 2);
-    assert_eq!(delta.removed, vec![OrganismId(1), OrganismId(2)]);
+    assert_eq!(
+        delta.removed_positions.iter().map(|entry| entry.id).collect::<Vec<_>>(),
+        vec![OrganismId(1), OrganismId(2)]
+    );
     assert_eq!(delta.spawned.len(), 2);
     assert_eq!(sim.organisms.len(), 4);
     let predator = sim

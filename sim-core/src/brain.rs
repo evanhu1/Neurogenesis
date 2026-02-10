@@ -7,6 +7,8 @@ use sim_protocol::{
 };
 use std::collections::HashMap;
 
+const ACTION_ACTIVATION_THRESHOLD: f32 = 0.5;
+
 impl Simulation {
     pub(crate) fn mutate_brain(&mut self, brain: &mut BrainState) {
         if self.rng.random::<f32>() > self.config.mutation_chance {
@@ -50,12 +52,7 @@ impl Simulation {
                 remove_neuron_references(brain, removed_id);
             }
             _ => {
-                let mutate_action = self.rng.random::<f32>() < 0.5;
-                if mutate_action && !brain.action.is_empty() {
-                    let idx = self.rng.random_range(0..brain.action.len());
-                    let bias = &mut brain.action[idx].neuron.bias;
-                    *bias = (*bias + self.rng.random_range(-1.0..1.0)).clamp(-8.0, 8.0);
-                } else if !brain.inter.is_empty() {
+                if !brain.inter.is_empty() {
                     let idx = self.rng.random_range(0..brain.inter.len());
                     let bias = &mut brain.inter[idx].neuron.bias;
                     *bias = (*bias + self.rng.random_range(-1.0..1.0)).clamp(-8.0, 8.0);
@@ -104,11 +101,7 @@ impl Simulation {
 
         let mut action = Vec::new();
         for (idx, action_type) in ActionType::ALL.into_iter().enumerate() {
-            action.push(make_action_neuron(
-                2000 + idx as u32,
-                action_type,
-                self.random_bias(),
-            ));
+            action.push(make_action_neuron(2000 + idx as u32, action_type));
         }
 
         let mut brain = BrainState {
@@ -130,6 +123,10 @@ impl Simulation {
 
         brain.synapse_count = count_synapses(&brain) as u32;
         brain
+    }
+
+    fn random_bias(&mut self) -> f32 {
+        self.rng.random_range(-1.0..1.0)
     }
 }
 
@@ -156,6 +153,7 @@ fn make_neuron(id: NeuronId, neuron_type: NeuronType, bias: f32) -> NeuronState 
         neuron_type,
         bias,
         activation: 0.0,
+        is_active: false,
         parent_ids: Vec::new(),
     }
 }
@@ -171,11 +169,10 @@ pub(crate) fn make_sensory_neuron(
     }
 }
 
-pub(crate) fn make_action_neuron(id: u32, action_type: ActionType, bias: f32) -> ActionNeuronState {
+pub(crate) fn make_action_neuron(id: u32, action_type: ActionType) -> ActionNeuronState {
     ActionNeuronState {
-        neuron: make_neuron(NeuronId(id), NeuronType::Action, bias),
+        neuron: make_neuron(NeuronId(id), NeuronType::Action, DEFAULT_BIAS),
         action_type,
-        is_active: false,
     }
 }
 
@@ -199,7 +196,7 @@ pub(crate) fn evaluate_brain(
     let mut result = BrainEvaluation::default();
 
     for action in &mut brain.action {
-        action.is_active = false;
+        action.neuron.is_active = false;
     }
 
     let look = look_sensor_value(position, facing, organism_id, world_width, occupancy);
@@ -207,6 +204,7 @@ pub(crate) fn evaluate_brain(
         sensory.neuron.activation = match sensory.receptor_type {
             SensoryReceptorType::Look => look,
         };
+        sensory.neuron.is_active = sensory.neuron.activation > 0.0;
     }
 
     let inter_index: HashMap<NeuronId, usize> = brain
@@ -254,13 +252,10 @@ pub(crate) fn evaluate_brain(
 
     for (idx, neuron) in brain.inter.iter_mut().enumerate() {
         neuron.neuron.activation = inter_inputs[idx].tanh();
+        neuron.neuron.is_active = neuron.neuron.activation > 0.0;
     }
 
-    let mut action_inputs: Vec<f32> = brain
-        .action
-        .iter()
-        .map(|neuron| neuron.neuron.bias)
-        .collect();
+    let mut action_inputs: Vec<f32> = vec![0.0; brain.action.len()];
 
     for sensory in &brain.sensory {
         result.synapse_ops += accumulate_weighted_inputs(
@@ -282,13 +277,23 @@ pub(crate) fn evaluate_brain(
 
     for action in &mut brain.action {
         if let Some(idx) = action_index_map.get(&action.neuron.neuron_id) {
-            action.neuron.activation = action_inputs[*idx].tanh();
-            action.is_active = action.neuron.activation > 0.0;
-            result.actions[action_index(action.action_type)] = action.is_active;
+            action.neuron.activation = sigmoid(action_inputs[*idx]);
+            action.neuron.is_active = action.neuron.activation > ACTION_ACTIVATION_THRESHOLD;
+            result.actions[action_index(action.action_type)] = action.neuron.is_active;
         }
     }
 
     result
+}
+
+fn sigmoid(x: f32) -> f32 {
+    if x >= 0.0 {
+        let z = (-x).exp();
+        1.0 / (1.0 + z)
+    } else {
+        let z = x.exp();
+        z / (1.0 + z)
+    }
 }
 
 fn accumulate_weighted_inputs(

@@ -33,15 +33,6 @@ Fields:
 - `center_spawn_min_fraction`
 - `center_spawn_max_fraction`
 
-Validation:
-
-- `world_width > 0`
-- `num_organisms > 0`
-- `turns_to_starve >= 1`
-- `mutation_chance` is within `[0,1]`
-- center spawn fractions are within `[0,1]`
-- `center_spawn_min_fraction < center_spawn_max_fraction`
-
 ## 3. Turn Runner Pipeline
 
 Each turn is executed centrally in phases.
@@ -138,10 +129,13 @@ After turn commit/lifecycle/spawn:
 ## 4. Brain Evaluation Model
 
 - Sensory receptors: currently `Look` only.
-- `Look` = `1.0` when faced neighbor is occupied by another organism,
-  otherwise `0.0`; out-of-bounds returns `0.0`.
-- Inter/action activations use tanh updates.
-- Action neuron active when activation `> 0.0`.
+- `Look` = `1.0` when faced neighbor is occupied by another organism, otherwise
+  `0.0`; out-of-bounds returns `0.0`.
+- Inter activations use tanh updates.
+- Action activations use sigmoid updates.
+- `NeuronState.is_active` is server-authored.
+- Sensory/inter neuron active when activation `> 0.0`.
+- Action neuron active when activation `> 0.5`.
 - `synapse_ops_last_turn` counts traversed edge contributions during intent
   evaluation.
 
@@ -185,7 +179,7 @@ Weights remain clamped to `[-8.0, 8.0]`.
 
 - `turn`
 - `moves` (`OrganismMove[]`)
-- `removed` (`OrganismId[]`)
+- `removed_positions` (`{ id, q, r }[]`)
 - `spawned` (`OrganismState[]`)
 - `metrics`
 
@@ -206,7 +200,7 @@ waiting for full snapshots.
 ### Web Client
 
 - Applies tick deltas by:
-  - removing `removed` IDs
+  - removing IDs from `removed_positions`
   - applying committed `moves`
   - appending `spawned`
   - sorting organisms by ID

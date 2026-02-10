@@ -3,7 +3,8 @@ use crate::grid::{hex_neighbor, rotate_left, rotate_right};
 use crate::Simulation;
 use crate::{SpawnRequest, SpawnRequestKind};
 use sim_protocol::{
-    ActionType, FacingDirection, OrganismId, OrganismMove, OrganismState, TickDelta,
+    ActionType, EvolutionStats, FacingDirection, OrganismId, OrganismMove, OrganismState,
+    RemovedOrganismPosition, TickDelta,
 };
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -85,7 +86,7 @@ struct MoveResolution {
 #[derive(Default)]
 struct CommitResult {
     moves: Vec<OrganismMove>,
-    removed: Vec<OrganismId>,
+    removed_positions: Vec<RemovedOrganismPosition>,
     meals: u64,
     eaters: HashSet<OrganismId>,
 }
@@ -99,25 +100,29 @@ impl Simulation {
         let resolutions = self.resolve_moves(&snapshot, &intents);
         let mut spawn_requests = Vec::new();
         let commit = self.commit_phase(&intents, &resolutions, &mut spawn_requests);
-        let (starvations, starved_removed) =
+        let (starvations, starved_removed_positions) =
             self.lifecycle_phase(&commit.eaters, &mut spawn_requests);
+        self.increment_age_for_survivors();
         let spawned = self.resolve_spawn_requests(&spawn_requests);
         let births = spawned.len() as u64;
         self.debug_assert_consistent_state();
 
         self.turn = self.turn.saturating_add(1);
         self.metrics.turns = self.turn;
-        self.metrics.organisms = self.organisms.len() as u32;
         self.metrics.synapse_ops_last_turn = synapse_ops;
         self.metrics.actions_applied_last_turn = commit.moves.len() as u64;
         self.metrics.meals_last_turn = commit.meals;
         self.metrics.starvations_last_turn = starvations;
         self.metrics.births_last_turn = births;
+        self.refresh_population_metrics();
+
+        let mut removed_positions = commit.removed_positions;
+        removed_positions.extend(starved_removed_positions);
 
         TickDelta {
             turn: self.turn,
             moves: commit.moves,
-            removed: commit.removed.into_iter().chain(starved_removed).collect(),
+            removed_positions,
             spawned,
             metrics: self.metrics.clone(),
         }
@@ -275,7 +280,12 @@ impl Simulation {
 
         let mut move_by_actor: HashMap<OrganismId, (i32, i32)> = HashMap::new();
         let mut prey_kills = HashSet::new();
-        let mut removed = Vec::new();
+        let positions_by_id: HashMap<OrganismId, (i32, i32)> = self
+            .organisms
+            .iter()
+            .map(|organism| (organism.id, (organism.q, organism.r)))
+            .collect();
+        let mut removed_positions = Vec::new();
         let mut eaters = HashSet::new();
         let mut meals = 0_u64;
 
@@ -283,7 +293,9 @@ impl Simulation {
             move_by_actor.insert(resolution.actor, resolution.to);
             if let MoveResolutionKind::EatAndReplace { prey } = resolution.kind {
                 if prey_kills.insert(prey) {
-                    removed.push(prey);
+                    if let Some((q, r)) = positions_by_id.get(&prey).copied() {
+                        removed_positions.push(RemovedOrganismPosition { id: prey, q, r });
+                    }
                 }
                 eaters.insert(resolution.actor);
                 meals += 1;
@@ -321,7 +333,7 @@ impl Simulation {
 
         CommitResult {
             moves,
-            removed,
+            removed_positions,
             meals,
             eaters,
         }
@@ -331,7 +343,7 @@ impl Simulation {
         &mut self,
         eaters: &HashSet<OrganismId>,
         spawn_requests: &mut Vec<SpawnRequest>,
-    ) -> (u64, Vec<OrganismId>) {
+    ) -> (u64, Vec<RemovedOrganismPosition>) {
         self.organisms.sort_by_key(|organism| organism.id);
 
         let mut starved_ids = Vec::new();
@@ -345,11 +357,22 @@ impl Simulation {
             }
         }
 
+        let starved_set: HashSet<OrganismId> = starved_ids.iter().copied().collect();
+        let starved_positions = self
+            .organisms
+            .iter()
+            .filter(|organism| starved_set.contains(&organism.id))
+            .map(|organism| RemovedOrganismPosition {
+                id: organism.id,
+                q: organism.q,
+                r: organism.r,
+            })
+            .collect::<Vec<_>>();
+
         if starved_ids.is_empty() {
-            return (0, Vec::new());
+            return (0, starved_positions);
         }
 
-        let starved_set: HashSet<OrganismId> = starved_ids.iter().copied().collect();
         self.organisms
             .retain(|organism| !starved_set.contains(&organism.id));
         self.rebuild_occupancy();
@@ -359,7 +382,49 @@ impl Simulation {
                 kind: SpawnRequestKind::StarvationReplacement,
             });
         }
-        (starved_ids.len() as u64, starved_ids)
+        (starved_ids.len() as u64, starved_positions)
+    }
+}
+
+impl Simulation {
+    fn increment_age_for_survivors(&mut self) {
+        for organism in &mut self.organisms {
+            organism.age_turns = organism.age_turns.saturating_add(1);
+        }
+    }
+
+    pub(crate) fn refresh_population_metrics(&mut self) {
+        self.metrics.organisms = self.organisms.len() as u32;
+        self.metrics.evolution = self.compute_evolution_stats();
+    }
+
+    fn compute_evolution_stats(&self) -> EvolutionStats {
+        if self.organisms.is_empty() {
+            return EvolutionStats::default();
+        }
+
+        let mut ages: Vec<u64> = self
+            .organisms
+            .iter()
+            .map(|organism| organism.age_turns)
+            .collect();
+        ages.sort_unstable();
+
+        let count = ages.len();
+        let total_age: u64 = ages.iter().sum();
+        let mean_age_turns = total_age as f64 / count as f64;
+        let median_age_turns = if count % 2 == 1 {
+            ages[count / 2] as f64
+        } else {
+            (ages[count / 2 - 1] as f64 + ages[count / 2] as f64) / 2.0
+        };
+        let max_age_turns = ages[count - 1];
+
+        EvolutionStats {
+            mean_age_turns,
+            median_age_turns,
+            max_age_turns,
+        }
     }
 }
 

@@ -7,7 +7,8 @@ This repository is a Rust workspace plus a TypeScript web client.
 - `sim-core/`: deterministic simulation engine and core logic.
 - `sim-protocol/`: shared API/protocol types used by server and UI.
 - `sim-server/`: Axum HTTP + WebSocket server (`src/main.rs`).
-- `web-client/`: React + Vite canvas UI (`src/`), static entry in `index.html`.
+- `web-client/`: React + TailwindCSS + Vite canvas UI (`src/`), static entry in
+  `index.html`.
 - `config/default.toml`: baseline simulation configuration.
 - `docs/`: API/behavior docs and protocol examples.
 
@@ -29,6 +30,7 @@ This repository is a Rust workspace plus a TypeScript web client.
   constants.
 - TypeScript/React: strict mode is enabled (`web-client/tsconfig.json`), prefer
   `camelCase` for vars/functions and `PascalCase` for components/types.
+- Use Tailwind for front end styling
 - Keep protocol field names aligned with backend payloads (both `snake_case` and
   compatibility fields appear in `web-client/src/types.ts`).
 

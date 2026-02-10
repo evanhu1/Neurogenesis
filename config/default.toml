@@ -1,4 +1,4 @@
-world_width = 20
+world_width = 50
 steps_per_second = 5
 num_organisms = 200
 num_neurons = 2
