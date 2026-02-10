@@ -17,6 +17,10 @@ Neuromorphic brains grown from scratch with simulated evolution in Rust.
 4. In another shell: `cd web-client && npm install && npm run dev`
 5. Open `http://127.0.0.1:5173`
 
+## Performance
+
+`cargo bench -p sim-core --bench turn_throughput`
+
 ## Config
 
 A default config is available at `config/default.toml`.
