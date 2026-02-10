@@ -23,6 +23,34 @@ export type SpeciesPopulationPoint = {
   speciesCounts: Record<string, number>;
 };
 
+function normalizeSpeciesCounts(speciesCounts: Record<string, number>): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(speciesCounts).sort(([speciesA], [speciesB]) => Number(speciesA) - Number(speciesB)),
+  );
+}
+
+function upsertSpeciesPopulationHistory(
+  previous: SpeciesPopulationPoint[],
+  point: SpeciesPopulationPoint,
+): SpeciesPopulationPoint[] {
+  const latest = previous[previous.length - 1];
+  if (!latest) {
+    return [point];
+  }
+
+  if (point.turn < latest.turn) {
+    return [point];
+  }
+
+  if (point.turn === latest.turn) {
+    const next = previous.slice();
+    next[next.length - 1] = point;
+    return next;
+  }
+
+  return previous.concat(point);
+}
+
 export type SimulationSessionState = {
   session: SessionMetadata | null;
   snapshot: WorldSnapshot | null;
@@ -60,21 +88,6 @@ export function useSimulationSession(): SimulationSessionState {
   const wsRef = useRef<WebSocket | null>(null);
   const request = useMemo(() => createSimHttpClient(apiBase), []);
 
-  const buildSpeciesPopulationPoint = useCallback(
-    (sourceSnapshot: WorldSnapshot): SpeciesPopulationPoint => {
-      const speciesCounts = Object.fromEntries(
-        Object.entries(sourceSnapshot.metrics.species_counts).sort(
-          ([speciesA], [speciesB]) => Number(speciesA) - Number(speciesB),
-        ),
-      );
-      return {
-        turn: sourceSnapshot.turn,
-        speciesCounts,
-      };
-    },
-    [],
-  );
-
   const handleServerEvent = useCallback((event: ServerEvent) => {
     switch (event.type) {
       case 'StateSnapshot': {
@@ -86,10 +99,22 @@ export function useSimulationSession(): SimulationSessionState {
           prev !== null && prev.turn !== nextSnapshot.turn ? null : prev,
         );
         setSnapshot(nextSnapshot);
+        setSpeciesPopulationHistory((previous) =>
+          upsertSpeciesPopulationHistory(previous, {
+            turn: nextSnapshot.turn,
+            speciesCounts: normalizeSpeciesCounts(nextSnapshot.metrics.species_counts),
+          }),
+        );
         break;
       }
       case 'TickDelta': {
         const delta = event.data as TickDelta;
+        setSpeciesPopulationHistory((previous) =>
+          upsertSpeciesPopulationHistory(previous, {
+            turn: delta.turn,
+            speciesCounts: normalizeSpeciesCounts(delta.metrics.species_counts),
+          }),
+        );
         setSnapshot((prev) => {
           if (!prev) return prev;
 
@@ -141,7 +166,16 @@ export function useSimulationSession(): SimulationSessionState {
         break;
       }
       case 'Metrics': {
-        setSnapshot((prev) => (prev ? { ...prev, metrics: event.data as MetricsSnapshot } : prev));
+        const nextMetrics = event.data as MetricsSnapshot;
+        setSnapshot((prev) => (prev ? { ...prev, metrics: nextMetrics } : prev));
+        setSpeciesPopulationHistory((previous) => {
+          const latest = previous[previous.length - 1];
+          if (!latest) return previous;
+          return upsertSpeciesPopulationHistory(previous, {
+            turn: latest.turn,
+            speciesCounts: normalizeSpeciesCounts(nextMetrics.species_counts),
+          });
+        });
         break;
       }
       case 'Error': {
@@ -185,6 +219,12 @@ export function useSimulationSession(): SimulationSessionState {
       setIsRunning(false);
       setDeadCellFlashState(null);
       setBornCellFlashState(null);
+      setSpeciesPopulationHistory([
+        {
+          turn: loadedSnapshot.turn,
+          speciesCounts: normalizeSpeciesCounts(loadedSnapshot.metrics.species_counts),
+        },
+      ]);
       persistSessionId(metadata.id);
       connectWs(metadata.id);
     },
@@ -257,6 +297,12 @@ export function useSimulationSession(): SimulationSessionState {
     void request<WorldSnapshot>(`/v1/sessions/${session.id}/reset`, 'POST', { seed: null })
       .then((nextSnapshot) => {
         setSnapshot(nextSnapshot);
+        setSpeciesPopulationHistory([
+          {
+            turn: nextSnapshot.turn,
+            speciesCounts: normalizeSpeciesCounts(nextSnapshot.metrics.species_counts),
+          },
+        ]);
         setFocusedOrganismId(null);
         setFocusedOrganism(null);
         setDeadCellFlashState(null);
@@ -296,33 +342,6 @@ export function useSimulationSession(): SimulationSessionState {
     }
     setFocusedOrganism(nextFocusedOrganism);
   }, [snapshot, focusedOrganismId]);
-
-  useEffect(() => {
-    if (!snapshot) {
-      setSpeciesPopulationHistory([]);
-      return;
-    }
-
-    const point = buildSpeciesPopulationPoint(snapshot);
-    setSpeciesPopulationHistory((previous) => {
-      const latest = previous[previous.length - 1];
-      if (!latest) {
-        return [point];
-      }
-
-      if (point.turn < latest.turn) {
-        return [point];
-      }
-
-      if (point.turn === latest.turn) {
-        const next = previous.slice();
-        next[next.length - 1] = point;
-        return next;
-      }
-
-      return previous.concat(point);
-    });
-  }, [buildSpeciesPopulationPoint, snapshot]);
 
   useEffect(() => {
     let cancelled = false;

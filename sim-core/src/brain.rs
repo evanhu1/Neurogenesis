@@ -347,14 +347,16 @@ pub(crate) fn evaluate_brain(
 }
 
 fn select_action(activations: [f32; 4]) -> Option<usize> {
-    let mut best_idx = 0usize;
+    let mut best_idx = 0;
     let mut best_activation = activations[0];
-    for (idx, activation) in activations.into_iter().enumerate().skip(1) {
+
+    for (idx, &activation) in activations.iter().enumerate().skip(1) {
         if activation.total_cmp(&best_activation) == Ordering::Greater {
             best_idx = idx;
             best_activation = activation;
         }
     }
+
     (best_activation > ACTION_ACTIVATION_THRESHOLD).then_some(best_idx)
 }
 

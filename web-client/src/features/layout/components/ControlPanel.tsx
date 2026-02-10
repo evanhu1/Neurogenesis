@@ -85,7 +85,9 @@ export function ControlPanel({
         <ControlButton label="Step 100" onClick={() => onStep(100)} />
       </div>
 
-      <h3 className="mt-3 text-sm font-semibold uppercase tracking-wide text-ink/80">Fitness Stats</h3>
+      <h3 className="mt-3 text-sm font-semibold uppercase tracking-wide text-ink/80">
+        Species Population
+      </h3>
       <SpeciesPopulationChart history={speciesPopulationHistory} />
 
       <h3 className="mt-3 text-sm font-semibold uppercase tracking-wide text-ink/80">Runtime Metrics</h3>
@@ -164,6 +166,7 @@ function SpeciesPopulationChart({ history }: { history: SpeciesPopulationPoint[]
 
   const turnStart = history[0]?.turn ?? 0;
   const turnEnd = history[history.length - 1]?.turn ?? 0;
+  const turnSpan = Math.max(1, turnEnd - turnStart);
 
   return (
     <div className="mt-2 rounded-xl bg-slate-100/80 p-3">
@@ -187,11 +190,11 @@ function SpeciesPopulationChart({ history }: { history: SpeciesPopulationPoint[]
         />
         {speciesIds.map((speciesId, speciesIdx) => {
           const points = history
-            .map((point, index) => {
+            .map((point) => {
               const x =
                 history.length === 1
                   ? padLeft + innerWidth / 2
-                  : padLeft + (index / (history.length - 1)) * innerWidth;
+                  : padLeft + ((point.turn - turnStart) / turnSpan) * innerWidth;
               const count = point.speciesCounts[speciesId] ?? 0;
               const y = padTop + ((maxCount - count) / maxCount) * innerHeight;
               return `${x.toFixed(2)},${y.toFixed(2)}`;

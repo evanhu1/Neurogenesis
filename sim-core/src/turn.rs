@@ -3,8 +3,8 @@ use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right};
 use crate::Simulation;
 use crate::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 use sim_protocol::{
-    ActionType, FacingDirection, OrganismId, OrganismMove, OrganismState, SpeciesId,
-    RemovedOrganismPosition, TickDelta,
+    ActionType, FacingDirection, OrganismId, OrganismMove, OrganismState, RemovedOrganismPosition,
+    SpeciesId, TickDelta,
 };
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -450,10 +450,8 @@ impl Simulation {
     fn compute_species_counts(&self) -> BTreeMap<SpeciesId, u32> {
         let mut species_counts = BTreeMap::new();
         for organism in &self.organisms {
-            species_counts
-                .entry(organism.species_id)
-                .and_modify(|count| *count = count.saturating_add(1))
-                .or_insert(1);
+            let count = species_counts.entry(organism.species_id).or_insert(0_u32);
+            *count = count.saturating_add(1);
         }
         species_counts
     }
