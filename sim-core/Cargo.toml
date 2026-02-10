@@ -14,3 +14,8 @@ sim-protocol = { path = "../sim-protocol" }
 
 [dev-dependencies]
 serde_json.workspace = true
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "turn_throughput"
+harness = false
