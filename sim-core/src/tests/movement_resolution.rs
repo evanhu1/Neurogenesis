@@ -256,9 +256,10 @@ fn move_into_food_consumes_and_replenishes_food_supply() {
         ),
         (2, 1)
     );
-    assert_eq!(delta.food_spawned.len(), 2);
+    let target_food = (5_usize * 5) / sim.config.food_coverage_divisor as usize;
+    assert_eq!(delta.food_spawned.len(), target_food);
     assert_eq!(delta.metrics.consumptions_last_turn, 1);
-    assert_eq!(sim.foods.len(), 2);
+    assert_eq!(sim.foods.len(), target_food);
     assert_eq!(
         sim.occupant_at(2, 1),
         Some(CellEntity::Organism(OrganismId(0)))

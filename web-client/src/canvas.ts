@@ -250,7 +250,7 @@ export function renderBrain(
         type: 'sensory',
         label:
           neuron.receptor_type === 'Look'
-            ? neuron.look_target ?? 'Look'
+            ? `Vision: ${neuron.look_target ?? 'Look'}`
             : neuron.receptor_type,
         activation: neuron.neuron.activation,
         bias: neuron.neuron.bias,
@@ -443,7 +443,9 @@ export function renderBrain(
     ctx.fillStyle = '#43556f';
     const metricsY = hasLabel ? node.y + 16 : node.y + 4;
     ctx.fillText(`h=${node.activation.toFixed(2)}`, node.x + 12, metricsY);
-    ctx.fillText(`b=${node.bias.toFixed(2)}`, node.x + 12, metricsY + 12);
+    if (node.type === 'inter') {
+      ctx.fillText(`b=${node.bias.toFixed(2)}`, node.x + 12, metricsY + 12);
+    }
   }
 }
 

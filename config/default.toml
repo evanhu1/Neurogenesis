@@ -4,14 +4,15 @@ num_organisms = 1000
 center_spawn_min_fraction = 0.25
 center_spawn_max_fraction = 0.75
 starting_energy = 100.0
-food_energy = 50.0
+food_energy = 25.0
 reproduction_energy_cost = 100.0
 move_action_energy_cost = 0.5
 turn_energy_cost = 0.5
+food_coverage_divisor = 20
 
 [seed_species_config]
 num_neurons = 10
 max_num_neurons = 20
 num_synapses = 40
 mutation_chance = 0.1
-vision_distance = 5
+vision_distance = 10

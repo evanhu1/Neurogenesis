@@ -104,6 +104,7 @@ export type MetricsSnapshot = {
   synapse_ops_last_turn: number;
   actions_applied_last_turn: number;
   consumptions_last_turn: number;
+  total_consumptions: number;
   reproductions_last_turn: number;
   starvations_last_turn: number;
   species_counts: Record<string, number>;

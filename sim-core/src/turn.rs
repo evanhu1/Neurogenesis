@@ -112,6 +112,7 @@ impl Simulation {
         self.metrics.synapse_ops_last_turn = synapse_ops;
         self.metrics.actions_applied_last_turn = commit.moves.len() as u64 + reproductions;
         self.metrics.consumptions_last_turn = commit.consumptions;
+        self.metrics.total_consumptions += commit.consumptions;
         self.metrics.reproductions_last_turn = reproductions;
         self.metrics.starvations_last_turn = starvations;
         self.refresh_population_metrics();

@@ -5,7 +5,6 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use sim_protocol::{FacingDirection, FoodId, FoodState, OrganismId, OrganismState, SpeciesId};
 
-const FOOD_COVERAGE_DIVISOR: usize = 10;
 
 #[derive(Clone)]
 pub(crate) struct ReproductionSpawn {
@@ -120,7 +119,7 @@ impl Simulation {
     }
 
     fn target_food_count(&self) -> usize {
-        world_capacity(self.config.world_width) / FOOD_COVERAGE_DIVISOR
+        world_capacity(self.config.world_width) / self.config.food_coverage_divisor as usize
     }
 
     pub(crate) fn replenish_food_supply(&mut self) -> Vec<FoodState> {

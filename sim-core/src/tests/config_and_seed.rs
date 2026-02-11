@@ -110,8 +110,9 @@ fn population_is_capped_by_world_capacity_without_overlap() {
 }
 
 #[test]
-fn initial_food_population_targets_ten_percent_of_world_tiles() {
+fn initial_food_population_matches_coverage_divisor() {
     let cfg = test_config(20, 4);
+    let expected = (20_usize * 20) / cfg.food_coverage_divisor as usize;
     let sim = Simulation::new(cfg, 55).expect("simulation should initialize");
-    assert_eq!(sim.foods.len(), (20_usize * 20) / 10);
+    assert_eq!(sim.foods.len(), expected);
 }

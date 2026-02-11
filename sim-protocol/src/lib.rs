@@ -125,6 +125,8 @@ pub struct WorldConfig {
     pub move_action_energy_cost: f32,
     #[serde(default = "default_turn_energy_cost")]
     pub turn_energy_cost: f32,
+    #[serde(default = "default_food_coverage_divisor")]
+    pub food_coverage_divisor: u32,
     #[serde(
         default = "default_seed_species_config",
         alias = "species_config",
@@ -154,6 +156,10 @@ fn default_food_energy() -> f32 {
 
 fn default_turn_energy_cost() -> f32 {
     default_world_config().turn_energy_cost
+}
+
+fn default_food_coverage_divisor() -> u32 {
+    default_world_config().food_coverage_divisor
 }
 
 fn default_species_vision_distance() -> u32 {
@@ -232,6 +238,7 @@ pub struct MetricsSnapshot {
     pub synapse_ops_last_turn: u64,
     pub actions_applied_last_turn: u64,
     pub consumptions_last_turn: u64,
+    pub total_consumptions: u64,
     pub reproductions_last_turn: u64,
     pub starvations_last_turn: u64,
     pub species_counts: BTreeMap<SpeciesId, u32>,

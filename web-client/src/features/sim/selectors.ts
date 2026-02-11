@@ -13,6 +13,7 @@ export function formatMetrics(snapshot: WorldSnapshot | null): string {
     `organisms=${snapshot.metrics.organisms}`,
     `food=${snapshot.foods.length}`,
     `consumptions_last_turn=${snapshot.metrics.consumptions_last_turn}`,
+    `total_food_eaten=${snapshot.metrics.total_consumptions}`,
     `reproductions_last_turn=${snapshot.metrics.reproductions_last_turn}`,
     `starvations_last_turn=${snapshot.metrics.starvations_last_turn}`,
     `synapse_ops_last_turn=${snapshot.metrics.synapse_ops_last_turn}`,
