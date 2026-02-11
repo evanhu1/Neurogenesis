@@ -1,5 +1,5 @@
 use crate::grid::hex_neighbor;
-use crate::{BrainEvaluation, Simulation, DEFAULT_BIAS, SYNAPSE_STRENGTH_MAX};
+use crate::{BrainEvaluation, CellEntity, Simulation, DEFAULT_BIAS, SYNAPSE_STRENGTH_MAX};
 use rand::Rng;
 use sim_protocol::{
     ActionNeuronState, ActionType, BrainState, InterNeuronState, NeuronId, NeuronState, NeuronType,
@@ -107,7 +107,7 @@ pub(crate) fn evaluate_brain(
     facing: sim_protocol::FacingDirection,
     organism_id: OrganismId,
     world_width: i32,
-    occupancy: &[Option<OrganismId>],
+    occupancy: &[Option<CellEntity>],
 ) -> BrainEvaluation {
     let mut result = BrainEvaluation::default();
 
@@ -270,7 +270,7 @@ pub(crate) fn look_sensor_value(
     facing: sim_protocol::FacingDirection,
     organism_id: OrganismId,
     world_width: i32,
-    occupancy: &[Option<OrganismId>],
+    occupancy: &[Option<CellEntity>],
 ) -> f32 {
     let target = hex_neighbor(position, facing);
     if target.0 < 0 || target.1 < 0 || target.0 >= world_width || target.1 >= world_width {
@@ -279,7 +279,8 @@ pub(crate) fn look_sensor_value(
 
     let idx = target.1 as usize * world_width as usize + target.0 as usize;
     match occupancy[idx] {
-        Some(id) if id != organism_id => 1.0,
+        Some(CellEntity::Organism(id)) if id == organism_id => 0.0,
+        Some(_) => 1.0,
         _ => 0.0,
     }
 }

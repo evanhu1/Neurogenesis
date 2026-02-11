@@ -1,8 +1,8 @@
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use sim_protocol::{
-    FacingDirection, MetricsSnapshot, OccupancyCell, OrganismId, OrganismState, SpeciesConfig,
-    SpeciesId, TickDelta, WorldConfig, WorldSnapshot,
+    FacingDirection, FoodId, FoodState, MetricsSnapshot, OccupancyCell, OrganismId, OrganismState,
+    SpeciesConfig, SpeciesId, TickDelta, WorldConfig, WorldSnapshot,
 };
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -37,9 +37,17 @@ pub struct Simulation {
     seed: u64,
     rng: ChaCha8Rng,
     next_organism_id: u64,
+    next_food_id: u64,
     organisms: Vec<OrganismState>,
-    occupancy: Vec<Option<OrganismId>>,
+    foods: Vec<FoodState>,
+    occupancy: Vec<Option<CellEntity>>,
     metrics: MetricsSnapshot,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CellEntity {
+    Organism(OrganismId),
+    Food(FoodId),
 }
 
 #[derive(Default)]
@@ -81,13 +89,16 @@ impl Simulation {
             seed,
             rng: ChaCha8Rng::seed_from_u64(seed),
             next_organism_id: 0,
+            next_food_id: 0,
             organisms: Vec::new(),
+            foods: Vec::new(),
             occupancy: vec![None; capacity],
             metrics: MetricsSnapshot::default(),
         };
 
         sim.initialize_species_registry_from_seed();
         sim.spawn_initial_population();
+        sim.replenish_food_supply();
         sim.refresh_population_metrics();
         Ok(sim)
     }
@@ -99,18 +110,26 @@ impl Simulation {
     pub fn snapshot(&self) -> WorldSnapshot {
         let mut organisms = self.organisms.clone();
         organisms.sort_by_key(|o| o.id);
+        let mut foods = self.foods.clone();
+        foods.sort_by_key(|food| food.id);
 
         let width = self.config.world_width as usize;
-        let mut occupancy = Vec::with_capacity(self.organisms.len());
-        for (idx, maybe_id) in self.occupancy.iter().enumerate() {
-            if let Some(id) = maybe_id {
+        let mut occupancy = Vec::with_capacity(self.organisms.len() + self.foods.len());
+        for (idx, maybe_entity) in self.occupancy.iter().enumerate() {
+            if let Some(entity) = maybe_entity {
                 let q = (idx % width) as i32;
                 let r = (idx / width) as i32;
-                occupancy.push(OccupancyCell {
+                let mut cell = OccupancyCell {
                     q,
                     r,
-                    organism_ids: vec![*id],
-                });
+                    organism_ids: Vec::new(),
+                    food_ids: Vec::new(),
+                };
+                match entity {
+                    CellEntity::Organism(id) => cell.organism_ids.push(*id),
+                    CellEntity::Food(id) => cell.food_ids.push(*id),
+                }
+                occupancy.push(cell);
             }
         }
         occupancy.sort_by_key(|cell| (cell.q, cell.r));
@@ -121,6 +140,7 @@ impl Simulation {
             config: self.config.clone(),
             species_registry: self.species_registry.clone(),
             organisms,
+            foods,
             occupancy,
             metrics: self.metrics.clone(),
         }
@@ -133,11 +153,14 @@ impl Simulation {
         self.species_registry.clear();
         self.next_species_id = 0;
         self.next_organism_id = 0;
+        self.next_food_id = 0;
         self.organisms.clear();
+        self.foods.clear();
         self.occupancy.fill(None);
         self.metrics = MetricsSnapshot::default();
         self.initialize_species_registry_from_seed();
         self.spawn_initial_population();
+        self.replenish_food_supply();
         self.refresh_population_metrics();
     }
 
@@ -208,6 +231,11 @@ fn validate_world_config(config: &WorldConfig) -> Result<(), SimError> {
     if config.starting_energy <= 0.0 {
         return Err(SimError::InvalidConfig(
             "starting_energy must be greater than zero".to_owned(),
+        ));
+    }
+    if config.food_energy <= 0.0 {
+        return Err(SimError::InvalidConfig(
+            "food_energy must be greater than zero".to_owned(),
         ));
     }
     if config.reproduction_energy_cost < 0.0 {

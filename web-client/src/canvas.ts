@@ -14,6 +14,7 @@ const ORGANISM_COLORS = [
   '#6366f1',
   '#ec4899',
 ] as const;
+const FOOD_COLOR = '#16a34a';
 
 type HexLayout = {
   size: number;
@@ -162,6 +163,18 @@ export function renderWorld(
       ctx.fillStyle = 'rgba(134, 239, 172, 0.45)';
       ctx.fill();
     }
+  }
+
+  const foods = Array.isArray(snapshot.foods) ? snapshot.foods : [];
+  for (const food of foods) {
+    const center = hexCenter(layout, food.q, food.r);
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, Math.max(2.5, layout.size * 0.24), 0, Math.PI * 2);
+    ctx.fillStyle = FOOD_COLOR;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.35)';
+    ctx.lineWidth = Math.max(0.5, layout.size * 0.03);
+    ctx.stroke();
   }
 
   for (const org of snapshot.organisms) {

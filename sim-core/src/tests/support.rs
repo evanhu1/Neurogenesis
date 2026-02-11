@@ -125,6 +125,15 @@ pub(super) fn make_organism(
     }
 }
 
+pub(super) fn make_food(id: u64, q: i32, r: i32, energy: impl IntoEnergy) -> FoodState {
+    FoodState {
+        id: FoodId(id),
+        q,
+        r,
+        energy: energy.into_energy(),
+    }
+}
+
 pub(super) fn enable_reproduce_action(organism: &mut OrganismState) {
     let inter_id = organism.brain.inter[0].neuron.neuron_id;
     let mut found = false;
@@ -202,6 +211,8 @@ pub(super) fn reproduction_request_at(
 pub(super) fn configure_sim(sim: &mut Simulation, mut organisms: Vec<OrganismState>) {
     organisms.sort_by_key(|organism| organism.id);
     sim.organisms = organisms;
+    sim.foods.clear();
+    sim.next_food_id = 0;
     sim.next_organism_id = sim
         .organisms
         .iter()
@@ -217,7 +228,7 @@ pub(super) fn configure_sim(sim: &mut Simulation, mut organisms: Vec<OrganismSta
             sim.occupancy[idx].is_none(),
             "test setup should not overlap"
         );
-        sim.occupancy[idx] = Some(organism.id);
+        sim.occupancy[idx] = Some(CellEntity::Organism(organism.id));
     }
     sim.turn = 0;
     sim.metrics = MetricsSnapshot::default();
@@ -247,7 +258,17 @@ pub(super) fn assert_no_overlap(sim: &Simulation) {
         let idx = sim
             .cell_index(organism.q, organism.r)
             .expect("organism should remain in bounds");
-        assert_eq!(sim.occupancy[idx], Some(organism.id));
+        assert_eq!(sim.occupancy[idx], Some(CellEntity::Organism(organism.id)));
     }
-    assert_eq!(sim.organisms.len(), sim.occupancy.iter().flatten().count());
+    for food in &sim.foods {
+        assert!(seen.insert((food.q, food.r)), "entities should not overlap",);
+        let idx = sim
+            .cell_index(food.q, food.r)
+            .expect("food should remain in bounds");
+        assert_eq!(sim.occupancy[idx], Some(CellEntity::Food(food.id)));
+    }
+    assert_eq!(
+        sim.organisms.len() + sim.foods.len(),
+        sim.occupancy.iter().flatten().count()
+    );
 }

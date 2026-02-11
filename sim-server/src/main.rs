@@ -351,12 +351,10 @@ async fn handle_command(command: ClientCommand, session: Arc<Session>) -> Result
             let sim = session.simulation.lock().await;
             if let Some(organism) = sim.focused_organism(organism_id) {
                 let active = derive_active_neuron_ids(&organism.brain);
-                let _ = session
-                    .events
-                    .send(ServerEvent::FocusBrain(FocusBrainData {
-                        organism,
-                        active_neuron_ids: active,
-                    }));
+                let _ = session.events.send(ServerEvent::FocusBrain(FocusBrainData {
+                    organism,
+                    active_neuron_ids: active,
+                }));
             }
             Ok(())
         }

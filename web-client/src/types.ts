@@ -2,6 +2,7 @@ import defaultConfigToml from '../../config/default.toml?raw';
 
 export type OrganismId = { 0: number } | number;
 export type SpeciesId = { 0: number } | number;
+export type FoodId = { 0: number } | number;
 
 export type Envelope<T> = {
   protocol_version: number;
@@ -15,6 +16,7 @@ export type WorldConfig = {
   center_spawn_min_fraction: number;
   center_spawn_max_fraction: number;
   starting_energy: number;
+  food_energy: number;
   reproduction_energy_cost: number;
   move_action_energy_cost: number;
   seed_species_config: SpeciesConfig;
@@ -86,6 +88,13 @@ export type OrganismState = {
   brain: BrainState;
 };
 
+export type FoodState = {
+  id: FoodId;
+  q: number;
+  r: number;
+  energy: number;
+};
+
 export type MetricsSnapshot = {
   turns: number;
   organisms: number;
@@ -103,7 +112,8 @@ export type WorldSnapshot = {
   config: WorldConfig;
   species_registry: Record<string, SpeciesConfig>;
   organisms: OrganismState[];
-  occupancy: Array<{ q: number; r: number; organism_ids: OrganismId[] }>;
+  foods: FoodState[];
+  occupancy: Array<{ q: number; r: number; organism_ids: OrganismId[]; food_ids: FoodId[] }>;
   metrics: MetricsSnapshot;
 };
 
@@ -123,6 +133,8 @@ export type TickDelta = {
   moves: Array<{ id: OrganismId; from: [number, number]; to: [number, number] }>;
   removed_positions: Array<{ id: OrganismId; q: number; r: number }>;
   spawned: OrganismState[];
+  food_removed_positions: Array<{ id: FoodId; q: number; r: number }>;
+  food_spawned: FoodState[];
   metrics: MetricsSnapshot;
 };
 
@@ -177,6 +189,7 @@ function parseDefaultConfigToml(tomlText: string): WorldConfig {
     center_spawn_min_fraction: parseRequiredNumber(worldLevel, 'center_spawn_min_fraction'),
     center_spawn_max_fraction: parseRequiredNumber(worldLevel, 'center_spawn_max_fraction'),
     starting_energy: parseRequiredNumber(worldLevel, 'starting_energy'),
+    food_energy: parseRequiredNumber(worldLevel, 'food_energy'),
     reproduction_energy_cost: parseRequiredNumber(worldLevel, 'reproduction_energy_cost'),
     move_action_energy_cost: parseRequiredNumber(worldLevel, 'move_action_energy_cost'),
     seed_species_config: {

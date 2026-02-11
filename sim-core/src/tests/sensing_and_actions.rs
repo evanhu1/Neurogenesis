@@ -15,7 +15,7 @@ fn look_sensor_returns_binary_occupancy() {
     sim.occupancy.fill(None);
     for org in &sim.organisms {
         let idx = sim.cell_index(org.q, org.r).expect("in-bounds test setup");
-        sim.occupancy[idx] = Some(org.id);
+        sim.occupancy[idx] = Some(CellEntity::Organism(org.id));
     }
 
     let signal = look_sensor_value(
@@ -35,6 +35,37 @@ fn look_sensor_returns_binary_occupancy() {
         &sim.occupancy,
     );
     assert_eq!(empty_signal, 0.0);
+}
+
+#[test]
+fn look_sensor_detects_food_as_occupied() {
+    let cfg = test_config(5, 1);
+    let mut sim = Simulation::new(cfg, 76).expect("simulation should initialize");
+    configure_sim(
+        &mut sim,
+        vec![make_organism(
+            0,
+            2,
+            2,
+            FacingDirection::East,
+            false,
+            false,
+            false,
+            0.1,
+            10.0,
+        )],
+    );
+    let added = sim.add_food(make_food(0, 3, 2, sim.config.food_energy));
+    assert!(added);
+
+    let signal = look_sensor_value(
+        (2, 2),
+        FacingDirection::East,
+        OrganismId(0),
+        sim.config.world_width as i32,
+        &sim.occupancy,
+    );
+    assert_eq!(signal, 1.0);
 }
 
 #[test]

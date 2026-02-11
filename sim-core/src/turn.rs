@@ -1,10 +1,10 @@
 use crate::brain::{action_index, evaluate_brain};
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right};
-use crate::Simulation;
+use crate::{CellEntity, Simulation};
 use crate::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 use sim_protocol::{
-    ActionType, FacingDirection, OrganismId, OrganismMove, OrganismState, RemovedOrganismPosition,
-    SpeciesId, TickDelta,
+    ActionType, FacingDirection, FoodId, FoodState, OrganismId, OrganismMove, OrganismState,
+    RemovedFoodPosition, RemovedOrganismPosition, SpeciesId, TickDelta,
 };
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -19,7 +19,7 @@ struct SnapshotOrganismState {
 #[derive(Clone)]
 struct TurnSnapshot {
     world_width: i32,
-    occupancy: Vec<Option<OrganismId>>,
+    occupancy: Vec<Option<CellEntity>>,
     ordered_ids: Vec<OrganismId>,
     organism_states: Vec<SnapshotOrganismState>,
     id_to_index: HashMap<OrganismId, usize>,
@@ -42,7 +42,7 @@ impl TurnSnapshot {
         Some(r as usize * self.world_width as usize + q as usize)
     }
 
-    fn occupant_at(&self, q: i32, r: i32) -> Option<OrganismId> {
+    fn occupant_at(&self, q: i32, r: i32) -> Option<CellEntity> {
         let idx = self.cell_index(q, r)?;
         self.occupancy[idx]
     }
@@ -71,7 +71,8 @@ struct MoveCandidate {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum MoveResolutionKind {
     MoveOnly,
-    ConsumeAndReplace { consumed_organism: OrganismId },
+    ConsumeOrganism { consumed_organism: OrganismId },
+    ConsumeFood { consumed_food: FoodId },
 }
 
 #[derive(Clone, Copy)]
@@ -86,6 +87,8 @@ struct MoveResolution {
 struct CommitResult {
     moves: Vec<OrganismMove>,
     removed_positions: Vec<RemovedOrganismPosition>,
+    food_removed_positions: Vec<RemovedFoodPosition>,
+    food_spawned: Vec<FoodState>,
     consumptions: u64,
 }
 
@@ -121,6 +124,8 @@ impl Simulation {
             moves: commit.moves,
             removed_positions,
             spawned,
+            food_removed_positions: commit.food_removed_positions,
+            food_spawned: commit.food_spawned,
             metrics: self.metrics.clone(),
         }
     }
@@ -246,11 +251,14 @@ impl Simulation {
         let mut resolutions = Vec::with_capacity(winners.len());
         for winner in winners {
             let kind = match snapshot.occupant_at(winner.target.0, winner.target.1) {
-                Some(occupant) if !moving_ids.contains(&occupant) => {
-                    MoveResolutionKind::ConsumeAndReplace {
+                Some(CellEntity::Organism(occupant)) if !moving_ids.contains(&occupant) => {
+                    MoveResolutionKind::ConsumeOrganism {
                         consumed_organism: occupant,
                     }
                 }
+                Some(CellEntity::Food(food_id)) => MoveResolutionKind::ConsumeFood {
+                    consumed_food: food_id,
+                },
                 _ => MoveResolutionKind::MoveOnly,
             };
             resolutions.push(MoveResolution {
@@ -289,33 +297,69 @@ impl Simulation {
             .iter()
             .map(|organism| (organism.id, organism.energy))
             .collect();
+        let positions_by_food_id: HashMap<FoodId, (i32, i32)> = self
+            .foods
+            .iter()
+            .map(|food| (food.id, (food.q, food.r)))
+            .collect();
+        let energy_by_food_id: HashMap<FoodId, f32> = self
+            .foods
+            .iter()
+            .map(|food| (food.id, food.energy))
+            .collect();
         let mut removed_positions = Vec::new();
+        let mut food_removed_positions = Vec::new();
         let mut consumed_energy_by_actor: HashMap<OrganismId, f32> = HashMap::new();
+        let mut consumed_food_ids = HashSet::new();
         let mut consumptions = 0_u64;
 
         for resolution in resolutions {
             move_by_actor.insert(resolution.actor, resolution.to);
-            if let MoveResolutionKind::ConsumeAndReplace { consumed_organism } = resolution.kind {
-                if consumed_organism_ids.insert(consumed_organism) {
-                    if let Some((q, r)) = positions_by_id.get(&consumed_organism).copied() {
-                        removed_positions.push(RemovedOrganismPosition {
-                            id: consumed_organism,
-                            q,
-                            r,
-                        });
+            match resolution.kind {
+                MoveResolutionKind::ConsumeOrganism { consumed_organism } => {
+                    if consumed_organism_ids.insert(consumed_organism) {
+                        if let Some((q, r)) = positions_by_id.get(&consumed_organism).copied() {
+                            removed_positions.push(RemovedOrganismPosition {
+                                id: consumed_organism,
+                                q,
+                                r,
+                            });
+                        }
+                        let consumed_energy =
+                            energy_by_id.get(&consumed_organism).copied().unwrap_or(0.0);
+                        *consumed_energy_by_actor
+                            .entry(resolution.actor)
+                            .or_insert(0.0) += consumed_energy;
                     }
-                    let consumed_energy =
-                        energy_by_id.get(&consumed_organism).copied().unwrap_or(0.0);
-                    *consumed_energy_by_actor
-                        .entry(resolution.actor)
-                        .or_insert(0.0) += consumed_energy;
+                    consumptions += 1;
                 }
-                consumptions += 1;
+                MoveResolutionKind::ConsumeFood { consumed_food } => {
+                    if consumed_food_ids.insert(consumed_food) {
+                        if let Some((q, r)) = positions_by_food_id.get(&consumed_food).copied() {
+                            food_removed_positions.push(RemovedFoodPosition {
+                                id: consumed_food,
+                                q,
+                                r,
+                            });
+                        }
+                        let consumed_energy = energy_by_food_id
+                            .get(&consumed_food)
+                            .copied()
+                            .unwrap_or(0.0);
+                        *consumed_energy_by_actor
+                            .entry(resolution.actor)
+                            .or_insert(0.0) += consumed_energy;
+                    }
+                    consumptions += 1;
+                }
+                MoveResolutionKind::MoveOnly => {}
             }
         }
 
         self.organisms
             .retain(|organism| !consumed_organism_ids.contains(&organism.id));
+        self.foods
+            .retain(|food| !consumed_food_ids.contains(&food.id));
 
         for organism in &mut self.organisms {
             if let Some((next_q, next_r)) = move_by_actor.get(&organism.id).copied() {
@@ -330,6 +374,7 @@ impl Simulation {
         }
 
         self.rebuild_occupancy();
+        let food_spawned = self.replenish_food_supply();
         let moves = resolutions
             .iter()
             .map(|resolution| OrganismMove {
@@ -342,6 +387,8 @@ impl Simulation {
         CommitResult {
             moves,
             removed_positions,
+            food_removed_positions,
+            food_spawned,
             consumptions,
         }
     }
@@ -471,11 +518,11 @@ fn compare_move_candidates(a: &MoveCandidate, b: &MoveCandidate) -> Ordering {
 }
 
 fn occupancy_snapshot_cell(
-    occupancy: &[Option<OrganismId>],
+    occupancy: &[Option<CellEntity>],
     world_width: i32,
     q: i32,
     r: i32,
-) -> Option<OrganismId> {
+) -> Option<CellEntity> {
     if q < 0 || r < 0 || q >= world_width || r >= world_width {
         return None;
     }

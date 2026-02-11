@@ -220,3 +220,54 @@ fn contested_occupied_target_where_occupant_remains_uses_consume_path() {
         .expect("predator should survive");
     assert_eq!(predator.energy, 6.0);
 }
+
+#[test]
+fn move_into_food_consumes_and_replenishes_food_supply() {
+    let mut cfg = test_config(5, 1);
+    cfg.food_energy = 7.0;
+    let mut sim = Simulation::new(cfg, 101).expect("simulation should initialize");
+    configure_sim(
+        &mut sim,
+        vec![make_organism(
+            0,
+            1,
+            1,
+            FacingDirection::East,
+            true,
+            false,
+            false,
+            0.9,
+            10.0,
+        )],
+    );
+    let added = sim.add_food(make_food(0, 2, 1, 7.0));
+    assert!(added, "food setup should succeed");
+    sim.next_food_id = 1;
+
+    let delta = tick_once(&mut sim);
+    let moves = move_map(&delta);
+    assert_eq!(moves.get(&OrganismId(0)), Some(&((1, 1), (2, 1))));
+    assert!(delta.removed_positions.is_empty());
+    assert_eq!(delta.food_removed_positions.len(), 1);
+    assert_eq!(
+        (
+            delta.food_removed_positions[0].q,
+            delta.food_removed_positions[0].r
+        ),
+        (2, 1)
+    );
+    assert_eq!(delta.food_spawned.len(), 1);
+    assert_eq!(delta.metrics.consumptions_last_turn, 1);
+    assert_eq!(sim.foods.len(), 1);
+    assert_eq!(
+        sim.occupant_at(2, 1),
+        Some(CellEntity::Organism(OrganismId(0)))
+    );
+
+    let predator = sim
+        .organisms
+        .iter()
+        .find(|organism| organism.id == OrganismId(0))
+        .expect("predator should survive");
+    assert_eq!(predator.energy, 15.0);
+}

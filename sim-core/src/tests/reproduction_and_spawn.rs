@@ -71,11 +71,7 @@ fn reproduction_offspring_brain_runtime_state_is_reset() {
         .sensory
         .iter()
         .all(|n| n.neuron.activation == 0.0));
-    assert!(child
-        .brain
-        .inter
-        .iter()
-        .all(|n| n.neuron.activation == 0.0));
+    assert!(child.brain.inter.iter().all(|n| n.neuron.activation == 0.0));
     assert!(child
         .brain
         .action

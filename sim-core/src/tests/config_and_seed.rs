@@ -99,3 +99,10 @@ fn population_is_capped_by_world_capacity_without_overlap() {
         9
     );
 }
+
+#[test]
+fn initial_food_population_targets_five_percent_of_world_tiles() {
+    let cfg = test_config(20, 4);
+    let sim = Simulation::new(cfg, 55).expect("simulation should initialize");
+    assert_eq!(sim.foods.len(), (20_usize * 20) / 20);
+}

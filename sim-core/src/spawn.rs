@@ -4,7 +4,9 @@ use crate::Simulation;
 use crate::{world_capacity, SpawnRequest, SpawnRequestKind};
 use rand::seq::SliceRandom;
 use rand::Rng;
-use sim_protocol::{FacingDirection, OrganismId, OrganismState};
+use sim_protocol::{FacingDirection, FoodId, FoodState, OrganismId, OrganismState};
+
+const FOOD_COVERAGE_DIVISOR: usize = 20;
 
 impl Simulation {
     pub(crate) fn resolve_spawn_requests(&mut self, queue: &[SpawnRequest]) -> Vec<OrganismState> {
@@ -90,8 +92,50 @@ impl Simulation {
         id
     }
 
+    fn alloc_food_id(&mut self) -> FoodId {
+        let id = FoodId(self.next_food_id);
+        self.next_food_id += 1;
+        id
+    }
+
     fn target_population(&self) -> usize {
         (self.config.num_organisms as usize).min(world_capacity(self.config.world_width))
+    }
+
+    fn target_food_count(&self) -> usize {
+        world_capacity(self.config.world_width) / FOOD_COVERAGE_DIVISOR
+    }
+
+    pub(crate) fn replenish_food_supply(&mut self) -> Vec<FoodState> {
+        let target = self.target_food_count();
+        if self.foods.len() >= target {
+            return Vec::new();
+        }
+
+        let mut empty_positions = self.empty_positions();
+        empty_positions.shuffle(&mut self.rng);
+        let spawn_count = (target - self.foods.len()).min(empty_positions.len());
+
+        let mut spawned = Vec::with_capacity(spawn_count);
+        for _ in 0..spawn_count {
+            let (q, r) = empty_positions
+                .pop()
+                .expect("spawn count must never exceed empty positions");
+            let food = FoodState {
+                id: self.alloc_food_id(),
+                q,
+                r,
+                energy: self.config.food_energy,
+            };
+            let added = self.add_food(food.clone());
+            debug_assert!(added);
+            if added {
+                spawned.push(food);
+            }
+        }
+
+        self.foods.sort_by_key(|food| food.id);
+        spawned
     }
 
     fn empty_positions(&self) -> Vec<(i32, i32)> {

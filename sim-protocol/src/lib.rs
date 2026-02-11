@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct OrganismId(pub u64);
@@ -12,6 +12,9 @@ pub struct NeuronId(pub u32);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SpeciesId(pub u32);
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct FoodId(pub u64);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Envelope<T> {
@@ -104,6 +107,8 @@ pub struct WorldConfig {
     pub center_spawn_min_fraction: f32,
     pub center_spawn_max_fraction: f32,
     pub starting_energy: f32,
+    #[serde(default = "default_food_energy")]
+    pub food_energy: f32,
     pub reproduction_energy_cost: f32,
     pub move_action_energy_cost: f32,
     #[serde(
@@ -127,6 +132,10 @@ fn default_world_config() -> WorldConfig {
 
 fn default_seed_species_config() -> SpeciesConfig {
     default_world_config().seed_species_config
+}
+
+fn default_food_energy() -> f32 {
+    default_world_config().food_energy
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -185,6 +194,14 @@ pub struct OrganismState {
     pub brain: BrainState,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FoodState {
+    pub id: FoodId,
+    pub q: i32,
+    pub r: i32,
+    pub energy: f32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct MetricsSnapshot {
     pub turns: u64,
@@ -204,6 +221,8 @@ pub struct WorldSnapshot {
     pub config: WorldConfig,
     pub species_registry: BTreeMap<SpeciesId, SpeciesConfig>,
     pub organisms: Vec<OrganismState>,
+    #[serde(default)]
+    pub foods: Vec<FoodState>,
     pub occupancy: Vec<OccupancyCell>,
     pub metrics: MetricsSnapshot,
 }
@@ -213,6 +232,8 @@ pub struct OccupancyCell {
     pub q: i32,
     pub r: i32,
     pub organism_ids: Vec<OrganismId>,
+    #[serde(default)]
+    pub food_ids: Vec<FoodId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -229,12 +250,23 @@ pub struct RemovedOrganismPosition {
     pub r: i32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RemovedFoodPosition {
+    pub id: FoodId,
+    pub q: i32,
+    pub r: i32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct TickDelta {
     pub turn: u64,
     pub moves: Vec<OrganismMove>,
     pub removed_positions: Vec<RemovedOrganismPosition>,
     pub spawned: Vec<OrganismState>,
+    #[serde(default)]
+    pub food_removed_positions: Vec<RemovedFoodPosition>,
+    #[serde(default)]
+    pub food_spawned: Vec<FoodState>,
     pub metrics: MetricsSnapshot,
 }
 
