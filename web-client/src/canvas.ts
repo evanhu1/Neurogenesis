@@ -1,20 +1,10 @@
-import type { BrainState, FacingDirection, OrganismState, WorldSnapshot } from './types';
+import type { BrainState, FacingDirection, WorldOrganismState, WorldSnapshot } from './types';
 import { unwrapId } from './protocol';
+import { colorForSpeciesId } from './speciesColor';
 
 const SQRT_3 = Math.sqrt(3);
-const ORGANISM_COLORS = [
-  '#ef4444',
-  '#f97316',
-  '#eab308',
-  '#84cc16',
-  '#22c55e',
-  '#14b8a6',
-  '#06b6d4',
-  '#3b82f6',
-  '#6366f1',
-  '#ec4899',
-] as const;
 const FOOD_COLOR = '#16a34a';
+const GRID_LAYER_MAX_DIMENSION = 8192;
 
 type HexLayout = {
   size: number;
@@ -22,6 +12,14 @@ type HexLayout = {
   originY: number;
   worldWidth: number;
 };
+
+type GridLayerCache = {
+  key: string;
+  canvas: HTMLCanvasElement;
+  layout: HexLayout;
+};
+
+let gridLayerCache: GridLayerCache | null = null;
 
 export type WorldViewport = {
   zoom: number;
@@ -90,6 +88,59 @@ function traceHex(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: n
   ctx.closePath();
 }
 
+function computeGridRenderScale(canvasWidth: number, canvasHeight: number, zoom: number): number {
+  const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  if (safeZoom <= 1) return 1;
+  const maxCanvasDimension = Math.max(canvasWidth, canvasHeight);
+  if (maxCanvasDimension <= 0) return 1;
+  const maxScaleByDimension = Math.max(1, Math.floor(GRID_LAYER_MAX_DIMENSION / maxCanvasDimension));
+  return Math.min(safeZoom, maxScaleByDimension);
+}
+
+function getGridLayer(
+  canvasWidth: number,
+  canvasHeight: number,
+  worldWidth: number,
+  zoom: number,
+): GridLayerCache {
+  const renderScale = computeGridRenderScale(canvasWidth, canvasHeight, zoom);
+  const layerWidth = Math.max(1, Math.round(canvasWidth * renderScale));
+  const layerHeight = Math.max(1, Math.round(canvasHeight * renderScale));
+  const key = `${canvasWidth}x${canvasHeight}:${worldWidth}:${layerWidth}x${layerHeight}`;
+  if (gridLayerCache && gridLayerCache.key === key) {
+    return gridLayerCache;
+  }
+
+  const layer = document.createElement('canvas');
+  layer.width = layerWidth;
+  layer.height = layerHeight;
+
+  const layout = buildHexLayout(canvasWidth, canvasHeight, worldWidth);
+  const layerCtx = layer.getContext('2d');
+  if (layerCtx) {
+    const scaleX = layerWidth / canvasWidth;
+    const scaleY = layerHeight / canvasHeight;
+    layerCtx.save();
+    layerCtx.scale(scaleX, scaleY);
+    for (let r = 0; r < worldWidth; r += 1) {
+      for (let q = 0; q < worldWidth; q += 1) {
+        const center = hexCenter(layout, q, r);
+        traceHex(layerCtx, center.x, center.y, layout.size - 0.5);
+        layerCtx.fillStyle = (q + r) % 2 === 0 ? '#d7dde8' : '#e3e8f0';
+        layerCtx.fill();
+        layerCtx.strokeStyle = '#c7d0df';
+        layerCtx.lineWidth = 1;
+        layerCtx.stroke();
+      }
+    }
+    layerCtx.restore();
+  }
+
+  const cacheEntry = { key, canvas: layer, layout };
+  gridLayerCache = cacheEntry;
+  return cacheEntry;
+}
+
 function facingDelta(direction: FacingDirection): [number, number] {
   switch (direction) {
     case 'East':
@@ -133,19 +184,9 @@ export function renderWorld(
   ctx.translate(-width / 2, -height / 2);
 
   const worldWidth = snapshot.config.world_width;
-  const layout = buildHexLayout(width, height, worldWidth);
-
-  for (let r = 0; r < worldWidth; r += 1) {
-    for (let q = 0; q < worldWidth; q += 1) {
-      const center = hexCenter(layout, q, r);
-      traceHex(ctx, center.x, center.y, layout.size - 0.5);
-      ctx.fillStyle = (q + r) % 2 === 0 ? '#d7dde8' : '#e3e8f0';
-      ctx.fill();
-      ctx.strokeStyle = '#c7d0df';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-  }
+  const gridLayer = getGridLayer(width, height, worldWidth, viewport.zoom);
+  const layout = gridLayer.layout;
+  ctx.drawImage(gridLayer.canvas, 0, 0, width, height);
 
   if (deadFlashCells) {
     for (const cell of deadFlashCells) {
@@ -179,11 +220,12 @@ export function renderWorld(
 
   for (const org of snapshot.organisms) {
     const id = unwrapId(org.id);
+    const speciesId = unwrapId(org.species_id);
     const center = hexCenter(layout, org.q, org.r);
 
     ctx.beginPath();
     ctx.arc(center.x, center.y, Math.max(3, layout.size * 0.5), 0, Math.PI * 2);
-    ctx.fillStyle = ORGANISM_COLORS[id % ORGANISM_COLORS.length];
+    ctx.fillStyle = colorForSpeciesId(String(speciesId));
     ctx.fill();
     if (id === focusedOrganismId) {
       ctx.lineWidth = Math.max(1.2, layout.size * 0.12);
@@ -461,7 +503,7 @@ export function pickOrganismAtCanvasPoint(
   const layout = buildHexLayout(canvasWidth, canvasHeight, worldWidth);
   const point = toWorldSpace(xPx, yPx, canvasWidth, canvasHeight, viewport);
 
-  let best: { organism: OrganismState; distance: number } | null = null;
+  let best: { organism: WorldOrganismState; distance: number } | null = null;
   for (const organism of snapshot.organisms) {
     const center = hexCenter(layout, organism.q, organism.r);
     const distance = Math.hypot(center.x - point.x, center.y - point.y);

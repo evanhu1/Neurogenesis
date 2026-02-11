@@ -1,4 +1,5 @@
 import { useMemo, useRef } from 'react';
+import { unwrapId } from './protocol';
 import { ControlPanel } from './features/layout/components/ControlPanel';
 import { InspectorPanel } from './features/layout/components/InspectorPanel';
 import { useSimulationSession } from './features/sim/hooks/useSimulationSession';
@@ -24,6 +25,11 @@ export default function App() {
     () => formatFocusedStats(simulation.focusedOrganism),
     [simulation.focusedOrganism],
   );
+  const focusedSpeciesId = useMemo(
+    () =>
+      simulation.focusedOrganism ? String(unwrapId(simulation.focusedOrganism.species_id)) : null,
+    [simulation.focusedOrganism],
+  );
 
   return (
     <div className="h-screen bg-page px-4 py-4 text-ink sm:px-6 lg:px-8">
@@ -31,6 +37,7 @@ export default function App() {
         <ControlPanel
           sessionMeta={sessionMeta}
           speciesPopulationHistory={simulation.speciesPopulationHistory}
+          focusedSpeciesId={focusedSpeciesId}
           snapshot={simulation.snapshot}
           metricsText={metricsText}
           errorText={simulation.errorText}

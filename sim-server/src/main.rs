@@ -9,12 +9,13 @@ use serde::Serialize;
 use sim_core::{derive_active_neuron_ids, SimError, Simulation};
 use sim_server::protocol::{
     ApiError, ClientCommand, CountRequest, CreateSessionRequest, CreateSessionResponse,
-    FocusBrainData, FocusRequest, ResetRequest, ServerEvent, SessionMetadata,
+    FocusBrainData, FocusRequest, ResetRequest, ServerEvent, SessionMetadata, WorldSnapshotView,
 };
 use sim_types::WorldSnapshot;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast, Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tower_http::cors::CorsLayer;
@@ -157,7 +158,10 @@ async fn create_session(
     let mut sessions = state.sessions.write().await;
     sessions.insert(id, session);
 
-    Ok(Json(CreateSessionResponse { metadata, snapshot }))
+    Ok(Json(CreateSessionResponse {
+        metadata,
+        snapshot: snapshot.into(),
+    }))
 }
 
 async fn get_session_metadata(
@@ -171,10 +175,10 @@ async fn get_session_metadata(
 async fn get_state(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
-) -> Result<Json<WorldSnapshot>, AppError> {
+) -> Result<Json<WorldSnapshotView>, AppError> {
     let session = get_session(&state, id).await?;
     let sim = session.simulation.lock().await;
-    Ok(Json(sim.snapshot()))
+    Ok(Json(sim.snapshot().into()))
 }
 
 async fn step_session(
@@ -189,14 +193,10 @@ async fn step_session(
     drop(sim);
 
     for delta in &deltas {
-        let _ = session.events.send(ServerEvent::TickDelta(delta.clone()));
         let _ = session
             .events
-            .send(ServerEvent::Metrics(delta.metrics.clone()));
+            .send(ServerEvent::TickDelta(delta.clone().into()));
     }
-    let _ = session
-        .events
-        .send(ServerEvent::StateSnapshot(snapshot.clone()));
 
     Ok(Json(StepResponse { deltas, snapshot }))
 }
@@ -205,7 +205,7 @@ async fn reset_session(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
     Json(req): Json<ResetRequest>,
-) -> Result<Json<WorldSnapshot>, AppError> {
+) -> Result<Json<WorldSnapshotView>, AppError> {
     let session = get_session(&state, id).await?;
     let mut sim = session.simulation.lock().await;
     sim.reset(req.seed);
@@ -214,16 +214,16 @@ async fn reset_session(
 
     let _ = session
         .events
-        .send(ServerEvent::StateSnapshot(snapshot.clone()));
+        .send(ServerEvent::StateSnapshot(snapshot.clone().into()));
 
-    Ok(Json(snapshot))
+    Ok(Json(snapshot.into()))
 }
 
 async fn set_focus(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
     Json(req): Json<FocusRequest>,
-) -> Result<Json<WorldSnapshot>, AppError> {
+) -> Result<Json<WorldSnapshotView>, AppError> {
     let session = get_session(&state, id).await?;
     let sim = session.simulation.lock().await;
     if let Some(org) = sim.focused_organism(req.organism_id) {
@@ -236,7 +236,7 @@ async fn set_focus(
     let snapshot = sim.snapshot();
     drop(sim);
 
-    Ok(Json(snapshot))
+    Ok(Json(snapshot.into()))
 }
 
 async fn stream_session(
@@ -256,7 +256,7 @@ async fn socket_loop(socket: WebSocket, session: Arc<Session>) {
 
     {
         let sim = session.simulation.lock().await;
-        let event = ServerEvent::StateSnapshot(sim.snapshot());
+        let event = ServerEvent::StateSnapshot(sim.snapshot().into());
         if let Ok(text) = serde_json::to_string(&event) {
             if sender.send(Message::Text(text.into())).await.is_err() {
                 return;
@@ -264,17 +264,27 @@ async fn socket_loop(socket: WebSocket, session: Arc<Session>) {
         }
     }
 
+    let session_for_send = session.clone();
     let send_task = tokio::spawn(async move {
-        while let Ok(event) = rx.recv().await {
-            match serde_json::to_string(&event) {
-                Ok(text) => {
-                    if sender.send(Message::Text(text.into())).await.is_err() {
+        loop {
+            let event = match rx.recv().await {
+                Ok(event) => event,
+                Err(RecvError::Lagged(skipped)) => {
+                    error!("ws receiver lagged by {skipped} events; sending state snapshot");
+                    let snapshot_event = {
+                        let sim = session_for_send.simulation.lock().await;
+                        ServerEvent::StateSnapshot(sim.snapshot().into())
+                    };
+                    if send_ws_event(&mut sender, &snapshot_event).await.is_err() {
                         break;
                     }
+                    continue;
                 }
-                Err(err) => {
-                    error!("failed to serialize server event: {err}");
-                }
+                Err(RecvError::Closed) => break,
+            };
+
+            if send_ws_event(&mut sender, &event).await.is_err() {
+                break;
             }
         }
     });
@@ -327,13 +337,10 @@ async fn handle_command(command: ClientCommand, session: Arc<Session>) -> Result
         ClientCommand::Step { count } => {
             let mut sim = session.simulation.lock().await;
             let deltas = sim.step_n(count.max(1));
-            let snapshot = sim.snapshot();
             drop(sim);
             for delta in deltas {
-                let _ = session.events.send(ServerEvent::TickDelta(delta.clone()));
-                let _ = session.events.send(ServerEvent::Metrics(delta.metrics));
+                let _ = session.events.send(ServerEvent::TickDelta(delta.into()));
             }
-            let _ = session.events.send(ServerEvent::StateSnapshot(snapshot));
             Ok(())
         }
         ClientCommand::SetFocus { organism_id } => {
@@ -378,10 +385,7 @@ async fn session_start(session: Arc<Session>, ticks_per_second: u32) {
             if let Some(delta) = delta {
                 let _ = session_for_task
                     .events
-                    .send(ServerEvent::TickDelta(delta.clone()));
-                let _ = session_for_task
-                    .events
-                    .send(ServerEvent::Metrics(delta.metrics));
+                    .send(ServerEvent::TickDelta(delta.into()));
             }
 
             tokio::time::sleep(Duration::from_millis((1000_u64 / tps as u64).max(1))).await;
@@ -391,6 +395,22 @@ async fn session_start(session: Arc<Session>, ticks_per_second: u32) {
         rt.running = false;
         rt.runner = None;
     }));
+}
+
+async fn send_ws_event(
+    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+    event: &ServerEvent,
+) -> Result<(), ()> {
+    match serde_json::to_string(event) {
+        Ok(text) => sender
+            .send(Message::Text(text.into()))
+            .await
+            .map_err(|_| ()),
+        Err(err) => {
+            error!("failed to serialize server event: {err}");
+            Ok(())
+        }
+    }
 }
 
 async fn session_pause(session: &Arc<Session>) {

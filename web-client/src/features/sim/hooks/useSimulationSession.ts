@@ -4,11 +4,11 @@ import { DEFAULT_CONFIG } from '../../../types';
 import type {
   CreateSessionResponse,
   FocusBrainData,
-  MetricsSnapshot,
   OrganismState,
   ServerEvent,
   SessionMetadata,
   TickDelta,
+  WorldOrganismState,
   WorldSnapshot,
 } from '../../../types';
 import { connectSimulationWs, sendSimulationCommand } from '../api/simWsClient';
@@ -25,6 +25,7 @@ export type SpeciesPopulationPoint = {
 };
 
 const MAX_SPECIES_HISTORY_POINTS = 2048;
+const FOCUS_POLL_INTERVAL_MS = 100;
 
 function normalizeSpeciesCounts(speciesCounts: Record<string, number>): Record<string, number> {
   return { ...speciesCounts };
@@ -69,6 +70,25 @@ function upsertSpeciesPopulationHistory(
   return trimmed.concat(point);
 }
 
+function syncFocusedOrganismFromWorld(
+  focused: OrganismState | null,
+  worldOrganism: WorldOrganismState,
+): OrganismState | null {
+  if (!focused) return focused;
+  if (unwrapId(focused.id) !== unwrapId(worldOrganism.id)) return focused;
+  return {
+    ...focused,
+    species_id: worldOrganism.species_id,
+    q: worldOrganism.q,
+    r: worldOrganism.r,
+    age_turns: worldOrganism.age_turns,
+    facing: worldOrganism.facing,
+    energy: worldOrganism.energy,
+    consumptions_count: worldOrganism.consumptions_count,
+    reproductions_count: worldOrganism.reproductions_count,
+  };
+}
+
 export type SimulationSessionState = {
   session: SessionMetadata | null;
   snapshot: WorldSnapshot | null;
@@ -87,7 +107,7 @@ export type SimulationSessionState = {
   toggleRun: () => void;
   setSpeedLevelIndex: (levelIndex: number) => void;
   step: (count: number) => void;
-  focusOrganism: (organism: OrganismState) => void;
+  focusOrganism: (organism: WorldOrganismState) => void;
   defocusOrganism: () => void;
 };
 
@@ -108,9 +128,11 @@ export function useSimulationSession(): SimulationSessionState {
 
   const wsRef = useRef<WebSocket | null>(null);
   const focusedOrganismIdRef = useRef<number | null>(null);
+  const nextFocusPollAtMsRef = useRef(0);
   const request = useMemo(() => createSimHttpClient(apiBase), []);
   const setFocusedOrganismIdTracked = useCallback((organismId: number | null) => {
     focusedOrganismIdRef.current = organismId;
+    nextFocusPollAtMsRef.current = 0;
     setFocusedOrganismId(organismId);
   }, []);
 
@@ -187,10 +209,14 @@ export function useSimulationSession(): SimulationSessionState {
 
         const trackedFocusedId = focusedOrganismIdRef.current;
         if (trackedFocusedId !== null) {
-          sendSimulationCommand(wsRef.current, {
-            type: 'SetFocus',
-            data: { organism_id: trackedFocusedId },
-          });
+          const now = Date.now();
+          if (now >= nextFocusPollAtMsRef.current) {
+            nextFocusPollAtMsRef.current = now + FOCUS_POLL_INTERVAL_MS;
+            sendSimulationCommand(wsRef.current, {
+              type: 'SetFocus',
+              data: { organism_id: trackedFocusedId },
+            });
+          }
         }
         break;
       }
@@ -200,20 +226,9 @@ export function useSimulationSession(): SimulationSessionState {
         setFocusedOrganismIdTracked(organismId);
         setFocusedOrganism(organism);
         setActiveNeuronIds(new Set(active_neuron_ids));
-        setSnapshot((prev) => {
-          if (!prev) return prev;
-          const index = prev.organisms.findIndex((item) => unwrapId(item.id) === organismId);
-          if (index === -1) return prev;
-
-          const organisms = prev.organisms.slice();
-          organisms[index] = organism;
-          return { ...prev, organisms };
-        });
         break;
       }
       case 'Metrics': {
-        const nextMetrics = event.data as MetricsSnapshot;
-        setSnapshot((prev) => (prev ? { ...prev, metrics: nextMetrics } : prev));
         break;
       }
       case 'Error': {
@@ -354,10 +369,13 @@ export function useSimulationSession(): SimulationSessionState {
   }, [request, session, setFocusedOrganismIdTracked]);
 
   const focusOrganism = useCallback(
-    (organism: OrganismState) => {
+    (organism: WorldOrganismState) => {
       const organismId = unwrapId(organism.id);
       setFocusedOrganismIdTracked(organismId);
-      setFocusedOrganism(organism);
+      setFocusedOrganism((current) =>
+        current && unwrapId(current.id) === organismId ? current : null,
+      );
+      setActiveNeuronIds(null);
       if (!session) return;
       void request(`/v1/sessions/${session.id}/focus`, 'POST', {
         organism_id: organismId,
@@ -381,14 +399,14 @@ export function useSimulationSession(): SimulationSessionState {
       return;
     }
 
-    const nextFocusedOrganism = findOrganism(snapshot, focusedOrganismId);
-    if (!nextFocusedOrganism) {
+    const worldFocusedOrganism = findOrganism(snapshot, focusedOrganismId);
+    if (!worldFocusedOrganism) {
       setFocusedOrganismIdTracked(null);
       setFocusedOrganism(null);
       setActiveNeuronIds(null);
       return;
     }
-    setFocusedOrganism(nextFocusedOrganism);
+    setFocusedOrganism((current) => syncFocusedOrganismFromWorld(current, worldFocusedOrganism));
   }, [snapshot, focusedOrganismId, setFocusedOrganismIdTracked]);
 
   useEffect(() => {

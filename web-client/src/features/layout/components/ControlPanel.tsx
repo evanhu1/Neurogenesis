@@ -1,11 +1,13 @@
-import { useMemo, type ChangeEvent, type MutableRefObject } from 'react';
+import { useCallback, useMemo, useState, type ChangeEvent, type MutableRefObject } from 'react';
 import { unwrapId } from '../../../protocol';
-import type { OrganismState, WorldSnapshot } from '../../../types';
+import { colorForSpeciesId } from '../../../speciesColor';
+import type { WorldOrganismState, WorldSnapshot } from '../../../types';
 import type { SpeciesPopulationPoint } from '../../sim/hooks/useSimulationSession';
 
 type ControlPanelProps = {
   sessionMeta: string;
   speciesPopulationHistory: SpeciesPopulationPoint[];
+  focusedSpeciesId: string | null;
   snapshot: WorldSnapshot | null;
   metricsText: string;
   errorText: string | null;
@@ -17,13 +19,14 @@ type ControlPanelProps = {
   onToggleRun: () => void;
   onSpeedLevelChange: (levelIndex: number) => void;
   onStep: (count: number) => void;
-  onFocusOrganism: (organism: OrganismState) => void;
+  onFocusOrganism: (organism: WorldOrganismState) => void;
   panToHexRef: MutableRefObject<((q: number, r: number) => void) | null>;
 };
 
 export function ControlPanel({
   sessionMeta,
   speciesPopulationHistory,
+  focusedSpeciesId,
   snapshot,
   metricsText,
   errorText,
@@ -81,6 +84,7 @@ export function ControlPanel({
       </h3>
       <SpeciesPopulationChart
         history={speciesPopulationHistory}
+        focusedSpeciesId={focusedSpeciesId}
         onSpeciesClick={(speciesId) => {
           if (!snapshot) return;
           const candidates = snapshot.organisms.filter(
@@ -123,9 +127,9 @@ function ControlButton({ label, onClick }: ControlButtonProps) {
   );
 }
 
-const CHART_COLORS = ['#0f766e', '#1d4ed8', '#b45309', '#dc2626', '#7e22ce', '#be185d'];
-
 const MAX_DISPLAY_POINTS = 300;
+const MAX_VISIBLE_SPECIES = 10;
+const SPECIES_ZERO_GRACE_POINTS = 40;
 
 function pointPeakSpeciesCount(point: SpeciesPopulationPoint): number {
   let max = 0;
@@ -186,40 +190,143 @@ function downsampleHistoryPreserveSpikes(history: SpeciesPopulationPoint[]): Spe
   return sampled.slice(0, MAX_DISPLAY_POINTS - 1).concat(last);
 }
 
+type ChartSeries = {
+  id: string;
+  label: string;
+  color: string;
+  latestCount: number;
+  counts: number[];
+};
+
 type ChartData = {
   displayPoints: SpeciesPopulationPoint[];
-  speciesIds: string[];
+  series: ChartSeries[];
   maxCount: number;
-  latest: SpeciesPopulationPoint;
   turnStart: number;
   turnEnd: number;
 };
 
-function computeChartData(history: SpeciesPopulationPoint[]): ChartData | null {
-  if (history.length === 0) return null;
+function rankSpeciesIdsByCount(speciesCounts: Record<string, number>): string[] {
+  return Object.entries(speciesCounts)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1] || Number(a[0]) - Number(b[0]))
+    .map(([speciesId]) => speciesId);
+}
 
-  const displayPoints = downsampleHistoryPreserveSpikes(history);
+function computeStableVisibleSpeciesIds(
+  history: SpeciesPopulationPoint[],
+  pinnedSpeciesIds: string[],
+  focusedSpeciesId: string | null,
+): string[] {
+  const protectedSpeciesSet = new Set<string>(pinnedSpeciesIds);
+  if (focusedSpeciesId) {
+    protectedSpeciesSet.add(focusedSpeciesId);
+  }
 
-  const activeSpecies = new Set<string>();
-  let maxCount = 1;
-  for (const point of displayPoints) {
-    for (const speciesId in point.speciesCounts) {
-      const count = point.speciesCounts[speciesId];
-      if (count > 0) {
-        activeSpecies.add(speciesId);
-        if (count > maxCount) maxCount = count;
+  const visibleSpeciesIds: string[] = [];
+  const zeroStreakBySpecies = new Map<string, number>();
+
+  for (const point of history) {
+    for (const speciesId of visibleSpeciesIds) {
+      const count = point.speciesCounts[speciesId] ?? 0;
+      zeroStreakBySpecies.set(
+        speciesId,
+        count > 0 ? 0 : (zeroStreakBySpecies.get(speciesId) ?? 0) + 1,
+      );
+    }
+
+    for (let idx = visibleSpeciesIds.length - 1; idx >= 0; idx -= 1) {
+      const speciesId = visibleSpeciesIds[idx];
+      if (protectedSpeciesSet.has(speciesId)) continue;
+      if ((zeroStreakBySpecies.get(speciesId) ?? 0) >= SPECIES_ZERO_GRACE_POINTS) {
+        visibleSpeciesIds.splice(idx, 1);
+        zeroStreakBySpecies.delete(speciesId);
       }
+    }
+
+    for (const speciesId of protectedSpeciesSet) {
+      if (!visibleSpeciesIds.includes(speciesId)) {
+        visibleSpeciesIds.push(speciesId);
+        zeroStreakBySpecies.set(speciesId, 0);
+      }
+    }
+
+    const rankedSpeciesIds = rankSpeciesIdsByCount(point.speciesCounts);
+    for (const speciesId of rankedSpeciesIds) {
+      if (visibleSpeciesIds.includes(speciesId)) continue;
+
+      if (visibleSpeciesIds.length < MAX_VISIBLE_SPECIES) {
+        visibleSpeciesIds.push(speciesId);
+        zeroStreakBySpecies.set(speciesId, 0);
+        continue;
+      }
+
+      let replacementIndex = -1;
+      let replacementStreak = SPECIES_ZERO_GRACE_POINTS;
+      for (let idx = 0; idx < visibleSpeciesIds.length; idx += 1) {
+        const candidateId = visibleSpeciesIds[idx];
+        if (protectedSpeciesSet.has(candidateId)) continue;
+        const streak = zeroStreakBySpecies.get(candidateId) ?? 0;
+        if (streak >= replacementStreak) {
+          replacementStreak = streak;
+          replacementIndex = idx;
+        }
+      }
+
+      if (replacementIndex === -1) continue;
+      zeroStreakBySpecies.delete(visibleSpeciesIds[replacementIndex]);
+      visibleSpeciesIds[replacementIndex] = speciesId;
+      zeroStreakBySpecies.set(speciesId, 0);
     }
   }
 
-  const speciesIds = Array.from(activeSpecies).sort((a, b) => Number(a) - Number(b));
-  if (speciesIds.length === 0) return null;
+  const latest = history[history.length - 1];
+  return visibleSpeciesIds.sort((a, b) => {
+    const countDiff = (latest.speciesCounts[b] ?? 0) - (latest.speciesCounts[a] ?? 0);
+    if (countDiff !== 0) return countDiff;
+    return Number(a) - Number(b);
+  });
+}
+
+function computeChartData(
+  history: SpeciesPopulationPoint[],
+  pinnedSpeciesIds: string[],
+  focusedSpeciesId: string | null,
+): ChartData | null {
+  if (history.length === 0) return null;
+
+  const displayPoints = downsampleHistoryPreserveSpikes(history);
+  const latest = history[history.length - 1];
+  const visibleSpeciesIds = computeStableVisibleSpeciesIds(history, pinnedSpeciesIds, focusedSpeciesId);
+
+  if (visibleSpeciesIds.length === 0) return null;
+
+  const countsBySeries = new Map<string, number[]>();
+  for (const speciesId of visibleSpeciesIds) {
+    countsBySeries.set(speciesId, []);
+  }
+  let maxCount = 1;
+
+  for (const point of displayPoints) {
+    for (const speciesId of visibleSpeciesIds) {
+      const count = point.speciesCounts[speciesId] ?? 0;
+      countsBySeries.get(speciesId)?.push(count);
+      if (count > maxCount) maxCount = count;
+    }
+  }
+
+  const series: ChartSeries[] = visibleSpeciesIds.map((speciesId) => ({
+    id: speciesId,
+    label: speciesId,
+    color: colorForSpeciesId(speciesId),
+    latestCount: latest.speciesCounts[speciesId] ?? 0,
+    counts: countsBySeries.get(speciesId) ?? [],
+  }));
 
   return {
     displayPoints,
-    speciesIds,
+    series,
     maxCount,
-    latest: displayPoints[displayPoints.length - 1],
     turnStart: displayPoints[0].turn,
     turnEnd: displayPoints[displayPoints.length - 1].turn,
   };
@@ -227,12 +334,28 @@ function computeChartData(history: SpeciesPopulationPoint[]): ChartData | null {
 
 function SpeciesPopulationChart({
   history,
+  focusedSpeciesId,
   onSpeciesClick,
 }: {
   history: SpeciesPopulationPoint[];
+  focusedSpeciesId: string | null;
   onSpeciesClick: (speciesId: string) => void;
 }) {
-  const chartData = useMemo(() => computeChartData(history), [history]);
+  const [pinnedSpeciesIds, setPinnedSpeciesIds] = useState<string[]>([]);
+  const chartData = useMemo(
+    () => computeChartData(history, pinnedSpeciesIds, focusedSpeciesId),
+    [focusedSpeciesId, history, pinnedSpeciesIds],
+  );
+
+  const onSpeciesSeriesClick = useCallback(
+    (speciesId: string) => {
+      setPinnedSpeciesIds((previous) =>
+        previous.includes(speciesId) ? previous : previous.concat(speciesId),
+      );
+      onSpeciesClick(speciesId);
+    },
+    [onSpeciesClick],
+  );
 
   if (!chartData) {
     return (
@@ -242,7 +365,7 @@ function SpeciesPopulationChart({
     );
   }
 
-  const { displayPoints, speciesIds, maxCount, latest, turnStart, turnEnd } = chartData;
+  const { displayPoints, series, maxCount, turnStart, turnEnd } = chartData;
 
   const chartWidth = 300;
   const chartHeight = 180;
@@ -274,14 +397,14 @@ function SpeciesPopulationChart({
           stroke="#94a3b8"
           strokeWidth={1}
         />
-        {speciesIds.map((speciesId, speciesIdx) => {
-          const points = displayPoints
-            .map((point) => {
+        {series.map((item) => {
+          const points = item.counts
+            .map((count, idx) => {
+              const point = displayPoints[idx];
               const x =
                 displayPoints.length === 1
                   ? padLeft + innerWidth / 2
                   : padLeft + ((point.turn - turnStart) / turnSpan) * innerWidth;
-              const count = point.speciesCounts[speciesId] ?? 0;
               const y = padTop + ((maxCount - count) / maxCount) * innerHeight;
               return `${x.toFixed(2)},${y.toFixed(2)}`;
             })
@@ -289,11 +412,11 @@ function SpeciesPopulationChart({
 
           return (
             <polyline
-              key={speciesId}
+              key={item.id}
               points={points}
               fill="none"
-              stroke={CHART_COLORS[speciesIdx % CHART_COLORS.length]}
-              strokeWidth={2.25}
+              stroke={item.color}
+              strokeWidth={item.id === focusedSpeciesId ? 3 : 2.25}
               strokeLinecap="round"
               strokeLinejoin="round"
             />
@@ -320,24 +443,24 @@ function SpeciesPopulationChart({
         </text>
       </svg>
       <div className="mt-2 flex gap-2 overflow-x-auto scrollbar-none font-mono text-[11px] text-ink/80">
-        {speciesIds
-          .map((speciesId, speciesIdx) => ({
-            speciesId,
-            speciesIdx,
-            count: latest.speciesCounts[speciesId] ?? 0,
-          }))
-          .sort((a, b) => b.count - a.count)
-          .map(({ speciesId, speciesIdx, count }) => (
+        {series
+          .slice()
+          .sort((a, b) => b.latestCount - a.latestCount)
+          .map((item) => (
             <button
-              key={speciesId}
-              onClick={() => onSpeciesClick(speciesId)}
-              className="flex shrink-0 items-center gap-1 rounded bg-white/70 px-2 py-1 transition hover:bg-slate-200"
+              key={item.id}
+              onClick={() => {
+                onSpeciesSeriesClick(item.id);
+              }}
+              className={`flex shrink-0 items-center gap-1 rounded bg-white/70 px-2 py-1 transition hover:bg-slate-200 ${
+                item.id === focusedSpeciesId ? 'ring-1 ring-ink/40' : ''
+              }`}
             >
               <span
                 className="inline-block h-2.5 w-2.5 rounded-full"
-                style={{ backgroundColor: CHART_COLORS[speciesIdx % CHART_COLORS.length] }}
+                style={{ backgroundColor: item.color }}
               />
-              <span>{`${speciesId}: ${count}`}</span>
+              <span>{`${item.label}: ${item.latestCount}`}</span>
             </button>
           ))}
       </div>

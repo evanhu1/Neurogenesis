@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, type MouseEvent, type MutableRefObject } from 'react';
 import { buildHexLayout, hexCenter, pickOrganismAtCanvasPoint, renderWorld } from '../../../canvas';
 import { unwrapId } from '../../../protocol';
-import type { OrganismState, WorldSnapshot } from '../../../types';
+import type { WorldOrganismState, WorldSnapshot } from '../../../types';
 import { useWorldViewport } from '../hooks/useWorldViewport';
 
 type WorldCanvasProps = {
@@ -9,7 +9,7 @@ type WorldCanvasProps = {
   focusedOrganismId: number | null;
   deadFlashCells: Array<{ q: number; r: number }> | null;
   bornFlashCells: Array<{ q: number; r: number }> | null;
-  onOrganismSelect: (organism: OrganismState) => void;
+  onOrganismSelect: (organism: WorldOrganismState) => void;
   panToHexRef?: MutableRefObject<((q: number, r: number) => void) | null>;
 };
 

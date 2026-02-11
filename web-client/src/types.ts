@@ -103,6 +103,18 @@ export type OrganismState = {
   genome: OrganismGenome;
 };
 
+export type WorldOrganismState = {
+  id: OrganismId;
+  species_id: SpeciesId;
+  q: number;
+  r: number;
+  age_turns: number;
+  facing: FacingDirection;
+  energy: number;
+  consumptions_count: number;
+  reproductions_count: number;
+};
+
 export type FoodState = {
   id: FoodId;
   q: number;
@@ -127,11 +139,11 @@ export type WorldSnapshot = {
   turn: number;
   rng_seed: number;
   config: WorldConfig;
-  species_registry: Record<string, OrganismGenome>;
-  organisms: OrganismState[];
+  organisms: WorldOrganismState[];
   foods: FoodState[];
-  occupancy: Array<{ q: number; r: number; occupant: { type: 'Organism' | 'Food'; id: OrganismId | FoodId } }>;
   metrics: MetricsSnapshot;
+  species_registry?: Record<string, OrganismGenome>;
+  occupancy?: Array<{ q: number; r: number; occupant: { type: 'Organism' | 'Food'; id: OrganismId | FoodId } }>;
 };
 
 export type SessionMetadata = {
@@ -159,7 +171,7 @@ export type TickDelta = {
   turn: number;
   moves: Array<{ id: OrganismId; from: [number, number]; to: [number, number] }>;
   removed_positions: RemovedEntityPosition[];
-  spawned: OrganismState[];
+  spawned: WorldOrganismState[];
   food_spawned: FoodState[];
   metrics: MetricsSnapshot;
 };
