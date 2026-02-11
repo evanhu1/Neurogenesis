@@ -5,6 +5,7 @@ use sim_types::{
     SynapseEdge,
 };
 use std::cmp::Ordering;
+use utils::math::sigmoid;
 
 const ACTION_ACTIVATION_THRESHOLD: f32 = 0.5;
 const DEFAULT_BIAS: f32 = 0.0;
@@ -329,16 +330,6 @@ fn select_action(activations: [f32; ACTION_COUNT]) -> Option<usize> {
     }
 
     (best_activation > ACTION_ACTIVATION_THRESHOLD).then_some(best_idx)
-}
-
-fn sigmoid(x: f32) -> f32 {
-    if x >= 0.0 {
-        let z = (-x).exp();
-        1.0 / (1.0 + z)
-    } else {
-        let z = x.exp();
-        z / (1.0 + z)
-    }
 }
 
 /// Accumulates weighted inputs using arithmetic index resolution.
