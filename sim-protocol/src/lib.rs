@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
-pub const PROTOCOL_VERSION: u32 = 9;
+pub const PROTOCOL_VERSION: u32 = 10;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct OrganismId(pub u64);
@@ -77,15 +77,22 @@ pub enum NeuronType {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum LookTarget {
+    Food,
+    Organism,
+    OutOfBounds,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "receptor_type")]
 pub enum SensoryReceptor {
-    Look { look_distance: u32 },
+    Look { look_target: LookTarget },
     Energy,
 }
 
 impl SensoryReceptor {
-    /// Number of receptor types that are not vision-based (always present regardless of species config).
-    pub const NON_VISION_COUNT: u32 = 1;
+    /// Number of look-based sensory neurons (Food, Organism, OutOfBounds).
+    pub const LOOK_NEURON_COUNT: u32 = 3;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

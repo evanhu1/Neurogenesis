@@ -250,7 +250,7 @@ export function renderBrain(
         type: 'sensory',
         label:
           neuron.receptor_type === 'Look'
-            ? `Look ${neuron.look_distance ?? 1}`
+            ? neuron.look_target ?? 'Look'
             : neuron.receptor_type,
         activation: neuron.neuron.activation,
         bias: neuron.neuron.bias,

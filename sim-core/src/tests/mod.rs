@@ -1,9 +1,9 @@
 pub(super) use super::*;
-pub(super) use crate::brain::{look_sensor_value, make_action_neuron, make_sensory_neuron};
+pub(super) use crate::brain::{make_action_neuron, make_sensory_neuron, scan_ahead};
 pub(super) use crate::turn::facing_after_turn;
 pub(super) use sim_protocol::{
-    ActionType, BrainState, FacingDirection, FoodId, FoodState, InterNeuronState, NeuronId,
-    NeuronState, NeuronType, SensoryReceptor, SpeciesConfig, SpeciesId, SynapseEdge,
+    ActionType, BrainState, FacingDirection, FoodId, FoodState, InterNeuronState, LookTarget,
+    NeuronId, NeuronState, NeuronType, SensoryReceptor, SpeciesConfig, SpeciesId, SynapseEdge,
 };
 pub(super) use std::collections::{HashMap, HashSet};
 

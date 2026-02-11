@@ -2,19 +2,15 @@ use crate::grid::hex_neighbor;
 use crate::{CellEntity, Simulation};
 use rand::Rng;
 use sim_protocol::{
-    ActionNeuronState, ActionType, BrainState, InterNeuronState, NeuronId, NeuronState, NeuronType,
-    OrganismId, SensoryNeuronState, SensoryReceptor, SpeciesConfig, SynapseEdge,
+    ActionNeuronState, ActionType, BrainState, InterNeuronState, LookTarget, NeuronId, NeuronState,
+    NeuronType, OrganismId, SensoryNeuronState, SensoryReceptor, SpeciesConfig, SynapseEdge,
 };
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
 const ACTION_ACTIVATION_THRESHOLD: f32 = 0.5;
-const SYNAPSE_STRENGTH_MAX: f32 = 8.0;
+const SYNAPSE_STRENGTH_MAX: f32 = 3.0;
 const DEFAULT_BIAS: f32 = 0.0;
-const LOOK_EMPTY: f32 = 0.0;
-const LOOK_FOOD: f32 = 1.0;
-const LOOK_ORGANISM: f32 = 2.0;
-const LOOK_OUT_OF_BOUNDS: f32 = 3.0;
 
 #[derive(Default)]
 pub(crate) struct BrainEvaluation {
@@ -25,21 +21,27 @@ pub(crate) struct BrainEvaluation {
 
 impl Simulation {
     pub(crate) fn generate_brain(&mut self, species_config: &SpeciesConfig) -> BrainState {
-        let vision_distance = species_config.vision_distance.max(1);
-        let sensory_count = vision_distance + SensoryReceptor::NON_VISION_COUNT;
-        let mut sensory = Vec::with_capacity(sensory_count as usize);
-        for distance in 1..=vision_distance {
-            sensory.push(make_sensory_neuron(
-                distance - 1,
+        let sensory = vec![
+            make_sensory_neuron(
+                0,
                 SensoryReceptor::Look {
-                    look_distance: distance,
+                    look_target: LookTarget::Food,
                 },
-            ));
-        }
-        sensory.push(make_sensory_neuron(
-            vision_distance,
-            SensoryReceptor::Energy,
-        ));
+            ),
+            make_sensory_neuron(
+                1,
+                SensoryReceptor::Look {
+                    look_target: LookTarget::Organism,
+                },
+            ),
+            make_sensory_neuron(
+                2,
+                SensoryReceptor::Look {
+                    look_target: LookTarget::OutOfBounds,
+                },
+            ),
+            make_sensory_neuron(3, SensoryReceptor::Energy),
+        ];
 
         let mut inter = Vec::new();
         for i in 0..species_config.num_neurons {
@@ -123,29 +125,33 @@ pub(crate) fn make_action_neuron(id: u32, action_type: ActionType) -> ActionNeur
 }
 
 pub(crate) fn evaluate_brain(
-    brain: &mut BrainState,
-    position: (i32, i32),
-    facing: sim_protocol::FacingDirection,
-    organism_id: OrganismId,
+    organism: &mut sim_protocol::OrganismState,
     world_width: i32,
     occupancy: &[Option<CellEntity>],
-    energy: f32,
+    vision_distance: u32,
 ) -> BrainEvaluation {
     let mut result = BrainEvaluation::default();
 
-    for sensory in &mut brain.sensory {
-        sensory.neuron.activation = match sensory.receptor {
-            SensoryReceptor::Look { look_distance } => look_sensor_value(
-                position,
-                facing,
-                organism_id,
-                world_width,
-                occupancy,
-                look_distance,
-            ),
-            SensoryReceptor::Energy => energy_sensor_value(energy),
+    let scan = scan_ahead(
+        (organism.q, organism.r),
+        organism.facing,
+        organism.id,
+        world_width,
+        occupancy,
+        vision_distance,
+    );
+
+    for sensory in &mut organism.brain.sensory {
+        sensory.neuron.activation = match &sensory.receptor {
+            SensoryReceptor::Look { look_target } => match &scan {
+                Some(ref r) if r.target == *look_target => r.signal,
+                _ => 0.0,
+            },
+            SensoryReceptor::Energy => energy_sensor_value(organism.energy),
         };
     }
+
+    let brain = &mut organism.brain;
 
     let inter_index: HashMap<NeuronId, usize> = brain
         .inter
@@ -301,41 +307,54 @@ fn energy_sensor_value(energy: f32) -> f32 {
     (1.0 + energy.max(0.0)).ln() / (1.0 + ENERGY_SCALE).ln()
 }
 
-pub(crate) fn look_sensor_value(
+pub(crate) struct ScanResult {
+    pub(crate) target: LookTarget,
+    pub(crate) signal: f32,
+}
+
+/// Scans forward along the facing direction up to `vision_distance` hexes.
+/// Returns the closest entity found (with occlusion) and a distance-encoded signal
+/// strength: `(max_dist - dist + 1) / max_dist`. Returns `None` if all cells are empty.
+pub(crate) fn scan_ahead(
     position: (i32, i32),
     facing: sim_protocol::FacingDirection,
     organism_id: OrganismId,
     world_width: i32,
     occupancy: &[Option<CellEntity>],
-    distance: u32,
-) -> f32 {
-    if distance == 0 {
-        return LOOK_EMPTY;
+    vision_distance: u32,
+) -> Option<ScanResult> {
+    let max_dist = vision_distance.max(1);
+    let mut current = position;
+    for d in 1..=max_dist {
+        current = hex_neighbor(current, facing);
+        if current.0 < 0 || current.1 < 0 || current.0 >= world_width || current.1 >= world_width {
+            let signal = (max_dist - d + 1) as f32 / max_dist as f32;
+            return Some(ScanResult {
+                target: LookTarget::OutOfBounds,
+                signal,
+            });
+        }
+        let idx = current.1 as usize * world_width as usize + current.0 as usize;
+        match occupancy[idx] {
+            Some(CellEntity::Organism(id)) if id == organism_id => {}
+            Some(CellEntity::Food(_)) => {
+                let signal = (max_dist - d + 1) as f32 / max_dist as f32;
+                return Some(ScanResult {
+                    target: LookTarget::Food,
+                    signal,
+                });
+            }
+            Some(CellEntity::Organism(_)) => {
+                let signal = (max_dist - d + 1) as f32 / max_dist as f32;
+                return Some(ScanResult {
+                    target: LookTarget::Organism,
+                    signal,
+                });
+            }
+            None => {}
+        }
     }
-
-    let mut target = position;
-    for _ in 0..distance {
-        target = hex_neighbor(target, facing);
-    }
-    look_target_value(target, organism_id, world_width, occupancy)
-}
-
-fn look_target_value(
-    target: (i32, i32),
-    organism_id: OrganismId,
-    world_width: i32,
-    occupancy: &[Option<CellEntity>],
-) -> f32 {
-    if target.0 < 0 || target.1 < 0 || target.0 >= world_width || target.1 >= world_width {
-        return LOOK_OUT_OF_BOUNDS;
-    }
-    let idx = target.1 as usize * world_width as usize + target.0 as usize;
-    match occupancy[idx] {
-        Some(CellEntity::Organism(id)) if id == organism_id => LOOK_EMPTY,
-        Some(CellEntity::Food(_)) => LOOK_FOOD,
-        Some(CellEntity::Organism(_)) => LOOK_ORGANISM,
-        None => LOOK_EMPTY,
-    }
+    None
 }
 
 fn output_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {

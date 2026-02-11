@@ -7,7 +7,9 @@
       "Bash(npm run build:*)",
       "Bash(npm run typecheck:*)",
       "Bash(git stash:*)",
-      "Bash(make fmt:*)"
+      "Bash(make fmt:*)",
+      "Bash(grep:*)",
+      "Bash(BLESS=1 cargo test:*)"
     ]
   }
 }

@@ -61,7 +61,9 @@ fn forced_brain(
 ) -> BrainState {
     let sensory = vec![make_sensory_neuron(
         0,
-        SensoryReceptor::Look { look_distance: 1 },
+        SensoryReceptor::Look {
+            look_target: LookTarget::Food,
+        },
     )];
     let inter_id = NeuronId(1000);
     let inter_bias = 1.0;

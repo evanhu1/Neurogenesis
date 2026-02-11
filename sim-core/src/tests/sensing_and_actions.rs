@@ -2,7 +2,7 @@ use super::support::*;
 use super::*;
 
 #[test]
-fn look_sensor_returns_distance_based_entity_codes() {
+fn scan_ahead_returns_organism_with_distance_signal() {
     let cfg = test_config(5, 2);
     let mut sim = Simulation::new(cfg, 7).expect("simulation should initialize");
 
@@ -18,17 +18,8 @@ fn look_sensor_returns_distance_based_entity_codes() {
         sim.occupancy[idx] = Some(CellEntity::Organism(org.id));
     }
 
-    let signal = look_sensor_value(
-        (2, 2),
-        FacingDirection::East,
-        sim.organisms[0].id,
-        sim.config.world_width as i32,
-        &sim.occupancy,
-        1,
-    );
-    assert_eq!(signal, 0.0);
-
-    let far_signal = look_sensor_value(
+    // vision_distance=2, organism at distance 2 → signal = (2 - 2 + 1)/2 = 0.5
+    let result = scan_ahead(
         (2, 2),
         FacingDirection::East,
         sim.organisms[0].id,
@@ -36,19 +27,30 @@ fn look_sensor_returns_distance_based_entity_codes() {
         &sim.occupancy,
         2,
     );
-    assert_eq!(far_signal, 2.0);
+    let result = result.expect("should detect organism");
+    assert_eq!(result.target, LookTarget::Organism);
+    assert!((result.signal - 0.5).abs() < f32::EPSILON);
+}
 
-    let empty_signal = look_sensor_value(
-        (2, 2),
-        FacingDirection::NorthWest,
-        sim.organisms[0].id,
-        sim.config.world_width as i32,
-        &sim.occupancy,
-        1,
-    );
-    assert_eq!(empty_signal, 0.0);
+#[test]
+fn scan_ahead_returns_oob_at_boundary() {
+    let cfg = test_config(5, 2);
+    let mut sim = Simulation::new(cfg, 7).expect("simulation should initialize");
 
-    let out_of_bounds_signal = look_sensor_value(
+    sim.organisms[0].q = 2;
+    sim.organisms[0].r = 2;
+    sim.organisms[0].facing = FacingDirection::East;
+    sim.organisms[1].q = 0;
+    sim.organisms[1].r = 0;
+
+    sim.occupancy.fill(None);
+    for org in &sim.organisms {
+        let idx = sim.cell_index(org.q, org.r).expect("in-bounds test setup");
+        sim.occupancy[idx] = Some(CellEntity::Organism(org.id));
+    }
+
+    // vision_distance=3, OOB at distance 3 → signal = (3 - 3 + 1)/3 = 1/3
+    let result = scan_ahead(
         (2, 2),
         FacingDirection::East,
         sim.organisms[0].id,
@@ -56,11 +58,42 @@ fn look_sensor_returns_distance_based_entity_codes() {
         &sim.occupancy,
         3,
     );
-    assert_eq!(out_of_bounds_signal, 3.0);
+    let result = result.expect("should detect out of bounds");
+    assert_eq!(result.target, LookTarget::OutOfBounds);
+    assert!((result.signal - 1.0 / 3.0).abs() < f32::EPSILON);
 }
 
 #[test]
-fn look_sensor_detects_food_with_food_code() {
+fn scan_ahead_returns_none_for_empty_path() {
+    let cfg = test_config(5, 2);
+    let mut sim = Simulation::new(cfg, 7).expect("simulation should initialize");
+
+    sim.organisms[0].q = 2;
+    sim.organisms[0].r = 2;
+    sim.organisms[0].facing = FacingDirection::NorthWest;
+    sim.organisms[1].q = 4;
+    sim.organisms[1].r = 4;
+
+    sim.occupancy.fill(None);
+    for org in &sim.organisms {
+        let idx = sim.cell_index(org.q, org.r).expect("in-bounds test setup");
+        sim.occupancy[idx] = Some(CellEntity::Organism(org.id));
+    }
+
+    // Looking NorthWest from (2,2): distance 1 → (2,1), distance 2 → (2,0) — both empty
+    let result = scan_ahead(
+        (2, 2),
+        FacingDirection::NorthWest,
+        sim.organisms[0].id,
+        sim.config.world_width as i32,
+        &sim.occupancy,
+        2,
+    );
+    assert!(result.is_none());
+}
+
+#[test]
+fn scan_ahead_detects_food_with_distance_signal() {
     let cfg = test_config(5, 1);
     let mut sim = Simulation::new(cfg, 76).expect("simulation should initialize");
     configure_sim(
@@ -80,7 +113,8 @@ fn look_sensor_detects_food_with_food_code() {
     let added = sim.add_food(make_food(0, 4, 2, sim.config.food_energy));
     assert!(added);
 
-    let signal = look_sensor_value(
+    // vision_distance=2, food at distance 2 → signal = (2 - 2 + 1)/2 = 0.5
+    let result = scan_ahead(
         (2, 2),
         FacingDirection::East,
         OrganismId(0),
@@ -88,7 +122,85 @@ fn look_sensor_detects_food_with_food_code() {
         &sim.occupancy,
         2,
     );
-    assert_eq!(signal, 1.0);
+    let result = result.expect("should detect food");
+    assert_eq!(result.target, LookTarget::Food);
+    assert!((result.signal - 0.5).abs() < f32::EPSILON);
+}
+
+#[test]
+fn scan_ahead_adjacent_entity_returns_max_signal() {
+    let cfg = test_config(5, 1);
+    let mut sim = Simulation::new(cfg, 76).expect("simulation should initialize");
+    configure_sim(
+        &mut sim,
+        vec![make_organism(
+            0,
+            2,
+            2,
+            FacingDirection::East,
+            false,
+            false,
+            false,
+            0.1,
+            10.0,
+        )],
+    );
+    let added = sim.add_food(make_food(0, 3, 2, sim.config.food_energy));
+    assert!(added);
+
+    // vision_distance=3, food at distance 1 → signal = (3 - 1 + 1)/3 = 1.0
+    let result = scan_ahead(
+        (2, 2),
+        FacingDirection::East,
+        OrganismId(0),
+        sim.config.world_width as i32,
+        &sim.occupancy,
+        3,
+    );
+    let result = result.expect("should detect food");
+    assert_eq!(result.target, LookTarget::Food);
+    assert!((result.signal - 1.0).abs() < f32::EPSILON);
+}
+
+#[test]
+fn scan_ahead_occlusion_closer_entity_blocks_farther() {
+    let cfg = test_config(7, 1);
+    let mut sim = Simulation::new(cfg, 76).expect("simulation should initialize");
+    configure_sim(
+        &mut sim,
+        vec![make_organism(
+            0,
+            1,
+            3,
+            FacingDirection::East,
+            false,
+            false,
+            false,
+            0.1,
+            10.0,
+        )],
+    );
+    // Food at distance 2, organism at distance 4 — food should occlude organism
+    sim.add_food(make_food(0, 3, 3, sim.config.food_energy));
+    sim.add_organism(make_organism(
+        1, 5, 3,
+        FacingDirection::East,
+        false, false, false,
+        0.1, 10.0,
+    ));
+
+    let result = scan_ahead(
+        (1, 3),
+        FacingDirection::East,
+        OrganismId(0),
+        sim.config.world_width as i32,
+        &sim.occupancy,
+        5,
+    );
+    let result = result.expect("should detect food (closer)");
+    assert_eq!(result.target, LookTarget::Food);
+    // distance 2, max 5 → signal = (5 - 2 + 1)/5 = 0.8
+    assert!((result.signal - 0.8).abs() < f32::EPSILON);
 }
 
 #[test]

@@ -154,7 +154,7 @@ fn normalize_species_config(mutated: &mut SpeciesConfig) {
 }
 
 fn max_synapses_for_species(species: &SpeciesConfig) -> u32 {
-    let sensory_count = species.vision_distance + SensoryReceptor::NON_VISION_COUNT;
+    let sensory_count = SensoryReceptor::LOOK_NEURON_COUNT + 1;
     let action_count = ActionType::ALL.len() as u32;
     let pre_count = sensory_count + species.num_neurons;
     let post_count = species.num_neurons + action_count;

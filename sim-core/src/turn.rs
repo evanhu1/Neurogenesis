@@ -174,19 +174,16 @@ impl Simulation {
                 continue;
             };
 
-            let evaluation = {
-                let energy = self.organisms[organism_idx].energy;
-                let brain = &mut self.organisms[organism_idx].brain;
-                evaluate_brain(
-                    brain,
-                    (snapshot_state.q, snapshot_state.r),
-                    snapshot_state.facing,
-                    *organism_id,
-                    snapshot.world_width,
-                    &snapshot.occupancy,
-                    energy,
-                )
-            };
+            let vision_distance = self
+                .species_config(self.organisms[organism_idx].species_id)
+                .map(|c| c.vision_distance)
+                .unwrap_or(1);
+            let evaluation = evaluate_brain(
+                &mut self.organisms[organism_idx],
+                snapshot.world_width,
+                &snapshot.occupancy,
+                vision_distance,
+            );
 
             let turn_left_active = evaluation.actions[action_index(ActionType::TurnLeft)];
             let turn_right_active = evaluation.actions[action_index(ActionType::TurnRight)];
