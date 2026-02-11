@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use sim_types::{
-    FacingDirection, FoodState, MetricsSnapshot, NeuronId, OrganismId, OrganismMove, OrganismState,
-    RemovedEntityPosition, SpeciesId, TickDelta, WorldConfig, WorldSnapshot,
+    FacingDirection, FoodState, MetricsSnapshot, NeuronId, OrganismFacing, OrganismId,
+    OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId, TickDelta, WorldConfig,
+    WorldSnapshot,
 };
 use uuid::Uuid;
 
@@ -120,6 +121,7 @@ impl From<WorldSnapshot> for WorldSnapshotView {
 pub struct TickDeltaView {
     pub turn: u64,
     pub moves: Vec<OrganismMove>,
+    pub facing_updates: Vec<OrganismFacing>,
     pub removed_positions: Vec<RemovedEntityPosition>,
     pub spawned: Vec<WorldOrganismState>,
     pub food_spawned: Vec<FoodState>,
@@ -131,6 +133,7 @@ impl From<TickDelta> for TickDeltaView {
         Self {
             turn: delta.turn,
             moves: delta.moves,
+            facing_updates: delta.facing_updates,
             removed_positions: delta.removed_positions,
             spawned: delta.spawned.iter().map(WorldOrganismState::from).collect(),
             food_spawned: delta.food_spawned,

@@ -57,7 +57,7 @@ export function ControlPanel({
       <div className="mt-3 flex flex-wrap gap-2">
         <ControlButton label="New Session" onClick={onNewSession} />
         <ControlButton label="Reset" onClick={onReset} />
-        <div className="flex items-center gap-2 rounded-lg border border-accent/20 bg-white/70 px-2 py-1">
+        <div className="flex w-full items-center gap-2 rounded-lg bg-white/70 px-2 py-1">
           <ControlButton label={isRunning ? 'Pause' : 'Start'} onClick={onToggleRun} />
           <span className="text-xs" role="img" aria-label="turtle">🐢</span>
           <input
@@ -68,7 +68,7 @@ export function ControlPanel({
             step={1}
             value={speedLevelIndex}
             onChange={handleSpeedLevelInput}
-            className="h-1.5 w-16 cursor-pointer accent-accent"
+            className="h-1.5 min-w-0 flex-1 cursor-pointer accent-accent"
           />
           <span className="text-xs" role="img" aria-label="rabbit">🐇</span>
         </div>
@@ -129,7 +129,7 @@ function ControlButton({ label, onClick }: ControlButtonProps) {
 
 const MAX_DISPLAY_POINTS = 300;
 const MAX_VISIBLE_SPECIES = 10;
-const SPECIES_ZERO_GRACE_POINTS = 40;
+const SPECIES_ZERO_GRACE_POINTS = 100;
 
 function pointPeakSpeciesCount(point: SpeciesPopulationPoint): number {
   let max = 0;
@@ -452,9 +452,8 @@ function SpeciesPopulationChart({
               onClick={() => {
                 onSpeciesSeriesClick(item.id);
               }}
-              className={`flex shrink-0 items-center gap-1 rounded bg-white/70 px-2 py-1 transition hover:bg-slate-200 ${
-                item.id === focusedSpeciesId ? 'ring-1 ring-ink/40' : ''
-              }`}
+              className={`flex shrink-0 items-center gap-1 rounded bg-white/70 px-2 py-1 transition hover:bg-slate-200 ${item.id === focusedSpeciesId ? 'ring-1 ring-ink/40' : ''
+                }`}
             >
               <span
                 className="inline-block h-2.5 w-2.5 rounded-full"

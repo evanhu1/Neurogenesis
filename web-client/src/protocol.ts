@@ -18,6 +18,11 @@ export function applyTickDelta(snapshot: WorldSnapshot, delta: TickDelta): World
   for (const move of deltaMoves) {
     movements.set(unwrapId(move.id), move.to as [number, number]);
   }
+  const facings = new Map<number, WorldOrganismState['facing']>();
+  const deltaFacingUpdates = Array.isArray(delta.facing_updates) ? delta.facing_updates : [];
+  for (const update of deltaFacingUpdates) {
+    facings.set(unwrapId(update.id), update.facing);
+  }
 
   const removedOrganisms = new Set<number>();
   const removedFoods = new Set<number>();
@@ -36,11 +41,18 @@ export function applyTickDelta(snapshot: WorldSnapshot, delta: TickDelta): World
   const organisms = snapshot.organisms
     .filter((organism: WorldOrganismState) => !removedOrganisms.has(unwrapId(organism.id)))
     .map((organism: WorldOrganismState) => {
+      const facing = facings.get(unwrapId(organism.id)) ?? organism.facing;
       const next = movements.get(unwrapId(organism.id));
       if (!next) {
-        return { ...organism, age_turns: organism.age_turns + 1 };
+        return { ...organism, facing, age_turns: organism.age_turns + 1 };
       }
-      return { ...organism, q: next[0], r: next[1], age_turns: organism.age_turns + 1 };
+      return {
+        ...organism,
+        q: next[0],
+        r: next[1],
+        facing,
+        age_turns: organism.age_turns + 1,
+      };
     })
     .concat(spawnedOrganisms);
   const foods = (Array.isArray(snapshot.foods) ? snapshot.foods : [])

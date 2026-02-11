@@ -8,6 +8,10 @@ const TARGET_HEX_RADIUS_PX = 48;
 const WORLD_ZOOM_STEP = 1.12;
 const DEFAULT_WORLD_VIEWPORT: WorldViewport = { zoom: 1, panX: 0, panY: 0 };
 
+function viewportEqual(a: WorldViewport, b: WorldViewport): boolean {
+  return a.zoom === b.zoom && a.panX === b.panX && a.panY === b.panY;
+}
+
 function computeMaxWorldZoom(canvas: HTMLCanvasElement, worldWidth: number | null | undefined): number {
   if (!worldWidth || worldWidth <= 0) return BASE_MAX_WORLD_ZOOM;
   const baseHexSize = computeBaseHexSize(canvas.width, canvas.height, worldWidth);
@@ -37,16 +41,20 @@ type PanState = {
 };
 
 export function useWorldViewport() {
-  const [viewport, setViewport] = useState<WorldViewport>(DEFAULT_WORLD_VIEWPORT);
+  const [, setViewport] = useState<WorldViewport>(DEFAULT_WORLD_VIEWPORT);
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const [isPanningWorld, setIsPanningWorld] = useState(false);
   const viewportRef = useRef<WorldViewport>(DEFAULT_WORLD_VIEWPORT);
   const panRef = useRef<PanState | null>(null);
   const suppressNextClickRef = useRef(false);
 
-  useEffect(() => {
-    viewportRef.current = viewport;
-  }, [viewport]);
+  const updateViewport = useCallback((updater: (prev: WorldViewport) => WorldViewport) => {
+    const prev = viewportRef.current;
+    const next = updater(prev);
+    if (viewportEqual(prev, next)) return;
+    viewportRef.current = next;
+    setViewport(next);
+  }, []);
 
   const zoomAtPointer = useCallback(
     (
@@ -60,7 +68,7 @@ export function useWorldViewport() {
       const xPx = ((clientX - rect.left) / rect.width) * canvas.width;
       const yPx = ((clientY - rect.top) / rect.height) * canvas.height;
 
-      setViewport((prev) => {
+      updateViewport((prev) => {
         const zoomFactor = deltaY < 0 ? WORLD_ZOOM_STEP : 1 / WORLD_ZOOM_STEP;
         const maxWorldZoom = computeMaxWorldZoom(canvas, worldWidth);
         const nextZoom = Math.max(MIN_WORLD_ZOOM, Math.min(maxWorldZoom, prev.zoom * zoomFactor));
@@ -74,7 +82,7 @@ export function useWorldViewport() {
         return { zoom: nextZoom, panX, panY };
       });
     },
-    [],
+    [updateViewport],
   );
 
   const onCanvasMouseDown = useCallback(
@@ -108,13 +116,13 @@ export function useWorldViewport() {
       if (!panState.dragged && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) {
         panState.dragged = true;
       }
-      setViewport((prev) => ({
+      updateViewport((prev) => ({
         ...prev,
         panX: panState.startPanX + dxCanvasPx,
         panY: panState.startPanY + dyCanvasPx,
       }));
     },
-    [isPanningWorld],
+    [isPanningWorld, updateViewport],
   );
 
   const onCanvasMouseUp = useCallback(() => {
@@ -164,14 +172,14 @@ export function useWorldViewport() {
 
   const panToWorldPoint = useCallback(
     (worldX: number, worldY: number, canvasWidth: number, canvasHeight: number) => {
-      setViewport((prev) => {
+      updateViewport((prev) => {
         const panX = -(worldX - canvasWidth / 2) * prev.zoom;
         const panY = -(worldY - canvasHeight / 2) * prev.zoom;
         if (panX === prev.panX && panY === prev.panY) return prev;
         return { ...prev, panX, panY };
       });
     },
-    [],
+    [updateViewport],
   );
 
   const cursorClass = isSpacePressed || isPanningWorld ? 'cursor-pointer' : 'cursor-default';

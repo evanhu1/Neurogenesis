@@ -245,6 +245,12 @@ pub struct OrganismMove {
     pub to: (i32, i32),
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OrganismFacing {
+    pub id: OrganismId,
+    pub facing: FacingDirection,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct RemovedEntityPosition {
     pub entity_id: EntityId,
@@ -256,6 +262,7 @@ pub struct RemovedEntityPosition {
 pub struct TickDelta {
     pub turn: u64,
     pub moves: Vec<OrganismMove>,
+    pub facing_updates: Vec<OrganismFacing>,
     pub removed_positions: Vec<RemovedEntityPosition>,
     pub spawned: Vec<OrganismState>,
     pub food_spawned: Vec<FoodState>,

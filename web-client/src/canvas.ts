@@ -125,11 +125,11 @@ function getGridLayer(
     for (let r = 0; r < worldWidth; r += 1) {
       for (let q = 0; q < worldWidth; q += 1) {
         const center = hexCenter(layout, q, r);
-        traceHex(layerCtx, center.x, center.y, layout.size - 0.5);
-        layerCtx.fillStyle = (q + r) % 2 === 0 ? '#d7dde8' : '#e3e8f0';
+        traceHex(layerCtx, center.x, center.y, layout.size);
+        layerCtx.fillStyle = (q + r) % 2 === 0 ? '#cfd6e2' : '#e3e8f0';
         layerCtx.fill();
-        layerCtx.strokeStyle = '#c7d0df';
-        layerCtx.lineWidth = 1;
+        layerCtx.strokeStyle = '#8a94a8';
+        layerCtx.lineWidth = 0.4;
         layerCtx.stroke();
       }
     }

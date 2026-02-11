@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, type MouseEvent, type MutableRefObject } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  type MouseEvent,
+  type MutableRefObject,
+} from 'react';
 import { buildHexLayout, hexCenter, pickOrganismAtCanvasPoint, renderWorld } from '../../../canvas';
 import { unwrapId } from '../../../protocol';
 import type { WorldOrganismState, WorldSnapshot } from '../../../types';
@@ -39,25 +46,12 @@ export function WorldCanvas({
     consumeSuppressedClick,
   } = useWorldViewport();
 
-  useEffect(() => {
-    snapshotRef.current = snapshot;
-  }, [snapshot]);
-
-  useEffect(() => {
-    focusedOrganismIdRef.current = focusedOrganismId;
-  }, [focusedOrganismId]);
-
-  useEffect(() => {
-    deadFlashCellsRef.current = deadFlashCells;
-  }, [deadFlashCells]);
-
-  useEffect(() => {
-    bornFlashCellsRef.current = bornFlashCells;
-  }, [bornFlashCells]);
-
-  useEffect(() => {
-    onOrganismSelectRef.current = onOrganismSelect;
-  }, [onOrganismSelect]);
+  // Keep refs synchronized during render so the RAF draw loop sees latest props immediately.
+  snapshotRef.current = snapshot;
+  focusedOrganismIdRef.current = focusedOrganismId;
+  deadFlashCellsRef.current = deadFlashCells;
+  bornFlashCellsRef.current = bornFlashCells;
+  onOrganismSelectRef.current = onOrganismSelect;
 
   useEffect(() => {
     if (!panToHexRef) return;
@@ -75,7 +69,7 @@ export function WorldCanvas({
   }, [panToHexRef, panToWorldPoint]);
 
   // Track focused organism across ticks
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!snapshot || focusedOrganismId == null) return;
     const canvas = canvasRef.current;
     if (!canvas) return;

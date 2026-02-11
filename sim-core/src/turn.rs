@@ -3,8 +3,8 @@ use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right};
 use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 use crate::Simulation;
 use sim_types::{
-    ActionType, EntityId, FacingDirection, FoodId, FoodState, Occupant, OrganismId, OrganismMove,
-    RemovedEntityPosition, SpeciesId, TickDelta,
+    ActionType, EntityId, FacingDirection, FoodId, FoodState, Occupant, OrganismFacing, OrganismId,
+    OrganismMove, RemovedEntityPosition, SpeciesId, TickDelta,
 };
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
@@ -69,6 +69,7 @@ struct MoveResolution {
 #[derive(Default)]
 struct CommitResult {
     moves: Vec<OrganismMove>,
+    facing_updates: Vec<OrganismFacing>,
     removed_positions: Vec<RemovedEntityPosition>,
     food_spawned: Vec<FoodState>,
     consumptions: u64,
@@ -106,6 +107,7 @@ impl Simulation {
         TickDelta {
             turn: self.turn,
             moves: commit.moves,
+            facing_updates: commit.facing_updates,
             removed_positions,
             spawned,
             food_spawned: commit.food_spawned,
@@ -253,8 +255,16 @@ impl Simulation {
         resolutions: &[MoveResolution],
     ) -> CommitResult {
         // intents[i] aligns with organisms[i] (both built in sorted ID order)
+        let mut facing_updates = Vec::new();
         for (idx, intent) in intents.iter().enumerate() {
-            self.organisms[idx].facing = intent.facing_after_turn;
+            let organism = &mut self.organisms[idx];
+            if organism.facing != intent.facing_after_turn {
+                facing_updates.push(OrganismFacing {
+                    id: organism.id,
+                    facing: intent.facing_after_turn,
+                });
+            }
+            organism.facing = intent.facing_after_turn;
         }
 
         let org_count = self.organisms.len();
@@ -344,6 +354,7 @@ impl Simulation {
 
         CommitResult {
             moves,
+            facing_updates,
             removed_positions,
             food_spawned,
             consumptions,

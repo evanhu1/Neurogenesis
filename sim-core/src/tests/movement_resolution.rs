@@ -174,6 +174,8 @@ fn multi_node_cycle_resolves_without_conflict() {
 #[test]
 fn contested_occupied_target_where_occupant_remains_uses_consume_path() {
     let cfg = test_config(5, 3);
+    let expected_energy =
+        6.0 - cfg.turn_energy_cost - cfg.move_action_energy_cost + cfg.food_energy * 2.0;
     let mut sim = Simulation::new(cfg, 17).expect("simulation should initialize");
     configure_sim(
         &mut sim,
@@ -218,7 +220,7 @@ fn contested_occupied_target_where_occupant_remains_uses_consume_path() {
         .iter()
         .find(|organism| organism.id == OrganismId(0))
         .expect("predator should survive");
-    assert_eq!(predator.energy, 6.0);
+    assert_eq!(predator.energy, expected_energy);
 }
 
 #[test]

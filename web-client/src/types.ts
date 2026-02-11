@@ -170,6 +170,7 @@ export type RemovedEntityPosition = {
 export type TickDelta = {
   turn: number;
   moves: Array<{ id: OrganismId; from: [number, number]; to: [number, number] }>;
+  facing_updates: Array<{ id: OrganismId; facing: FacingDirection }>;
   removed_positions: RemovedEntityPosition[];
   spawned: WorldOrganismState[];
   food_spawned: FoodState[];
