@@ -1,5 +1,4 @@
-import type { Envelope, ServerEvent } from '../../../types';
-import { protocolVersion } from '../constants';
+import type { ServerEvent } from '../../../types';
 
 export function connectSimulationWs(
   wsBase: string,
@@ -11,8 +10,8 @@ export function connectSimulationWs(
 
   socket.onmessage = (evt) => {
     try {
-      const envelope = JSON.parse(String(evt.data)) as Envelope<ServerEvent>;
-      onEvent(envelope.payload);
+      const event = JSON.parse(String(evt.data)) as ServerEvent;
+      onEvent(event);
     } catch (err) {
       console.error('ws parse error', err);
     }
@@ -27,7 +26,6 @@ export function connectSimulationWs(
 
 export function sendSimulationCommand(ws: WebSocket | null, command: unknown): boolean {
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-  ws.send(JSON.stringify({ protocol_version: protocolVersion, payload: command }));
+  ws.send(JSON.stringify(command));
   return true;
 }
-

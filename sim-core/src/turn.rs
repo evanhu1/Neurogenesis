@@ -1,10 +1,10 @@
 use crate::brain::{action_index, evaluate_brain, BrainScratch};
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right};
 use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
-use crate::{CellEntity, Simulation};
+use crate::Simulation;
 use sim_protocol::{
-    ActionType, FacingDirection, FoodId, FoodState, OrganismId, OrganismMove, OrganismState,
-    RemovedFoodPosition, RemovedOrganismPosition, SpeciesId, TickDelta,
+    ActionType, FacingDirection, FoodId, FoodState, Occupant, OrganismId, OrganismMove,
+    OrganismState, RemovedFoodPosition, RemovedOrganismPosition, SpeciesId, TickDelta,
 };
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -19,7 +19,7 @@ struct SnapshotOrganismState {
 #[derive(Clone)]
 struct TurnSnapshot {
     world_width: i32,
-    occupancy: Vec<Option<CellEntity>>,
+    occupancy: Vec<Option<Occupant>>,
     ordered_ids: Vec<OrganismId>,
     organism_states: Vec<SnapshotOrganismState>,
     id_to_index: HashMap<OrganismId, usize>,
@@ -42,7 +42,7 @@ impl TurnSnapshot {
         Some(r as usize * self.world_width as usize + q as usize)
     }
 
-    fn occupant_at(&self, q: i32, r: i32) -> Option<CellEntity> {
+    fn occupant_at(&self, q: i32, r: i32) -> Option<Occupant> {
         let idx = self.cell_index(q, r)?;
         self.occupancy[idx]
     }
@@ -105,6 +105,7 @@ impl Simulation {
         let reproductions = self.reproduction_phase(&intents, &mut spawn_requests);
         self.increment_age_for_survivors();
         let spawned = self.resolve_spawn_requests(&spawn_requests);
+        self.prune_extinct_species();
         self.debug_assert_consistent_state();
 
         self.turn = self.turn.saturating_add(1);
@@ -250,12 +251,12 @@ impl Simulation {
         let mut resolutions = Vec::with_capacity(winners.len());
         for winner in winners {
             let kind = match snapshot.occupant_at(winner.target.0, winner.target.1) {
-                Some(CellEntity::Organism(occupant)) if !moving_ids.contains(&occupant) => {
+                Some(Occupant::Organism(occupant)) if !moving_ids.contains(&occupant) => {
                     MoveResolutionKind::ConsumeOrganism {
                         consumed_organism: occupant,
                     }
                 }
-                Some(CellEntity::Food(food_id)) => MoveResolutionKind::ConsumeFood {
+                Some(Occupant::Food(food_id)) => MoveResolutionKind::ConsumeFood {
                     consumed_food: food_id,
                 },
                 _ => MoveResolutionKind::MoveOnly,
@@ -497,6 +498,7 @@ impl Simulation {
 
     pub(crate) fn refresh_population_metrics(&mut self) {
         self.metrics.organisms = self.organisms.len() as u32;
+        self.metrics.total_species_created = self.next_species_id;
         self.metrics.species_counts = self.compute_species_counts();
     }
 
@@ -517,11 +519,11 @@ fn compare_move_candidates(a: &MoveCandidate, b: &MoveCandidate) -> Ordering {
 }
 
 fn occupancy_snapshot_cell(
-    occupancy: &[Option<CellEntity>],
+    occupancy: &[Option<Occupant>],
     world_width: i32,
     q: i32,
     r: i32,
-) -> Option<CellEntity> {
+) -> Option<Occupant> {
     if q < 0 || r < 0 || q >= world_width || r >= world_width {
         return None;
     }

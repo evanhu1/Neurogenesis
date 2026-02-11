@@ -1,9 +1,10 @@
 use crate::SimError;
 use rand::Rng;
 use sim_protocol::{
-    ActionType, GenomeEdge, NeuronId, OrganismGenome, SeedGenomeConfig, SensoryReceptor, SpeciesId,
+    ActionType, NeuronId, OrganismGenome, SeedGenomeConfig, SensoryReceptor, SpeciesId, SynapseEdge,
 };
-use std::collections::{BTreeMap, HashMap};
+use std::cmp::Ordering;
+use std::collections::BTreeMap;
 
 const MAX_MUTATED_INTER_NEURONS: u32 = 256;
 const MIN_MUTATED_VISION_DISTANCE: u32 = 1;
@@ -33,6 +34,8 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         }
     }
 
+    sort_edges(&mut edges);
+
     OrganismGenome {
         num_neurons: config.num_neurons,
         max_num_neurons: config.max_num_neurons,
@@ -43,11 +46,26 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     }
 }
 
+fn edge_key(e: &SynapseEdge) -> (NeuronId, NeuronId) {
+    (e.pre_neuron_id, e.post_neuron_id)
+}
+
+fn sort_edges(edges: &mut [SynapseEdge]) {
+    edges.sort_by_key(edge_key);
+}
+
+fn debug_assert_edges_sorted(edges: &[SynapseEdge]) {
+    debug_assert!(
+        edges.windows(2).all(|w| edge_key(&w[0]) <= edge_key(&w[1])),
+        "genome edges must be sorted by (pre, post)"
+    );
+}
+
 fn random_edge<R: Rng + ?Sized>(
     num_neurons: u32,
-    existing: &[GenomeEdge],
+    existing: &[SynapseEdge],
     rng: &mut R,
-) -> Option<GenomeEdge> {
+) -> Option<SynapseEdge> {
     // Pre neurons: sensory (0..SENSORY_COUNT) + enabled inter (INTER_ID_BASE..INTER_ID_BASE+num_neurons)
     // Post neurons: enabled inter (INTER_ID_BASE..INTER_ID_BASE+num_neurons) + action (ACTION_ID_BASE..ACTION_ID_BASE+ACTION_COUNT)
     let pre_count = SENSORY_COUNT + num_neurons;
@@ -77,13 +95,19 @@ fn random_edge<R: Rng + ?Sized>(
             continue;
         }
 
-        let is_dup = existing.iter().any(|e| e.pre == pre && e.post == post);
+        let is_dup = existing
+            .iter()
+            .any(|e| e.pre_neuron_id == pre && e.post_neuron_id == post);
         if is_dup {
             continue;
         }
 
         let weight = rng.random_range(-SYNAPSE_STRENGTH_MAX..SYNAPSE_STRENGTH_MAX);
-        return Some(GenomeEdge { pre, post, weight });
+        return Some(SynapseEdge {
+            pre_neuron_id: pre,
+            post_neuron_id: post,
+            weight,
+        });
     }
     None
 }
@@ -155,6 +179,9 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &
             rng,
         );
     }
+
+    sort_edges(&mut genome.edges);
+    debug_assert_edges_sorted(&genome.edges);
 }
 
 fn mutate_num_neurons<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
@@ -178,7 +205,7 @@ fn mutate_num_neurons<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R)
         let disabled_id = NeuronId(INTER_ID_BASE + genome.num_neurons);
         genome
             .edges
-            .retain(|e| e.pre != disabled_id && e.post != disabled_id);
+            .retain(|e| e.pre_neuron_id != disabled_id && e.post_neuron_id != disabled_id);
     }
 }
 
@@ -207,7 +234,8 @@ fn perturb<R: Rng + ?Sized>(value: f32, stddev: f32, clamp_abs: f32, rng: &mut R
     (value + normal * stddev).clamp(-clamp_abs, clamp_abs)
 }
 
-pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
+/// Cheap distance from scalar traits + bias vectors only (no edge comparison).
+fn trait_and_bias_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
     let mut dist = 0.0f32;
 
     dist += (a.num_neurons as f32 - b.num_neurons as f32).abs();
@@ -215,7 +243,6 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
     dist += (a.vision_distance as f32 - b.vision_distance as f32).abs();
     dist += (a.mutation_rate - b.mutation_rate).abs();
 
-    // Bias distance
     let max_bias_len = a.inter_biases.len().max(b.inter_biases.len());
     for i in 0..max_bias_len {
         let ba = a.inter_biases.get(i).copied().unwrap_or(0.0);
@@ -223,28 +250,40 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
         dist += (ba - bb).abs();
     }
 
-    // Edge distance: build HashMap<(pre,post), weight> for each
-    let map_a: HashMap<(NeuronId, NeuronId), f32> = a
-        .edges
-        .iter()
-        .map(|e| ((e.pre, e.post), e.weight))
-        .collect();
-    let map_b: HashMap<(NeuronId, NeuronId), f32> = b
-        .edges
-        .iter()
-        .map(|e| ((e.pre, e.post), e.weight))
-        .collect();
+    dist
+}
 
-    for (key, &wa) in &map_a {
-        match map_b.get(key) {
-            Some(&wb) => dist += (wa - wb).abs(),
-            None => dist += wa.abs(),
+/// Zero-allocation O(n+m) merge-join over sorted edge lists.
+pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
+    debug_assert_edges_sorted(&a.edges);
+    debug_assert_edges_sorted(&b.edges);
+
+    let mut dist = trait_and_bias_distance(a, b);
+
+    // Merge-join over sorted edges
+    let (mut ai, mut bi) = (0, 0);
+    while ai < a.edges.len() && bi < b.edges.len() {
+        match edge_key(&a.edges[ai]).cmp(&edge_key(&b.edges[bi])) {
+            Ordering::Equal => {
+                dist += (a.edges[ai].weight - b.edges[bi].weight).abs();
+                ai += 1;
+                bi += 1;
+            }
+            Ordering::Less => {
+                dist += a.edges[ai].weight.abs();
+                ai += 1;
+            }
+            Ordering::Greater => {
+                dist += b.edges[bi].weight.abs();
+                bi += 1;
+            }
         }
     }
-    for (key, &wb) in &map_b {
-        if !map_a.contains_key(key) {
-            dist += wb.abs();
-        }
+    for edge in &a.edges[ai..] {
+        dist += edge.weight.abs();
+    }
+    for edge in &b.edges[bi..] {
+        dist += edge.weight.abs();
     }
 
     dist
@@ -259,6 +298,11 @@ pub(crate) fn assign_species(
     let mut best_dist = f32::MAX;
 
     for (&species_id, founder_genome) in registry {
+        // Cheap pre-screen: if trait+bias distance alone exceeds best, skip full comparison
+        let cheap_dist = trait_and_bias_distance(child_genome, founder_genome);
+        if cheap_dist >= best_dist {
+            continue;
+        }
         let dist = genome_distance(child_genome, founder_genome);
         if dist < best_dist {
             best_dist = dist;

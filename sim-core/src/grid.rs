@@ -1,7 +1,6 @@
-use crate::CellEntity;
 use crate::Simulation;
 use sim_protocol::FacingDirection;
-use sim_protocol::{FoodState, OrganismState};
+use sim_protocol::{FoodState, Occupant, OrganismState};
 
 pub(crate) fn world_capacity(width: u32) -> usize {
     width as usize * width as usize
@@ -66,7 +65,7 @@ impl Simulation {
                     .expect("organism position must remain in bounds");
                 debug_assert_eq!(
                     self.occupancy[idx],
-                    Some(CellEntity::Organism(organism.id)),
+                    Some(Occupant::Organism(organism.id)),
                     "occupancy must point at organism occupying that cell",
                 );
             }
@@ -76,7 +75,7 @@ impl Simulation {
                     .expect("food position must remain in bounds");
                 debug_assert_eq!(
                     self.occupancy[idx],
-                    Some(CellEntity::Food(food.id)),
+                    Some(Occupant::Food(food.id)),
                     "occupancy must point at food occupying that cell",
                 );
             }
@@ -91,7 +90,7 @@ impl Simulation {
             return false;
         }
 
-        self.occupancy[cell_idx] = Some(CellEntity::Organism(organism.id));
+        self.occupancy[cell_idx] = Some(Occupant::Organism(organism.id));
         self.organisms.push(organism);
         true
     }
@@ -104,7 +103,7 @@ impl Simulation {
             return false;
         }
 
-        self.occupancy[cell_idx] = Some(CellEntity::Food(food.id));
+        self.occupancy[cell_idx] = Some(Occupant::Food(food.id));
         self.foods.push(food);
         true
     }
@@ -116,18 +115,18 @@ impl Simulation {
                 .cell_index(organism.q, organism.r)
                 .expect("organism must remain in bounds");
             debug_assert!(self.occupancy[idx].is_none());
-            self.occupancy[idx] = Some(CellEntity::Organism(organism.id));
+            self.occupancy[idx] = Some(Occupant::Organism(organism.id));
         }
         for food in &self.foods {
             let idx = self
                 .cell_index(food.q, food.r)
                 .expect("food must remain in bounds");
             debug_assert!(self.occupancy[idx].is_none());
-            self.occupancy[idx] = Some(CellEntity::Food(food.id));
+            self.occupancy[idx] = Some(Occupant::Food(food.id));
         }
     }
 
-    pub(crate) fn occupant_at(&self, q: i32, r: i32) -> Option<CellEntity> {
+    pub(crate) fn occupant_at(&self, q: i32, r: i32) -> Option<Occupant> {
         let idx = self.cell_index(q, r)?;
         self.occupancy[idx]
     }

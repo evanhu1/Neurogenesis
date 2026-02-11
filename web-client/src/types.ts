@@ -4,11 +4,6 @@ export type OrganismId = { 0: number } | number;
 export type SpeciesId = { 0: number } | number;
 export type FoodId = { 0: number } | number;
 
-export type Envelope<T> = {
-  protocol_version: number;
-  payload: T;
-};
-
 export type SeedGenomeConfig = {
   num_neurons: number;
   max_num_neurons: number;
@@ -32,22 +27,20 @@ export type WorldConfig = {
   seed_genome_config: SeedGenomeConfig;
 };
 
-export type GenomeEdge = {
-  pre: number | { 0: number };
-  post: number | { 0: number };
-  weight: number;
-};
-
 export type OrganismGenome = {
   num_neurons: number;
   max_num_neurons: number;
   vision_distance: number;
   mutation_rate: number;
   inter_biases: number[];
-  edges: GenomeEdge[];
+  edges: SynapseEdge[];
 };
 
-export type SynapseEdge = { post_neuron_id: number | { 0: number }; weight: number };
+export type SynapseEdge = {
+  pre_neuron_id: number | { 0: number };
+  post_neuron_id: number | { 0: number };
+  weight: number;
+};
 
 export type NeuronState = {
   neuron_id: number | { 0: number };
@@ -124,6 +117,7 @@ export type MetricsSnapshot = {
   total_consumptions: number;
   reproductions_last_turn: number;
   starvations_last_turn: number;
+  total_species_created: number;
   species_counts: Record<string, number>;
 };
 
@@ -134,7 +128,7 @@ export type WorldSnapshot = {
   species_registry: Record<string, OrganismGenome>;
   organisms: OrganismState[];
   foods: FoodState[];
-  occupancy: Array<{ q: number; r: number; organism_ids: OrganismId[]; food_ids: FoodId[] }>;
+  occupancy: Array<{ q: number; r: number; occupant: { type: 'Organism' | 'Food'; id: OrganismId | FoodId } }>;
   metrics: MetricsSnapshot;
 };
 

@@ -8,9 +8,12 @@ export function formatSessionMeta(session: SessionMetadata | null): string {
 
 export function formatMetrics(snapshot: WorldSnapshot | null): string {
   if (!snapshot) return 'No metrics';
+  const speciesAlive = Object.keys(snapshot.metrics.species_counts).length;
   return [
     `turn=${snapshot.turn}`,
     `organisms=${snapshot.metrics.organisms}`,
+    `species_alive=${speciesAlive}`,
+    `total_species_created=${snapshot.metrics.total_species_created}`,
     `food=${snapshot.foods.length}`,
     `consumptions_last_turn=${snapshot.metrics.consumptions_last_turn}`,
     `total_food_eaten=${snapshot.metrics.total_consumptions}`,

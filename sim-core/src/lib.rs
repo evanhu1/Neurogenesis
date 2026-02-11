@@ -1,7 +1,7 @@
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use sim_protocol::{
-    FoodId, FoodState, MetricsSnapshot, OccupancyCell, OrganismGenome, OrganismId, OrganismState,
+    FoodState, MetricsSnapshot, Occupant, OccupancyCell, OrganismGenome, OrganismId, OrganismState,
     SpeciesId, TickDelta, WorldConfig, WorldSnapshot,
 };
 use std::collections::BTreeMap;
@@ -36,15 +36,10 @@ pub struct Simulation {
     next_food_id: u64,
     organisms: Vec<OrganismState>,
     foods: Vec<FoodState>,
-    occupancy: Vec<Option<CellEntity>>,
+    occupancy: Vec<Option<Occupant>>,
     metrics: MetricsSnapshot,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CellEntity {
-    Organism(OrganismId),
-    Food(FoodId),
-}
 
 impl Simulation {
     pub fn new(config: WorldConfig, seed: u64) -> Result<Self, SimError> {
@@ -86,20 +81,10 @@ impl Simulation {
         let width = self.config.world_width as usize;
         let mut occupancy = Vec::with_capacity(self.organisms.len() + self.foods.len());
         for (idx, maybe_entity) in self.occupancy.iter().enumerate() {
-            if let Some(entity) = maybe_entity {
+            if let Some(occupant) = *maybe_entity {
                 let q = (idx % width) as i32;
                 let r = (idx / width) as i32;
-                let mut cell = OccupancyCell {
-                    q,
-                    r,
-                    organism_ids: Vec::new(),
-                    food_ids: Vec::new(),
-                };
-                match entity {
-                    CellEntity::Organism(id) => cell.organism_ids.push(*id),
-                    CellEntity::Food(id) => cell.food_ids.push(*id),
-                }
-                occupancy.push(cell);
+                occupancy.push(OccupancyCell { q, r, occupant });
             }
         }
         occupancy.sort_by_key(|cell| (cell.q, cell.r));
@@ -173,6 +158,12 @@ impl Simulation {
         let id = SpeciesId(self.next_species_id);
         self.next_species_id = self.next_species_id.saturating_add(1);
         id
+    }
+
+    pub(crate) fn prune_extinct_species(&mut self) {
+        let living: std::collections::HashSet<SpeciesId> =
+            self.organisms.iter().map(|o| o.species_id).collect();
+        self.species_registry.retain(|id, _| living.contains(id));
     }
 }
 

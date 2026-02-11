@@ -1,8 +1,8 @@
 use crate::grid::hex_neighbor;
-use crate::CellEntity;
 use sim_protocol::{
-    ActionNeuronState, ActionType, BrainState, InterNeuronState, LookTarget, NeuronId, NeuronState,
-    NeuronType, OrganismGenome, OrganismId, SensoryNeuronState, SensoryReceptor, SynapseEdge,
+    ActionNeuronState, ActionType, BrainState, Entity, InterNeuronState, NeuronId, NeuronState,
+    NeuronType, Occupant, OrganismGenome, OrganismId, SensoryNeuronState, SensoryReceptor,
+    SynapseEdge,
 };
 use std::cmp::Ordering;
 
@@ -40,19 +40,19 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
         make_sensory_neuron(
             0,
             SensoryReceptor::Look {
-                look_target: LookTarget::Food,
+                look_target: Entity::Food,
             },
         ),
         make_sensory_neuron(
             1,
             SensoryReceptor::Look {
-                look_target: LookTarget::Organism,
+                look_target: Entity::Organism,
             },
         ),
         make_sensory_neuron(
             2,
             SensoryReceptor::Look {
-                look_target: LookTarget::OutOfBounds,
+                look_target: Entity::OutOfBounds,
             },
         ),
         make_sensory_neuron(3, SensoryReceptor::Energy),
@@ -74,43 +74,55 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
 
     // Valid neuron IDs for this brain
     let sensory_max = sensory.len() as u32; // 0..4
+    let inter_count = genome.num_neurons as usize;
     let inter_max = INTER_ID_BASE + genome.num_neurons; // 1000..1000+n
     let action_max = ACTION_ID_BASE + ACTION_COUNT as u32; // 2000..2004
 
     let is_valid_pre = |id: NeuronId| -> bool {
-        // pre can be sensory or inter
         id.0 < sensory_max || (id.0 >= INTER_ID_BASE && id.0 < inter_max)
     };
     let is_valid_post = |id: NeuronId| -> bool {
-        // post can be inter or action
         (id.0 >= INTER_ID_BASE && id.0 < inter_max) || (id.0 >= ACTION_ID_BASE && id.0 < action_max)
     };
 
-    // Track seen (pre, post) pairs to skip duplicates
-    let mut seen_edges = std::collections::HashSet::new();
+    // Parent ID tracking: Vec-indexed instead of HashMap
+    let mut inter_parent_ids: Vec<Vec<NeuronId>> = vec![Vec::new(); inter_count];
+    let mut action_parent_ids: Vec<Vec<NeuronId>> = vec![Vec::new(); ACTION_COUNT];
+
+    // Edges are sorted by (pre, post) — use adjacent-duplicate detection
+    let mut prev_key: Option<(NeuronId, NeuronId)> = None;
 
     for edge in &genome.edges {
-        if edge.pre == edge.post {
+        let key = (edge.pre_neuron_id, edge.post_neuron_id);
+        if prev_key == Some(key) {
             continue;
         }
-        if !is_valid_pre(edge.pre) || !is_valid_post(edge.post) {
-            continue;
-        }
-        if !seen_edges.insert((edge.pre, edge.post)) {
-            continue;
-        }
+        prev_key = Some(key);
 
-        let synapse = SynapseEdge {
-            post_neuron_id: edge.post,
-            weight: edge.weight,
-        };
+        if edge.pre_neuron_id == edge.post_neuron_id {
+            continue;
+        }
+        if !is_valid_pre(edge.pre_neuron_id) || !is_valid_post(edge.post_neuron_id) {
+            continue;
+        }
 
         // Add to the correct pre-neuron's synapse list
-        if edge.pre.0 < sensory_max {
-            sensory[edge.pre.0 as usize].synapses.push(synapse);
-        } else if edge.pre.0 >= INTER_ID_BASE && edge.pre.0 < inter_max {
-            let idx = (edge.pre.0 - INTER_ID_BASE) as usize;
-            inter[idx].synapses.push(synapse);
+        if edge.pre_neuron_id.0 < sensory_max {
+            sensory[edge.pre_neuron_id.0 as usize]
+                .synapses
+                .push(edge.clone());
+        } else if edge.pre_neuron_id.0 >= INTER_ID_BASE && edge.pre_neuron_id.0 < inter_max {
+            let idx = (edge.pre_neuron_id.0 - INTER_ID_BASE) as usize;
+            inter[idx].synapses.push(edge.clone());
+        }
+
+        // Track parent relationships
+        if edge.post_neuron_id.0 >= INTER_ID_BASE && edge.post_neuron_id.0 < inter_max {
+            let idx = (edge.post_neuron_id.0 - INTER_ID_BASE) as usize;
+            inter_parent_ids[idx].push(edge.pre_neuron_id);
+        } else if edge.post_neuron_id.0 >= ACTION_ID_BASE && edge.post_neuron_id.0 < action_max {
+            let idx = (edge.post_neuron_id.0 - ACTION_ID_BASE) as usize;
+            action_parent_ids[idx].push(edge.pre_neuron_id);
         }
     }
 
@@ -122,41 +134,18 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
         i.synapses.sort_by_key(|e| e.post_neuron_id);
     }
 
-    // Build parent_ids in a single pass over all synapse lists
-    // parent_ids[post] = list of pre neurons that connect to post
-    let mut parent_map: std::collections::HashMap<NeuronId, Vec<NeuronId>> =
-        std::collections::HashMap::new();
-    for s in &sensory {
-        for edge in &s.synapses {
-            parent_map
-                .entry(edge.post_neuron_id)
-                .or_default()
-                .push(s.neuron.neuron_id);
-        }
+    // Assign parent_ids to inter and action neurons (take instead of clone)
+    for (idx, i) in inter.iter_mut().enumerate() {
+        let parents = &mut inter_parent_ids[idx];
+        parents.sort();
+        parents.dedup();
+        i.neuron.parent_ids = std::mem::take(parents);
     }
-    for i in &inter {
-        for edge in &i.synapses {
-            parent_map
-                .entry(edge.post_neuron_id)
-                .or_default()
-                .push(i.neuron.neuron_id);
-        }
-    }
-
-    // Assign parent_ids to inter and action neurons
-    for i in &mut inter {
-        if let Some(parents) = parent_map.get_mut(&i.neuron.neuron_id) {
-            parents.sort();
-            parents.dedup();
-            i.neuron.parent_ids = parents.clone();
-        }
-    }
-    for a in &mut action {
-        if let Some(parents) = parent_map.get_mut(&a.neuron.neuron_id) {
-            parents.sort();
-            parents.dedup();
-            a.neuron.parent_ids = parents.clone();
-        }
+    for (idx, a) in action.iter_mut().enumerate() {
+        let parents = &mut action_parent_ids[idx];
+        parents.sort();
+        parents.dedup();
+        a.neuron.parent_ids = std::mem::take(parents);
     }
 
     let synapse_count = sensory.iter().map(|s| s.synapses.len()).sum::<usize>()
@@ -207,7 +196,7 @@ pub(crate) fn make_action_neuron(id: u32, action_type: ActionType) -> ActionNeur
 pub(crate) fn evaluate_brain(
     organism: &mut sim_protocol::OrganismState,
     world_width: i32,
-    occupancy: &[Option<CellEntity>],
+    occupancy: &[Option<Occupant>],
     vision_distance: u32,
     scratch: &mut BrainScratch,
 ) -> BrainEvaluation {
@@ -381,7 +370,7 @@ fn energy_sensor_value(energy: f32) -> f32 {
 }
 
 pub(crate) struct ScanResult {
-    pub(crate) target: LookTarget,
+    pub(crate) target: Entity,
     pub(crate) signal: f32,
 }
 
@@ -393,7 +382,7 @@ pub(crate) fn scan_ahead(
     facing: sim_protocol::FacingDirection,
     organism_id: OrganismId,
     world_width: i32,
-    occupancy: &[Option<CellEntity>],
+    occupancy: &[Option<Occupant>],
     vision_distance: u32,
 ) -> Option<ScanResult> {
     let max_dist = vision_distance.max(1);
@@ -403,24 +392,24 @@ pub(crate) fn scan_ahead(
         if current.0 < 0 || current.1 < 0 || current.0 >= world_width || current.1 >= world_width {
             let signal = (max_dist - d + 1) as f32 / max_dist as f32;
             return Some(ScanResult {
-                target: LookTarget::OutOfBounds,
+                target: Entity::OutOfBounds,
                 signal,
             });
         }
         let idx = current.1 as usize * world_width as usize + current.0 as usize;
         match occupancy[idx] {
-            Some(CellEntity::Organism(id)) if id == organism_id => {}
-            Some(CellEntity::Food(_)) => {
+            Some(Occupant::Organism(id)) if id == organism_id => {}
+            Some(Occupant::Food(_)) => {
                 let signal = (max_dist - d + 1) as f32 / max_dist as f32;
                 return Some(ScanResult {
-                    target: LookTarget::Food,
+                    target: Entity::Food,
                     signal,
                 });
             }
-            Some(CellEntity::Organism(_)) => {
+            Some(Occupant::Organism(_)) => {
                 let signal = (max_dist - d + 1) as f32 / max_dist as f32;
                 return Some(ScanResult {
-                    target: LookTarget::Organism,
+                    target: Entity::Organism,
                     signal,
                 });
             }

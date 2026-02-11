@@ -15,7 +15,7 @@ fn scan_ahead_returns_organism_with_distance_signal() {
     sim.occupancy.fill(None);
     for org in &sim.organisms {
         let idx = sim.cell_index(org.q, org.r).expect("in-bounds test setup");
-        sim.occupancy[idx] = Some(CellEntity::Organism(org.id));
+        sim.occupancy[idx] = Some(Occupant::Organism(org.id));
     }
 
     // vision_distance=2, organism at distance 2 → signal = (2 - 2 + 1)/2 = 0.5
@@ -28,7 +28,7 @@ fn scan_ahead_returns_organism_with_distance_signal() {
         2,
     );
     let result = result.expect("should detect organism");
-    assert_eq!(result.target, LookTarget::Organism);
+    assert_eq!(result.target, Entity::Organism);
     assert!((result.signal - 0.5).abs() < f32::EPSILON);
 }
 
@@ -46,7 +46,7 @@ fn scan_ahead_returns_oob_at_boundary() {
     sim.occupancy.fill(None);
     for org in &sim.organisms {
         let idx = sim.cell_index(org.q, org.r).expect("in-bounds test setup");
-        sim.occupancy[idx] = Some(CellEntity::Organism(org.id));
+        sim.occupancy[idx] = Some(Occupant::Organism(org.id));
     }
 
     // vision_distance=3, OOB at distance 3 → signal = (3 - 3 + 1)/3 = 1/3
@@ -59,7 +59,7 @@ fn scan_ahead_returns_oob_at_boundary() {
         3,
     );
     let result = result.expect("should detect out of bounds");
-    assert_eq!(result.target, LookTarget::OutOfBounds);
+    assert_eq!(result.target, Entity::OutOfBounds);
     assert!((result.signal - 1.0 / 3.0).abs() < f32::EPSILON);
 }
 
@@ -77,7 +77,7 @@ fn scan_ahead_returns_none_for_empty_path() {
     sim.occupancy.fill(None);
     for org in &sim.organisms {
         let idx = sim.cell_index(org.q, org.r).expect("in-bounds test setup");
-        sim.occupancy[idx] = Some(CellEntity::Organism(org.id));
+        sim.occupancy[idx] = Some(Occupant::Organism(org.id));
     }
 
     // Looking NorthWest from (2,2): distance 1 → (2,1), distance 2 → (2,0) — both empty
@@ -123,7 +123,7 @@ fn scan_ahead_detects_food_with_distance_signal() {
         2,
     );
     let result = result.expect("should detect food");
-    assert_eq!(result.target, LookTarget::Food);
+    assert_eq!(result.target, Entity::Food);
     assert!((result.signal - 0.5).abs() < f32::EPSILON);
 }
 
@@ -158,7 +158,7 @@ fn scan_ahead_adjacent_entity_returns_max_signal() {
         3,
     );
     let result = result.expect("should detect food");
-    assert_eq!(result.target, LookTarget::Food);
+    assert_eq!(result.target, Entity::Food);
     assert!((result.signal - 1.0).abs() < f32::EPSILON);
 }
 
@@ -203,7 +203,7 @@ fn scan_ahead_occlusion_closer_entity_blocks_farther() {
         5,
     );
     let result = result.expect("should detect food (closer)");
-    assert_eq!(result.target, LookTarget::Food);
+    assert_eq!(result.target, Entity::Food);
     // distance 2, max 5 → signal = (5 - 2 + 1)/5 = 0.8
     assert!((result.signal - 0.8).abs() < f32::EPSILON);
 }

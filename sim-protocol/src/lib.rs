@@ -2,8 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
-pub const PROTOCOL_VERSION: u32 = 11;
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct OrganismId(pub u64);
 
@@ -16,21 +14,6 @@ pub struct SpeciesId(pub u32);
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FoodId(pub u64);
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Envelope<T> {
-    pub protocol_version: u32,
-    pub payload: T,
-}
-
-impl<T> Envelope<T> {
-    pub fn new(payload: T) -> Self {
-        Self {
-            protocol_version: PROTOCOL_VERSION,
-            payload,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ActionType {
     MoveForward,
@@ -38,7 +21,6 @@ pub enum ActionType {
     TurnRight,
     Reproduce,
 }
-
 impl ActionType {
     pub const ALL: [ActionType; 4] = [
         ActionType::MoveForward,
@@ -77,7 +59,7 @@ pub enum NeuronType {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum LookTarget {
+pub enum Entity {
     Food,
     Organism,
     OutOfBounds,
@@ -86,7 +68,7 @@ pub enum LookTarget {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "receptor_type")]
 pub enum SensoryReceptor {
-    Look { look_target: LookTarget },
+    Look { look_target: Entity },
     Energy,
 }
 
@@ -96,20 +78,13 @@ impl SensoryReceptor {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct GenomeEdge {
-    pub pre: NeuronId,
-    pub post: NeuronId,
-    pub weight: f32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OrganismGenome {
     pub num_neurons: u32,
     pub max_num_neurons: u32,
     pub vision_distance: u32,
     pub mutation_rate: f32,
     pub inter_biases: Vec<f32>,
-    pub edges: Vec<GenomeEdge>,
+    pub edges: Vec<SynapseEdge>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -117,7 +92,6 @@ pub struct SeedGenomeConfig {
     pub num_neurons: u32,
     pub max_num_neurons: u32,
     pub num_synapses: u32,
-    #[serde(alias = "mutation_chance")]
     pub mutation_rate: f32,
     pub vision_distance: u32,
 }
@@ -130,23 +104,13 @@ pub struct WorldConfig {
     pub center_spawn_min_fraction: f32,
     pub center_spawn_max_fraction: f32,
     pub starting_energy: f32,
-    #[serde(default = "default_food_energy")]
     pub food_energy: f32,
     pub reproduction_energy_cost: f32,
     pub move_action_energy_cost: f32,
-    #[serde(default = "default_turn_energy_cost")]
     pub turn_energy_cost: f32,
-    #[serde(default = "default_food_coverage_divisor")]
     pub food_coverage_divisor: u32,
-    #[serde(default = "default_max_organism_age")]
     pub max_organism_age: u32,
-    #[serde(default = "default_speciation_threshold")]
     pub speciation_threshold: f32,
-    #[serde(
-        default = "default_seed_genome_config",
-        alias = "seed_species_config",
-        alias = "seed_config"
-    )]
     pub seed_genome_config: SeedGenomeConfig,
 }
 
@@ -161,32 +125,10 @@ fn default_world_config() -> WorldConfig {
         .expect("default world config TOML must parse")
 }
 
-fn default_seed_genome_config() -> SeedGenomeConfig {
-    default_world_config().seed_genome_config
-}
-
-fn default_food_energy() -> f32 {
-    default_world_config().food_energy
-}
-
-fn default_turn_energy_cost() -> f32 {
-    default_world_config().turn_energy_cost
-}
-
-fn default_food_coverage_divisor() -> u32 {
-    default_world_config().food_coverage_divisor
-}
-
-fn default_max_organism_age() -> u32 {
-    default_world_config().max_organism_age
-}
-
-fn default_speciation_threshold() -> f32 {
-    default_world_config().speciation_threshold
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SynapseEdge {
+    pub pre_neuron_id: NeuronId,
     pub post_neuron_id: NeuronId,
     pub weight: f32,
 }
@@ -261,6 +203,7 @@ pub struct MetricsSnapshot {
     pub total_consumptions: u64,
     pub reproductions_last_turn: u64,
     pub starvations_last_turn: u64,
+    pub total_species_created: u32,
     pub species_counts: BTreeMap<SpeciesId, u32>,
 }
 
@@ -271,19 +214,23 @@ pub struct WorldSnapshot {
     pub config: WorldConfig,
     pub species_registry: BTreeMap<SpeciesId, OrganismGenome>,
     pub organisms: Vec<OrganismState>,
-    #[serde(default)]
     pub foods: Vec<FoodState>,
     pub occupancy: Vec<OccupancyCell>,
     pub metrics: MetricsSnapshot,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", content = "id")]
+pub enum Occupant {
+    Organism(OrganismId),
+    Food(FoodId),
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OccupancyCell {
     pub q: i32,
     pub r: i32,
-    pub organism_ids: Vec<OrganismId>,
-    #[serde(default)]
-    pub food_ids: Vec<FoodId>,
+    pub occupant: Occupant,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -313,9 +260,7 @@ pub struct TickDelta {
     pub moves: Vec<OrganismMove>,
     pub removed_positions: Vec<RemovedOrganismPosition>,
     pub spawned: Vec<OrganismState>,
-    #[serde(default)]
     pub food_removed_positions: Vec<RemovedFoodPosition>,
-    #[serde(default)]
     pub food_spawned: Vec<FoodState>,
     pub metrics: MetricsSnapshot,
 }
@@ -390,13 +335,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn protocol_roundtrip() {
+    fn config_roundtrip() {
         let cfg = WorldConfig::default();
-        let wrapped = Envelope::new(cfg.clone());
-        let json = serde_json::to_string(&wrapped).expect("serialize envelope");
-        let parsed: Envelope<WorldConfig> =
-            serde_json::from_str(&json).expect("deserialize envelope");
-        assert_eq!(parsed.payload, cfg);
-        assert_eq!(parsed.protocol_version, PROTOCOL_VERSION);
+        let json = serde_json::to_string(&cfg).expect("serialize config");
+        let parsed: WorldConfig = serde_json::from_str(&json).expect("deserialize config");
+        assert_eq!(parsed, cfg);
     }
 }

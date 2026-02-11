@@ -74,25 +74,29 @@ fn forced_brain(
     let sensory = vec![make_sensory_neuron(
         0,
         SensoryReceptor::Look {
-            look_target: LookTarget::Food,
+            look_target: Entity::Food,
         },
     )];
     let inter_id = NeuronId(1000);
     let inter_bias = 1.0;
     let inter_synapses = vec![
         SynapseEdge {
+            pre_neuron_id: NeuronId(1000),
             post_neuron_id: NeuronId(2000),
             weight: if wants_move { 8.0 } else { -8.0 },
         },
         SynapseEdge {
+            pre_neuron_id: NeuronId(1000),
             post_neuron_id: NeuronId(2001),
             weight: if turn_left { 8.0 } else { -8.0 },
         },
         SynapseEdge {
+            pre_neuron_id: NeuronId(1000),
             post_neuron_id: NeuronId(2002),
             weight: if turn_right { 8.0 } else { -8.0 },
         },
         SynapseEdge {
+            pre_neuron_id: NeuronId(1000),
             post_neuron_id: NeuronId(2003),
             weight: -8.0,
         },
@@ -173,7 +177,9 @@ pub(super) fn enable_reproduce_action(organism: &mut OrganismState) {
         }
     }
     if !found {
+        let inter_id = organism.brain.inter[0].neuron.neuron_id;
         organism.brain.inter[0].synapses.push(SynapseEdge {
+            pre_neuron_id: inter_id,
             post_neuron_id: NeuronId(2003),
             weight: 8.0,
         });
@@ -256,7 +262,7 @@ pub(super) fn configure_sim(sim: &mut Simulation, mut organisms: Vec<OrganismSta
             sim.occupancy[idx].is_none(),
             "test setup should not overlap"
         );
-        sim.occupancy[idx] = Some(CellEntity::Organism(organism.id));
+        sim.occupancy[idx] = Some(Occupant::Organism(organism.id));
     }
     sim.turn = 0;
     sim.metrics = MetricsSnapshot::default();
@@ -286,14 +292,14 @@ pub(super) fn assert_no_overlap(sim: &Simulation) {
         let idx = sim
             .cell_index(organism.q, organism.r)
             .expect("organism should remain in bounds");
-        assert_eq!(sim.occupancy[idx], Some(CellEntity::Organism(organism.id)));
+        assert_eq!(sim.occupancy[idx], Some(Occupant::Organism(organism.id)));
     }
     for food in &sim.foods {
         assert!(seen.insert((food.q, food.r)), "entities should not overlap",);
         let idx = sim
             .cell_index(food.q, food.r)
             .expect("food should remain in bounds");
-        assert_eq!(sim.occupancy[idx], Some(CellEntity::Food(food.id)));
+        assert_eq!(sim.occupancy[idx], Some(Occupant::Food(food.id)));
     }
     assert_eq!(
         sim.organisms.len() + sim.foods.len(),

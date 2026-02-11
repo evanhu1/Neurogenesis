@@ -262,7 +262,7 @@ fn move_into_food_consumes_and_replenishes_food_supply() {
     assert_eq!(sim.foods.len(), target_food);
     assert_eq!(
         sim.occupant_at(2, 1),
-        Some(CellEntity::Organism(OrganismId(0)))
+        Some(Occupant::Organism(OrganismId(0)))
     );
 
     let predator = sim

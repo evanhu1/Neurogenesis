@@ -8,9 +8,8 @@ use futures::{SinkExt, StreamExt};
 use serde::Serialize;
 use sim_core::{derive_active_neuron_ids, SimError, Simulation};
 use sim_protocol::{
-    ApiError, ClientCommand, CountRequest, CreateSessionRequest, CreateSessionResponse, Envelope,
+    ApiError, ClientCommand, CountRequest, CreateSessionRequest, CreateSessionResponse,
     FocusBrainData, FocusRequest, ResetRequest, ServerEvent, SessionMetadata, WorldSnapshot,
-    PROTOCOL_VERSION,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -43,7 +42,6 @@ struct RuntimeState {
 #[derive(Serialize)]
 struct HealthResponse {
     status: &'static str,
-    protocol_version: u32,
 }
 
 #[derive(Serialize)]
@@ -67,12 +65,12 @@ impl IntoResponse for AppError {
             AppError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, "internal", msg),
         };
 
-        let payload = Envelope::new(ApiError {
+        let error = ApiError {
             code: code.to_owned(),
             message,
-        });
+        };
 
-        (status, Json(payload)).into_response()
+        (status, Json(error)).into_response()
     }
 }
 
@@ -120,17 +118,14 @@ fn build_app(state: AppState) -> Router {
         .with_state(state)
 }
 
-async fn health() -> Json<Envelope<HealthResponse>> {
-    Json(Envelope::new(HealthResponse {
-        status: "ok",
-        protocol_version: PROTOCOL_VERSION,
-    }))
+async fn health() -> Json<HealthResponse> {
+    Json(HealthResponse { status: "ok" })
 }
 
 async fn create_session(
     State(state): State<AppState>,
     Json(req): Json<CreateSessionRequest>,
-) -> Result<Json<Envelope<CreateSessionResponse>>, AppError> {
+) -> Result<Json<CreateSessionResponse>, AppError> {
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| AppError::Internal(e.to_string()))?
@@ -161,34 +156,31 @@ async fn create_session(
     let mut sessions = state.sessions.write().await;
     sessions.insert(id, session);
 
-    Ok(Json(Envelope::new(CreateSessionResponse {
-        metadata,
-        snapshot,
-    })))
+    Ok(Json(CreateSessionResponse { metadata, snapshot }))
 }
 
 async fn get_session_metadata(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
-) -> Result<Json<Envelope<SessionMetadata>>, AppError> {
+) -> Result<Json<SessionMetadata>, AppError> {
     let session = get_session(&state, id).await?;
-    Ok(Json(Envelope::new(session.metadata.clone())))
+    Ok(Json(session.metadata.clone()))
 }
 
 async fn get_state(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
-) -> Result<Json<Envelope<WorldSnapshot>>, AppError> {
+) -> Result<Json<WorldSnapshot>, AppError> {
     let session = get_session(&state, id).await?;
     let sim = session.simulation.lock().await;
-    Ok(Json(Envelope::new(sim.snapshot())))
+    Ok(Json(sim.snapshot()))
 }
 
 async fn step_session(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
     Json(req): Json<CountRequest>,
-) -> Result<Json<Envelope<StepResponse>>, AppError> {
+) -> Result<Json<StepResponse>, AppError> {
     let session = get_session(&state, id).await?;
     let mut sim = session.simulation.lock().await;
     let deltas = sim.step_n(req.count.max(1));
@@ -205,14 +197,14 @@ async fn step_session(
         .events
         .send(ServerEvent::StateSnapshot(snapshot.clone()));
 
-    Ok(Json(Envelope::new(StepResponse { deltas, snapshot })))
+    Ok(Json(StepResponse { deltas, snapshot }))
 }
 
 async fn reset_session(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
     Json(req): Json<ResetRequest>,
-) -> Result<Json<Envelope<WorldSnapshot>>, AppError> {
+) -> Result<Json<WorldSnapshot>, AppError> {
     let session = get_session(&state, id).await?;
     let mut sim = session.simulation.lock().await;
     sim.reset(req.seed);
@@ -223,14 +215,14 @@ async fn reset_session(
         .events
         .send(ServerEvent::StateSnapshot(snapshot.clone()));
 
-    Ok(Json(Envelope::new(snapshot)))
+    Ok(Json(snapshot))
 }
 
 async fn set_focus(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
     Json(req): Json<FocusRequest>,
-) -> Result<Json<Envelope<WorldSnapshot>>, AppError> {
+) -> Result<Json<WorldSnapshot>, AppError> {
     let session = get_session(&state, id).await?;
     let sim = session.simulation.lock().await;
     if let Some(org) = sim.focused_organism(req.organism_id) {
@@ -243,7 +235,7 @@ async fn set_focus(
     let snapshot = sim.snapshot();
     drop(sim);
 
-    Ok(Json(Envelope::new(snapshot)))
+    Ok(Json(snapshot))
 }
 
 async fn stream_session(
@@ -264,7 +256,7 @@ async fn socket_loop(socket: WebSocket, session: Arc<Session>) {
     {
         let sim = session.simulation.lock().await;
         let event = ServerEvent::StateSnapshot(sim.snapshot());
-        if let Ok(text) = serde_json::to_string(&Envelope::new(event)) {
+        if let Ok(text) = serde_json::to_string(&event) {
             if sender.send(Message::Text(text.into())).await.is_err() {
                 return;
             }
@@ -273,7 +265,7 @@ async fn socket_loop(socket: WebSocket, session: Arc<Session>) {
 
     let send_task = tokio::spawn(async move {
         while let Ok(event) = rx.recv().await {
-            match serde_json::to_string(&Envelope::new(event)) {
+            match serde_json::to_string(&event) {
                 Ok(text) => {
                     if sender.send(Message::Text(text.into())).await.is_err() {
                         break;
@@ -289,19 +281,15 @@ async fn socket_loop(socket: WebSocket, session: Arc<Session>) {
     while let Some(message) = receiver.next().await {
         match message {
             Ok(Message::Text(text)) => {
-                let parsed: Result<Envelope<ClientCommand>, _> = serde_json::from_str(&text);
-                let command = match parsed {
-                    Ok(enveloped) => enveloped.payload,
-                    Err(_) => match serde_json::from_str::<ClientCommand>(&text) {
-                        Ok(cmd) => cmd,
-                        Err(err) => {
-                            let _ = session.events.send(ServerEvent::Error(ApiError {
-                                code: "bad_command".to_owned(),
-                                message: format!("failed to parse command: {err}"),
-                            }));
-                            continue;
-                        }
-                    },
+                let command = match serde_json::from_str::<ClientCommand>(&text) {
+                    Ok(cmd) => cmd,
+                    Err(err) => {
+                        let _ = session.events.send(ServerEvent::Error(ApiError {
+                            code: "bad_command".to_owned(),
+                            message: format!("failed to parse command: {err}"),
+                        }));
+                        continue;
+                    }
                 };
 
                 if let Err(err) = handle_command(command, session.clone()).await {
@@ -381,11 +369,9 @@ async fn session_start(session: Arc<Session>, ticks_per_second: u32) {
                 rt.ticks_per_second.max(1)
             };
 
-            let (delta, snapshot) = {
+            let delta = {
                 let mut sim = session_for_task.simulation.lock().await;
-                let delta = sim.step_n(1).into_iter().next();
-                let snapshot = sim.snapshot();
-                (delta, snapshot)
+                sim.step_n(1).into_iter().next()
             };
 
             if let Some(delta) = delta {
@@ -395,9 +381,6 @@ async fn session_start(session: Arc<Session>, ticks_per_second: u32) {
                 let _ = session_for_task
                     .events
                     .send(ServerEvent::Metrics(delta.metrics));
-                let _ = session_for_task
-                    .events
-                    .send(ServerEvent::StateSnapshot(snapshot));
             }
 
             tokio::time::sleep(Duration::from_millis((1000_u64 / tps as u64).max(1))).await;
@@ -430,7 +413,7 @@ mod tests {
     use super::*;
     use futures::{SinkExt, StreamExt};
     use reqwest::Client;
-    use sim_protocol::{CreateSessionRequest, Envelope, ServerEvent, WorldConfig};
+    use sim_protocol::{CreateSessionRequest, ServerEvent, WorldConfig};
     use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 
     async fn spawn_test_server() -> (String, tokio::task::JoinHandle<()>) {
@@ -461,11 +444,11 @@ mod tests {
             .expect("create session request should succeed");
         assert_eq!(create.status(), StatusCode::OK);
 
-        let payload: Envelope<CreateSessionResponse> = create
+        let payload: CreateSessionResponse = create
             .json()
             .await
             .expect("create session response should deserialize");
-        let session_id = payload.payload.metadata.id;
+        let session_id = payload.metadata.id;
 
         let state = client
             .get(format!("{base}/v1/sessions/{session_id}/state"))
@@ -499,11 +482,11 @@ mod tests {
             .send()
             .await
             .expect("create session request should succeed");
-        let payload: Envelope<CreateSessionResponse> = create
+        let payload: CreateSessionResponse = create
             .json()
             .await
             .expect("create session response should deserialize");
-        let session_id = payload.payload.metadata.id;
+        let session_id = payload.metadata.id;
 
         let ws_url = format!(
             "{}/v1/sessions/{session_id}/stream",
@@ -522,11 +505,11 @@ mod tests {
             WsMessage::Text(t) => t,
             other => panic!("unexpected ws message: {other:?}"),
         };
-        let env: Envelope<ServerEvent> =
+        let event: ServerEvent =
             serde_json::from_str(&text).expect("initial server event should deserialize");
-        assert!(matches!(env.payload, ServerEvent::StateSnapshot(_)));
+        assert!(matches!(event, ServerEvent::StateSnapshot(_)));
 
-        let cmd = Envelope::new(ClientCommand::Step { count: 1 });
+        let cmd = ClientCommand::Step { count: 1 };
         stream
             .send(WsMessage::Text(
                 serde_json::to_string(&cmd)
@@ -539,9 +522,9 @@ mod tests {
         let mut saw_delta = false;
         for _ in 0..4 {
             if let Some(Ok(WsMessage::Text(t))) = stream.next().await {
-                let env: Envelope<ServerEvent> =
+                let event: ServerEvent =
                     serde_json::from_str(&t).expect("ws server event should deserialize");
-                if matches!(env.payload, ServerEvent::TickDelta(_)) {
+                if matches!(event, ServerEvent::TickDelta(_)) {
                     saw_delta = true;
                     break;
                 }
