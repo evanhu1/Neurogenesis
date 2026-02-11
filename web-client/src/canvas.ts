@@ -202,6 +202,7 @@ export function renderBrain(
   ctx: CanvasRenderingContext2D,
   canvas: HTMLCanvasElement,
   focusedBrain: BrainState | null,
+  activeNeuronIds: Set<number> | null,
 ) {
   const width = canvas.width;
   const height = canvas.height;
@@ -229,14 +230,17 @@ export function renderBrain(
     }>
   > = [];
   layers.push(
-    sensory.map((neuron) => ({
-      id: unwrapId(neuron.neuron.neuron_id),
-      type: 'sensory',
-      label: neuron.receptor_type,
-      activation: neuron.neuron.activation,
-      bias: neuron.neuron.bias,
-      isActive: neuron.neuron.is_active,
-    })),
+    sensory.map((neuron) => {
+      const nid = unwrapId(neuron.neuron.neuron_id);
+      return {
+        id: nid,
+        type: 'sensory',
+        label: neuron.receptor_type,
+        activation: neuron.neuron.activation,
+        bias: neuron.neuron.bias,
+        isActive: activeNeuronIds?.has(nid) ?? false,
+      };
+    }),
   );
 
   const interColumns = Math.max(1, Math.ceil(inter.length / 8));
@@ -244,25 +248,31 @@ export function renderBrain(
     const start = column * 8;
     const slice = inter.slice(start, start + 8);
     layers.push(
-      slice.map((neuron) => ({
-        id: unwrapId(neuron.neuron.neuron_id),
-        type: 'inter',
-        activation: neuron.neuron.activation,
-        bias: neuron.neuron.bias,
-        isActive: neuron.neuron.is_active,
-      })),
+      slice.map((neuron) => {
+        const nid = unwrapId(neuron.neuron.neuron_id);
+        return {
+          id: nid,
+          type: 'inter',
+          activation: neuron.neuron.activation,
+          bias: neuron.neuron.bias,
+          isActive: activeNeuronIds?.has(nid) ?? false,
+        };
+      }),
     );
   }
 
   layers.push(
-    action.map((neuron) => ({
-      id: unwrapId(neuron.neuron.neuron_id),
-      type: 'action',
-      label: neuron.action_type,
-      activation: neuron.neuron.activation,
-      bias: neuron.neuron.bias,
-      isActive: neuron.neuron.is_active,
-    })),
+    action.map((neuron) => {
+      const nid = unwrapId(neuron.neuron.neuron_id);
+      return {
+        id: nid,
+        type: 'action',
+        label: neuron.action_type,
+        activation: neuron.neuron.activation,
+        bias: neuron.neuron.bias,
+        isActive: activeNeuronIds?.has(nid) ?? false,
+      };
+    }),
   );
 
   const xGap = width / Math.max(2, layers.length);

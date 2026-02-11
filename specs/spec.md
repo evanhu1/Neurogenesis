@@ -37,8 +37,6 @@ Species-level fields:
 - `max_num_neurons`
 - `num_synapses`
 - `mutation_chance`
-- `mutation_magnitude`
-- `mutation_operations`
 
 Runtime species model:
 
@@ -206,11 +204,14 @@ Turn behavior:
 Applied to reproduction offspring only:
 
 - skipped when RNG exceeds `mutation_chance`
-- operations count: `mutation_operations` (must be `>= 1`)
-- operation split:
-  - topology mutation (add/remove inter neuron or bias mutation)
-  - synapse mutation (add/remove/perturb synapse)
-- each operation retries a bounded number of times to reduce no-op mutations
+- one or more small-step trait mutations are applied:
+  - `num_neurons` mutates by `+1` or `-1` within bounds
+  - `max_num_neurons` mutates by `+1` or `-1` within bounds
+  - `num_synapses` mutates by `+1` or `-1` within bounds
+  - `mutation_chance` mutates by a small bounded delta
+- at least one trait mutation is always applied per successful speciation event
+- additional trait mutations may be added probabilistically from
+  `mutation_chance`, with a fixed internal cap for runtime stability
 
 Weights remain clamped to `[-8.0, 8.0]`.
 

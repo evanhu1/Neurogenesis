@@ -360,19 +360,25 @@ impl Simulation {
         let occupancy_snapshot = self.occupancy.clone();
 
         self.organisms.sort_by_key(|organism| organism.id);
-        for organism in &mut self.organisms {
-            let Some(intent) = intent_by_id.get(&organism.id) else {
+        for idx in 0..self.organisms.len() {
+            let organism_id = self.organisms[idx].id;
+            let Some(intent) = intent_by_id.get(&organism_id) else {
                 continue;
             };
             if !intent.wants_reproduce {
                 continue;
             }
-            if organism.energy < reproduction_energy_cost {
+
+            let parent_energy = self.organisms[idx].energy;
+            if parent_energy < reproduction_energy_cost {
                 continue;
             }
+            let parent_q = self.organisms[idx].q;
+            let parent_r = self.organisms[idx].r;
+            let parent_facing = self.organisms[idx].facing;
+            let parent_species_id = self.organisms[idx].species_id;
 
-            let Some((q, r)) =
-                reproduction_target(world_width, organism.q, organism.r, organism.facing)
+            let Some((q, r)) = reproduction_target(world_width, parent_q, parent_r, parent_facing)
             else {
                 continue;
             };
@@ -382,16 +388,17 @@ impl Simulation {
                 continue;
             }
 
+            let offspring_species_id = self.species_id_for_reproduction(parent_species_id);
             spawn_requests.push(SpawnRequest {
                 kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
-                    species_id: organism.species_id,
-                    parent_facing: organism.facing,
-                    parent_brain: organism.brain.clone(),
+                    species_id: offspring_species_id,
+                    parent_facing,
                     q,
                     r,
                 }),
             });
             reserved_spawn_cells.insert((q, r));
+            let organism = &mut self.organisms[idx];
             organism.energy -= reproduction_energy_cost;
             organism.reproductions_count = organism.reproductions_count.saturating_add(1);
             successful_reproductions += 1;

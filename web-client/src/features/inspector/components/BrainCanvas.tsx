@@ -4,9 +4,10 @@ import type { BrainState } from '../../../types';
 
 type BrainCanvasProps = {
   focusedBrain: BrainState | null;
+  activeNeuronIds: Set<number> | null;
 };
 
-export function BrainCanvas({ focusedBrain }: BrainCanvasProps) {
+export function BrainCanvas({ focusedBrain, activeNeuronIds }: BrainCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -14,8 +15,8 @@ export function BrainCanvas({ focusedBrain }: BrainCanvasProps) {
     if (!canvas) return;
     const context = canvas.getContext('2d');
     if (!context) return;
-    renderBrain(context, canvas, focusedBrain);
-  }, [focusedBrain]);
+    renderBrain(context, canvas, focusedBrain, activeNeuronIds);
+  }, [focusedBrain, activeNeuronIds]);
 
   return (
     <canvas

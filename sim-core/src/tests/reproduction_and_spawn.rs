@@ -61,27 +61,26 @@ fn reproduction_offspring_brain_runtime_state_is_reset() {
         )],
     );
 
-    let parent = sim
-        .organisms
-        .iter_mut()
-        .find(|organism| organism.id == OrganismId(0))
-        .expect("parent should exist");
-    parent.brain.sensory[0].neuron.activation = 1.0;
-    parent.brain.sensory[0].neuron.is_active = true;
-    parent.brain.action[0].neuron.activation = 0.91;
-    parent.brain.action[0].neuron.is_active = true;
-    parent.brain.action[1].neuron.activation = 0.73;
-    parent.brain.action[1].neuron.is_active = true;
-    let parent_brain = parent.brain.clone();
-
     let spawned =
         sim.resolve_spawn_requests(&[reproduction_request_from_parent(&sim, OrganismId(0))]);
 
     assert_eq!(spawned.len(), 1);
     let child = &spawned[0];
-    let mut expected_child_brain = parent_brain;
-    reset_brain_runtime_state(&mut expected_child_brain);
-    assert_eq!(child.brain, expected_child_brain);
+    assert!(child
+        .brain
+        .sensory
+        .iter()
+        .all(|n| n.neuron.activation == 0.0));
+    assert!(child
+        .brain
+        .inter
+        .iter()
+        .all(|n| n.neuron.activation == 0.0));
+    assert!(child
+        .brain
+        .action
+        .iter()
+        .all(|n| n.neuron.activation == 0.0));
     assert_eq!(child.species_id, SpeciesId(0));
     assert_eq!(child.facing, FacingDirection::West);
 }
@@ -253,4 +252,37 @@ fn reproduce_action_fails_when_turn_upkeep_leaves_insufficient_energy() {
         .expect("parent should remain alive");
     assert_eq!(parent_after.reproductions_count, 0);
     assert_eq!(parent_after.energy, 99.0);
+}
+
+#[test]
+fn reproduction_can_create_and_register_new_species() {
+    let mut cfg = test_config(7, 1);
+    cfg.reproduction_energy_cost = 20.0;
+    cfg.seed_species_config.mutation_chance = 1.0;
+    let mut sim = Simulation::new(cfg, 88).expect("simulation should initialize");
+
+    let mut parent = make_organism(
+        0,
+        3,
+        3,
+        FacingDirection::East,
+        false,
+        false,
+        false,
+        0.7,
+        30.0,
+    );
+    enable_reproduce_action(&mut parent);
+    configure_sim(&mut sim, vec![parent]);
+
+    let delta = tick_once(&mut sim);
+    assert_eq!(delta.metrics.reproductions_last_turn, 1);
+    assert_eq!(delta.spawned.len(), 1);
+    assert_eq!(delta.spawned[0].species_id, SpeciesId(1));
+    assert_eq!(sim.species_registry.len(), 2);
+    assert!(sim.species_registry.contains_key(&SpeciesId(1)));
+    assert_ne!(
+        sim.species_registry.get(&SpeciesId(0)),
+        sim.species_registry.get(&SpeciesId(1))
+    );
 }

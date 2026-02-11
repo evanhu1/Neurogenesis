@@ -5,9 +5,10 @@ type InspectorPanelProps = {
   focusMetaText: string;
   focusedStatsText: string;
   focusedBrain: BrainState | null;
+  activeNeuronIds: Set<number> | null;
 };
 
-export function InspectorPanel({ focusMetaText, focusedStatsText, focusedBrain }: InspectorPanelProps) {
+export function InspectorPanel({ focusMetaText, focusedStatsText, focusedBrain, activeNeuronIds }: InspectorPanelProps) {
   return (
     <aside className="h-full overflow-auto rounded-2xl border border-accent/15 bg-panel/95 p-4 shadow-panel">
       <h2 className="text-xl font-semibold tracking-tight">Organism Inspector</h2>
@@ -20,7 +21,7 @@ export function InspectorPanel({ focusMetaText, focusedStatsText, focusedBrain }
       </section>
       <section className="mt-3 rounded-xl border border-accent/15 bg-white/80 p-3">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-ink/80">Brain</h3>
-        <BrainCanvas focusedBrain={focusedBrain} />
+        <BrainCanvas focusedBrain={focusedBrain} activeNeuronIds={activeNeuronIds} />
       </section>
     </aside>
   );

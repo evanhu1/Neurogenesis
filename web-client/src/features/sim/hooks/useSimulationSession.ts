@@ -3,6 +3,7 @@ import { applyTickDelta, findOrganism, unwrapId } from '../../../protocol';
 import { DEFAULT_CONFIG } from '../../../types';
 import type {
   CreateSessionResponse,
+  FocusBrainData,
   MetricsSnapshot,
   OrganismState,
   ServerEvent,
@@ -57,6 +58,7 @@ export type SimulationSessionState = {
   speciesPopulationHistory: SpeciesPopulationPoint[];
   focusedOrganismId: number | null;
   focusedOrganism: OrganismState | null;
+  activeNeuronIds: Set<number> | null;
   isRunning: boolean;
   speedLevels: readonly number[];
   speedLevelIndex: number;
@@ -79,6 +81,7 @@ export function useSimulationSession(): SimulationSessionState {
   >([]);
   const [focusedOrganismId, setFocusedOrganismId] = useState<number | null>(null);
   const [focusedOrganism, setFocusedOrganism] = useState<OrganismState | null>(null);
+  const [activeNeuronIds, setActiveNeuronIds] = useState<Set<number> | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [speedLevelIndex, setSpeedLevelIndex] = useState(1);
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -159,10 +162,11 @@ export function useSimulationSession(): SimulationSessionState {
         break;
       }
       case 'FocusBrain': {
-        const organism = event.data as OrganismState;
+        const { organism, active_neuron_ids } = event.data as FocusBrainData;
         const organismId = unwrapId(organism.id);
         setFocusedOrganismId(organismId);
         setFocusedOrganism(organism);
+        setActiveNeuronIds(new Set(active_neuron_ids));
         break;
       }
       case 'Metrics': {
@@ -216,6 +220,7 @@ export function useSimulationSession(): SimulationSessionState {
       setSnapshot(loadedSnapshot);
       setFocusedOrganismId(null);
       setFocusedOrganism(null);
+      setActiveNeuronIds(null);
       setIsRunning(false);
       setDeadCellFlashState(null);
       setBornCellFlashState(null);
@@ -305,6 +310,7 @@ export function useSimulationSession(): SimulationSessionState {
         ]);
         setFocusedOrganismId(null);
         setFocusedOrganism(null);
+        setActiveNeuronIds(null);
         setDeadCellFlashState(null);
         setBornCellFlashState(null);
       })
@@ -331,6 +337,7 @@ export function useSimulationSession(): SimulationSessionState {
   useEffect(() => {
     if (!snapshot || focusedOrganismId === null) {
       setFocusedOrganism(null);
+      setActiveNeuronIds(null);
       return;
     }
 
@@ -338,6 +345,7 @@ export function useSimulationSession(): SimulationSessionState {
     if (!nextFocusedOrganism) {
       setFocusedOrganismId(null);
       setFocusedOrganism(null);
+      setActiveNeuronIds(null);
       return;
     }
     setFocusedOrganism(nextFocusedOrganism);
@@ -389,6 +397,7 @@ export function useSimulationSession(): SimulationSessionState {
     speciesPopulationHistory,
     focusedOrganismId,
     focusedOrganism,
+    activeNeuronIds,
     isRunning,
     speedLevels: SPEED_LEVELS,
     speedLevelIndex,

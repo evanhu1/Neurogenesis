@@ -32,6 +32,9 @@
 - Rust: use standard `rustfmt` output (4-space indentation), `snake_case` for
   functions/modules, `PascalCase` for types, `SCREAMING_SNAKE_CASE` for
   constants.
+- Rust performance is a top priority: prefer highly optimized implementations,
+  avoid unnecessary allocations/copies, and treat runtime efficiency as a core
+  requirement in all Rust code changes.
 - TypeScript/React: strict mode is enabled (`web-client/tsconfig.json`), prefer
   `camelCase` for vars/functions and `PascalCase` for components/types.
 - Use Tailwind for front end styling

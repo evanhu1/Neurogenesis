@@ -18,8 +18,7 @@ impl Simulation {
                         continue;
                     };
 
-                    let mut brain = reproduction.parent_brain.clone();
-                    self.mutate_brain(&mut brain, &species_config);
+                    let mut brain = self.generate_brain(&species_config);
                     reset_brain_runtime_state(&mut brain);
                     OrganismState {
                         id: self.alloc_organism_id(),

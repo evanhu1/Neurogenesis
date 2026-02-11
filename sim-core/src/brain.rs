@@ -9,119 +9,8 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 
 const ACTION_ACTIVATION_THRESHOLD: f32 = 0.5;
-const MAX_MUTATION_OPERATION_ATTEMPTS: usize = 8;
 
 impl Simulation {
-    pub(crate) fn mutate_brain(&mut self, brain: &mut BrainState, species_config: &SpeciesConfig) {
-        if self.rng.random::<f32>() > species_config.mutation_chance {
-            return;
-        }
-
-        let operations = species_config.mutation_operations.max(1) as usize;
-        for _ in 0..operations {
-            let mut applied = false;
-            for _ in 0..MAX_MUTATION_OPERATION_ATTEMPTS {
-                applied = if self.rng.random::<f32>() < 0.5 {
-                    self.apply_topology_mutation(brain, species_config)
-                } else {
-                    self.apply_synapse_mutation(brain, species_config)
-                };
-                if applied {
-                    break;
-                }
-            }
-            if !applied {
-                break;
-            }
-        }
-
-        brain.synapse_count = count_synapses(brain) as u32;
-    }
-
-    fn apply_topology_mutation(
-        &mut self,
-        brain: &mut BrainState,
-        species_config: &SpeciesConfig,
-    ) -> bool {
-        match self.rng.random_range(0..3) {
-            0 => {
-                if brain.inter.len() as u32 >= species_config.max_num_neurons {
-                    return false;
-                }
-
-                let next_id = next_inter_neuron_id(brain);
-                brain.inter.push(InterNeuronState {
-                    neuron: make_neuron(NeuronId(next_id), NeuronType::Inter, self.random_bias()),
-                    synapses: Vec::new(),
-                });
-
-                let _ = create_random_synapse_with_retries(
-                    brain,
-                    &mut self.rng,
-                    MAX_MUTATION_OPERATION_ATTEMPTS,
-                );
-                true
-            }
-            1 => {
-                if brain.inter.len() <= self.minimum_inter_neurons(species_config) {
-                    return false;
-                }
-                let idx = self.rng.random_range(0..brain.inter.len());
-                let removed_id = brain.inter[idx].neuron.neuron_id;
-                brain.inter.remove(idx);
-                remove_neuron_references(brain, removed_id);
-                true
-            }
-            _ => {
-                if brain.inter.is_empty() {
-                    return false;
-                }
-                let magnitude = species_config.mutation_magnitude.clamp(0.05, 8.0);
-                let idx = self.rng.random_range(0..brain.inter.len());
-                let bias = &mut brain.inter[idx].neuron.bias;
-                *bias = (*bias + self.rng.random_range(-magnitude..magnitude)).clamp(-8.0, 8.0);
-                true
-            }
-        }
-    }
-
-    fn apply_synapse_mutation(
-        &mut self,
-        brain: &mut BrainState,
-        species_config: &SpeciesConfig,
-    ) -> bool {
-        match self.rng.random_range(0..3) {
-            0 => create_random_synapse_with_retries(
-                brain,
-                &mut self.rng,
-                MAX_MUTATION_OPERATION_ATTEMPTS,
-            ),
-            1 => {
-                let outputs = output_neuron_ids_with_synapses(brain);
-                if outputs.is_empty() {
-                    return false;
-                }
-                let pre = outputs[self.rng.random_range(0..outputs.len())];
-                remove_random_synapse(brain, pre, &mut self.rng);
-                true
-            }
-            _ => {
-                let outputs = output_neuron_ids_with_synapses(brain);
-                if outputs.is_empty() {
-                    return false;
-                }
-                let pre = outputs[self.rng.random_range(0..outputs.len())];
-                perturb_random_synapse(
-                    brain,
-                    pre,
-                    species_config.mutation_magnitude,
-                    &mut self.rng,
-                );
-                true
-            }
-        }
-    }
-
     pub(crate) fn generate_brain(&mut self, species_config: &SpeciesConfig) -> BrainState {
         let mut sensory = Vec::new();
         for (idx, receptor_type) in SensoryReceptorType::ALL.into_iter().enumerate() {
@@ -149,11 +38,7 @@ impl Simulation {
         };
 
         for _ in 0..species_config.num_synapses {
-            if !create_random_synapse_with_retries(
-                &mut brain,
-                &mut self.rng,
-                MAX_MUTATION_OPERATION_ATTEMPTS,
-            ) {
+            if !create_random_synapse(&mut brain, &mut self.rng) {
                 break;
             }
         }
@@ -164,14 +49,6 @@ impl Simulation {
 
     fn random_bias(&mut self) -> f32 {
         self.rng.random_range(-1.0..1.0)
-    }
-
-    fn minimum_inter_neurons(&self, species_config: &SpeciesConfig) -> usize {
-        if species_config.num_neurons > 0 {
-            1
-        } else {
-            0
-        }
     }
 }
 
@@ -187,15 +64,12 @@ pub(crate) fn action_index(action: ActionType) -> usize {
 pub(crate) fn reset_brain_runtime_state(brain: &mut BrainState) {
     for sensory in &mut brain.sensory {
         sensory.neuron.activation = 0.0;
-        sensory.neuron.is_active = false;
     }
     for inter in &mut brain.inter {
         inter.neuron.activation = 0.0;
-        inter.neuron.is_active = false;
     }
     for action in &mut brain.action {
         action.neuron.activation = 0.0;
-        action.neuron.is_active = false;
     }
 }
 
@@ -205,7 +79,6 @@ fn make_neuron(id: NeuronId, neuron_type: NeuronType, bias: f32) -> NeuronState 
         neuron_type,
         bias,
         activation: 0.0,
-        is_active: false,
         parent_ids: Vec::new(),
     }
 }
@@ -228,15 +101,6 @@ pub(crate) fn make_action_neuron(id: u32, action_type: ActionType) -> ActionNeur
     }
 }
 
-fn next_inter_neuron_id(brain: &BrainState) -> u32 {
-    brain
-        .inter
-        .iter()
-        .map(|neuron| neuron.neuron.neuron_id.0)
-        .max()
-        .map_or(1000, |id| id + 1)
-}
-
 pub(crate) fn evaluate_brain(
     brain: &mut BrainState,
     position: (i32, i32),
@@ -247,16 +111,11 @@ pub(crate) fn evaluate_brain(
 ) -> BrainEvaluation {
     let mut result = BrainEvaluation::default();
 
-    for action in &mut brain.action {
-        action.neuron.is_active = false;
-    }
-
     let look = look_sensor_value(position, facing, organism_id, world_width, occupancy);
     for sensory in &mut brain.sensory {
         sensory.neuron.activation = match sensory.receptor_type {
             SensoryReceptorType::Look => look,
         };
-        sensory.neuron.is_active = sensory.neuron.activation > 0.0;
     }
 
     let inter_index: HashMap<NeuronId, usize> = brain
@@ -304,7 +163,6 @@ pub(crate) fn evaluate_brain(
 
     for (idx, neuron) in brain.inter.iter_mut().enumerate() {
         neuron.neuron.activation = inter_inputs[idx].tanh();
-        neuron.neuron.is_active = neuron.neuron.activation > 0.0;
     }
 
     let mut action_inputs: Vec<f32> = vec![0.0; brain.action.len()];
@@ -338,12 +196,33 @@ pub(crate) fn evaluate_brain(
         result.actions[selected_idx] = true;
     }
 
-    for action in &mut brain.action {
-        let idx = action_index(action.action_type);
-        action.neuron.is_active = result.actions[idx];
+    result
+}
+
+/// Derives the set of active neuron IDs from a brain's current activation state.
+/// Sensory/Inter neurons are active when activation > 0.0.
+/// Action neurons use winner-take-all with ACTION_ACTIVATION_THRESHOLD.
+pub fn derive_active_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
+    let mut active = Vec::new();
+
+    for sensory in &brain.sensory {
+        if sensory.neuron.activation > 0.0 {
+            active.push(sensory.neuron.neuron_id);
+        }
     }
 
-    result
+    for inter in &brain.inter {
+        if inter.neuron.activation > 0.0 {
+            active.push(inter.neuron.neuron_id);
+        }
+    }
+
+    let action_activations: [f32; 4] = std::array::from_fn(|i| brain.action[i].neuron.activation);
+    if let Some(winner_idx) = select_action(action_activations) {
+        active.push(brain.action[winner_idx].neuron.neuron_id);
+    }
+
+    active
 }
 
 fn select_action(activations: [f32; 4]) -> Option<usize> {
@@ -414,44 +293,40 @@ fn output_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
         .collect()
 }
 
-fn random_neuron_id<R: Rng + ?Sized>(ids: &[NeuronId], rng: &mut R) -> Option<NeuronId> {
-    if ids.is_empty() {
-        return None;
-    }
-    Some(ids[rng.random_range(0..ids.len())])
-}
-
-fn random_synapse_endpoints<R: Rng + ?Sized>(
-    brain: &BrainState,
-    rng: &mut R,
-) -> Option<(NeuronId, NeuronId)> {
+fn create_random_synapse<R: Rng + ?Sized>(brain: &mut BrainState, rng: &mut R) -> bool {
     let pre_candidates = output_neuron_ids(brain);
     let post_candidates = post_neuron_ids(brain);
+    let mut available_endpoints = Vec::new();
 
-    let pre = random_neuron_id(&pre_candidates, rng)?;
-    let post = random_neuron_id(&post_candidates, rng)?;
-    Some((pre, post))
-}
-
-fn create_random_synapse<R: Rng + ?Sized>(brain: &mut BrainState, rng: &mut R) -> bool {
-    let Some((pre, post)) = random_synapse_endpoints(brain, rng) else {
-        return false;
-    };
-    let weight = rng.random_range(-SYNAPSE_STRENGTH_MAX..SYNAPSE_STRENGTH_MAX);
-    create_synapse(brain, pre, post, weight)
-}
-
-fn create_random_synapse_with_retries<R: Rng + ?Sized>(
-    brain: &mut BrainState,
-    rng: &mut R,
-    max_attempts: usize,
-) -> bool {
-    for _ in 0..max_attempts.max(1) {
-        if create_random_synapse(brain, rng) {
-            return true;
+    for pre in pre_candidates {
+        let Some(existing_synapses) = synapses_from_pre(brain, pre) else {
+            continue;
+        };
+        for &post in &post_candidates {
+            if pre == post {
+                continue;
+            }
+            let duplicate = existing_synapses
+                .iter()
+                .any(|edge| edge.post_neuron_id == post);
+            if !duplicate {
+                available_endpoints.push((pre, post));
+            }
         }
     }
-    false
+
+    if available_endpoints.is_empty() {
+        return false;
+    }
+
+    let (pre, post) = available_endpoints[rng.random_range(0..available_endpoints.len())];
+    let weight = rng.random_range(-SYNAPSE_STRENGTH_MAX..SYNAPSE_STRENGTH_MAX);
+    let created = create_synapse(brain, pre, post, weight);
+    debug_assert!(
+        created,
+        "available endpoint selection should only choose valid synapses"
+    );
+    created
 }
 
 fn post_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
@@ -460,22 +335,6 @@ fn post_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
         .iter()
         .map(|neuron| neuron.neuron.neuron_id)
         .chain(brain.action.iter().map(|neuron| neuron.neuron.neuron_id))
-        .collect()
-}
-
-fn output_neuron_ids_with_synapses(brain: &BrainState) -> Vec<NeuronId> {
-    brain
-        .sensory
-        .iter()
-        .filter(|sensory| !sensory.synapses.is_empty())
-        .map(|sensory| sensory.neuron.neuron_id)
-        .chain(
-            brain
-                .inter
-                .iter()
-                .filter(|inter| !inter.synapses.is_empty())
-                .map(|inter| inter.neuron.neuron_id),
-        )
         .collect()
 }
 
@@ -590,62 +449,4 @@ fn create_synapse(brain: &mut BrainState, pre: NeuronId, post: NeuronId, weight:
     }
 
     true
-}
-
-fn remove_neuron_references(brain: &mut BrainState, target: NeuronId) {
-    for sensory in &mut brain.sensory {
-        sensory
-            .synapses
-            .retain(|edge| edge.post_neuron_id != target);
-        sensory.neuron.parent_ids.retain(|id| *id != target);
-    }
-
-    for inter in &mut brain.inter {
-        inter.synapses.retain(|edge| edge.post_neuron_id != target);
-        inter.neuron.parent_ids.retain(|id| *id != target);
-    }
-
-    for action in &mut brain.action {
-        action.neuron.parent_ids.retain(|id| *id != target);
-    }
-}
-
-fn remove_random_synapse<R: Rng + ?Sized>(brain: &mut BrainState, pre: NeuronId, rng: &mut R) {
-    let post = {
-        let Some(synapses) = synapses_from_pre_mut(brain, pre) else {
-            return;
-        };
-        if synapses.is_empty() {
-            return;
-        }
-
-        let idx = rng.random_range(0..synapses.len());
-        let post = synapses[idx].post_neuron_id;
-        synapses.remove(idx);
-        post
-    };
-
-    if let Some(post_neuron) = get_neuron_mut(brain, post) {
-        post_neuron.parent_ids.retain(|id| *id != pre);
-    }
-}
-
-fn perturb_random_synapse<R: Rng + ?Sized>(
-    brain: &mut BrainState,
-    pre: NeuronId,
-    mutation_magnitude: f32,
-    rng: &mut R,
-) {
-    let magnitude = mutation_magnitude.clamp(0.1, 8.0);
-    let Some(synapses) = synapses_from_pre_mut(brain, pre) else {
-        return;
-    };
-    if synapses.is_empty() {
-        return;
-    }
-
-    let idx = rng.random_range(0..synapses.len());
-    let delta = rng.random_range(-magnitude..magnitude);
-    synapses[idx].weight =
-        (synapses[idx].weight + delta).clamp(-SYNAPSE_STRENGTH_MAX, SYNAPSE_STRENGTH_MAX);
 }

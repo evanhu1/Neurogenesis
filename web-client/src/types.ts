@@ -25,8 +25,6 @@ export type SpeciesConfig = {
   max_num_neurons: number;
   num_synapses: number;
   mutation_chance: number;
-  mutation_magnitude: number;
-  mutation_operations: number;
 };
 
 export type SynapseEdge = { post_neuron_id: number | { 0: number }; weight: number };
@@ -36,8 +34,12 @@ export type NeuronState = {
   neuron_type: 'Sensory' | 'Inter' | 'Action' | string;
   bias: number;
   activation: number;
-  is_active: boolean;
   parent_ids: Array<number | { 0: number }>;
+};
+
+export type FocusBrainData = {
+  organism: OrganismState;
+  active_neuron_ids: number[];
 };
 
 export type SensoryNeuronState = {
@@ -182,8 +184,6 @@ function parseDefaultConfigToml(tomlText: string): WorldConfig {
       max_num_neurons: parseRequiredNumber(speciesSource, 'max_num_neurons'),
       num_synapses: parseRequiredNumber(speciesSource, 'num_synapses'),
       mutation_chance: parseRequiredNumber(speciesSource, 'mutation_chance'),
-      mutation_magnitude: parseRequiredNumber(speciesSource, 'mutation_magnitude'),
-      mutation_operations: parseRequiredNumber(speciesSource, 'mutation_operations'),
     },
   };
 }

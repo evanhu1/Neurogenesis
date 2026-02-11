@@ -76,7 +76,6 @@ fn forced_brain(
             neuron_type: NeuronType::Inter,
             bias: inter_bias,
             activation: confidence,
-            is_active: confidence > 0.0,
             parent_ids: Vec::new(),
         },
         synapses: inter_synapses,
@@ -99,6 +98,7 @@ fn forced_brain(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn make_organism(
     id: u64,
     q: i32,
@@ -172,7 +172,6 @@ pub(super) fn reproduction_request_from_parent(
         kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
             species_id: parent.species_id,
             parent_facing: parent.facing,
-            parent_brain: parent.brain.clone(),
             q,
             r,
         }),
@@ -194,7 +193,6 @@ pub(super) fn reproduction_request_at(
         kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
             species_id: parent.species_id,
             parent_facing: parent.facing,
-            parent_brain: parent.brain.clone(),
             q,
             r,
         }),
@@ -230,6 +228,7 @@ pub(super) fn tick_once(sim: &mut Simulation) -> TickDelta {
     sim.step_n(1).into_iter().next().expect("exactly one delta")
 }
 
+#[allow(clippy::type_complexity)]
 pub(super) fn move_map(delta: &TickDelta) -> HashMap<OrganismId, ((i32, i32), (i32, i32))> {
     delta
         .moves

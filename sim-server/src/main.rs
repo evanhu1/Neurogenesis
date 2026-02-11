@@ -6,10 +6,11 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::{SinkExt, StreamExt};
 use serde::Serialize;
-use sim_core::{SimError, Simulation};
+use sim_core::{derive_active_neuron_ids, SimError, Simulation};
 use sim_protocol::{
     ApiError, ClientCommand, CountRequest, CreateSessionRequest, CreateSessionResponse, Envelope,
-    FocusRequest, ResetRequest, ServerEvent, SessionMetadata, WorldSnapshot, PROTOCOL_VERSION,
+    FocusBrainData, FocusRequest, ResetRequest, ServerEvent, SessionMetadata, WorldSnapshot,
+    PROTOCOL_VERSION,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -233,7 +234,11 @@ async fn set_focus(
     let session = get_session(&state, id).await?;
     let sim = session.simulation.lock().await;
     if let Some(org) = sim.focused_organism(req.organism_id) {
-        let _ = session.events.send(ServerEvent::FocusBrain(org));
+        let active = derive_active_neuron_ids(&org.brain);
+        let _ = session.events.send(ServerEvent::FocusBrain(FocusBrainData {
+            organism: org,
+            active_neuron_ids: active,
+        }));
     }
     let snapshot = sim.snapshot();
     drop(sim);
@@ -345,7 +350,13 @@ async fn handle_command(command: ClientCommand, session: Arc<Session>) -> Result
         ClientCommand::SetFocus { organism_id } => {
             let sim = session.simulation.lock().await;
             if let Some(organism) = sim.focused_organism(organism_id) {
-                let _ = session.events.send(ServerEvent::FocusBrain(organism));
+                let active = derive_active_neuron_ids(&organism.brain);
+                let _ = session
+                    .events
+                    .send(ServerEvent::FocusBrain(FocusBrainData {
+                        organism,
+                        active_neuron_ids: active,
+                    }));
             }
             Ok(())
         }

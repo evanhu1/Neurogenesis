@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct OrganismId(pub u64);
@@ -88,8 +88,6 @@ pub struct SpeciesConfig {
     pub max_num_neurons: u32,
     pub num_synapses: u32,
     pub mutation_chance: f32,
-    pub mutation_magnitude: f32,
-    pub mutation_operations: u32,
 }
 
 impl Default for SpeciesConfig {
@@ -143,8 +141,6 @@ pub struct NeuronState {
     pub neuron_type: NeuronType,
     pub bias: f32,
     pub activation: f32,
-    #[serde(default)]
-    pub is_active: bool,
     pub parent_ids: Vec<NeuronId>,
 }
 
@@ -292,11 +288,17 @@ pub enum ClientCommand {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FocusBrainData {
+    pub organism: OrganismState,
+    pub active_neuron_ids: Vec<NeuronId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data")]
 pub enum ServerEvent {
     StateSnapshot(WorldSnapshot),
     TickDelta(TickDelta),
-    FocusBrain(OrganismState),
+    FocusBrain(FocusBrainData),
     Metrics(MetricsSnapshot),
     Error(ApiError),
 }

@@ -1,8 +1,8 @@
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use sim_protocol::{
-    BrainState, FacingDirection, MetricsSnapshot, OccupancyCell, OrganismId, OrganismState,
-    SpeciesConfig, SpeciesId, TickDelta, WorldConfig, WorldSnapshot,
+    FacingDirection, MetricsSnapshot, OccupancyCell, OrganismId, OrganismState, SpeciesConfig,
+    SpeciesId, TickDelta, WorldConfig, WorldSnapshot,
 };
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -11,7 +11,10 @@ use thiserror::Error;
 mod brain;
 mod grid;
 mod spawn;
+mod species;
 mod turn;
+
+pub use brain::derive_active_neuron_ids;
 
 #[cfg(test)]
 mod tests;
@@ -50,7 +53,6 @@ struct BrainEvaluation {
 struct ReproductionSpawn {
     species_id: SpeciesId,
     parent_facing: FacingDirection,
-    parent_brain: BrainState,
     q: i32,
     r: i32,
 }
@@ -174,25 +176,6 @@ impl Simulation {
     pub fn metrics(&self) -> &MetricsSnapshot {
         &self.metrics
     }
-
-    fn initialize_species_registry_from_seed(&mut self) {
-        self.species_registry.clear();
-        self.next_species_id = 0;
-        let species_id = self.alloc_species_id();
-        debug_assert_eq!(species_id, SpeciesId(0));
-        self.species_registry
-            .insert(species_id, self.config.seed_species_config.clone());
-    }
-
-    pub(crate) fn alloc_species_id(&mut self) -> SpeciesId {
-        let id = SpeciesId(self.next_species_id);
-        self.next_species_id = self.next_species_id.saturating_add(1);
-        id
-    }
-
-    pub(crate) fn species_config(&self, species_id: SpeciesId) -> Option<&SpeciesConfig> {
-        self.species_registry.get(&species_id)
-    }
 }
 
 fn world_capacity(width: u32) -> usize {
@@ -244,11 +227,6 @@ fn validate_species_config(config: &SpeciesConfig) -> Result<(), SimError> {
     if !(0.0..=1.0).contains(&config.mutation_chance) {
         return Err(SimError::InvalidConfig(
             "mutation_chance must be within [0, 1]".to_owned(),
-        ));
-    }
-    if config.mutation_operations == 0 {
-        return Err(SimError::InvalidConfig(
-            "mutation_operations must be >= 1".to_owned(),
         ));
     }
     if config.max_num_neurons < config.num_neurons {
