@@ -6,17 +6,34 @@ use sim_protocol::{
     NeuronType, OrganismId, SensoryNeuronState, SensoryReceptor, SpeciesConfig, SynapseEdge,
 };
 use std::cmp::Ordering;
-use std::collections::HashMap;
 
 const ACTION_ACTIVATION_THRESHOLD: f32 = 0.5;
 const SYNAPSE_STRENGTH_MAX: f32 = 3.0;
 const DEFAULT_BIAS: f32 = 0.0;
+const ACTION_COUNT: usize = 4;
+const INTER_ID_BASE: u32 = 1000;
+const ACTION_ID_BASE: u32 = 2000;
 
 #[derive(Default)]
 pub(crate) struct BrainEvaluation {
-    pub(crate) actions: [bool; 4],
-    pub(crate) action_activations: [f32; 4],
+    pub(crate) actions: [bool; ACTION_COUNT],
+    pub(crate) action_activations: [f32; ACTION_COUNT],
     pub(crate) synapse_ops: u64,
+}
+
+/// Reusable scratch buffers for brain evaluation, avoiding per-tick allocations.
+pub(crate) struct BrainScratch {
+    inter_inputs: Vec<f32>,
+    prev_inter: Vec<f32>,
+}
+
+impl BrainScratch {
+    pub(crate) fn new() -> Self {
+        Self {
+            inter_inputs: Vec::new(),
+            prev_inter: Vec::new(),
+        }
+    }
 }
 
 impl Simulation {
@@ -129,6 +146,7 @@ pub(crate) fn evaluate_brain(
     world_width: i32,
     occupancy: &[Option<CellEntity>],
     vision_distance: u32,
+    scratch: &mut BrainScratch,
 ) -> BrainEvaluation {
     let mut result = BrainEvaluation::default();
 
@@ -153,60 +171,44 @@ pub(crate) fn evaluate_brain(
 
     let brain = &mut organism.brain;
 
-    let inter_index: HashMap<NeuronId, usize> = brain
-        .inter
-        .iter()
-        .enumerate()
-        .map(|(idx, neuron)| (neuron.neuron.neuron_id, idx))
-        .collect();
-    let action_index_map: HashMap<NeuronId, usize> = brain
-        .action
-        .iter()
-        .enumerate()
-        .map(|(idx, neuron)| (neuron.neuron.neuron_id, idx))
-        .collect();
+    // Reuse scratch buffers: clear + fill avoids reallocation after first organism
+    scratch.inter_inputs.clear();
+    scratch.inter_inputs.extend(brain.inter.iter().map(|n| n.neuron.bias));
+    scratch.prev_inter.clear();
+    scratch.prev_inter.extend(brain.inter.iter().map(|n| n.neuron.activation));
 
-    let mut inter_inputs: Vec<f32> = brain
-        .inter
-        .iter()
-        .map(|neuron| neuron.neuron.bias)
-        .collect();
-    let prev_inter: Vec<f32> = brain
-        .inter
-        .iter()
-        .map(|neuron| neuron.neuron.activation)
-        .collect();
-
+    // Accumulate sensory → inter
     for sensory in &brain.sensory {
         result.synapse_ops += accumulate_weighted_inputs(
             &sensory.synapses,
             sensory.neuron.activation,
-            &inter_index,
-            &mut inter_inputs,
+            INTER_ID_BASE,
+            &mut scratch.inter_inputs,
         );
     }
 
-    for (source_idx, inter) in brain.inter.iter().enumerate() {
-        let source_activation = prev_inter[source_idx];
+    // Accumulate inter → inter (using previous tick's activations)
+    for (i, inter) in brain.inter.iter().enumerate() {
         result.synapse_ops += accumulate_weighted_inputs(
             &inter.synapses,
-            source_activation,
-            &inter_index,
-            &mut inter_inputs,
+            scratch.prev_inter[i],
+            INTER_ID_BASE,
+            &mut scratch.inter_inputs,
         );
     }
 
     for (idx, neuron) in brain.inter.iter_mut().enumerate() {
-        neuron.neuron.activation = inter_inputs[idx].tanh();
+        neuron.neuron.activation = scratch.inter_inputs[idx].tanh();
     }
 
-    let mut action_inputs: Vec<f32> = vec![0.0; brain.action.len()];
+    // Accumulate into action neurons (fixed-size array, no allocation)
+    let mut action_inputs = [0.0f32; ACTION_COUNT];
 
     for sensory in &brain.sensory {
         result.synapse_ops += accumulate_weighted_inputs(
             &sensory.synapses,
             sensory.neuron.activation,
-            &action_index_map,
+            ACTION_ID_BASE,
             &mut action_inputs,
         );
     }
@@ -215,16 +217,14 @@ pub(crate) fn evaluate_brain(
         result.synapse_ops += accumulate_weighted_inputs(
             &inter.synapses,
             inter.neuron.activation,
-            &action_index_map,
+            ACTION_ID_BASE,
             &mut action_inputs,
         );
     }
 
-    for action in &mut brain.action {
-        if let Some(idx) = action_index_map.get(&action.neuron.neuron_id) {
-            action.neuron.activation = sigmoid(action_inputs[*idx]);
-            result.action_activations[action_index(action.action_type)] = action.neuron.activation;
-        }
+    for (idx, action) in brain.action.iter_mut().enumerate() {
+        action.neuron.activation = sigmoid(action_inputs[idx]);
+        result.action_activations[action_index(action.action_type)] = action.neuron.activation;
     }
 
     if let Some(selected_idx) = select_action(result.action_activations) {
@@ -252,7 +252,8 @@ pub fn derive_active_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
         }
     }
 
-    let action_activations: [f32; 4] = std::array::from_fn(|i| brain.action[i].neuron.activation);
+    let action_activations: [f32; ACTION_COUNT] =
+        std::array::from_fn(|i| brain.action[i].neuron.activation);
     if let Some(winner_idx) = select_action(action_activations) {
         active.push(brain.action[winner_idx].neuron.neuron_id);
     }
@@ -260,7 +261,7 @@ pub fn derive_active_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
     active
 }
 
-fn select_action(activations: [f32; 4]) -> Option<usize> {
+fn select_action(activations: [f32; ACTION_COUNT]) -> Option<usize> {
     let mut best_idx = 0;
     let mut best_activation = activations[0];
 
@@ -284,16 +285,21 @@ fn sigmoid(x: f32) -> f32 {
     }
 }
 
+/// Accumulates weighted inputs using arithmetic index resolution.
+/// `id_base` is the neuron ID offset for the target layer (e.g. 1000 for inter, 2000 for action).
+/// Edges targeting neurons outside the range are skipped via bounds check.
 fn accumulate_weighted_inputs(
     edges: &[SynapseEdge],
     source_activation: f32,
-    index_map: &HashMap<NeuronId, usize>,
+    id_base: u32,
     inputs: &mut [f32],
 ) -> u64 {
+    let num_slots = inputs.len();
     let mut synapse_ops = 0;
     for edge in edges {
-        if let Some(idx) = index_map.get(&edge.post_neuron_id) {
-            inputs[*idx] += source_activation * edge.weight;
+        let idx = edge.post_neuron_id.0.wrapping_sub(id_base) as usize;
+        if idx < num_slots {
+            inputs[idx] += source_activation * edge.weight;
             synapse_ops += 1;
         }
     }

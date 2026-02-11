@@ -1,4 +1,4 @@
-use crate::brain::{action_index, evaluate_brain};
+use crate::brain::{action_index, evaluate_brain, BrainScratch};
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right};
 use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 use crate::{CellEntity, Simulation};
@@ -167,6 +167,7 @@ impl Simulation {
             .collect();
 
         let mut intents = Vec::with_capacity(snapshot.ordered_ids.len());
+        let mut scratch = BrainScratch::new();
         for organism_id in &snapshot.ordered_ids {
             let Some(snapshot_state) = snapshot.organism(*organism_id) else {
                 continue;
@@ -184,6 +185,7 @@ impl Simulation {
                 snapshot.world_width,
                 &snapshot.occupancy,
                 vision_distance,
+                &mut scratch,
             );
 
             let turn_left_active = evaluation.actions[action_index(ActionType::TurnLeft)];
