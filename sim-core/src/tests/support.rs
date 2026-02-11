@@ -1,4 +1,6 @@
 use super::*;
+use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
+use std::cmp::Ordering;
 
 pub(super) trait IntoEnergy {
     fn into_energy(self) -> f32;
@@ -43,13 +45,19 @@ pub(super) fn test_config(world_width: u32, num_organisms: u32) -> WorldConfig {
     config
 }
 
+pub(super) fn compare_snapshots(a: &WorldSnapshot, b: &WorldSnapshot) -> Ordering {
+    let snapshot_a = serde_json::to_string(a).expect("serialize snapshot A");
+    let snapshot_b = serde_json::to_string(b).expect("serialize snapshot B");
+    snapshot_a.cmp(&snapshot_b)
+}
+
 fn forced_brain(
     wants_move: bool,
     turn_left: bool,
     turn_right: bool,
     confidence: f32,
 ) -> BrainState {
-    let sensory = vec![make_sensory_neuron(0, SensoryReceptorType::Look)];
+    let sensory = vec![make_sensory_neuron(0, SensoryReceptorType::Look, 1)];
     let inter_id = NeuronId(1000);
     let inter_bias = 1.0;
     let inter_synapses = vec![
@@ -219,7 +227,7 @@ pub(super) fn configure_sim(sim: &mut Simulation, mut organisms: Vec<OrganismSta
         .map(|organism| organism.id.0)
         .max()
         .map_or(0, |max_id| max_id + 1);
-    sim.occupancy = vec![None; world_capacity(sim.config.world_width)];
+    sim.occupancy = vec![None; crate::grid::world_capacity(sim.config.world_width)];
     for organism in &sim.organisms {
         let idx = sim
             .cell_index(organism.q, organism.r)

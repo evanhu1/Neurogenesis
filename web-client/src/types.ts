@@ -27,6 +27,7 @@ export type SpeciesConfig = {
   max_num_neurons: number;
   num_synapses: number;
   mutation_chance: number;
+  vision_distance: number;
 };
 
 export type SynapseEdge = { post_neuron_id: number | { 0: number }; weight: number };
@@ -47,6 +48,7 @@ export type FocusBrainData = {
 export type SensoryNeuronState = {
   neuron: NeuronState;
   receptor_type: string;
+  look_distance: number;
   synapses: SynapseEdge[];
 };
 
@@ -151,6 +153,14 @@ function parseRequiredNumber(map: Record<string, number>, key: string): number {
   return value;
 }
 
+function parseNumberWithDefault(map: Record<string, number>, key: string, fallback: number): number {
+  const value = map[key];
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return fallback;
+  }
+  return value;
+}
+
 function parseDefaultConfigToml(tomlText: string): WorldConfig {
   const worldLevel: Record<string, number> = {};
   const seedSpeciesLevel: Record<string, number> = {};
@@ -197,6 +207,7 @@ function parseDefaultConfigToml(tomlText: string): WorldConfig {
       max_num_neurons: parseRequiredNumber(speciesSource, 'max_num_neurons'),
       num_synapses: parseRequiredNumber(speciesSource, 'num_synapses'),
       mutation_chance: parseRequiredNumber(speciesSource, 'mutation_chance'),
+      vision_distance: parseNumberWithDefault(speciesSource, 'vision_distance', 2),
     },
   };
 }

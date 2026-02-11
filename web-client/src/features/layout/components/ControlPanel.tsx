@@ -1,9 +1,12 @@
-import type { ChangeEvent } from 'react';
+import type { ChangeEvent, MutableRefObject } from 'react';
+import { unwrapId } from '../../../protocol';
+import type { OrganismState, WorldSnapshot } from '../../../types';
 import type { SpeciesPopulationPoint } from '../../sim/hooks/useSimulationSession';
 
 type ControlPanelProps = {
   sessionMeta: string;
   speciesPopulationHistory: SpeciesPopulationPoint[];
+  snapshot: WorldSnapshot | null;
   metricsText: string;
   errorText: string | null;
   isRunning: boolean;
@@ -14,11 +17,14 @@ type ControlPanelProps = {
   onToggleRun: () => void;
   onSpeedLevelChange: (levelIndex: number) => void;
   onStep: (count: number) => void;
+  onFocusOrganism: (organism: OrganismState) => void;
+  panToHexRef: MutableRefObject<((q: number, r: number) => void) | null>;
 };
 
 export function ControlPanel({
   sessionMeta,
   speciesPopulationHistory,
+  snapshot,
   metricsText,
   errorText,
   isRunning,
@@ -29,6 +35,8 @@ export function ControlPanel({
   onToggleRun,
   onSpeedLevelChange,
   onStep,
+  onFocusOrganism,
+  panToHexRef,
 }: ControlPanelProps) {
   const handleSpeedLevelInput = (evt: ChangeEvent<HTMLInputElement>) => {
     const rawLevel = Number.parseInt(evt.target.value, 10);
@@ -88,7 +96,19 @@ export function ControlPanel({
       <h3 className="mt-3 text-sm font-semibold uppercase tracking-wide text-ink/80">
         Species Population
       </h3>
-      <SpeciesPopulationChart history={speciesPopulationHistory} />
+      <SpeciesPopulationChart
+        history={speciesPopulationHistory}
+        onSpeciesClick={(speciesId) => {
+          if (!snapshot) return;
+          const candidates = snapshot.organisms.filter(
+            (o) => String(unwrapId(o.species_id)) === speciesId,
+          );
+          if (candidates.length === 0) return;
+          const organism = candidates[Math.floor(Math.random() * candidates.length)];
+          onFocusOrganism(organism);
+          panToHexRef.current?.(organism.q, organism.r);
+        }}
+      />
 
       <h3 className="mt-3 text-sm font-semibold uppercase tracking-wide text-ink/80">Runtime Metrics</h3>
       <pre className="mt-3 whitespace-pre-wrap rounded-xl bg-slate-100/80 p-3 font-mono text-xs">
@@ -122,7 +142,13 @@ function ControlButton({ label, onClick }: ControlButtonProps) {
 
 const CHART_COLORS = ['#0f766e', '#1d4ed8', '#b45309', '#dc2626', '#7e22ce', '#be185d'];
 
-function SpeciesPopulationChart({ history }: { history: SpeciesPopulationPoint[] }) {
+function SpeciesPopulationChart({
+  history,
+  onSpeciesClick,
+}: {
+  history: SpeciesPopulationPoint[];
+  onSpeciesClick: (speciesId: string) => void;
+}) {
   if (history.length === 0) {
     return (
       <div className="mt-2 rounded-xl bg-slate-100/80 p-3 font-mono text-xs text-ink/70">
@@ -233,16 +259,24 @@ function SpeciesPopulationChart({ history }: { history: SpeciesPopulationPoint[]
           {turnEnd}
         </text>
       </svg>
-      <div className="mt-2 flex flex-wrap gap-2 font-mono text-[11px] text-ink/80">
-        {speciesIds.map((speciesId, speciesIdx) => (
-          <div key={speciesId} className="flex items-center gap-1 rounded bg-white/70 px-2 py-1">
-            <span
-              className="inline-block h-2.5 w-2.5 rounded-full"
-              style={{ backgroundColor: CHART_COLORS[speciesIdx % CHART_COLORS.length] }}
-            />
-            <span>{`species ${speciesId}`}</span>
-          </div>
-        ))}
+      <div className="mt-2 flex gap-2 overflow-x-auto font-mono text-[11px] text-ink/80">
+        {speciesIds.map((speciesId, speciesIdx) => {
+          const latest = history[history.length - 1];
+          const count = latest?.speciesCounts[speciesId] ?? 0;
+          return (
+            <button
+              key={speciesId}
+              onClick={() => onSpeciesClick(speciesId)}
+              className="flex shrink-0 items-center gap-1 rounded bg-white/70 px-2 py-1 transition hover:bg-slate-200"
+            >
+              <span
+                className="inline-block h-2.5 w-2.5 rounded-full"
+                style={{ backgroundColor: CHART_COLORS[speciesIdx % CHART_COLORS.length] }}
+              />
+              <span>{`${speciesId}: ${count}`}</span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

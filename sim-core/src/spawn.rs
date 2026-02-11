@@ -1,12 +1,29 @@
 use crate::brain::reset_brain_runtime_state;
-use crate::grid::opposite_direction;
+use crate::grid::{opposite_direction, world_capacity};
 use crate::Simulation;
-use crate::{world_capacity, SpawnRequest, SpawnRequestKind};
 use rand::seq::SliceRandom;
 use rand::Rng;
-use sim_protocol::{FacingDirection, FoodId, FoodState, OrganismId, OrganismState};
+use sim_protocol::{FacingDirection, FoodId, FoodState, OrganismId, OrganismState, SpeciesId};
 
 const FOOD_COVERAGE_DIVISOR: usize = 20;
+
+#[derive(Clone)]
+pub(crate) struct ReproductionSpawn {
+    pub(crate) species_id: SpeciesId,
+    pub(crate) parent_facing: FacingDirection,
+    pub(crate) q: i32,
+    pub(crate) r: i32,
+}
+
+#[derive(Clone)]
+pub(crate) enum SpawnRequestKind {
+    Reproduction(ReproductionSpawn),
+}
+
+#[derive(Clone)]
+pub(crate) struct SpawnRequest {
+    pub(crate) kind: SpawnRequestKind,
+}
 
 impl Simulation {
     pub(crate) fn resolve_spawn_requests(&mut self, queue: &[SpawnRequest]) -> Vec<OrganismState> {

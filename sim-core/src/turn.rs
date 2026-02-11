@@ -1,13 +1,15 @@
 use crate::brain::{action_index, evaluate_brain};
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right};
+use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 use crate::{CellEntity, Simulation};
-use crate::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 use sim_protocol::{
     ActionType, FacingDirection, FoodId, FoodState, OrganismId, OrganismMove, OrganismState,
     RemovedFoodPosition, RemovedOrganismPosition, SpeciesId, TickDelta,
 };
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
+
+const TURN_ENERGY_COST: f32 = 0.25;
 
 #[derive(Clone, Copy)]
 struct SnapshotOrganismState {
@@ -459,7 +461,7 @@ impl Simulation {
 
         let mut starved_ids = Vec::new();
         for organism in &mut self.organisms {
-            organism.energy -= 1.0;
+            organism.energy -= TURN_ENERGY_COST;
             if organism.energy <= 0.0 {
                 starved_ids.push(organism.id);
             }

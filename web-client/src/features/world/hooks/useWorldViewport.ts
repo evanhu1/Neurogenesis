@@ -162,6 +162,17 @@ export function useWorldViewport() {
     return true;
   }, []);
 
+  const panToWorldPoint = useCallback(
+    (worldX: number, worldY: number, canvasWidth: number, canvasHeight: number) => {
+      setViewport((prev) => ({
+        ...prev,
+        panX: -(worldX - canvasWidth / 2) * prev.zoom,
+        panY: -(worldY - canvasHeight / 2) * prev.zoom,
+      }));
+    },
+    [],
+  );
+
   const cursorClass = isSpacePressed || isPanningWorld ? 'cursor-pointer' : 'cursor-default';
 
   return {
@@ -169,6 +180,7 @@ export function useWorldViewport() {
     isSpacePressed,
     cursorClass,
     zoomAtPointer,
+    panToWorldPoint,
     onCanvasMouseDown,
     onCanvasMouseMove,
     onCanvasMouseUp,

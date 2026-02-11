@@ -52,7 +52,7 @@ export function computeBaseHexSize(
   return Math.min(canvasWidth / widthFactor, canvasHeight / heightFactor);
 }
 
-function buildHexLayout(canvasWidth: number, canvasHeight: number, worldWidth: number): HexLayout {
+export function buildHexLayout(canvasWidth: number, canvasHeight: number, worldWidth: number): HexLayout {
   const widthFactor = SQRT_3 * (1.5 * Math.max(0, worldWidth - 1) + 1);
   const heightFactor = 1.5 * Math.max(0, worldWidth - 1) + 2;
   const size = computeBaseHexSize(canvasWidth, canvasHeight, worldWidth);
@@ -68,7 +68,7 @@ function buildHexLayout(canvasWidth: number, canvasHeight: number, worldWidth: n
   };
 }
 
-function hexCenter(layout: HexLayout, q: number, r: number) {
+export function hexCenter(layout: HexLayout, q: number, r: number) {
   return {
     x: layout.originX + layout.size * SQRT_3 * (q + r / 2),
     y: layout.originY + layout.size * 1.5 * r,
@@ -248,7 +248,10 @@ export function renderBrain(
       return {
         id: nid,
         type: 'sensory',
-        label: neuron.receptor_type,
+        label:
+          neuron.receptor_type === 'Look'
+            ? `Look ${neuron.look_distance ?? 1}`
+            : neuron.receptor_type,
         activation: neuron.neuron.activation,
         bias: neuron.neuron.bias,
         isActive: activeNeuronIds?.has(nid) ?? false,

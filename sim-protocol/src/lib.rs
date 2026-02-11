@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct OrganismId(pub u64);
@@ -91,6 +91,8 @@ pub struct SpeciesConfig {
     pub max_num_neurons: u32,
     pub num_synapses: u32,
     pub mutation_chance: f32,
+    #[serde(default = "default_species_vision_distance")]
+    pub vision_distance: u32,
 }
 
 impl Default for SpeciesConfig {
@@ -138,6 +140,14 @@ fn default_food_energy() -> f32 {
     default_world_config().food_energy
 }
 
+fn default_species_vision_distance() -> u32 {
+    2
+}
+
+fn default_look_distance() -> u32 {
+    1
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SynapseEdge {
     pub post_neuron_id: NeuronId,
@@ -157,6 +167,8 @@ pub struct NeuronState {
 pub struct SensoryNeuronState {
     pub neuron: NeuronState,
     pub receptor_type: SensoryReceptorType,
+    #[serde(default = "default_look_distance")]
+    pub look_distance: u32,
     pub synapses: Vec<SynapseEdge>,
 }
 

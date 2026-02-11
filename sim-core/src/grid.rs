@@ -3,6 +3,10 @@ use crate::Simulation;
 use sim_protocol::FacingDirection;
 use sim_protocol::{FoodState, OrganismState};
 
+pub(crate) fn world_capacity(width: u32) -> usize {
+    width as usize * width as usize
+}
+
 pub(crate) fn rotate_left(direction: FacingDirection) -> FacingDirection {
     match direction {
         FacingDirection::East => FacingDirection::NorthEast,

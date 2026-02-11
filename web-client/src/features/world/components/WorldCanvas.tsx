@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, type MouseEvent } from 'react';
-import { pickOrganismAtCanvasPoint, renderWorld } from '../../../canvas';
+import { useCallback, useEffect, useRef, type MouseEvent, type MutableRefObject } from 'react';
+import { buildHexLayout, hexCenter, pickOrganismAtCanvasPoint, renderWorld } from '../../../canvas';
 import type { OrganismState, WorldSnapshot } from '../../../types';
 import { useWorldViewport } from '../hooks/useWorldViewport';
 
@@ -9,6 +9,7 @@ type WorldCanvasProps = {
   deadFlashCells: Array<{ q: number; r: number }> | null;
   bornFlashCells: Array<{ q: number; r: number }> | null;
   onOrganismSelect: (organism: OrganismState) => void;
+  panToHexRef?: MutableRefObject<((q: number, r: number) => void) | null>;
 };
 
 export function WorldCanvas({
@@ -17,6 +18,7 @@ export function WorldCanvas({
   deadFlashCells,
   bornFlashCells,
   onOrganismSelect,
+  panToHexRef,
 }: WorldCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const snapshotRef = useRef<WorldSnapshot | null>(snapshot);
@@ -29,6 +31,7 @@ export function WorldCanvas({
     isSpacePressed,
     cursorClass,
     zoomAtPointer,
+    panToWorldPoint,
     onCanvasMouseDown,
     onCanvasMouseMove,
     onCanvasMouseUp,
@@ -54,6 +57,21 @@ export function WorldCanvas({
   useEffect(() => {
     onOrganismSelectRef.current = onOrganismSelect;
   }, [onOrganismSelect]);
+
+  useEffect(() => {
+    if (!panToHexRef) return;
+    panToHexRef.current = (q: number, r: number) => {
+      const canvas = canvasRef.current;
+      const worldWidth = snapshotRef.current?.config.world_width;
+      if (!canvas || !worldWidth) return;
+      const layout = buildHexLayout(canvas.width, canvas.height, worldWidth);
+      const center = hexCenter(layout, q, r);
+      panToWorldPoint(center.x, center.y, canvas.width, canvas.height);
+    };
+    return () => {
+      panToHexRef.current = null;
+    };
+  }, [panToHexRef, panToWorldPoint]);
 
   const onCanvasClick = useCallback(
     (evt: MouseEvent<HTMLCanvasElement>) => {

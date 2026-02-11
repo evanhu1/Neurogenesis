@@ -2,14 +2,14 @@ use super::support::*;
 use super::*;
 
 #[test]
-fn look_sensor_returns_binary_occupancy() {
+fn look_sensor_returns_distance_based_entity_codes() {
     let cfg = test_config(5, 2);
     let mut sim = Simulation::new(cfg, 7).expect("simulation should initialize");
 
     sim.organisms[0].q = 2;
     sim.organisms[0].r = 2;
     sim.organisms[0].facing = FacingDirection::East;
-    sim.organisms[1].q = 3;
+    sim.organisms[1].q = 4;
     sim.organisms[1].r = 2;
 
     sim.occupancy.fill(None);
@@ -24,8 +24,19 @@ fn look_sensor_returns_binary_occupancy() {
         sim.organisms[0].id,
         sim.config.world_width as i32,
         &sim.occupancy,
+        1,
     );
-    assert_eq!(signal, 1.0);
+    assert_eq!(signal, 0.0);
+
+    let far_signal = look_sensor_value(
+        (2, 2),
+        FacingDirection::East,
+        sim.organisms[0].id,
+        sim.config.world_width as i32,
+        &sim.occupancy,
+        2,
+    );
+    assert_eq!(far_signal, 2.0);
 
     let empty_signal = look_sensor_value(
         (2, 2),
@@ -33,12 +44,23 @@ fn look_sensor_returns_binary_occupancy() {
         sim.organisms[0].id,
         sim.config.world_width as i32,
         &sim.occupancy,
+        1,
     );
     assert_eq!(empty_signal, 0.0);
+
+    let out_of_bounds_signal = look_sensor_value(
+        (2, 2),
+        FacingDirection::East,
+        sim.organisms[0].id,
+        sim.config.world_width as i32,
+        &sim.occupancy,
+        3,
+    );
+    assert_eq!(out_of_bounds_signal, 3.0);
 }
 
 #[test]
-fn look_sensor_detects_food_as_occupied() {
+fn look_sensor_detects_food_with_food_code() {
     let cfg = test_config(5, 1);
     let mut sim = Simulation::new(cfg, 76).expect("simulation should initialize");
     configure_sim(
@@ -55,7 +77,7 @@ fn look_sensor_detects_food_as_occupied() {
             10.0,
         )],
     );
-    let added = sim.add_food(make_food(0, 3, 2, sim.config.food_energy));
+    let added = sim.add_food(make_food(0, 4, 2, sim.config.food_energy));
     assert!(added);
 
     let signal = look_sensor_value(
@@ -64,6 +86,7 @@ fn look_sensor_detects_food_as_occupied() {
         OrganismId(0),
         sim.config.world_width as i32,
         &sim.occupancy,
+        2,
     );
     assert_eq!(signal, 1.0);
 }

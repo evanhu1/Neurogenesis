@@ -1,10 +1,9 @@
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use sim_protocol::{
-    FacingDirection, FoodId, FoodState, MetricsSnapshot, OccupancyCell, OrganismId, OrganismState,
-    SpeciesConfig, SpeciesId, TickDelta, WorldConfig, WorldSnapshot,
+    FoodId, FoodState, MetricsSnapshot, OccupancyCell, OrganismId, OrganismState, SpeciesConfig,
+    SpeciesId, TickDelta, WorldConfig, WorldSnapshot,
 };
-use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use thiserror::Error;
 
@@ -18,9 +17,6 @@ pub use brain::derive_active_neuron_ids;
 
 #[cfg(test)]
 mod tests;
-
-const SYNAPSE_STRENGTH_MAX: f32 = 8.0;
-const DEFAULT_BIAS: f32 = 0.0;
 
 #[derive(Debug, Error)]
 pub enum SimError {
@@ -50,37 +46,12 @@ enum CellEntity {
     Food(FoodId),
 }
 
-#[derive(Default)]
-struct BrainEvaluation {
-    actions: [bool; 4],
-    action_activations: [f32; 4],
-    synapse_ops: u64,
-}
-
-#[derive(Clone)]
-struct ReproductionSpawn {
-    species_id: SpeciesId,
-    parent_facing: FacingDirection,
-    q: i32,
-    r: i32,
-}
-
-#[derive(Clone)]
-enum SpawnRequestKind {
-    Reproduction(ReproductionSpawn),
-}
-
-#[derive(Clone)]
-struct SpawnRequest {
-    kind: SpawnRequestKind,
-}
-
 impl Simulation {
     pub fn new(config: WorldConfig, seed: u64) -> Result<Self, SimError> {
         validate_world_config(&config)?;
-        validate_species_config(&config.seed_species_config)?;
+        species::validate_species_config(&config.seed_species_config)?;
 
-        let capacity = world_capacity(config.world_width);
+        let capacity = grid::world_capacity(config.world_width);
         let mut sim = Self {
             config,
             species_registry: BTreeMap::new(),
@@ -201,10 +172,6 @@ impl Simulation {
     }
 }
 
-fn world_capacity(width: u32) -> usize {
-    width as usize * width as usize
-}
-
 fn validate_world_config(config: &WorldConfig) -> Result<(), SimError> {
     if config.world_width == 0 {
         return Err(SimError::InvalidConfig(
@@ -249,24 +216,4 @@ fn validate_world_config(config: &WorldConfig) -> Result<(), SimError> {
         ));
     }
     Ok(())
-}
-
-fn validate_species_config(config: &SpeciesConfig) -> Result<(), SimError> {
-    if !(0.0..=1.0).contains(&config.mutation_chance) {
-        return Err(SimError::InvalidConfig(
-            "mutation_chance must be within [0, 1]".to_owned(),
-        ));
-    }
-    if config.max_num_neurons < config.num_neurons {
-        return Err(SimError::InvalidConfig(
-            "max_num_neurons must be >= num_neurons".to_owned(),
-        ));
-    }
-    Ok(())
-}
-
-pub fn compare_snapshots(a: &WorldSnapshot, b: &WorldSnapshot) -> Ordering {
-    let snapshot_a = serde_json::to_string(a).expect("serialize snapshot A");
-    let snapshot_b = serde_json::to_string(b).expect("serialize snapshot B");
-    snapshot_a.cmp(&snapshot_b)
 }

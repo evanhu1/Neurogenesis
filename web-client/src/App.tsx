@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { ControlPanel } from './features/layout/components/ControlPanel';
 import { InspectorPanel } from './features/layout/components/InspectorPanel';
 import { useSimulationSession } from './features/sim/hooks/useSimulationSession';
@@ -12,6 +12,7 @@ import { WorldCanvas } from './features/world/components/WorldCanvas';
 
 export default function App() {
   const simulation = useSimulationSession();
+  const panToHexRef = useRef<((q: number, r: number) => void) | null>(null);
 
   const sessionMeta = useMemo(() => formatSessionMeta(simulation.session), [simulation.session]);
   const metricsText = useMemo(() => formatMetrics(simulation.snapshot), [simulation.snapshot]);
@@ -30,6 +31,7 @@ export default function App() {
         <ControlPanel
           sessionMeta={sessionMeta}
           speciesPopulationHistory={simulation.speciesPopulationHistory}
+          snapshot={simulation.snapshot}
           metricsText={metricsText}
           errorText={simulation.errorText}
           isRunning={simulation.isRunning}
@@ -40,6 +42,8 @@ export default function App() {
           onToggleRun={simulation.toggleRun}
           onSpeedLevelChange={simulation.setSpeedLevelIndex}
           onStep={simulation.step}
+          onFocusOrganism={simulation.focusOrganism}
+          panToHexRef={panToHexRef}
         />
 
         <main className="flex h-full items-center justify-center overflow-hidden rounded-2xl border border-accent/15 bg-panel/70 p-3 shadow-panel">
@@ -50,6 +54,7 @@ export default function App() {
             deadFlashCells={simulation.deadFlashCells}
             bornFlashCells={simulation.bornFlashCells}
             onOrganismSelect={simulation.focusOrganism}
+            panToHexRef={panToHexRef}
           />
         </main>
 

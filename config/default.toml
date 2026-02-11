@@ -1,15 +1,16 @@
 world_width = 100
 steps_per_second = 5
-num_organisms = 500
+num_organisms = 1000
 center_spawn_min_fraction = 0.25
 center_spawn_max_fraction = 0.75
 starting_energy = 100.0
-food_energy = 25.0
+food_energy = 50.0
 reproduction_energy_cost = 100.0
-move_action_energy_cost = 1.0
+move_action_energy_cost = 0.5
 
 [seed_species_config]
-num_neurons = 4
+num_neurons = 8
 max_num_neurons = 20
-num_synapses = 16
-mutation_chance = 0.25
+num_synapses = 64
+mutation_chance = 0.1
+vision_distance = 2

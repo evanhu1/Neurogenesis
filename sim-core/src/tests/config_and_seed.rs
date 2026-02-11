@@ -1,5 +1,6 @@
 use super::support::*;
 use super::*;
+use std::cmp::Ordering;
 
 #[test]
 fn deterministic_seed() {
@@ -81,6 +82,14 @@ fn config_validation_rejects_mutation_chance_out_of_range() {
     cfg.seed_species_config.mutation_chance = 1.5;
     let err = Simulation::new(cfg, 1).expect_err("expected invalid config error");
     assert!(err.to_string().contains("mutation_chance"));
+}
+
+#[test]
+fn config_validation_rejects_zero_vision_distance() {
+    let mut cfg = WorldConfig::default();
+    cfg.seed_species_config.vision_distance = 0;
+    let err = Simulation::new(cfg, 1).expect_err("expected invalid config error");
+    assert!(err.to_string().contains("vision_distance"));
 }
 
 #[test]
