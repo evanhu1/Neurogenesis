@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, type MouseEvent, type MutableRefObject } from 'react';
 import { buildHexLayout, hexCenter, pickOrganismAtCanvasPoint, renderWorld } from '../../../canvas';
+import { unwrapId } from '../../../protocol';
 import type { OrganismState, WorldSnapshot } from '../../../types';
 import { useWorldViewport } from '../hooks/useWorldViewport';
 
@@ -72,6 +73,18 @@ export function WorldCanvas({
       panToHexRef.current = null;
     };
   }, [panToHexRef, panToWorldPoint]);
+
+  // Track focused organism across ticks
+  useEffect(() => {
+    if (!snapshot || focusedOrganismId == null) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const org = snapshot.organisms.find((o) => unwrapId(o.id) === focusedOrganismId);
+    if (!org) return;
+    const layout = buildHexLayout(canvas.width, canvas.height, snapshot.config.world_width);
+    const center = hexCenter(layout, org.q, org.r);
+    panToWorldPoint(center.x, center.y, canvas.width, canvas.height);
+  }, [snapshot, focusedOrganismId, panToWorldPoint]);
 
   const onCanvasClick = useCallback(
     (evt: MouseEvent<HTMLCanvasElement>) => {

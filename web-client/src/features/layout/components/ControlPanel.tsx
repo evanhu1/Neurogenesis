@@ -56,38 +56,21 @@ export function ControlPanel({
         <ControlButton label="Reset" onClick={onReset} />
         <div className="flex items-center gap-2 rounded-lg border border-accent/20 bg-white/70 px-2 py-1">
           <ControlButton label={isRunning ? 'Pause' : 'Start'} onClick={onToggleRun} />
-          <div className="flex items-center gap-2">
-            <div className="flex h-12 w-6 items-center justify-center">
-              <input
-                aria-label="Simulation speed"
-                type="range"
-                min={0}
-                max={speedLevelCount - 1}
-                step={1}
-                value={speedLevelIndex}
-                onChange={handleSpeedLevelInput}
-                className="h-2 w-24 -rotate-90 cursor-pointer accent-accent"
-              />
-            </div>
-            <div className="flex h-24 flex-col justify-between">
-              <div className="flex items-center gap-1 text-sm leading-none">
-                <span className="inline-block h-0.5 w-2 rounded-full bg-slate-500" />
-                <span role="img" aria-label="rabbit">
-                  🐇
-                </span>
-              </div>
-              <div className="flex items-center gap-1 text-sm leading-none">
-                <span className="inline-block h-0.5 w-2 rounded-full bg-slate-500" />
-              </div>
-              <div className="flex items-center gap-1 text-sm leading-none">
-                <span className="inline-block h-0.5 w-2 rounded-full bg-slate-500" />
-                <span role="img" aria-label="turtle">
-                  🐢
-                </span>
-              </div>
-            </div>
-          </div>
+          <span className="text-xs" role="img" aria-label="turtle">🐢</span>
+          <input
+            aria-label="Simulation speed"
+            type="range"
+            min={0}
+            max={speedLevelCount - 1}
+            step={1}
+            value={speedLevelIndex}
+            onChange={handleSpeedLevelInput}
+            className="h-1.5 w-16 cursor-pointer accent-accent"
+          />
+          <span className="text-xs" role="img" aria-label="rabbit">🐇</span>
         </div>
+      </div>
+      <div className="mt-2 flex gap-2">
         <ControlButton label="Step 1" onClick={() => onStep(1)} />
         <ControlButton label="Step 10" onClick={() => onStep(10)} />
         <ControlButton label="Step 100" onClick={() => onStep(100)} />
@@ -183,15 +166,17 @@ function SpeciesPopulationChart({
   const innerWidth = chartWidth - padLeft - padRight;
   const innerHeight = chartHeight - padTop - padBottom;
 
-  const maxCount = Math.max(
-    1,
-    ...history.flatMap((point) =>
-      speciesIds.map((speciesId) => point.speciesCounts[speciesId] ?? 0),
-    ),
-  );
+  let maxCount = 1;
+  for (const point of history) {
+    for (const speciesId of speciesIds) {
+      const c = point.speciesCounts[speciesId] ?? 0;
+      if (c > maxCount) maxCount = c;
+    }
+  }
 
+  const latest = history[history.length - 1];
   const turnStart = history[0]?.turn ?? 0;
-  const turnEnd = history[history.length - 1]?.turn ?? 0;
+  const turnEnd = latest?.turn ?? 0;
   const turnSpan = Math.max(1, turnEnd - turnStart);
 
   return (
@@ -259,11 +244,15 @@ function SpeciesPopulationChart({
           {turnEnd}
         </text>
       </svg>
-      <div className="mt-2 flex gap-2 overflow-x-auto font-mono text-[11px] text-ink/80">
-        {speciesIds.map((speciesId, speciesIdx) => {
-          const latest = history[history.length - 1];
-          const count = latest?.speciesCounts[speciesId] ?? 0;
-          return (
+      <div className="mt-2 flex gap-2 overflow-x-auto scrollbar-none font-mono text-[11px] text-ink/80">
+        {speciesIds
+          .map((speciesId, speciesIdx) => ({
+            speciesId,
+            speciesIdx,
+            count: latest?.speciesCounts[speciesId] ?? 0,
+          }))
+          .sort((a, b) => b.count - a.count)
+          .map(({ speciesId, speciesIdx, count }) => (
             <button
               key={speciesId}
               onClick={() => onSpeciesClick(speciesId)}
@@ -275,8 +264,7 @@ function SpeciesPopulationChart({
               />
               <span>{`${speciesId}: ${count}`}</span>
             </button>
-          );
-        })}
+          ))}
       </div>
     </div>
   );

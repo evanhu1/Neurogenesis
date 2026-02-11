@@ -63,6 +63,7 @@ export default function App() {
           focusedStatsText={focusedStatsText}
           focusedBrain={simulation.focusedOrganism?.brain ?? null}
           activeNeuronIds={simulation.activeNeuronIds}
+          onDefocus={simulation.defocusOrganism}
         />
       </div>
     </div>

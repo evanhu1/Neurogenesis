@@ -71,6 +71,7 @@ export type SimulationSessionState = {
   setSpeedLevelIndex: (levelIndex: number) => void;
   step: (count: number) => void;
   focusOrganism: (organism: OrganismState) => void;
+  defocusOrganism: () => void;
 };
 
 export function useSimulationSession(): SimulationSessionState {
@@ -334,6 +335,12 @@ export function useSimulationSession(): SimulationSessionState {
     [request, session],
   );
 
+  const defocusOrganism = useCallback(() => {
+    setFocusedOrganismId(null);
+    setFocusedOrganism(null);
+    setActiveNeuronIds(null);
+  }, []);
+
   useEffect(() => {
     if (!snapshot || focusedOrganismId === null) {
       setFocusedOrganism(null);
@@ -410,5 +417,6 @@ export function useSimulationSession(): SimulationSessionState {
     setSpeedLevelIndex: setSpeedLevel,
     step,
     focusOrganism,
+    defocusOrganism,
   };
 }

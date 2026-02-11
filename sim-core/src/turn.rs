@@ -9,7 +9,7 @@ use sim_protocol::{
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-const TURN_ENERGY_COST: f32 = 0.25;
+const TURN_ENERGY_COST: f32 = 0.5;
 
 #[derive(Clone, Copy)]
 struct SnapshotOrganismState {

@@ -9,8 +9,8 @@ reproduction_energy_cost = 100.0
 move_action_energy_cost = 0.5
 
 [seed_species_config]
-num_neurons = 8
+num_neurons = 10
 max_num_neurons = 20
-num_synapses = 64
+num_synapses = 40
 mutation_chance = 0.1
-vision_distance = 2
+vision_distance = 4

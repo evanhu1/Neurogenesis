@@ -3,4 +3,4 @@ export const wsBase = apiBase.replace('http://', 'ws://').replace('https://', 'w
 export const protocolVersion = 7;
 
 export const SESSION_ID_STORAGE_KEY = 'neurogenesis.session_id';
-export const SPEED_LEVELS = [2, 10, 30] as const;
+export const SPEED_LEVELS = [2, 10, 30, 60] as const;

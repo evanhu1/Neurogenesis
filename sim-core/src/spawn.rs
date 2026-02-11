@@ -5,7 +5,7 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use sim_protocol::{FacingDirection, FoodId, FoodState, OrganismId, OrganismState, SpeciesId};
 
-const FOOD_COVERAGE_DIVISOR: usize = 20;
+const FOOD_COVERAGE_DIVISOR: usize = 10;
 
 #[derive(Clone)]
 pub(crate) struct ReproductionSpawn {
