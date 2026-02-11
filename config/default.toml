@@ -13,4 +13,4 @@ num_neurons = 10
 max_num_neurons = 20
 num_synapses = 40
 mutation_chance = 0.1
-vision_distance = 4
+vision_distance = 5
