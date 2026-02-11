@@ -132,23 +132,6 @@ impl Simulation {
             .cloned()
     }
 
-    pub fn export_trace_jsonl(&mut self, turns: u32) -> Vec<String> {
-        let mut lines = Vec::new();
-        lines.push(
-            serde_json::to_string(&self.snapshot())
-                .expect("serialize initial snapshot for trace export"),
-        );
-
-        for _ in 0..turns {
-            self.tick();
-            lines.push(
-                serde_json::to_string(&self.snapshot())
-                    .expect("serialize turn snapshot for trace export"),
-            );
-        }
-        lines
-    }
-
     pub fn metrics(&self) -> &MetricsSnapshot {
         &self.metrics
     }
