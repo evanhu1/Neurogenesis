@@ -5,7 +5,10 @@ use sim_types::{
     SynapseEdge,
 };
 use std::cmp::Ordering;
-use utils::math::sigmoid;
+
+fn sigmoid(x: f32) -> f32 {
+    1.0 / (1.0 + (-x).exp())
+}
 
 const ACTION_ACTIVATION_THRESHOLD: f32 = 0.5;
 const DEFAULT_BIAS: f32 = 0.0;

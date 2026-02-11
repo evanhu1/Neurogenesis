@@ -6,7 +6,13 @@ import react from '@vitejs/plugin-react';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react({
+      babel: {
+        plugins: ['babel-plugin-react-compiler'],
+      },
+    }),
+  ],
   server: {
     host: '127.0.0.1',
     port: 5173,

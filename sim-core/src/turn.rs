@@ -4,10 +4,10 @@ use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 use crate::Simulation;
 use sim_types::{
     ActionType, EntityId, FacingDirection, FoodId, FoodState, Occupant, OrganismId, OrganismMove,
-    OrganismState, RemovedEntityPosition, SpeciesId, TickDelta,
+    RemovedEntityPosition, SpeciesId, TickDelta,
 };
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
 #[derive(Clone, Copy)]
 struct SnapshotOrganismState {
@@ -20,31 +20,14 @@ struct SnapshotOrganismState {
 struct TurnSnapshot {
     world_width: i32,
     occupancy: Vec<Option<Occupant>>,
-    ordered_ids: Vec<OrganismId>,
+    organism_count: usize,
+    organism_ids: Vec<OrganismId>,
     organism_states: Vec<SnapshotOrganismState>,
-    id_to_index: HashMap<OrganismId, usize>,
 }
 
 impl TurnSnapshot {
-    fn organism(&self, id: OrganismId) -> Option<SnapshotOrganismState> {
-        let idx = self.id_to_index.get(&id)?;
-        self.organism_states.get(*idx).copied()
-    }
-
     fn in_bounds(&self, q: i32, r: i32) -> bool {
         q >= 0 && r >= 0 && q < self.world_width && r < self.world_width
-    }
-
-    fn cell_index(&self, q: i32, r: i32) -> Option<usize> {
-        if !self.in_bounds(q, r) {
-            return None;
-        }
-        Some(r as usize * self.world_width as usize + q as usize)
-    }
-
-    fn occupant_at(&self, q: i32, r: i32) -> Option<Occupant> {
-        let idx = self.cell_index(q, r)?;
-        self.occupancy[idx]
     }
 }
 
@@ -131,53 +114,37 @@ impl Simulation {
     }
 
     fn build_turn_snapshot(&self) -> TurnSnapshot {
-        let mut ordered: Vec<&OrganismState> = self.organisms.iter().collect();
-        ordered.sort_by_key(|organism| organism.id);
+        let len = self.organisms.len();
+        let mut organism_ids = Vec::with_capacity(len);
+        let mut organism_states = Vec::with_capacity(len);
 
-        let mut ordered_ids = Vec::with_capacity(ordered.len());
-        let mut organism_states = Vec::with_capacity(ordered.len());
-        let mut id_to_index = HashMap::with_capacity(ordered.len());
-
-        for (idx, organism) in ordered.into_iter().enumerate() {
-            ordered_ids.push(organism.id);
+        for organism in &self.organisms {
+            organism_ids.push(organism.id);
             organism_states.push(SnapshotOrganismState {
                 q: organism.q,
                 r: organism.r,
                 facing: organism.facing,
             });
-            id_to_index.insert(organism.id, idx);
         }
 
         TurnSnapshot {
             world_width: self.config.world_width as i32,
             occupancy: self.occupancy.clone(),
-            ordered_ids,
+            organism_count: len,
+            organism_ids,
             organism_states,
-            id_to_index,
         }
     }
 
     fn build_intents(&mut self, snapshot: &TurnSnapshot) -> Vec<OrganismIntent> {
-        let index_by_id: HashMap<OrganismId, usize> = self
-            .organisms
-            .iter()
-            .enumerate()
-            .map(|(idx, organism)| (organism.id, idx))
-            .collect();
-
-        let mut intents = Vec::with_capacity(snapshot.ordered_ids.len());
+        let mut intents = Vec::with_capacity(snapshot.organism_count);
         let mut scratch = BrainScratch::new();
-        for organism_id in &snapshot.ordered_ids {
-            let Some(snapshot_state) = snapshot.organism(*organism_id) else {
-                continue;
-            };
-            let Some(organism_idx) = index_by_id.get(organism_id).copied() else {
-                continue;
-            };
+        for idx in 0..snapshot.organism_count {
+            let snapshot_state = snapshot.organism_states[idx];
 
-            let vision_distance = self.organisms[organism_idx].genome.vision_distance;
+            let vision_distance = self.organisms[idx].genome.vision_distance;
             let evaluation = evaluate_brain(
-                &mut self.organisms[organism_idx],
+                &mut self.organisms[idx],
                 snapshot.world_width,
                 &snapshot.occupancy,
                 vision_distance,
@@ -200,7 +167,7 @@ impl Simulation {
             };
 
             intents.push(OrganismIntent {
-                id: *organism_id,
+                id: snapshot.organism_ids[idx],
                 from: (snapshot_state.q, snapshot_state.r),
                 facing_after_turn,
                 wants_move,
@@ -218,7 +185,10 @@ impl Simulation {
         snapshot: &TurnSnapshot,
         intents: &[OrganismIntent],
     ) -> Vec<MoveResolution> {
-        let mut contenders: HashMap<(i32, i32), Vec<MoveCandidate>> = HashMap::new();
+        let w = snapshot.world_width as usize;
+        let world_cells = w * w;
+        let mut best_by_cell: Vec<Option<MoveCandidate>> = vec![None; world_cells];
+
         for intent in intents {
             if !intent.wants_move {
                 continue;
@@ -226,38 +196,45 @@ impl Simulation {
             let Some(target) = intent.move_target else {
                 continue;
             };
-            contenders.entry(target).or_default().push(MoveCandidate {
+            let cell_idx = target.1 as usize * w + target.0 as usize;
+            let candidate = MoveCandidate {
                 actor: intent.id,
                 from: intent.from,
                 target,
                 confidence: intent.move_confidence,
-            });
-        }
-
-        let mut winners = Vec::with_capacity(contenders.len());
-        for contenders_for_target in contenders.into_values() {
-            if let Some(winner) = contenders_for_target
-                .into_iter()
-                .max_by(compare_move_candidates)
-            {
-                winners.push(winner);
+            };
+            match &best_by_cell[cell_idx] {
+                Some(current)
+                    if compare_move_candidates(&candidate, current) != Ordering::Greater => {}
+                _ => best_by_cell[cell_idx] = Some(candidate),
             }
         }
-        winners.sort_by_key(|winner| winner.actor);
 
-        let moving_ids: HashSet<OrganismId> = winners.iter().map(|winner| winner.actor).collect();
+        let mut winners: Vec<MoveCandidate> = best_by_cell.into_iter().flatten().collect();
+        winners.sort_by_key(|w| w.actor);
+
+        // Track which cells have a winner moving FROM them
+        let mut moving_from = vec![false; world_cells];
+        for winner in &winners {
+            let from_idx = winner.from.1 as usize * w + winner.from.0 as usize;
+            moving_from[from_idx] = true;
+        }
+
         let mut resolutions = Vec::with_capacity(winners.len());
         for winner in winners {
-            let kind = match snapshot.occupant_at(winner.target.0, winner.target.1) {
-                Some(Occupant::Organism(occupant)) if !moving_ids.contains(&occupant) => {
-                    MoveResolutionKind::ConsumeOrganism {
-                        consumed_organism: occupant,
-                    }
+            let target_idx = winner.target.1 as usize * w + winner.target.0 as usize;
+            let kind = match snapshot.occupancy[target_idx] {
+                Some(Occupant::Organism(_)) if moving_from[target_idx] => {
+                    // Target cell's occupant is itself moving away
+                    MoveResolutionKind::MoveOnly
                 }
+                Some(Occupant::Organism(occupant)) => MoveResolutionKind::ConsumeOrganism {
+                    consumed_organism: occupant,
+                },
                 Some(Occupant::Food(food_id)) => MoveResolutionKind::ConsumeFood {
                     consumed_food: food_id,
                 },
-                _ => MoveResolutionKind::MoveOnly,
+                None => MoveResolutionKind::MoveOnly,
             };
             resolutions.push(MoveResolution {
                 actor: winner.actor,
@@ -275,77 +252,51 @@ impl Simulation {
         intents: &[OrganismIntent],
         resolutions: &[MoveResolution],
     ) -> CommitResult {
-        let intent_by_id: HashMap<OrganismId, OrganismIntent> =
-            intents.iter().map(|intent| (intent.id, *intent)).collect();
-        for organism in &mut self.organisms {
-            if let Some(intent) = intent_by_id.get(&organism.id) {
-                organism.facing = intent.facing_after_turn;
-            }
+        // intents[i] aligns with organisms[i] (both built in sorted ID order)
+        for (idx, intent) in intents.iter().enumerate() {
+            self.organisms[idx].facing = intent.facing_after_turn;
         }
 
-        let mut move_by_actor: HashMap<OrganismId, (i32, i32)> = HashMap::new();
-        let mut consumed_organism_ids = HashSet::new();
-        let positions_by_id: HashMap<OrganismId, (i32, i32)> = self
-            .organisms
-            .iter()
-            .map(|organism| (organism.id, (organism.q, organism.r)))
-            .collect();
-        let energy_by_id: HashMap<OrganismId, f32> = self
-            .organisms
-            .iter()
-            .map(|organism| (organism.id, organism.energy))
-            .collect();
-        let positions_by_food_id: HashMap<FoodId, (i32, i32)> = self
-            .foods
-            .iter()
-            .map(|food| (food.id, (food.q, food.r)))
-            .collect();
-        let energy_by_food_id: HashMap<FoodId, f32> = self
-            .foods
-            .iter()
-            .map(|food| (food.id, food.energy))
-            .collect();
+        let org_count = self.organisms.len();
+        let food_count = self.foods.len();
+        let mut move_to: Vec<Option<(i32, i32)>> = vec![None; org_count];
+        let mut consumed_org = vec![false; org_count];
+        let mut consumed_food = vec![false; food_count];
+        let mut consumed_energy = vec![0.0_f32; org_count];
         let mut removed_positions = Vec::new();
-        let mut consumed_energy_by_actor: HashMap<OrganismId, f32> = HashMap::new();
-        let mut consumed_food_ids = HashSet::new();
         let mut consumptions = 0_u64;
 
         for resolution in resolutions {
-            move_by_actor.insert(resolution.actor, resolution.to);
+            let actor_idx = self.organism_index(resolution.actor);
+            move_to[actor_idx] = Some(resolution.to);
             match resolution.kind {
                 MoveResolutionKind::ConsumeOrganism { consumed_organism } => {
-                    if consumed_organism_ids.insert(consumed_organism) {
-                        if let Some((q, r)) = positions_by_id.get(&consumed_organism).copied() {
-                            removed_positions.push(RemovedEntityPosition {
-                                entity_id: EntityId::Organism(consumed_organism),
-                                q,
-                                r,
-                            });
-                        }
-                        let consumed_energy =
-                            energy_by_id.get(&consumed_organism).copied().unwrap_or(0.0);
-                        *consumed_energy_by_actor
-                            .entry(resolution.actor)
-                            .or_insert(0.0) += consumed_energy;
+                    let victim_idx = self.organism_index(consumed_organism);
+                    if !consumed_org[victim_idx] {
+                        consumed_org[victim_idx] = true;
+                        let victim = &self.organisms[victim_idx];
+                        removed_positions.push(RemovedEntityPosition {
+                            entity_id: EntityId::Organism(consumed_organism),
+                            q: victim.q,
+                            r: victim.r,
+                        });
+                        consumed_energy[actor_idx] += victim.energy;
                     }
                     consumptions += 1;
                 }
-                MoveResolutionKind::ConsumeFood { consumed_food } => {
-                    if consumed_food_ids.insert(consumed_food) {
-                        if let Some((q, r)) = positions_by_food_id.get(&consumed_food).copied() {
-                            removed_positions.push(RemovedEntityPosition {
-                                entity_id: EntityId::Food(consumed_food),
-                                q,
-                                r,
-                            });
-                        }
-                        let consumed_energy = energy_by_food_id
-                            .get(&consumed_food)
-                            .copied()
-                            .unwrap_or(0.0);
-                        *consumed_energy_by_actor
-                            .entry(resolution.actor)
-                            .or_insert(0.0) += consumed_energy;
+                MoveResolutionKind::ConsumeFood {
+                    consumed_food: food_id,
+                } => {
+                    let food_idx = self.food_index(food_id);
+                    if !consumed_food[food_idx] {
+                        consumed_food[food_idx] = true;
+                        let food = &self.foods[food_idx];
+                        removed_positions.push(RemovedEntityPosition {
+                            entity_id: EntityId::Food(food_id),
+                            q: food.q,
+                            r: food.r,
+                        });
+                        consumed_energy[actor_idx] += food.energy;
                     }
                     consumptions += 1;
                 }
@@ -353,22 +304,32 @@ impl Simulation {
             }
         }
 
-        self.organisms
-            .retain(|organism| !consumed_organism_ids.contains(&organism.id));
-        self.foods
-            .retain(|food| !consumed_food_ids.contains(&food.id));
-
-        for organism in &mut self.organisms {
-            if let Some((next_q, next_r)) = move_by_actor.get(&organism.id).copied() {
+        let move_energy_cost = self.config.move_action_energy_cost;
+        let mut new_organisms = Vec::with_capacity(org_count);
+        for (idx, mut organism) in self.organisms.drain(..).enumerate() {
+            if consumed_org[idx] {
+                continue;
+            }
+            if let Some((next_q, next_r)) = move_to[idx] {
                 organism.q = next_q;
                 organism.r = next_r;
-                organism.energy -= self.config.move_action_energy_cost;
+                organism.energy -= move_energy_cost;
             }
-            if let Some(consumed_energy) = consumed_energy_by_actor.get(&organism.id).copied() {
-                organism.energy += consumed_energy;
+            if consumed_energy[idx] > 0.0 {
+                organism.energy += consumed_energy[idx];
                 organism.consumptions_count = organism.consumptions_count.saturating_add(1);
             }
+            new_organisms.push(organism);
         }
+        self.organisms = new_organisms;
+
+        let mut new_foods = Vec::with_capacity(food_count);
+        for (idx, food) in self.foods.drain(..).enumerate() {
+            if !consumed_food[idx] {
+                new_foods.push(food);
+            }
+        }
+        self.foods = new_foods;
 
         self.rebuild_occupancy();
         let food_spawned = self.replenish_food_supply();
@@ -394,32 +355,37 @@ impl Simulation {
         intents: &[OrganismIntent],
         spawn_requests: &mut Vec<SpawnRequest>,
     ) -> u64 {
-        let intent_by_id: HashMap<OrganismId, OrganismIntent> =
-            intents.iter().map(|intent| (intent.id, *intent)).collect();
         let mut reserved_spawn_cells = HashSet::new();
         let mut successful_reproductions = 0_u64;
         let world_width = self.config.world_width as i32;
         let reproduction_energy_cost = self.config.reproduction_energy_cost;
         let occupancy_snapshot = self.occupancy.clone();
 
-        self.organisms.sort_by_key(|organism| organism.id);
-        for idx in 0..self.organisms.len() {
-            let organism_id = self.organisms[idx].id;
-            let Some(intent) = intent_by_id.get(&organism_id) else {
+        // Merge-iterate: both intents and organisms are sorted by ID.
+        // Some organisms may have been consumed in commit_phase, so organisms
+        // is a subset. Advance intent_idx to find matching intents.
+        let mut intent_idx = 0;
+        for org_idx in 0..self.organisms.len() {
+            let organism_id = self.organisms[org_idx].id;
+            while intent_idx < intents.len() && intents[intent_idx].id < organism_id {
+                intent_idx += 1;
+            }
+            if intent_idx >= intents.len() || intents[intent_idx].id != organism_id {
                 continue;
-            };
+            }
+            let intent = &intents[intent_idx];
             if !intent.wants_reproduce {
                 continue;
             }
 
-            let parent_energy = self.organisms[idx].energy;
+            let parent_energy = self.organisms[org_idx].energy;
             if parent_energy < reproduction_energy_cost {
                 continue;
             }
-            let parent_q = self.organisms[idx].q;
-            let parent_r = self.organisms[idx].r;
-            let parent_facing = self.organisms[idx].facing;
-            let parent_genome = self.organisms[idx].genome.clone();
+            let parent_q = self.organisms[org_idx].q;
+            let parent_r = self.organisms[org_idx].r;
+            let parent_facing = self.organisms[org_idx].facing;
+            let parent_genome = self.organisms[org_idx].genome.clone();
 
             let Some((q, r)) = reproduction_target(world_width, parent_q, parent_r, parent_facing)
             else {
@@ -440,7 +406,7 @@ impl Simulation {
                 }),
             });
             reserved_spawn_cells.insert((q, r));
-            let organism = &mut self.organisms[idx];
+            let organism = &mut self.organisms[org_idx];
             organism.energy -= reproduction_energy_cost;
             organism.reproductions_count = organism.reproductions_count.saturating_add(1);
             successful_reproductions += 1;
@@ -450,38 +416,37 @@ impl Simulation {
     }
 
     fn lifecycle_phase(&mut self) -> (u64, Vec<RemovedEntityPosition>) {
-        self.organisms.sort_by_key(|organism| organism.id);
-
         let max_age = self.config.max_organism_age as u64;
-        let mut starved_ids = Vec::new();
-        for organism in &mut self.organisms {
+        let mut dead = vec![false; self.organisms.len()];
+        let mut starved_positions = Vec::new();
+
+        for (idx, organism) in self.organisms.iter_mut().enumerate() {
             organism.energy -= self.config.turn_energy_cost;
             if organism.energy <= 0.0 || organism.age_turns >= max_age {
-                starved_ids.push(organism.id);
+                dead[idx] = true;
+                starved_positions.push(RemovedEntityPosition {
+                    entity_id: EntityId::Organism(organism.id),
+                    q: organism.q,
+                    r: organism.r,
+                });
             }
         }
 
-        let starved_set: HashSet<OrganismId> = starved_ids.iter().copied().collect();
-        let starved_positions = self
-            .organisms
-            .iter()
-            .filter(|organism| starved_set.contains(&organism.id))
-            .map(|organism| RemovedEntityPosition {
-                entity_id: EntityId::Organism(organism.id),
-                q: organism.q,
-                r: organism.r,
-            })
-            .collect::<Vec<_>>();
-
-        if starved_ids.is_empty() {
+        let starvation_count = starved_positions.len() as u64;
+        if starvation_count == 0 {
             return (0, starved_positions);
         }
 
-        self.organisms
-            .retain(|organism| !starved_set.contains(&organism.id));
+        let mut new_organisms = Vec::with_capacity(self.organisms.len());
+        for (idx, organism) in self.organisms.drain(..).enumerate() {
+            if !dead[idx] {
+                new_organisms.push(organism);
+            }
+        }
+        self.organisms = new_organisms;
         self.rebuild_occupancy();
 
-        (starved_ids.len() as u64, starved_positions)
+        (starvation_count, starved_positions)
     }
 }
 

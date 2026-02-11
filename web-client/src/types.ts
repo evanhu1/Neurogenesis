@@ -23,6 +23,8 @@ export type WorldConfig = {
   reproduction_energy_cost: number;
   move_action_energy_cost: number;
   turn_energy_cost: number;
+  food_coverage_divisor: number;
+  max_organism_age: number;
   speciation_threshold: number;
   seed_genome_config: SeedGenomeConfig;
 };
@@ -225,6 +227,8 @@ function parseDefaultConfigToml(tomlText: string): WorldConfig {
     reproduction_energy_cost: parseRequiredNumber(worldLevel, 'reproduction_energy_cost'),
     move_action_energy_cost: parseRequiredNumber(worldLevel, 'move_action_energy_cost'),
     turn_energy_cost: parseRequiredNumber(worldLevel, 'turn_energy_cost'),
+    food_coverage_divisor: parseRequiredNumber(worldLevel, 'food_coverage_divisor'),
+    max_organism_age: parseRequiredNumber(worldLevel, 'max_organism_age'),
     speciation_threshold: parseNumberWithDefault(worldLevel, 'speciation_threshold', 50.0),
     seed_genome_config: {
       num_neurons: parseRequiredNumber(genomeSource, 'num_neurons'),

@@ -1,4 +1,4 @@
-import type { ChangeEvent, MutableRefObject } from 'react';
+import { useMemo, type ChangeEvent, type MutableRefObject } from 'react';
 import { unwrapId } from '../../../protocol';
 import type { OrganismState, WorldSnapshot } from '../../../types';
 import type { SpeciesPopulationPoint } from '../../sim/hooks/useSimulationSession';
@@ -125,6 +125,57 @@ function ControlButton({ label, onClick }: ControlButtonProps) {
 
 const CHART_COLORS = ['#0f766e', '#1d4ed8', '#b45309', '#dc2626', '#7e22ce', '#be185d'];
 
+const MAX_DISPLAY_POINTS = 300;
+
+function downsampleHistory(history: SpeciesPopulationPoint[]): SpeciesPopulationPoint[] {
+  if (history.length <= MAX_DISPLAY_POINTS) return history;
+  const stride = (history.length - 1) / (MAX_DISPLAY_POINTS - 1);
+  const sampled: SpeciesPopulationPoint[] = [];
+  for (let i = 0; i < MAX_DISPLAY_POINTS - 1; i++) {
+    sampled.push(history[Math.floor(i * stride)]);
+  }
+  sampled.push(history[history.length - 1]);
+  return sampled;
+}
+
+type ChartData = {
+  displayPoints: SpeciesPopulationPoint[];
+  speciesIds: string[];
+  maxCount: number;
+  latest: SpeciesPopulationPoint;
+  turnStart: number;
+  turnEnd: number;
+};
+
+function computeChartData(history: SpeciesPopulationPoint[]): ChartData | null {
+  if (history.length === 0) return null;
+
+  const displayPoints = downsampleHistory(history);
+
+  const activeSpecies = new Set<string>();
+  let maxCount = 1;
+  for (const point of displayPoints) {
+    for (const [speciesId, count] of Object.entries(point.speciesCounts)) {
+      if (count > 0) {
+        activeSpecies.add(speciesId);
+        if (count > maxCount) maxCount = count;
+      }
+    }
+  }
+
+  const speciesIds = Array.from(activeSpecies).sort((a, b) => Number(a) - Number(b));
+  if (speciesIds.length === 0) return null;
+
+  return {
+    displayPoints,
+    speciesIds,
+    maxCount,
+    latest: displayPoints[displayPoints.length - 1],
+    turnStart: displayPoints[0].turn,
+    turnEnd: displayPoints[displayPoints.length - 1].turn,
+  };
+}
+
 function SpeciesPopulationChart({
   history,
   onSpeciesClick,
@@ -132,7 +183,9 @@ function SpeciesPopulationChart({
   history: SpeciesPopulationPoint[];
   onSpeciesClick: (speciesId: string) => void;
 }) {
-  if (history.length === 0) {
+  const chartData = useMemo(() => computeChartData(history), [history]);
+
+  if (!chartData) {
     return (
       <div className="mt-2 rounded-xl bg-slate-100/80 p-3 font-mono text-xs text-ink/70">
         No species population history yet
@@ -140,22 +193,7 @@ function SpeciesPopulationChart({
     );
   }
 
-  const speciesIds = Array.from(
-    history.reduce((set, point) => {
-      for (const speciesId of Object.keys(point.speciesCounts)) {
-        set.add(speciesId);
-      }
-      return set;
-    }, new Set<string>()),
-  ).sort((a, b) => Number(a) - Number(b));
-
-  if (speciesIds.length === 0) {
-    return (
-      <div className="mt-2 rounded-xl bg-slate-100/80 p-3 font-mono text-xs text-ink/70">
-        No species data available
-      </div>
-    );
-  }
+  const { displayPoints, speciesIds, maxCount, latest, turnStart, turnEnd } = chartData;
 
   const chartWidth = 300;
   const chartHeight = 180;
@@ -165,18 +203,6 @@ function SpeciesPopulationChart({
   const padBottom = 24;
   const innerWidth = chartWidth - padLeft - padRight;
   const innerHeight = chartHeight - padTop - padBottom;
-
-  let maxCount = 1;
-  for (const point of history) {
-    for (const speciesId of speciesIds) {
-      const c = point.speciesCounts[speciesId] ?? 0;
-      if (c > maxCount) maxCount = c;
-    }
-  }
-
-  const latest = history[history.length - 1];
-  const turnStart = history[0]?.turn ?? 0;
-  const turnEnd = latest?.turn ?? 0;
   const turnSpan = Math.max(1, turnEnd - turnStart);
 
   return (
@@ -200,10 +226,10 @@ function SpeciesPopulationChart({
           strokeWidth={1}
         />
         {speciesIds.map((speciesId, speciesIdx) => {
-          const points = history
+          const points = displayPoints
             .map((point) => {
               const x =
-                history.length === 1
+                displayPoints.length === 1
                   ? padLeft + innerWidth / 2
                   : padLeft + ((point.turn - turnStart) / turnSpan) * innerWidth;
               const count = point.speciesCounts[speciesId] ?? 0;
@@ -249,7 +275,7 @@ function SpeciesPopulationChart({
           .map((speciesId, speciesIdx) => ({
             speciesId,
             speciesIdx,
-            count: latest?.speciesCounts[speciesId] ?? 0,
+            count: latest.speciesCounts[speciesId] ?? 0,
           }))
           .sort((a, b) => b.count - a.count)
           .map(({ speciesId, speciesIdx, count }) => (

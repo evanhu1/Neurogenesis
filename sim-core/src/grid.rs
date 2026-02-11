@@ -1,6 +1,8 @@
 use crate::Simulation;
 use sim_types::FacingDirection;
-use sim_types::{FoodState, Occupant, OrganismState};
+#[cfg(test)]
+use sim_types::FoodState;
+use sim_types::{Occupant, OrganismState};
 
 pub(crate) fn world_capacity(width: u32) -> usize {
     width as usize * width as usize
@@ -54,6 +56,14 @@ pub(crate) fn opposite_direction(direction: FacingDirection) -> FacingDirection 
 impl Simulation {
     pub(crate) fn debug_assert_consistent_state(&self) {
         if cfg!(debug_assertions) {
+            debug_assert!(
+                self.organisms.windows(2).all(|w| w[0].id < w[1].id),
+                "organisms must be sorted by id"
+            );
+            debug_assert!(
+                self.foods.windows(2).all(|w| w[0].id < w[1].id),
+                "foods must be sorted by id"
+            );
             debug_assert_eq!(
                 self.organisms.len() + self.foods.len(),
                 self.occupancy.iter().flatten().count(),
@@ -95,6 +105,7 @@ impl Simulation {
         true
     }
 
+    #[cfg(test)]
     pub(crate) fn add_food(&mut self, food: FoodState) -> bool {
         let Some(cell_idx) = self.cell_index(food.q, food.r) else {
             return false;

@@ -131,7 +131,6 @@ fn default_world_config() -> WorldConfig {
         .expect("default world config TOML must parse")
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SynapseEdge {
     pub pre_neuron_id: NeuronId,

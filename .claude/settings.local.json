@@ -11,7 +11,9 @@
       "Bash(grep:*)",
       "Bash(BLESS=1 cargo test:*)",
       "Bash(find:*)",
-      "Bash(UPDATE_GOLDEN=1 cargo test:*)"
+      "Bash(UPDATE_GOLDEN=1 cargo test:*)",
+      "Bash(cargo tree:*)",
+      "Bash(npm install:*)"
     ]
   }
 }

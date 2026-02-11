@@ -4,7 +4,9 @@ use crate::grid::{opposite_direction, world_capacity};
 use crate::Simulation;
 use rand::seq::SliceRandom;
 use rand::Rng;
-use sim_types::{FacingDirection, FoodId, FoodState, OrganismGenome, OrganismId, OrganismState};
+use sim_types::{
+    FacingDirection, FoodId, FoodState, Occupant, OrganismGenome, OrganismId, OrganismState,
+};
 
 #[derive(Clone)]
 pub(crate) struct ReproductionSpawn {
@@ -66,7 +68,6 @@ impl Simulation {
             }
         }
 
-        self.organisms.sort_by_key(|organism| organism.id);
         spawned
     }
 
@@ -111,8 +112,6 @@ impl Simulation {
             let added = self.add_organism(organism);
             debug_assert!(added);
         }
-
-        self.organisms.sort_by_key(|organism| organism.id);
     }
 
     fn random_facing(&mut self) -> FacingDirection {
@@ -145,29 +144,32 @@ impl Simulation {
             return Vec::new();
         }
 
-        let mut empty_positions = self.empty_positions();
-        empty_positions.shuffle(&mut self.rng);
-        let spawn_count = (target - self.foods.len()).min(empty_positions.len());
+        let need = target - self.foods.len();
+        let capacity = world_capacity(self.config.world_width);
+        let width = self.config.world_width as usize;
+        let max_attempts = need * 16;
+        let mut spawned = Vec::with_capacity(need);
+        let mut attempts = 0;
 
-        let mut spawned = Vec::with_capacity(spawn_count);
-        for _ in 0..spawn_count {
-            let (q, r) = empty_positions
-                .pop()
-                .expect("spawn count must never exceed empty positions");
+        while spawned.len() < need && attempts < max_attempts {
+            let cell_idx = self.rng.random_range(0..capacity);
+            if self.occupancy[cell_idx].is_some() {
+                attempts += 1;
+                continue;
+            }
+            let q = (cell_idx % width) as i32;
+            let r = (cell_idx / width) as i32;
             let food = FoodState {
                 id: self.alloc_food_id(),
                 q,
                 r,
                 energy: self.config.food_energy,
             };
-            let added = self.add_food(food.clone());
-            debug_assert!(added);
-            if added {
-                spawned.push(food);
-            }
+            self.occupancy[cell_idx] = Some(Occupant::Food(food.id));
+            self.foods.push(food.clone());
+            spawned.push(food);
         }
 
-        self.foods.sort_by_key(|food| food.id);
         spawned
     }
 

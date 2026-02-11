@@ -1,8 +1,8 @@
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use sim_types::{
-    FoodState, MetricsSnapshot, Occupant, OccupancyCell, OrganismGenome, OrganismId, OrganismState,
-    SpeciesId, TickDelta, WorldConfig, WorldSnapshot,
+    FoodId, FoodState, MetricsSnapshot, OccupancyCell, Occupant, OrganismGenome, OrganismId,
+    OrganismState, SpeciesId, TickDelta, WorldConfig, WorldSnapshot,
 };
 use std::collections::BTreeMap;
 use thiserror::Error;
@@ -39,7 +39,6 @@ pub struct Simulation {
     occupancy: Vec<Option<Occupant>>,
     metrics: MetricsSnapshot,
 }
-
 
 impl Simulation {
     pub fn new(config: WorldConfig, seed: u64) -> Result<Self, SimError> {
@@ -152,6 +151,18 @@ impl Simulation {
 
     pub fn metrics(&self) -> &MetricsSnapshot {
         &self.metrics
+    }
+
+    pub(crate) fn organism_index(&self, id: OrganismId) -> usize {
+        self.organisms
+            .binary_search_by_key(&id, |o| o.id)
+            .expect("organism must exist")
+    }
+
+    pub(crate) fn food_index(&self, id: FoodId) -> usize {
+        self.foods
+            .binary_search_by_key(&id, |f| f.id)
+            .expect("food must exist")
     }
 
     pub(crate) fn alloc_species_id(&mut self) -> SpeciesId {

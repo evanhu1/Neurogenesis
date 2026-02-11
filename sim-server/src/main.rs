@@ -414,8 +414,8 @@ mod tests {
     use super::*;
     use futures::{SinkExt, StreamExt};
     use reqwest::Client;
-    use sim_types::WorldConfig;
     use sim_server::protocol::{CreateSessionRequest, ServerEvent};
+    use sim_types::WorldConfig;
     use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 
     async fn spawn_test_server() -> (String, tokio::task::JoinHandle<()>) {
