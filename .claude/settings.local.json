@@ -10,7 +10,8 @@
       "Bash(make fmt:*)",
       "Bash(grep:*)",
       "Bash(BLESS=1 cargo test:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(UPDATE_GOLDEN=1 cargo test:*)"
     ]
   }
 }

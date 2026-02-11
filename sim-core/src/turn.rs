@@ -457,10 +457,11 @@ impl Simulation {
     fn lifecycle_phase(&mut self) -> (u64, Vec<RemovedOrganismPosition>) {
         self.organisms.sort_by_key(|organism| organism.id);
 
+        let max_age = self.config.max_organism_age as u64;
         let mut starved_ids = Vec::new();
         for organism in &mut self.organisms {
             organism.energy -= self.config.turn_energy_cost;
-            if organism.energy <= 0.0 {
+            if organism.energy <= 0.0 || organism.age_turns >= max_age {
                 starved_ids.push(organism.id);
             }
         }

@@ -127,6 +127,8 @@ pub struct WorldConfig {
     pub turn_energy_cost: f32,
     #[serde(default = "default_food_coverage_divisor")]
     pub food_coverage_divisor: u32,
+    #[serde(default = "default_max_organism_age")]
+    pub max_organism_age: u32,
     #[serde(
         default = "default_seed_species_config",
         alias = "species_config",
@@ -158,12 +160,16 @@ fn default_turn_energy_cost() -> f32 {
     default_world_config().turn_energy_cost
 }
 
+fn default_species_vision_distance() -> u32 {
+    default_world_config().seed_species_config.vision_distance
+}
+
 fn default_food_coverage_divisor() -> u32 {
     default_world_config().food_coverage_divisor
 }
 
-fn default_species_vision_distance() -> u32 {
-    2
+fn default_max_organism_age() -> u32 {
+    default_world_config().max_organism_age
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

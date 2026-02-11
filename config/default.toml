@@ -9,6 +9,7 @@ reproduction_energy_cost = 100.0
 move_action_energy_cost = 0.5
 turn_energy_cost = 0.5
 food_coverage_divisor = 20
+max_organism_age = 1000
 
 [seed_species_config]
 num_neurons = 10
