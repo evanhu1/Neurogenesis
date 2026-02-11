@@ -183,10 +183,15 @@ fn scan_ahead_occlusion_closer_entity_blocks_farther() {
     // Food at distance 2, organism at distance 4 — food should occlude organism
     sim.add_food(make_food(0, 3, 3, sim.config.food_energy));
     sim.add_organism(make_organism(
-        1, 5, 3,
+        1,
+        5,
+        3,
         FacingDirection::East,
-        false, false, false,
-        0.1, 10.0,
+        false,
+        false,
+        false,
+        0.1,
+        10.0,
     ));
 
     let result = scan_ahead(

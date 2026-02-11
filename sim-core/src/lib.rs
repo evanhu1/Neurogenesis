@@ -1,16 +1,16 @@
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use sim_protocol::{
-    FoodId, FoodState, MetricsSnapshot, OccupancyCell, OrganismId, OrganismState, SpeciesConfig,
+    FoodId, FoodState, MetricsSnapshot, OccupancyCell, OrganismGenome, OrganismId, OrganismState,
     SpeciesId, TickDelta, WorldConfig, WorldSnapshot,
 };
 use std::collections::BTreeMap;
 use thiserror::Error;
 
 mod brain;
+pub(crate) mod genome;
 mod grid;
 mod spawn;
-mod species;
 mod turn;
 
 pub use brain::derive_active_neuron_ids;
@@ -27,7 +27,7 @@ pub enum SimError {
 #[derive(Debug, Clone)]
 pub struct Simulation {
     config: WorldConfig,
-    species_registry: BTreeMap<SpeciesId, SpeciesConfig>,
+    species_registry: BTreeMap<SpeciesId, OrganismGenome>,
     next_species_id: u32,
     turn: u64,
     seed: u64,
@@ -49,7 +49,7 @@ enum CellEntity {
 impl Simulation {
     pub fn new(config: WorldConfig, seed: u64) -> Result<Self, SimError> {
         validate_world_config(&config)?;
-        species::validate_species_config(&config.seed_species_config)?;
+        genome::validate_seed_genome_config(&config.seed_genome_config)?;
 
         let capacity = grid::world_capacity(config.world_width);
         let mut sim = Self {
@@ -67,7 +67,6 @@ impl Simulation {
             metrics: MetricsSnapshot::default(),
         };
 
-        sim.initialize_species_registry_from_seed();
         sim.spawn_initial_population();
         sim.replenish_food_supply();
         sim.refresh_population_metrics();
@@ -129,7 +128,6 @@ impl Simulation {
         self.foods.clear();
         self.occupancy.fill(None);
         self.metrics = MetricsSnapshot::default();
-        self.initialize_species_registry_from_seed();
         self.spawn_initial_population();
         self.replenish_food_supply();
         self.refresh_population_metrics();
@@ -169,6 +167,12 @@ impl Simulation {
 
     pub fn metrics(&self) -> &MetricsSnapshot {
         &self.metrics
+    }
+
+    pub(crate) fn alloc_species_id(&mut self) -> SpeciesId {
+        let id = SpeciesId(self.next_species_id);
+        self.next_species_id = self.next_species_id.saturating_add(1);
+        id
     }
 }
 

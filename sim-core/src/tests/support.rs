@@ -30,6 +30,17 @@ impl IntoEnergy for f64 {
     }
 }
 
+pub(super) fn test_genome() -> OrganismGenome {
+    OrganismGenome {
+        num_neurons: 1,
+        max_num_neurons: 1,
+        vision_distance: 2,
+        mutation_rate: 0.0,
+        inter_biases: vec![0.0],
+        edges: vec![],
+    }
+}
+
 pub(super) fn test_config(world_width: u32, num_organisms: u32) -> WorldConfig {
     let mut config = WorldConfig {
         world_width,
@@ -38,11 +49,12 @@ pub(super) fn test_config(world_width: u32, num_organisms: u32) -> WorldConfig {
     };
     config.turn_energy_cost = 1.0;
     config.move_action_energy_cost = 1.0;
-    config.seed_species_config = SpeciesConfig {
+    config.seed_genome_config = SeedGenomeConfig {
         num_neurons: 1,
+        max_num_neurons: 1,
         num_synapses: 0,
-        mutation_chance: 0.0,
-        ..config.seed_species_config
+        mutation_rate: 0.0,
+        vision_distance: 2,
     };
     config
 }
@@ -137,6 +149,7 @@ pub(super) fn make_organism(
         consumptions_count: 0,
         reproductions_count: 0,
         brain: forced_brain(wants_move, turn_left, turn_right, confidence),
+        genome: test_genome(),
     }
 }
 
@@ -194,7 +207,7 @@ pub(super) fn reproduction_request_from_parent(
     );
     SpawnRequest {
         kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
-            species_id: parent.species_id,
+            parent_genome: parent.genome.clone(),
             parent_facing: parent.facing,
             q,
             r,
@@ -215,7 +228,7 @@ pub(super) fn reproduction_request_at(
         .expect("parent should exist for reproduction request");
     SpawnRequest {
         kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
-            species_id: parent.species_id,
+            parent_genome: parent.genome.clone(),
             parent_facing: parent.facing,
             q,
             r,

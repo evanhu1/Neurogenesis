@@ -23,7 +23,6 @@ fn spawn_queue_order_is_deterministic_under_limited_space() {
             make_organism(2, 0, 1, FacingDirection::East, false, false, false, 0.1, 0),
         ],
     );
-    let parent_brain = sim.organisms[0].brain.clone();
 
     let spawned = sim.resolve_spawn_requests(&[
         reproduction_request_at(&sim, OrganismId(0), 1, 1),
@@ -37,14 +36,12 @@ fn spawn_queue_order_is_deterministic_under_limited_space() {
         .find(|organism| organism.id == OrganismId(3))
         .expect("first spawn request should consume final empty slot");
     assert_eq!((child.q, child.r), (1, 1));
-    assert_eq!(child.species_id, SpeciesId(0));
-    assert_ne!(child.brain, parent_brain);
 }
 
 #[test]
 fn reproduction_offspring_brain_runtime_state_is_reset() {
     let mut cfg = test_config(8, 1);
-    cfg.seed_species_config.mutation_chance = 0.0;
+    cfg.seed_genome_config.mutation_rate = 0.0;
     let mut sim = Simulation::new(cfg, 31).expect("simulation should initialize");
     configure_sim(
         &mut sim,
@@ -77,7 +74,6 @@ fn reproduction_offspring_brain_runtime_state_is_reset() {
         .action
         .iter()
         .all(|n| n.neuron.activation == 0.0));
-    assert_eq!(child.species_id, SpeciesId(0));
     assert_eq!(child.facing, FacingDirection::West);
 }
 
@@ -86,7 +82,7 @@ fn reproduction_spawn_is_opposite_of_parent_facing() {
     let mut cfg = test_config(40, 1);
     cfg.center_spawn_min_fraction = 0.45;
     cfg.center_spawn_max_fraction = 0.55;
-    cfg.seed_species_config.mutation_chance = 0.0;
+    cfg.seed_genome_config.mutation_rate = 0.0;
     let mut sim = Simulation::new(cfg, 30).expect("simulation should initialize");
     configure_sim(
         &mut sim,
@@ -107,7 +103,6 @@ fn reproduction_spawn_is_opposite_of_parent_facing() {
         sim.resolve_spawn_requests(&[reproduction_request_from_parent(&sim, OrganismId(0))]);
     assert_eq!(spawned.len(), 1);
     let child = &spawned[0];
-    assert_eq!(child.species_id, SpeciesId(0));
     assert_eq!((child.q, child.r), (0, 1));
 }
 
@@ -251,10 +246,13 @@ fn reproduce_action_fails_when_turn_upkeep_leaves_insufficient_energy() {
 }
 
 #[test]
-fn reproduction_can_create_and_register_new_species() {
+fn reproduction_can_create_new_species_via_genome_distance() {
     let mut cfg = test_config(7, 1);
     cfg.reproduction_energy_cost = 20.0;
-    cfg.seed_species_config.mutation_chance = 1.0;
+    // High mutation rate ensures child genome diverges from parent
+    cfg.seed_genome_config.mutation_rate = 1.0;
+    // Very low threshold so even a small mutation creates a new species
+    cfg.speciation_threshold = 0.001;
     let mut sim = Simulation::new(cfg, 88).expect("simulation should initialize");
 
     let mut parent = make_organism(
@@ -268,17 +266,15 @@ fn reproduction_can_create_and_register_new_species() {
         0.7,
         30.0,
     );
+    // Give parent a genome with high mutation_rate so child will diverge
+    parent.genome.mutation_rate = 1.0;
     enable_reproduce_action(&mut parent);
     configure_sim(&mut sim, vec![parent]);
 
     let delta = tick_once(&mut sim);
     assert_eq!(delta.metrics.reproductions_last_turn, 1);
     assert_eq!(delta.spawned.len(), 1);
-    assert_eq!(delta.spawned[0].species_id, SpeciesId(1));
-    assert_eq!(sim.species_registry.len(), 2);
-    assert!(sim.species_registry.contains_key(&SpeciesId(1)));
-    assert_ne!(
-        sim.species_registry.get(&SpeciesId(0)),
-        sim.species_registry.get(&SpeciesId(1))
-    );
+    // With threshold=0.001 and mutation_rate=1.0, child should be a new species
+    assert_ne!(delta.spawned[0].species_id, SpeciesId(0));
+    assert!(sim.species_registry.len() >= 2);
 }

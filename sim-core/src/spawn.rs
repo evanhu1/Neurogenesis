@@ -1,14 +1,14 @@
-use crate::brain::reset_brain_runtime_state;
+use crate::brain::express_genome;
+use crate::genome::{assign_species, generate_seed_genome, mutate_genome};
 use crate::grid::{opposite_direction, world_capacity};
 use crate::Simulation;
 use rand::seq::SliceRandom;
 use rand::Rng;
-use sim_protocol::{FacingDirection, FoodId, FoodState, OrganismId, OrganismState, SpeciesId};
-
+use sim_protocol::{FacingDirection, FoodId, FoodState, OrganismGenome, OrganismId, OrganismState};
 
 #[derive(Clone)]
 pub(crate) struct ReproductionSpawn {
-    pub(crate) species_id: SpeciesId,
+    pub(crate) parent_genome: OrganismGenome,
     pub(crate) parent_facing: FacingDirection,
     pub(crate) q: i32,
     pub(crate) r: i32,
@@ -30,17 +30,24 @@ impl Simulation {
         for request in queue {
             let organism = match &request.kind {
                 SpawnRequestKind::Reproduction(reproduction) => {
-                    let Some(species_config) =
-                        self.species_config(reproduction.species_id).cloned()
-                    else {
-                        continue;
-                    };
+                    let mut child_genome = reproduction.parent_genome.clone();
+                    mutate_genome(&mut child_genome, &mut self.rng);
 
-                    let mut brain = self.generate_brain(&species_config);
-                    reset_brain_runtime_state(&mut brain);
+                    let threshold = self.config.speciation_threshold;
+                    let child_species_id =
+                        match assign_species(&child_genome, &self.species_registry, threshold) {
+                            Some(id) => id,
+                            None => {
+                                let id = self.alloc_species_id();
+                                self.species_registry.insert(id, child_genome.clone());
+                                id
+                            }
+                        };
+
+                    let brain = express_genome(&child_genome);
                     OrganismState {
                         id: self.alloc_organism_id(),
-                        species_id: reproduction.species_id,
+                        species_id: child_species_id,
                         q: reproduction.q,
                         r: reproduction.r,
                         age_turns: 0,
@@ -49,6 +56,7 @@ impl Simulation {
                         consumptions_count: 0,
                         reproductions_count: 0,
                         brain,
+                        genome: child_genome,
                     }
                 }
             };
@@ -63,11 +71,8 @@ impl Simulation {
     }
 
     pub(crate) fn spawn_initial_population(&mut self) {
-        let Some((&seed_species_id, seed_species_config)) = self.species_registry.first_key_value()
-        else {
-            return;
-        };
-        let seed_species_config = seed_species_config.clone();
+        let seed_config = self.config.seed_genome_config.clone();
+        let threshold = self.config.speciation_threshold;
 
         let mut open_positions = self.empty_positions();
         open_positions.shuffle(&mut self.rng);
@@ -77,11 +82,22 @@ impl Simulation {
                 .pop()
                 .expect("initial population requires at least one unique cell per organism");
             let id = self.alloc_organism_id();
-            let brain = self.generate_brain(&seed_species_config);
+            let genome = generate_seed_genome(&seed_config, &mut self.rng);
+            let brain = express_genome(&genome);
+
+            let species_id = match assign_species(&genome, &self.species_registry, threshold) {
+                Some(id) => id,
+                None => {
+                    let id = self.alloc_species_id();
+                    self.species_registry.insert(id, genome.clone());
+                    id
+                }
+            };
+
             let facing = self.random_facing();
             let organism = OrganismState {
                 id,
-                species_id: seed_species_id,
+                species_id,
                 q,
                 r,
                 age_turns: 0,
@@ -90,6 +106,7 @@ impl Simulation {
                 consumptions_count: 0,
                 reproductions_count: 0,
                 brain,
+                genome,
             };
             let added = self.add_organism(organism);
             debug_assert!(added);

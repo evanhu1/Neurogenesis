@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
-pub const PROTOCOL_VERSION: u32 = 10;
+pub const PROTOCOL_VERSION: u32 = 11;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct OrganismId(pub u64);
@@ -96,19 +96,30 @@ impl SensoryReceptor {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SpeciesConfig {
+pub struct GenomeEdge {
+    pub pre: NeuronId,
+    pub post: NeuronId,
+    pub weight: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OrganismGenome {
+    pub num_neurons: u32,
+    pub max_num_neurons: u32,
+    pub vision_distance: u32,
+    pub mutation_rate: f32,
+    pub inter_biases: Vec<f32>,
+    pub edges: Vec<GenomeEdge>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SeedGenomeConfig {
     pub num_neurons: u32,
     pub max_num_neurons: u32,
     pub num_synapses: u32,
-    pub mutation_chance: f32,
-    #[serde(default = "default_species_vision_distance")]
+    #[serde(alias = "mutation_chance")]
+    pub mutation_rate: f32,
     pub vision_distance: u32,
-}
-
-impl Default for SpeciesConfig {
-    fn default() -> Self {
-        default_world_config().seed_species_config
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -129,12 +140,14 @@ pub struct WorldConfig {
     pub food_coverage_divisor: u32,
     #[serde(default = "default_max_organism_age")]
     pub max_organism_age: u32,
+    #[serde(default = "default_speciation_threshold")]
+    pub speciation_threshold: f32,
     #[serde(
-        default = "default_seed_species_config",
-        alias = "species_config",
+        default = "default_seed_genome_config",
+        alias = "seed_species_config",
         alias = "seed_config"
     )]
-    pub seed_species_config: SpeciesConfig,
+    pub seed_genome_config: SeedGenomeConfig,
 }
 
 impl Default for WorldConfig {
@@ -148,8 +161,8 @@ fn default_world_config() -> WorldConfig {
         .expect("default world config TOML must parse")
 }
 
-fn default_seed_species_config() -> SpeciesConfig {
-    default_world_config().seed_species_config
+fn default_seed_genome_config() -> SeedGenomeConfig {
+    default_world_config().seed_genome_config
 }
 
 fn default_food_energy() -> f32 {
@@ -160,16 +173,16 @@ fn default_turn_energy_cost() -> f32 {
     default_world_config().turn_energy_cost
 }
 
-fn default_species_vision_distance() -> u32 {
-    default_world_config().seed_species_config.vision_distance
-}
-
 fn default_food_coverage_divisor() -> u32 {
     default_world_config().food_coverage_divisor
 }
 
 fn default_max_organism_age() -> u32 {
     default_world_config().max_organism_age
+}
+
+fn default_speciation_threshold() -> f32 {
+    default_world_config().speciation_threshold
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -227,6 +240,7 @@ pub struct OrganismState {
     pub consumptions_count: u64,
     pub reproductions_count: u64,
     pub brain: BrainState,
+    pub genome: OrganismGenome,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -255,7 +269,7 @@ pub struct WorldSnapshot {
     pub turn: u64,
     pub rng_seed: u64,
     pub config: WorldConfig,
-    pub species_registry: BTreeMap<SpeciesId, SpeciesConfig>,
+    pub species_registry: BTreeMap<SpeciesId, OrganismGenome>,
     pub organisms: Vec<OrganismState>,
     #[serde(default)]
     pub foods: Vec<FoodState>,

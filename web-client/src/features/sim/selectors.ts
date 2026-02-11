@@ -43,5 +43,9 @@ export function formatFocusedStats(focusedOrganism: OrganismState | null): strin
     `consumptions_count=${focusedOrganism.consumptions_count}`,
     `reproductions_count=${focusedOrganism.reproductions_count}`,
     `synapse_count=${focusedOrganism.brain.synapse_count}`,
+    `vision_distance=${focusedOrganism.genome.vision_distance}`,
+    `genome_neurons=${focusedOrganism.genome.num_neurons}`,
+    `genome_edges=${focusedOrganism.genome.edges.length}`,
+    `mutation_rate=${focusedOrganism.genome.mutation_rate.toFixed(3)}`,
   ].join('\n');
 }

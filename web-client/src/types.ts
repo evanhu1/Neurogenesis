@@ -9,6 +9,14 @@ export type Envelope<T> = {
   payload: T;
 };
 
+export type SeedGenomeConfig = {
+  num_neurons: number;
+  max_num_neurons: number;
+  num_synapses: number;
+  mutation_rate: number;
+  vision_distance: number;
+};
+
 export type WorldConfig = {
   world_width: number;
   steps_per_second: number;
@@ -20,15 +28,23 @@ export type WorldConfig = {
   reproduction_energy_cost: number;
   move_action_energy_cost: number;
   turn_energy_cost: number;
-  seed_species_config: SpeciesConfig;
+  speciation_threshold: number;
+  seed_genome_config: SeedGenomeConfig;
 };
 
-export type SpeciesConfig = {
+export type GenomeEdge = {
+  pre: number | { 0: number };
+  post: number | { 0: number };
+  weight: number;
+};
+
+export type OrganismGenome = {
   num_neurons: number;
   max_num_neurons: number;
-  num_synapses: number;
-  mutation_chance: number;
   vision_distance: number;
+  mutation_rate: number;
+  inter_biases: number[];
+  edges: GenomeEdge[];
 };
 
 export type SynapseEdge = { post_neuron_id: number | { 0: number }; weight: number };
@@ -89,6 +105,7 @@ export type OrganismState = {
   consumptions_count: number;
   reproductions_count: number;
   brain: BrainState;
+  genome: OrganismGenome;
 };
 
 export type FoodState = {
@@ -114,7 +131,7 @@ export type WorldSnapshot = {
   turn: number;
   rng_seed: number;
   config: WorldConfig;
-  species_registry: Record<string, SpeciesConfig>;
+  species_registry: Record<string, OrganismGenome>;
   organisms: OrganismState[];
   foods: FoodState[];
   occupancy: Array<{ q: number; r: number; organism_ids: OrganismId[]; food_ids: FoodId[] }>;
@@ -165,7 +182,7 @@ function parseNumberWithDefault(map: Record<string, number>, key: string, fallba
 
 function parseDefaultConfigToml(tomlText: string): WorldConfig {
   const worldLevel: Record<string, number> = {};
-  const seedSpeciesLevel: Record<string, number> = {};
+  const seedGenomeLevel: Record<string, number> = {};
   let section = '';
 
   for (const rawLine of tomlText.split('\n')) {
@@ -186,13 +203,13 @@ function parseDefaultConfigToml(tomlText: string): WorldConfig {
       continue;
     }
 
-    if (section === 'seed_species_config') {
-      seedSpeciesLevel[key] = value;
+    if (section === 'seed_genome_config') {
+      seedGenomeLevel[key] = value;
     } else {
       worldLevel[key] = value;
     }
   }
-  const speciesSource = Object.keys(seedSpeciesLevel).length > 0 ? seedSpeciesLevel : worldLevel;
+  const genomeSource = Object.keys(seedGenomeLevel).length > 0 ? seedGenomeLevel : worldLevel;
 
   return {
     world_width: parseRequiredNumber(worldLevel, 'world_width'),
@@ -205,12 +222,13 @@ function parseDefaultConfigToml(tomlText: string): WorldConfig {
     reproduction_energy_cost: parseRequiredNumber(worldLevel, 'reproduction_energy_cost'),
     move_action_energy_cost: parseRequiredNumber(worldLevel, 'move_action_energy_cost'),
     turn_energy_cost: parseRequiredNumber(worldLevel, 'turn_energy_cost'),
-    seed_species_config: {
-      num_neurons: parseRequiredNumber(speciesSource, 'num_neurons'),
-      max_num_neurons: parseRequiredNumber(speciesSource, 'max_num_neurons'),
-      num_synapses: parseRequiredNumber(speciesSource, 'num_synapses'),
-      mutation_chance: parseRequiredNumber(speciesSource, 'mutation_chance'),
-      vision_distance: parseNumberWithDefault(speciesSource, 'vision_distance', 2),
+    speciation_threshold: parseNumberWithDefault(worldLevel, 'speciation_threshold', 50.0),
+    seed_genome_config: {
+      num_neurons: parseRequiredNumber(genomeSource, 'num_neurons'),
+      max_num_neurons: parseRequiredNumber(genomeSource, 'max_num_neurons'),
+      num_synapses: parseRequiredNumber(genomeSource, 'num_synapses'),
+      mutation_rate: parseRequiredNumber(genomeSource, 'mutation_rate'),
+      vision_distance: parseNumberWithDefault(genomeSource, 'vision_distance', 2),
     },
   };
 }

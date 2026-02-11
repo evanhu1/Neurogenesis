@@ -10,10 +10,11 @@ move_action_energy_cost = 0.5
 turn_energy_cost = 0.5
 food_coverage_divisor = 20
 max_organism_age = 1000
+speciation_threshold = 50.0
 
-[seed_species_config]
+[seed_genome_config]
 num_neurons = 10
 max_num_neurons = 20
 num_synapses = 40
-mutation_chance = 0.1
+mutation_rate = 0.1
 vision_distance = 10

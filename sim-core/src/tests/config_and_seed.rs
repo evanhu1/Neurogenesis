@@ -77,17 +77,17 @@ fn config_validation_rejects_zero_world_width() {
 }
 
 #[test]
-fn config_validation_rejects_mutation_chance_out_of_range() {
+fn config_validation_rejects_mutation_rate_out_of_range() {
     let mut cfg = WorldConfig::default();
-    cfg.seed_species_config.mutation_chance = 1.5;
+    cfg.seed_genome_config.mutation_rate = 1.5;
     let err = Simulation::new(cfg, 1).expect_err("expected invalid config error");
-    assert!(err.to_string().contains("mutation_chance"));
+    assert!(err.to_string().contains("mutation_rate"));
 }
 
 #[test]
 fn config_validation_rejects_zero_vision_distance() {
     let mut cfg = WorldConfig::default();
-    cfg.seed_species_config.vision_distance = 0;
+    cfg.seed_genome_config.vision_distance = 0;
     let err = Simulation::new(cfg, 1).expect_err("expected invalid config error");
     assert!(err.to_string().contains("vision_distance"));
 }
@@ -99,8 +99,8 @@ fn population_is_capped_by_world_capacity_without_overlap() {
         num_organisms: 20,
         ..WorldConfig::default()
     };
-    cfg.seed_species_config.num_neurons = 0;
-    cfg.seed_species_config.num_synapses = 0;
+    cfg.seed_genome_config.num_neurons = 0;
+    cfg.seed_genome_config.num_synapses = 0;
     let sim = Simulation::new(cfg, 3).expect("simulation should initialize");
     assert_eq!(sim.organisms.len(), 9);
     assert_eq!(

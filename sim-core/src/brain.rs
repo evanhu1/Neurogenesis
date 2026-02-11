@@ -1,14 +1,12 @@
 use crate::grid::hex_neighbor;
-use crate::{CellEntity, Simulation};
-use rand::Rng;
+use crate::CellEntity;
 use sim_protocol::{
     ActionNeuronState, ActionType, BrainState, InterNeuronState, LookTarget, NeuronId, NeuronState,
-    NeuronType, OrganismId, SensoryNeuronState, SensoryReceptor, SpeciesConfig, SynapseEdge,
+    NeuronType, OrganismGenome, OrganismId, SensoryNeuronState, SensoryReceptor, SynapseEdge,
 };
 use std::cmp::Ordering;
 
 const ACTION_ACTIVATION_THRESHOLD: f32 = 0.5;
-const SYNAPSE_STRENGTH_MAX: f32 = 3.0;
 const DEFAULT_BIAS: f32 = 0.0;
 const ACTION_COUNT: usize = 4;
 const INTER_ID_BASE: u32 = 1000;
@@ -36,62 +34,139 @@ impl BrainScratch {
     }
 }
 
-impl Simulation {
-    pub(crate) fn generate_brain(&mut self, species_config: &SpeciesConfig) -> BrainState {
-        let sensory = vec![
-            make_sensory_neuron(
-                0,
-                SensoryReceptor::Look {
-                    look_target: LookTarget::Food,
-                },
-            ),
-            make_sensory_neuron(
-                1,
-                SensoryReceptor::Look {
-                    look_target: LookTarget::Organism,
-                },
-            ),
-            make_sensory_neuron(
-                2,
-                SensoryReceptor::Look {
-                    look_target: LookTarget::OutOfBounds,
-                },
-            ),
-            make_sensory_neuron(3, SensoryReceptor::Energy),
-        ];
+/// Build a BrainState deterministically from a genome.
+pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
+    let mut sensory = vec![
+        make_sensory_neuron(
+            0,
+            SensoryReceptor::Look {
+                look_target: LookTarget::Food,
+            },
+        ),
+        make_sensory_neuron(
+            1,
+            SensoryReceptor::Look {
+                look_target: LookTarget::Organism,
+            },
+        ),
+        make_sensory_neuron(
+            2,
+            SensoryReceptor::Look {
+                look_target: LookTarget::OutOfBounds,
+            },
+        ),
+        make_sensory_neuron(3, SensoryReceptor::Energy),
+    ];
 
-        let mut inter = Vec::new();
-        for i in 0..species_config.num_neurons {
-            inter.push(InterNeuronState {
-                neuron: make_neuron(NeuronId(1000 + i), NeuronType::Inter, self.random_bias()),
-                synapses: Vec::new(),
-            });
-        }
-
-        let mut action = Vec::new();
-        for (idx, action_type) in ActionType::ALL.into_iter().enumerate() {
-            action.push(make_action_neuron(2000 + idx as u32, action_type));
-        }
-
-        let mut brain = BrainState {
-            sensory,
-            inter,
-            action,
-            synapse_count: 0,
-        };
-
-        for _ in 0..species_config.num_synapses {
-            if !create_random_synapse(&mut brain, &mut self.rng) {
-                break;
-            }
-        }
-
-        brain.synapse_count = count_synapses(&brain) as u32;
-        brain
+    let mut inter = Vec::with_capacity(genome.num_neurons as usize);
+    for i in 0..genome.num_neurons {
+        let bias = genome.inter_biases.get(i as usize).copied().unwrap_or(0.0);
+        inter.push(InterNeuronState {
+            neuron: make_neuron(NeuronId(INTER_ID_BASE + i), NeuronType::Inter, bias),
+            synapses: Vec::new(),
+        });
     }
 
-    fn random_bias(&mut self) -> f32 {
-        self.rng.random_range(-1.0..1.0)
+    let mut action = Vec::with_capacity(ACTION_COUNT);
+    for (idx, action_type) in ActionType::ALL.into_iter().enumerate() {
+        action.push(make_action_neuron(ACTION_ID_BASE + idx as u32, action_type));
+    }
+
+    // Valid neuron IDs for this brain
+    let sensory_max = sensory.len() as u32; // 0..4
+    let inter_max = INTER_ID_BASE + genome.num_neurons; // 1000..1000+n
+    let action_max = ACTION_ID_BASE + ACTION_COUNT as u32; // 2000..2004
+
+    let is_valid_pre = |id: NeuronId| -> bool {
+        // pre can be sensory or inter
+        id.0 < sensory_max || (id.0 >= INTER_ID_BASE && id.0 < inter_max)
+    };
+    let is_valid_post = |id: NeuronId| -> bool {
+        // post can be inter or action
+        (id.0 >= INTER_ID_BASE && id.0 < inter_max) || (id.0 >= ACTION_ID_BASE && id.0 < action_max)
+    };
+
+    // Track seen (pre, post) pairs to skip duplicates
+    let mut seen_edges = std::collections::HashSet::new();
+
+    for edge in &genome.edges {
+        if edge.pre == edge.post {
+            continue;
+        }
+        if !is_valid_pre(edge.pre) || !is_valid_post(edge.post) {
+            continue;
+        }
+        if !seen_edges.insert((edge.pre, edge.post)) {
+            continue;
+        }
+
+        let synapse = SynapseEdge {
+            post_neuron_id: edge.post,
+            weight: edge.weight,
+        };
+
+        // Add to the correct pre-neuron's synapse list
+        if edge.pre.0 < sensory_max {
+            sensory[edge.pre.0 as usize].synapses.push(synapse);
+        } else if edge.pre.0 >= INTER_ID_BASE && edge.pre.0 < inter_max {
+            let idx = (edge.pre.0 - INTER_ID_BASE) as usize;
+            inter[idx].synapses.push(synapse);
+        }
+    }
+
+    // Sort synapse lists by post_neuron_id
+    for s in &mut sensory {
+        s.synapses.sort_by_key(|e| e.post_neuron_id);
+    }
+    for i in &mut inter {
+        i.synapses.sort_by_key(|e| e.post_neuron_id);
+    }
+
+    // Build parent_ids in a single pass over all synapse lists
+    // parent_ids[post] = list of pre neurons that connect to post
+    let mut parent_map: std::collections::HashMap<NeuronId, Vec<NeuronId>> =
+        std::collections::HashMap::new();
+    for s in &sensory {
+        for edge in &s.synapses {
+            parent_map
+                .entry(edge.post_neuron_id)
+                .or_default()
+                .push(s.neuron.neuron_id);
+        }
+    }
+    for i in &inter {
+        for edge in &i.synapses {
+            parent_map
+                .entry(edge.post_neuron_id)
+                .or_default()
+                .push(i.neuron.neuron_id);
+        }
+    }
+
+    // Assign parent_ids to inter and action neurons
+    for i in &mut inter {
+        if let Some(parents) = parent_map.get_mut(&i.neuron.neuron_id) {
+            parents.sort();
+            parents.dedup();
+            i.neuron.parent_ids = parents.clone();
+        }
+    }
+    for a in &mut action {
+        if let Some(parents) = parent_map.get_mut(&a.neuron.neuron_id) {
+            parents.sort();
+            parents.dedup();
+            a.neuron.parent_ids = parents.clone();
+        }
+    }
+
+    let synapse_count = sensory.iter().map(|s| s.synapses.len()).sum::<usize>()
+        + inter.iter().map(|i| i.synapses.len()).sum::<usize>();
+
+    BrainState {
+        sensory,
+        inter,
+        action,
+        synapse_count: synapse_count as u32,
     }
 }
 
@@ -101,18 +176,6 @@ pub(crate) fn action_index(action: ActionType) -> usize {
         ActionType::TurnLeft => 1,
         ActionType::TurnRight => 2,
         ActionType::Reproduce => 3,
-    }
-}
-
-pub(crate) fn reset_brain_runtime_state(brain: &mut BrainState) {
-    for sensory in &mut brain.sensory {
-        sensory.neuron.activation = 0.0;
-    }
-    for inter in &mut brain.inter {
-        inter.neuron.activation = 0.0;
-    }
-    for action in &mut brain.action {
-        action.neuron.activation = 0.0;
     }
 }
 
@@ -173,9 +236,13 @@ pub(crate) fn evaluate_brain(
 
     // Reuse scratch buffers: clear + fill avoids reallocation after first organism
     scratch.inter_inputs.clear();
-    scratch.inter_inputs.extend(brain.inter.iter().map(|n| n.neuron.bias));
+    scratch
+        .inter_inputs
+        .extend(brain.inter.iter().map(|n| n.neuron.bias));
     scratch.prev_inter.clear();
-    scratch.prev_inter.extend(brain.inter.iter().map(|n| n.neuron.activation));
+    scratch
+        .prev_inter
+        .extend(brain.inter.iter().map(|n| n.neuron.activation));
 
     // Accumulate sensory → inter
     for sensory in &brain.sensory {
@@ -361,171 +428,4 @@ pub(crate) fn scan_ahead(
         }
     }
     None
-}
-
-fn output_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
-    brain
-        .sensory
-        .iter()
-        .map(|neuron| neuron.neuron.neuron_id)
-        .chain(brain.inter.iter().map(|neuron| neuron.neuron.neuron_id))
-        .collect()
-}
-
-fn create_random_synapse<R: Rng + ?Sized>(brain: &mut BrainState, rng: &mut R) -> bool {
-    let pre_candidates = output_neuron_ids(brain);
-    let post_candidates = post_neuron_ids(brain);
-    let mut available_endpoints = Vec::new();
-
-    for pre in pre_candidates {
-        let Some(existing_synapses) = synapses_from_pre(brain, pre) else {
-            continue;
-        };
-        for &post in &post_candidates {
-            if pre == post {
-                continue;
-            }
-            let duplicate = existing_synapses
-                .iter()
-                .any(|edge| edge.post_neuron_id == post);
-            if !duplicate {
-                available_endpoints.push((pre, post));
-            }
-        }
-    }
-
-    if available_endpoints.is_empty() {
-        return false;
-    }
-
-    let (pre, post) = available_endpoints[rng.random_range(0..available_endpoints.len())];
-    let weight = rng.random_range(-SYNAPSE_STRENGTH_MAX..SYNAPSE_STRENGTH_MAX);
-    let created = create_synapse(brain, pre, post, weight);
-    debug_assert!(
-        created,
-        "available endpoint selection should only choose valid synapses"
-    );
-    created
-}
-
-fn post_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
-    brain
-        .inter
-        .iter()
-        .map(|neuron| neuron.neuron.neuron_id)
-        .chain(brain.action.iter().map(|neuron| neuron.neuron.neuron_id))
-        .collect()
-}
-
-fn count_synapses(brain: &BrainState) -> usize {
-    brain
-        .sensory
-        .iter()
-        .map(|sensory| sensory.synapses.len())
-        .sum::<usize>()
-        + brain
-            .inter
-            .iter()
-            .map(|inter| inter.synapses.len())
-            .sum::<usize>()
-}
-
-fn get_neuron_mut(brain: &mut BrainState, id: NeuronId) -> Option<&mut NeuronState> {
-    if let Some(sensory) = brain
-        .sensory
-        .iter_mut()
-        .find(|neuron| neuron.neuron.neuron_id == id)
-    {
-        return Some(&mut sensory.neuron);
-    }
-    if let Some(inter) = brain
-        .inter
-        .iter_mut()
-        .find(|neuron| neuron.neuron.neuron_id == id)
-    {
-        return Some(&mut inter.neuron);
-    }
-    if let Some(action) = brain
-        .action
-        .iter_mut()
-        .find(|neuron| neuron.neuron.neuron_id == id)
-    {
-        return Some(&mut action.neuron);
-    }
-    None
-}
-
-fn synapses_from_pre(brain: &BrainState, pre: NeuronId) -> Option<&[SynapseEdge]> {
-    if let Some(sensory) = brain
-        .sensory
-        .iter()
-        .find(|neuron| neuron.neuron.neuron_id == pre)
-    {
-        return Some(&sensory.synapses);
-    }
-    if let Some(inter) = brain
-        .inter
-        .iter()
-        .find(|neuron| neuron.neuron.neuron_id == pre)
-    {
-        return Some(&inter.synapses);
-    }
-    None
-}
-
-fn synapses_from_pre_mut(brain: &mut BrainState, pre: NeuronId) -> Option<&mut Vec<SynapseEdge>> {
-    if let Some(idx) = brain
-        .sensory
-        .iter()
-        .position(|neuron| neuron.neuron.neuron_id == pre)
-    {
-        return Some(&mut brain.sensory[idx].synapses);
-    }
-    if let Some(idx) = brain
-        .inter
-        .iter()
-        .position(|neuron| neuron.neuron.neuron_id == pre)
-    {
-        return Some(&mut brain.inter[idx].synapses);
-    }
-    None
-}
-
-fn create_synapse(brain: &mut BrainState, pre: NeuronId, post: NeuronId, weight: f32) -> bool {
-    if pre == post {
-        return false;
-    }
-
-    let Some(existing_synapses) = synapses_from_pre(brain, pre) else {
-        return false;
-    };
-    let duplicate = existing_synapses
-        .iter()
-        .any(|edge| edge.post_neuron_id == post);
-
-    if duplicate {
-        return false;
-    }
-
-    let clamped = weight.clamp(-SYNAPSE_STRENGTH_MAX, SYNAPSE_STRENGTH_MAX);
-
-    {
-        let Some(synapses) = synapses_from_pre_mut(brain, pre) else {
-            return false;
-        };
-        synapses.push(SynapseEdge {
-            post_neuron_id: post,
-            weight: clamped,
-        });
-        synapses.sort_by(|a, b| a.post_neuron_id.cmp(&b.post_neuron_id));
-    }
-
-    if let Some(post_neuron) = get_neuron_mut(brain, post) {
-        if !post_neuron.parent_ids.contains(&pre) {
-            post_neuron.parent_ids.push(pre);
-            post_neuron.parent_ids.sort();
-        }
-    }
-
-    true
 }

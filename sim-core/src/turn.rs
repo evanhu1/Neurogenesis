@@ -176,10 +176,7 @@ impl Simulation {
                 continue;
             };
 
-            let vision_distance = self
-                .species_config(self.organisms[organism_idx].species_id)
-                .map(|c| c.vision_distance)
-                .unwrap_or(1);
+            let vision_distance = self.organisms[organism_idx].genome.vision_distance;
             let evaluation = evaluate_brain(
                 &mut self.organisms[organism_idx],
                 snapshot.world_width,
@@ -425,7 +422,7 @@ impl Simulation {
             let parent_q = self.organisms[idx].q;
             let parent_r = self.organisms[idx].r;
             let parent_facing = self.organisms[idx].facing;
-            let parent_species_id = self.organisms[idx].species_id;
+            let parent_genome = self.organisms[idx].genome.clone();
 
             let Some((q, r)) = reproduction_target(world_width, parent_q, parent_r, parent_facing)
             else {
@@ -437,10 +434,9 @@ impl Simulation {
                 continue;
             }
 
-            let offspring_species_id = self.species_id_for_reproduction(parent_species_id);
             spawn_requests.push(SpawnRequest {
                 kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
-                    species_id: offspring_species_id,
+                    parent_genome,
                     parent_facing,
                     q,
                     r,
