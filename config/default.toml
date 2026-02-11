@@ -1,6 +1,6 @@
 world_width = 100
 steps_per_second = 5
-num_organisms = 1000
+num_organisms = 2000
 center_spawn_min_fraction = 0.25
 center_spawn_max_fraction = 0.75
 starting_energy = 100.0
@@ -8,7 +8,7 @@ food_energy = 25.0
 reproduction_energy_cost = 100.0
 move_action_energy_cost = 0.5
 turn_energy_cost = 0.5
-food_coverage_divisor = 50
+food_coverage_divisor = 20
 max_organism_age = 1000
 speciation_threshold = 100.0
 

@@ -280,7 +280,7 @@ impl Simulation {
                             q: victim.q,
                             r: victim.r,
                         });
-                        consumed_energy[actor_idx] += victim.energy;
+                        consumed_energy[actor_idx] += self.config.food_energy * 2.0;
                     }
                     consumptions += 1;
                 }
