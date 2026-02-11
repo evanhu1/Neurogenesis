@@ -3,7 +3,7 @@ use crate::{CellEntity, Simulation};
 use rand::Rng;
 use sim_protocol::{
     ActionNeuronState, ActionType, BrainState, InterNeuronState, NeuronId, NeuronState, NeuronType,
-    OrganismId, SensoryNeuronState, SensoryReceptorType, SpeciesConfig, SynapseEdge,
+    OrganismId, SensoryNeuronState, SensoryReceptor, SpeciesConfig, SynapseEdge,
 };
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -26,14 +26,20 @@ pub(crate) struct BrainEvaluation {
 impl Simulation {
     pub(crate) fn generate_brain(&mut self, species_config: &SpeciesConfig) -> BrainState {
         let vision_distance = species_config.vision_distance.max(1);
-        let mut sensory = Vec::with_capacity(vision_distance as usize);
+        let sensory_count = vision_distance + SensoryReceptor::NON_VISION_COUNT;
+        let mut sensory = Vec::with_capacity(sensory_count as usize);
         for distance in 1..=vision_distance {
             sensory.push(make_sensory_neuron(
                 distance - 1,
-                SensoryReceptorType::Look,
-                distance,
+                SensoryReceptor::Look {
+                    look_distance: distance,
+                },
             ));
         }
+        sensory.push(make_sensory_neuron(
+            vision_distance,
+            SensoryReceptor::Energy,
+        ));
 
         let mut inter = Vec::new();
         for i in 0..species_config.num_neurons {
@@ -101,15 +107,10 @@ fn make_neuron(id: NeuronId, neuron_type: NeuronType, bias: f32) -> NeuronState 
     }
 }
 
-pub(crate) fn make_sensory_neuron(
-    id: u32,
-    receptor_type: SensoryReceptorType,
-    look_distance: u32,
-) -> SensoryNeuronState {
+pub(crate) fn make_sensory_neuron(id: u32, receptor: SensoryReceptor) -> SensoryNeuronState {
     SensoryNeuronState {
         neuron: make_neuron(NeuronId(id), NeuronType::Sensory, DEFAULT_BIAS),
-        receptor_type,
-        look_distance,
+        receptor,
         synapses: Vec::new(),
     }
 }
@@ -128,19 +129,21 @@ pub(crate) fn evaluate_brain(
     organism_id: OrganismId,
     world_width: i32,
     occupancy: &[Option<CellEntity>],
+    energy: f32,
 ) -> BrainEvaluation {
     let mut result = BrainEvaluation::default();
 
     for sensory in &mut brain.sensory {
-        sensory.neuron.activation = match sensory.receptor_type {
-            SensoryReceptorType::Look => look_sensor_value(
+        sensory.neuron.activation = match sensory.receptor {
+            SensoryReceptor::Look { look_distance } => look_sensor_value(
                 position,
                 facing,
                 organism_id,
                 world_width,
                 occupancy,
-                sensory.look_distance,
+                look_distance,
             ),
+            SensoryReceptor::Energy => energy_sensor_value(energy),
         };
     }
 
@@ -289,6 +292,13 @@ fn accumulate_weighted_inputs(
         }
     }
     synapse_ops
+}
+
+/// Normalizes energy to a [0, 1] range using a logarithmic curve.
+/// Uses ln(1 + energy) / ln(1 + scale) where scale controls the saturation point.
+fn energy_sensor_value(energy: f32) -> f32 {
+    const ENERGY_SCALE: f32 = 100.0;
+    (1.0 + energy.max(0.0)).ln() / (1.0 + ENERGY_SCALE).ln()
 }
 
 pub(crate) fn look_sensor_value(

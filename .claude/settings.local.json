@@ -6,7 +6,8 @@
       "Bash(make lint:*)",
       "Bash(npm run build:*)",
       "Bash(npm run typecheck:*)",
-      "Bash(git stash:*)"
+      "Bash(git stash:*)",
+      "Bash(make fmt:*)"
     ]
   }
 }

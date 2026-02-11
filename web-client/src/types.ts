@@ -19,6 +19,7 @@ export type WorldConfig = {
   food_energy: number;
   reproduction_energy_cost: number;
   move_action_energy_cost: number;
+  turn_energy_cost: number;
   seed_species_config: SpeciesConfig;
 };
 
@@ -48,7 +49,7 @@ export type FocusBrainData = {
 export type SensoryNeuronState = {
   neuron: NeuronState;
   receptor_type: string;
-  look_distance: number;
+  look_distance?: number;
   synapses: SynapseEdge[];
 };
 
@@ -202,6 +203,7 @@ function parseDefaultConfigToml(tomlText: string): WorldConfig {
     food_energy: parseRequiredNumber(worldLevel, 'food_energy'),
     reproduction_energy_cost: parseRequiredNumber(worldLevel, 'reproduction_energy_cost'),
     move_action_energy_cost: parseRequiredNumber(worldLevel, 'move_action_energy_cost'),
+    turn_energy_cost: parseRequiredNumber(worldLevel, 'turn_energy_cost'),
     seed_species_config: {
       num_neurons: parseRequiredNumber(speciesSource, 'num_neurons'),
       max_num_neurons: parseRequiredNumber(speciesSource, 'max_num_neurons'),

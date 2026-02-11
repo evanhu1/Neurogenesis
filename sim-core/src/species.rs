@@ -1,6 +1,6 @@
 use crate::{SimError, Simulation};
 use rand::Rng;
-use sim_protocol::{ActionType, SpeciesConfig, SpeciesId};
+use sim_protocol::{ActionType, SensoryReceptor, SpeciesConfig, SpeciesId};
 
 const MAX_MUTATED_INTER_NEURONS: u32 = 256;
 const MIN_MUTATED_VISION_DISTANCE: u32 = 1;
@@ -85,9 +85,7 @@ fn mutate_random_species_trait<R: Rng + ?Sized>(species: &mut SpeciesConfig, rng
         0 => {
             let max_neurons = species.max_num_neurons.min(MAX_MUTATED_INTER_NEURONS);
             species.num_neurons = mutate_step_u32(species.num_neurons, 0, max_neurons, rng);
-            species.num_synapses = species
-                .num_synapses
-                .min(max_synapses_for_species(species));
+            species.num_synapses = species.num_synapses.min(max_synapses_for_species(species));
         }
         1 => {
             let min_neurons = species.num_neurons.min(MAX_MUTATED_INTER_NEURONS);
@@ -117,9 +115,7 @@ fn mutate_random_species_trait<R: Rng + ?Sized>(species: &mut SpeciesConfig, rng
                 MAX_MUTATED_VISION_DISTANCE,
                 rng,
             );
-            species.num_synapses = species
-                .num_synapses
-                .min(max_synapses_for_species(species));
+            species.num_synapses = species.num_synapses.min(max_synapses_for_species(species));
         }
     }
 }
@@ -149,9 +145,7 @@ fn normalize_species_config(mutated: &mut SpeciesConfig) {
     mutated.vision_distance = mutated
         .vision_distance
         .clamp(MIN_MUTATED_VISION_DISTANCE, MAX_MUTATED_VISION_DISTANCE);
-    mutated.num_synapses = mutated
-        .num_synapses
-        .min(max_synapses_for_species(mutated));
+    mutated.num_synapses = mutated.num_synapses.min(max_synapses_for_species(mutated));
 
     if !mutated.mutation_chance.is_finite() {
         mutated.mutation_chance = 0.0;
@@ -160,7 +154,7 @@ fn normalize_species_config(mutated: &mut SpeciesConfig) {
 }
 
 fn max_synapses_for_species(species: &SpeciesConfig) -> u32 {
-    let sensory_count = species.vision_distance;
+    let sensory_count = species.vision_distance + SensoryReceptor::NON_VISION_COUNT;
     let action_count = ActionType::ALL.len() as u32;
     let pre_count = sensory_count + species.num_neurons;
     let post_count = species.num_neurons + action_count;

@@ -9,8 +9,6 @@ use sim_protocol::{
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-const TURN_ENERGY_COST: f32 = 0.5;
-
 #[derive(Clone, Copy)]
 struct SnapshotOrganismState {
     q: i32,
@@ -177,6 +175,7 @@ impl Simulation {
             };
 
             let evaluation = {
+                let energy = self.organisms[organism_idx].energy;
                 let brain = &mut self.organisms[organism_idx].brain;
                 evaluate_brain(
                     brain,
@@ -185,6 +184,7 @@ impl Simulation {
                     *organism_id,
                     snapshot.world_width,
                     &snapshot.occupancy,
+                    energy,
                 )
             };
 
@@ -461,7 +461,7 @@ impl Simulation {
 
         let mut starved_ids = Vec::new();
         for organism in &mut self.organisms {
-            organism.energy -= TURN_ENERGY_COST;
+            organism.energy -= self.config.turn_energy_cost;
             if organism.energy <= 0.0 {
                 starved_ids.push(organism.id);
             }

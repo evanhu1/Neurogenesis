@@ -36,6 +36,8 @@ pub(super) fn test_config(world_width: u32, num_organisms: u32) -> WorldConfig {
         num_organisms,
         ..WorldConfig::default()
     };
+    config.turn_energy_cost = 1.0;
+    config.move_action_energy_cost = 1.0;
     config.seed_species_config = SpeciesConfig {
         num_neurons: 1,
         num_synapses: 0,
@@ -57,7 +59,10 @@ fn forced_brain(
     turn_right: bool,
     confidence: f32,
 ) -> BrainState {
-    let sensory = vec![make_sensory_neuron(0, SensoryReceptorType::Look, 1)];
+    let sensory = vec![make_sensory_neuron(
+        0,
+        SensoryReceptor::Look { look_distance: 1 },
+    )];
     let inter_id = NeuronId(1000);
     let inter_bias = 1.0;
     let inter_synapses = vec![

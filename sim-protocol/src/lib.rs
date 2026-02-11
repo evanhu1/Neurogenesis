@@ -77,12 +77,15 @@ pub enum NeuronType {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum SensoryReceptorType {
-    Look,
+#[serde(tag = "receptor_type")]
+pub enum SensoryReceptor {
+    Look { look_distance: u32 },
+    Energy,
 }
 
-impl SensoryReceptorType {
-    pub const ALL: [SensoryReceptorType; 1] = [SensoryReceptorType::Look];
+impl SensoryReceptor {
+    /// Number of receptor types that are not vision-based (always present regardless of species config).
+    pub const NON_VISION_COUNT: u32 = 1;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -113,6 +116,8 @@ pub struct WorldConfig {
     pub food_energy: f32,
     pub reproduction_energy_cost: f32,
     pub move_action_energy_cost: f32,
+    #[serde(default = "default_turn_energy_cost")]
+    pub turn_energy_cost: f32,
     #[serde(
         default = "default_seed_species_config",
         alias = "species_config",
@@ -140,12 +145,12 @@ fn default_food_energy() -> f32 {
     default_world_config().food_energy
 }
 
-fn default_species_vision_distance() -> u32 {
-    2
+fn default_turn_energy_cost() -> f32 {
+    default_world_config().turn_energy_cost
 }
 
-fn default_look_distance() -> u32 {
-    1
+fn default_species_vision_distance() -> u32 {
+    2
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -166,9 +171,8 @@ pub struct NeuronState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SensoryNeuronState {
     pub neuron: NeuronState,
-    pub receptor_type: SensoryReceptorType,
-    #[serde(default = "default_look_distance")]
-    pub look_distance: u32,
+    #[serde(flatten)]
+    pub receptor: SensoryReceptor,
     pub synapses: Vec<SynapseEdge>,
 }
 

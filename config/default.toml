@@ -7,6 +7,7 @@ starting_energy = 100.0
 food_energy = 50.0
 reproduction_energy_cost = 100.0
 move_action_energy_cost = 0.5
+turn_energy_cost = 0.5
 
 [seed_species_config]
 num_neurons = 10
