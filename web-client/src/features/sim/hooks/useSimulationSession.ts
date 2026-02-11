@@ -24,10 +24,20 @@ export type SpeciesPopulationPoint = {
   speciesCounts: Record<string, number>;
 };
 
+const MAX_SPECIES_HISTORY_POINTS = 2048;
+
 function normalizeSpeciesCounts(speciesCounts: Record<string, number>): Record<string, number> {
-  return Object.fromEntries(
-    Object.entries(speciesCounts).sort(([speciesA], [speciesB]) => Number(speciesA) - Number(speciesB)),
-  );
+  return { ...speciesCounts };
+}
+
+function speciesCountsEqual(a: Record<string, number>, b: Record<string, number>): boolean {
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  for (const key of keysA) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
 }
 
 function upsertSpeciesPopulationHistory(
@@ -44,12 +54,19 @@ function upsertSpeciesPopulationHistory(
   }
 
   if (point.turn === latest.turn) {
+    if (speciesCountsEqual(latest.speciesCounts, point.speciesCounts)) {
+      return previous;
+    }
     const next = previous.slice();
     next[next.length - 1] = point;
     return next;
   }
 
-  return previous.concat(point);
+  const trimmed =
+    previous.length >= MAX_SPECIES_HISTORY_POINTS
+      ? previous.slice(previous.length - MAX_SPECIES_HISTORY_POINTS + 1)
+      : previous;
+  return trimmed.concat(point);
 }
 
 export type SimulationSessionState = {
@@ -90,7 +107,12 @@ export function useSimulationSession(): SimulationSessionState {
   const [bornCellFlashState, setBornCellFlashState] = useState<BornCellFlashState>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const focusedOrganismIdRef = useRef<number | null>(null);
   const request = useMemo(() => createSimHttpClient(apiBase), []);
+  const setFocusedOrganismIdTracked = useCallback((organismId: number | null) => {
+    focusedOrganismIdRef.current = organismId;
+    setFocusedOrganismId(organismId);
+  }, []);
 
   const handleServerEvent = useCallback((event: ServerEvent) => {
     switch (event.type) {
@@ -119,68 +141,79 @@ export function useSimulationSession(): SimulationSessionState {
             speciesCounts: normalizeSpeciesCounts(delta.metrics.species_counts),
           }),
         );
+
+        // Compute flash cells OUTSIDE the setSnapshot updater to avoid
+        // calling setState inside a setState updater (causes cascading renders).
+        const removedPositions = Array.isArray(delta.removed_positions)
+          ? delta.removed_positions
+          : [];
+
+        if (removedPositions.length > 0) {
+          const seenCells = new Set<string>();
+          const cells: Array<{ q: number; r: number }> = [];
+          for (const entry of removedPositions) {
+            const key = `${entry.q},${entry.r}`;
+            if (seenCells.has(key)) continue;
+            seenCells.add(key);
+            cells.push({ q: entry.q, r: entry.r });
+          }
+          setDeadCellFlashState(cells.length > 0 ? { turn: delta.turn, cells } : null);
+        } else {
+          setDeadCellFlashState((currentFlash) =>
+            currentFlash !== null && delta.turn > currentFlash.turn ? null : currentFlash,
+          );
+        }
+
+        if (delta.spawned.length > 0) {
+          const seenCells = new Set<string>();
+          const cells: Array<{ q: number; r: number }> = [];
+          for (const spawned of delta.spawned) {
+            const key = `${spawned.q},${spawned.r}`;
+            if (seenCells.has(key)) continue;
+            seenCells.add(key);
+            cells.push({ q: spawned.q, r: spawned.r });
+          }
+          setBornCellFlashState(cells.length > 0 ? { turn: delta.turn, cells } : null);
+        } else {
+          setBornCellFlashState((currentFlash) =>
+            currentFlash !== null && delta.turn > currentFlash.turn ? null : currentFlash,
+          );
+        }
+
         setSnapshot((prev) => {
           if (!prev) return prev;
-
-          const removedPositions = Array.isArray(delta.removed_positions)
-            ? delta.removed_positions
-            : [];
-
-          if (removedPositions.length > 0) {
-            const seenCells = new Set<string>();
-            const cells: Array<{ q: number; r: number }> = [];
-            for (const entry of removedPositions) {
-              const key = `${entry.q},${entry.r}`;
-              if (seenCells.has(key)) continue;
-              seenCells.add(key);
-              cells.push({ q: entry.q, r: entry.r });
-            }
-            setDeadCellFlashState(cells.length > 0 ? { turn: delta.turn, cells } : null);
-          } else {
-            setDeadCellFlashState((currentFlash) =>
-              currentFlash !== null && delta.turn > currentFlash.turn ? null : currentFlash,
-            );
-          }
-
-          if (delta.spawned.length > 0) {
-            const seenCells = new Set<string>();
-            const cells: Array<{ q: number; r: number }> = [];
-            for (const spawned of delta.spawned) {
-              const key = `${spawned.q},${spawned.r}`;
-              if (seenCells.has(key)) continue;
-              seenCells.add(key);
-              cells.push({ q: spawned.q, r: spawned.r });
-            }
-            setBornCellFlashState(cells.length > 0 ? { turn: delta.turn, cells } : null);
-          } else {
-            setBornCellFlashState((currentFlash) =>
-              currentFlash !== null && delta.turn > currentFlash.turn ? null : currentFlash,
-            );
-          }
-
           return applyTickDelta(prev, delta);
         });
+
+        const trackedFocusedId = focusedOrganismIdRef.current;
+        if (trackedFocusedId !== null) {
+          sendSimulationCommand(wsRef.current, {
+            type: 'SetFocus',
+            data: { organism_id: trackedFocusedId },
+          });
+        }
         break;
       }
       case 'FocusBrain': {
         const { organism, active_neuron_ids } = event.data as FocusBrainData;
         const organismId = unwrapId(organism.id);
-        setFocusedOrganismId(organismId);
+        setFocusedOrganismIdTracked(organismId);
         setFocusedOrganism(organism);
         setActiveNeuronIds(new Set(active_neuron_ids));
+        setSnapshot((prev) => {
+          if (!prev) return prev;
+          const index = prev.organisms.findIndex((item) => unwrapId(item.id) === organismId);
+          if (index === -1) return prev;
+
+          const organisms = prev.organisms.slice();
+          organisms[index] = organism;
+          return { ...prev, organisms };
+        });
         break;
       }
       case 'Metrics': {
         const nextMetrics = event.data as MetricsSnapshot;
         setSnapshot((prev) => (prev ? { ...prev, metrics: nextMetrics } : prev));
-        setSpeciesPopulationHistory((previous) => {
-          const latest = previous[previous.length - 1];
-          if (!latest) return previous;
-          return upsertSpeciesPopulationHistory(previous, {
-            turn: latest.turn,
-            speciesCounts: normalizeSpeciesCounts(nextMetrics.species_counts),
-          });
-        });
         break;
       }
       case 'Error': {
@@ -192,7 +225,7 @@ export function useSimulationSession(): SimulationSessionState {
       default:
         break;
     }
-  }, []);
+  }, [setFocusedOrganismIdTracked]);
 
   const connectWs = useCallback(
     (sessionId: string) => {
@@ -219,7 +252,7 @@ export function useSimulationSession(): SimulationSessionState {
       setErrorText(null);
       setSession(metadata);
       setSnapshot(loadedSnapshot);
-      setFocusedOrganismId(null);
+      setFocusedOrganismIdTracked(null);
       setFocusedOrganism(null);
       setActiveNeuronIds(null);
       setIsRunning(false);
@@ -234,7 +267,7 @@ export function useSimulationSession(): SimulationSessionState {
       persistSessionId(metadata.id);
       connectWs(metadata.id);
     },
-    [connectWs],
+    [connectWs, setFocusedOrganismIdTracked],
   );
 
   const createSession = useCallback(async () => {
@@ -309,7 +342,7 @@ export function useSimulationSession(): SimulationSessionState {
             speciesCounts: normalizeSpeciesCounts(nextSnapshot.metrics.species_counts),
           },
         ]);
-        setFocusedOrganismId(null);
+        setFocusedOrganismIdTracked(null);
         setFocusedOrganism(null);
         setActiveNeuronIds(null);
         setDeadCellFlashState(null);
@@ -318,12 +351,12 @@ export function useSimulationSession(): SimulationSessionState {
       .catch((err) => {
         setErrorText(err instanceof Error ? err.message : 'Failed to reset session');
       });
-  }, [request, session]);
+  }, [request, session, setFocusedOrganismIdTracked]);
 
   const focusOrganism = useCallback(
     (organism: OrganismState) => {
       const organismId = unwrapId(organism.id);
-      setFocusedOrganismId(organismId);
+      setFocusedOrganismIdTracked(organismId);
       setFocusedOrganism(organism);
       if (!session) return;
       void request(`/v1/sessions/${session.id}/focus`, 'POST', {
@@ -332,14 +365,14 @@ export function useSimulationSession(): SimulationSessionState {
         setErrorText(err instanceof Error ? err.message : 'Failed to focus organism');
       });
     },
-    [request, session],
+    [request, session, setFocusedOrganismIdTracked],
   );
 
   const defocusOrganism = useCallback(() => {
-    setFocusedOrganismId(null);
+    setFocusedOrganismIdTracked(null);
     setFocusedOrganism(null);
     setActiveNeuronIds(null);
-  }, []);
+  }, [setFocusedOrganismIdTracked]);
 
   useEffect(() => {
     if (!snapshot || focusedOrganismId === null) {
@@ -350,13 +383,13 @@ export function useSimulationSession(): SimulationSessionState {
 
     const nextFocusedOrganism = findOrganism(snapshot, focusedOrganismId);
     if (!nextFocusedOrganism) {
-      setFocusedOrganismId(null);
+      setFocusedOrganismIdTracked(null);
       setFocusedOrganism(null);
       setActiveNeuronIds(null);
       return;
     }
     setFocusedOrganism(nextFocusedOrganism);
-  }, [snapshot, focusedOrganismId]);
+  }, [snapshot, focusedOrganismId, setFocusedOrganismIdTracked]);
 
   useEffect(() => {
     let cancelled = false;

@@ -164,11 +164,12 @@ export function useWorldViewport() {
 
   const panToWorldPoint = useCallback(
     (worldX: number, worldY: number, canvasWidth: number, canvasHeight: number) => {
-      setViewport((prev) => ({
-        ...prev,
-        panX: -(worldX - canvasWidth / 2) * prev.zoom,
-        panY: -(worldY - canvasHeight / 2) * prev.zoom,
-      }));
+      setViewport((prev) => {
+        const panX = -(worldX - canvasWidth / 2) * prev.zoom;
+        const panY = -(worldY - canvasHeight / 2) * prev.zoom;
+        if (panX === prev.panX && panY === prev.panY) return prev;
+        return { ...prev, panX, panY };
+      });
     },
     [],
   );

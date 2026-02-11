@@ -1,10 +1,9 @@
 use crate::SimError;
 use rand::Rng;
 use sim_types::{
-    ActionType, NeuronId, OrganismGenome, SeedGenomeConfig, SensoryReceptor, SpeciesId, SynapseEdge,
+    ActionType, NeuronId, OrganismGenome, SeedGenomeConfig, SensoryReceptor, SynapseEdge,
 };
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
 
 const MAX_MUTATED_INTER_NEURONS: u32 = 256;
 const MIN_MUTATED_VISION_DISTANCE: u32 = 1;
@@ -234,14 +233,15 @@ fn perturb<R: Rng + ?Sized>(value: f32, stddev: f32, clamp_abs: f32, rng: &mut R
     (value + normal * stddev).clamp(-clamp_abs, clamp_abs)
 }
 
-/// Cheap distance from scalar traits + bias vectors only (no edge comparison).
-fn trait_and_bias_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
-    let mut dist = 0.0f32;
+/// L1 genome distance: scalar traits + bias vectors + merge-join over sorted edges.
+pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
+    debug_assert_edges_sorted(&a.edges);
+    debug_assert_edges_sorted(&b.edges);
 
-    dist += (a.num_neurons as f32 - b.num_neurons as f32).abs();
-    dist += (a.max_num_neurons as f32 - b.max_num_neurons as f32).abs();
-    dist += (a.vision_distance as f32 - b.vision_distance as f32).abs();
-    dist += (a.mutation_rate - b.mutation_rate).abs();
+    let mut dist = (a.num_neurons as f32 - b.num_neurons as f32).abs()
+        + (a.max_num_neurons as f32 - b.max_num_neurons as f32).abs()
+        + (a.vision_distance as f32 - b.vision_distance as f32).abs()
+        + (a.mutation_rate - b.mutation_rate).abs();
 
     let max_bias_len = a.inter_biases.len().max(b.inter_biases.len());
     for i in 0..max_bias_len {
@@ -249,16 +249,6 @@ fn trait_and_bias_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
         let bb = b.inter_biases.get(i).copied().unwrap_or(0.0);
         dist += (ba - bb).abs();
     }
-
-    dist
-}
-
-/// Zero-allocation O(n+m) merge-join over sorted edge lists.
-pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
-    debug_assert_edges_sorted(&a.edges);
-    debug_assert_edges_sorted(&b.edges);
-
-    let mut dist = trait_and_bias_distance(a, b);
 
     // Merge-join over sorted edges
     let (mut ai, mut bi) = (0, 0);
@@ -287,34 +277,6 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
     }
 
     dist
-}
-
-pub(crate) fn assign_species(
-    child_genome: &OrganismGenome,
-    registry: &BTreeMap<SpeciesId, OrganismGenome>,
-    threshold: f32,
-) -> Option<SpeciesId> {
-    let mut best_id = None;
-    let mut best_dist = f32::MAX;
-
-    for (&species_id, founder_genome) in registry {
-        // Cheap pre-screen: if trait+bias distance alone exceeds best, skip full comparison
-        let cheap_dist = trait_and_bias_distance(child_genome, founder_genome);
-        if cheap_dist >= best_dist {
-            continue;
-        }
-        let dist = genome_distance(child_genome, founder_genome);
-        if dist < best_dist {
-            best_dist = dist;
-            best_id = Some(species_id);
-        }
-    }
-
-    if best_dist <= threshold {
-        best_id
-    } else {
-        None
-    }
 }
 
 pub(crate) fn validate_seed_genome_config(config: &SeedGenomeConfig) -> Result<(), SimError> {

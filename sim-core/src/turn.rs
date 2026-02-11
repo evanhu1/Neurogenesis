@@ -385,6 +385,7 @@ impl Simulation {
             let parent_q = self.organisms[org_idx].q;
             let parent_r = self.organisms[org_idx].r;
             let parent_facing = self.organisms[org_idx].facing;
+            let parent_species_id = self.organisms[org_idx].species_id;
             let parent_genome = self.organisms[org_idx].genome.clone();
 
             let Some((q, r)) = reproduction_target(world_width, parent_q, parent_r, parent_facing)
@@ -400,6 +401,7 @@ impl Simulation {
             spawn_requests.push(SpawnRequest {
                 kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
                     parent_genome,
+                    parent_species_id,
                     parent_facing,
                     q,
                     r,

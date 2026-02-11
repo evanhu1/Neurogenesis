@@ -214,6 +214,7 @@ pub(super) fn reproduction_request_from_parent(
     SpawnRequest {
         kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
             parent_genome: parent.genome.clone(),
+            parent_species_id: parent.species_id,
             parent_facing: parent.facing,
             q,
             r,
@@ -235,6 +236,7 @@ pub(super) fn reproduction_request_at(
     SpawnRequest {
         kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
             parent_genome: parent.genome.clone(),
+            parent_species_id: parent.species_id,
             parent_facing: parent.facing,
             q,
             r,

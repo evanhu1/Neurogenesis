@@ -1,16 +1,18 @@
 use crate::brain::express_genome;
-use crate::genome::{assign_species, generate_seed_genome, mutate_genome};
+use crate::genome::{generate_seed_genome, genome_distance, mutate_genome};
 use crate::grid::{opposite_direction, world_capacity};
 use crate::Simulation;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use sim_types::{
     FacingDirection, FoodId, FoodState, Occupant, OrganismGenome, OrganismId, OrganismState,
+    SpeciesId,
 };
 
 #[derive(Clone)]
 pub(crate) struct ReproductionSpawn {
     pub(crate) parent_genome: OrganismGenome,
+    pub(crate) parent_species_id: SpeciesId,
     pub(crate) parent_facing: FacingDirection,
     pub(crate) q: i32,
     pub(crate) r: i32,
@@ -36,15 +38,20 @@ impl Simulation {
                     mutate_genome(&mut child_genome, &mut self.rng);
 
                     let threshold = self.config.speciation_threshold;
-                    let child_species_id =
-                        match assign_species(&child_genome, &self.species_registry, threshold) {
-                            Some(id) => id,
-                            None => {
-                                let id = self.alloc_species_id();
-                                self.species_registry.insert(id, child_genome.clone());
-                                id
-                            }
-                        };
+                    let child_species_id = {
+                        let within_lineage = self
+                            .species_registry
+                            .get(&reproduction.parent_species_id)
+                            .map(|root| genome_distance(&child_genome, root) <= threshold)
+                            .unwrap_or(false);
+                        if within_lineage {
+                            reproduction.parent_species_id
+                        } else {
+                            let id = self.alloc_species_id();
+                            self.species_registry.insert(id, child_genome.clone());
+                            id
+                        }
+                    };
 
                     let brain = express_genome(&child_genome);
                     OrganismState {
@@ -73,7 +80,6 @@ impl Simulation {
 
     pub(crate) fn spawn_initial_population(&mut self) {
         let seed_config = self.config.seed_genome_config.clone();
-        let threshold = self.config.speciation_threshold;
 
         let mut open_positions = self.empty_positions();
         open_positions.shuffle(&mut self.rng);
@@ -86,14 +92,10 @@ impl Simulation {
             let genome = generate_seed_genome(&seed_config, &mut self.rng);
             let brain = express_genome(&genome);
 
-            let species_id = match assign_species(&genome, &self.species_registry, threshold) {
-                Some(id) => id,
-                None => {
-                    let id = self.alloc_species_id();
-                    self.species_registry.insert(id, genome.clone());
-                    id
-                }
-            };
+            // Seed genomes are independently random — each gets its own species.
+            // Species assignment via genome distance only matters for mutation-derived offspring.
+            let species_id = self.alloc_species_id();
+            self.species_registry.insert(species_id, genome.clone());
 
             let facing = self.random_facing();
             let organism = OrganismState {

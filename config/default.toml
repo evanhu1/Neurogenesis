@@ -4,17 +4,17 @@ num_organisms = 2000
 center_spawn_min_fraction = 0.25
 center_spawn_max_fraction = 0.75
 starting_energy = 100.0
-food_energy = 25.0
+food_energy = 50.0
 reproduction_energy_cost = 100.0
-move_action_energy_cost = 0.5
+move_action_energy_cost = 1.0
 turn_energy_cost = 0.5
-food_coverage_divisor = 20
-max_organism_age = 1000
-speciation_threshold = 100.0
+food_coverage_divisor = 40
+max_organism_age = 500
+speciation_threshold = 50.0
 
 [seed_genome_config]
-num_neurons = 10
-max_num_neurons = 20
-num_synapses = 40
+num_neurons = 20
+max_num_neurons = 50
+num_synapses = 80
 mutation_rate = 0.1
 vision_distance = 10

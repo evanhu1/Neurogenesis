@@ -127,15 +127,63 @@ const CHART_COLORS = ['#0f766e', '#1d4ed8', '#b45309', '#dc2626', '#7e22ce', '#b
 
 const MAX_DISPLAY_POINTS = 300;
 
-function downsampleHistory(history: SpeciesPopulationPoint[]): SpeciesPopulationPoint[] {
-  if (history.length <= MAX_DISPLAY_POINTS) return history;
-  const stride = (history.length - 1) / (MAX_DISPLAY_POINTS - 1);
-  const sampled: SpeciesPopulationPoint[] = [];
-  for (let i = 0; i < MAX_DISPLAY_POINTS - 1; i++) {
-    sampled.push(history[Math.floor(i * stride)]);
+function pointPeakSpeciesCount(point: SpeciesPopulationPoint): number {
+  let max = 0;
+  for (const speciesId in point.speciesCounts) {
+    const count = point.speciesCounts[speciesId];
+    if (count > max) {
+      max = count;
+    }
   }
-  sampled.push(history[history.length - 1]);
-  return sampled;
+  return max;
+}
+
+function downsampleHistoryPreserveSpikes(history: SpeciesPopulationPoint[]): SpeciesPopulationPoint[] {
+  if (history.length <= MAX_DISPLAY_POINTS) return history;
+
+  const first = history[0];
+  const last = history[history.length - 1];
+  const middle = history.slice(1, history.length - 1);
+  const middleBudget = MAX_DISPLAY_POINTS - 2;
+  if (middleBudget <= 0 || middle.length === 0) return [first, last];
+
+  const bucketCount = Math.ceil(middleBudget / 2);
+  const sampledMiddle: SpeciesPopulationPoint[] = [];
+
+  for (let bucket = 0; bucket < bucketCount; bucket += 1) {
+    const start = Math.floor((bucket * middle.length) / bucketCount);
+    const end = Math.floor(((bucket + 1) * middle.length) / bucketCount);
+    if (start >= end) continue;
+
+    let minIdx = start;
+    let maxIdx = start;
+    let minValue = pointPeakSpeciesCount(middle[start]);
+    let maxValue = minValue;
+
+    for (let i = start + 1; i < end; i += 1) {
+      const value = pointPeakSpeciesCount(middle[i]);
+      if (value < minValue) {
+        minValue = value;
+        minIdx = i;
+      }
+      if (value > maxValue) {
+        maxValue = value;
+        maxIdx = i;
+      }
+    }
+
+    if (minIdx === maxIdx) {
+      sampledMiddle.push(middle[minIdx]);
+    } else if (minIdx < maxIdx) {
+      sampledMiddle.push(middle[minIdx], middle[maxIdx]);
+    } else {
+      sampledMiddle.push(middle[maxIdx], middle[minIdx]);
+    }
+  }
+
+  const sampled = [first, ...sampledMiddle, last];
+  if (sampled.length <= MAX_DISPLAY_POINTS) return sampled;
+  return sampled.slice(0, MAX_DISPLAY_POINTS - 1).concat(last);
 }
 
 type ChartData = {
@@ -150,12 +198,13 @@ type ChartData = {
 function computeChartData(history: SpeciesPopulationPoint[]): ChartData | null {
   if (history.length === 0) return null;
 
-  const displayPoints = downsampleHistory(history);
+  const displayPoints = downsampleHistoryPreserveSpikes(history);
 
   const activeSpecies = new Set<string>();
   let maxCount = 1;
   for (const point of displayPoints) {
-    for (const [speciesId, count] of Object.entries(point.speciesCounts)) {
+    for (const speciesId in point.speciesCounts) {
+      const count = point.speciesCounts[speciesId];
       if (count > 0) {
         activeSpecies.add(speciesId);
         if (count > maxCount) maxCount = count;
