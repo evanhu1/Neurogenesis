@@ -74,7 +74,7 @@ fn forced_brain(
     let sensory = vec![make_sensory_neuron(
         0,
         SensoryReceptor::Look {
-            look_target: Entity::Food,
+            look_target: EntityType::Food,
         },
     )];
     let inter_id = NeuronId(1000);

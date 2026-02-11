@@ -4,7 +4,7 @@ use crate::grid::{opposite_direction, world_capacity};
 use crate::Simulation;
 use rand::seq::SliceRandom;
 use rand::Rng;
-use sim_protocol::{FacingDirection, FoodId, FoodState, OrganismGenome, OrganismId, OrganismState};
+use sim_types::{FacingDirection, FoodId, FoodState, OrganismGenome, OrganismId, OrganismState};
 
 #[derive(Clone)]
 pub(crate) struct ReproductionSpawn {

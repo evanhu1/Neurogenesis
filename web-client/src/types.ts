@@ -143,12 +143,21 @@ export type CreateSessionResponse = {
   snapshot: WorldSnapshot;
 };
 
+export type EntityId =
+  | { entity_type: 'Organism'; id: OrganismId }
+  | { entity_type: 'Food'; id: FoodId };
+
+export type RemovedEntityPosition = {
+  entity_id: EntityId;
+  q: number;
+  r: number;
+};
+
 export type TickDelta = {
   turn: number;
   moves: Array<{ id: OrganismId; from: [number, number]; to: [number, number] }>;
-  removed_positions: Array<{ id: OrganismId; q: number; r: number }>;
+  removed_positions: RemovedEntityPosition[];
   spawned: OrganismState[];
-  food_removed_positions: Array<{ id: FoodId; q: number; r: number }>;
   food_spawned: FoodState[];
   metrics: MetricsSnapshot;
 };

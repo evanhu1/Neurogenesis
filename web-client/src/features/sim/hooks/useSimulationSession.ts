@@ -129,11 +129,11 @@ export function useSimulationSession(): SimulationSessionState {
           if (removedPositions.length > 0) {
             const seenCells = new Set<string>();
             const cells: Array<{ q: number; r: number }> = [];
-            for (const removed of removedPositions) {
-              const key = `${removed.q},${removed.r}`;
+            for (const entry of removedPositions) {
+              const key = `${entry.q},${entry.r}`;
               if (seenCells.has(key)) continue;
               seenCells.add(key);
-              cells.push({ q: removed.q, r: removed.r });
+              cells.push({ q: entry.q, r: entry.r });
             }
             setDeadCellFlashState(cells.length > 0 ? { turn: delta.turn, cells } : null);
           } else {

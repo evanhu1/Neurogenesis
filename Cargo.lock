@@ -1521,18 +1521,8 @@ dependencies = [
  "rand_chacha",
  "serde",
  "serde_json",
- "sim-protocol",
+ "sim-types",
  "thiserror",
-]
-
-[[package]]
-name = "sim-protocol"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "toml",
- "uuid",
 ]
 
 [[package]]
@@ -1546,7 +1536,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sim-core",
- "sim-protocol",
+ "sim-types",
  "tokio",
  "tokio-tungstenite",
  "tower-http",
@@ -1554,6 +1544,15 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "sim-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "toml",
 ]
 
 [[package]]

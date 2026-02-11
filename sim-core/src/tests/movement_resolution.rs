@@ -247,13 +247,13 @@ fn move_into_food_consumes_and_replenishes_food_supply() {
     let delta = tick_once(&mut sim);
     let moves = move_map(&delta);
     assert_eq!(moves.get(&OrganismId(0)), Some(&((1, 1), (2, 1))));
-    assert!(delta.removed_positions.is_empty());
-    assert_eq!(delta.food_removed_positions.len(), 1);
+    assert_eq!(delta.removed_positions.len(), 1);
     assert_eq!(
-        (
-            delta.food_removed_positions[0].q,
-            delta.food_removed_positions[0].r
-        ),
+        delta.removed_positions[0].entity_id,
+        EntityId::Food(FoodId(0))
+    );
+    assert_eq!(
+        (delta.removed_positions[0].q, delta.removed_positions[0].r),
         (2, 1)
     );
     let target_food = (5_usize * 5) / sim.config.food_coverage_divisor as usize;

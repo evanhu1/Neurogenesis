@@ -1,4 +1,4 @@
-import type { FoodId, OrganismId, OrganismState, TickDelta, WorldSnapshot } from './types';
+import type { FoodId, OrganismId, OrganismState, RemovedEntityPosition, TickDelta, WorldSnapshot } from './types';
 
 export function unwrapId(id: OrganismId | FoodId | number | { 0: number }) {
   if (typeof id === 'number') return id;
@@ -10,15 +10,19 @@ export function applyTickDelta(snapshot: WorldSnapshot, delta: TickDelta): World
   for (const move of delta.moves) {
     movements.set(unwrapId(move.id), move.to);
   }
-  const removed = new Set(delta.removed_positions.map((entry) => unwrapId(entry.id)));
-  const removedFoods = new Set(
-    (Array.isArray(delta.food_removed_positions) ? delta.food_removed_positions : []).map(
-      (entry) => unwrapId(entry.id),
-    ),
-  );
+
+  const removedOrganisms = new Set<number>();
+  const removedFoods = new Set<number>();
+  for (const entry of delta.removed_positions) {
+    if (entry.entity_id.entity_type === 'Organism') {
+      removedOrganisms.add(unwrapId(entry.entity_id.id));
+    } else {
+      removedFoods.add(unwrapId(entry.entity_id.id));
+    }
+  }
 
   const organisms = snapshot.organisms
-    .filter((organism: OrganismState) => !removed.has(unwrapId(organism.id)))
+    .filter((organism: OrganismState) => !removedOrganisms.has(unwrapId(organism.id)))
     .map((organism: OrganismState) => {
       const next = movements.get(unwrapId(organism.id));
       if (!next) {

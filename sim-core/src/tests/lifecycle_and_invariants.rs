@@ -57,9 +57,12 @@ fn starvation_and_reproduction_interact_in_same_turn() {
         delta
             .removed_positions
             .iter()
-            .map(|entry| entry.id)
+            .map(|entry| entry.entity_id)
             .collect::<Vec<_>>(),
-        vec![OrganismId(1), OrganismId(2)]
+        vec![
+            EntityId::Organism(OrganismId(1)),
+            EntityId::Organism(OrganismId(2))
+        ]
     );
     assert!(delta.spawned.is_empty());
     assert_eq!(sim.organisms.len(), 2);
@@ -112,9 +115,9 @@ fn starvation_does_not_spawn_replacements() {
         delta
             .removed_positions
             .iter()
-            .map(|entry| entry.id)
+            .map(|entry| entry.entity_id)
             .collect::<Vec<_>>(),
-        vec![OrganismId(0)]
+        vec![EntityId::Organism(OrganismId(0))]
     );
     assert_eq!(sim.organisms.len(), 1);
 }

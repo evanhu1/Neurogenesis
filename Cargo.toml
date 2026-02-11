@@ -1,7 +1,7 @@
 [workspace]
 members = [
   "sim-core",
-  "sim-protocol",
+  "sim-types",
   "sim-server",
 ]
 resolver = "2"

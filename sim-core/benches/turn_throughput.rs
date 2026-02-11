@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use sim_core::Simulation;
-use sim_protocol::WorldConfig;
+use sim_types::WorldConfig;
 
 fn bench_500_turns(c: &mut Criterion) {
     c.bench_function("500 turns (seed 42)", |b| {

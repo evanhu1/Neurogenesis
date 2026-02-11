@@ -28,7 +28,7 @@ fn scan_ahead_returns_organism_with_distance_signal() {
         2,
     );
     let result = result.expect("should detect organism");
-    assert_eq!(result.target, Entity::Organism);
+    assert_eq!(result.target, EntityType::Organism);
     assert!((result.signal - 0.5).abs() < f32::EPSILON);
 }
 
@@ -59,7 +59,7 @@ fn scan_ahead_returns_oob_at_boundary() {
         3,
     );
     let result = result.expect("should detect out of bounds");
-    assert_eq!(result.target, Entity::OutOfBounds);
+    assert_eq!(result.target, EntityType::OutOfBounds);
     assert!((result.signal - 1.0 / 3.0).abs() < f32::EPSILON);
 }
 
@@ -123,7 +123,7 @@ fn scan_ahead_detects_food_with_distance_signal() {
         2,
     );
     let result = result.expect("should detect food");
-    assert_eq!(result.target, Entity::Food);
+    assert_eq!(result.target, EntityType::Food);
     assert!((result.signal - 0.5).abs() < f32::EPSILON);
 }
 
@@ -158,7 +158,7 @@ fn scan_ahead_adjacent_entity_returns_max_signal() {
         3,
     );
     let result = result.expect("should detect food");
-    assert_eq!(result.target, Entity::Food);
+    assert_eq!(result.target, EntityType::Food);
     assert!((result.signal - 1.0).abs() < f32::EPSILON);
 }
 
@@ -203,7 +203,7 @@ fn scan_ahead_occlusion_closer_entity_blocks_farther() {
         5,
     );
     let result = result.expect("should detect food (closer)");
-    assert_eq!(result.target, Entity::Food);
+    assert_eq!(result.target, EntityType::Food);
     // distance 2, max 5 → signal = (5 - 2 + 1)/5 = 0.8
     assert!((result.signal - 0.8).abs() < f32::EPSILON);
 }

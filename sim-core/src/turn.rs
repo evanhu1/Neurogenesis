@@ -2,9 +2,9 @@ use crate::brain::{action_index, evaluate_brain, BrainScratch};
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right};
 use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 use crate::Simulation;
-use sim_protocol::{
-    ActionType, FacingDirection, FoodId, FoodState, Occupant, OrganismId, OrganismMove,
-    OrganismState, RemovedFoodPosition, RemovedOrganismPosition, SpeciesId, TickDelta,
+use sim_types::{
+    ActionType, EntityId, FacingDirection, FoodId, FoodState, Occupant, OrganismId, OrganismMove,
+    OrganismState, RemovedEntityPosition, SpeciesId, TickDelta,
 };
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -86,8 +86,7 @@ struct MoveResolution {
 #[derive(Default)]
 struct CommitResult {
     moves: Vec<OrganismMove>,
-    removed_positions: Vec<RemovedOrganismPosition>,
-    food_removed_positions: Vec<RemovedFoodPosition>,
+    removed_positions: Vec<RemovedEntityPosition>,
     food_spawned: Vec<FoodState>,
     consumptions: u64,
 }
@@ -126,7 +125,6 @@ impl Simulation {
             moves: commit.moves,
             removed_positions,
             spawned,
-            food_removed_positions: commit.food_removed_positions,
             food_spawned: commit.food_spawned,
             metrics: self.metrics.clone(),
         }
@@ -308,7 +306,6 @@ impl Simulation {
             .map(|food| (food.id, food.energy))
             .collect();
         let mut removed_positions = Vec::new();
-        let mut food_removed_positions = Vec::new();
         let mut consumed_energy_by_actor: HashMap<OrganismId, f32> = HashMap::new();
         let mut consumed_food_ids = HashSet::new();
         let mut consumptions = 0_u64;
@@ -319,8 +316,8 @@ impl Simulation {
                 MoveResolutionKind::ConsumeOrganism { consumed_organism } => {
                     if consumed_organism_ids.insert(consumed_organism) {
                         if let Some((q, r)) = positions_by_id.get(&consumed_organism).copied() {
-                            removed_positions.push(RemovedOrganismPosition {
-                                id: consumed_organism,
+                            removed_positions.push(RemovedEntityPosition {
+                                entity_id: EntityId::Organism(consumed_organism),
                                 q,
                                 r,
                             });
@@ -336,8 +333,8 @@ impl Simulation {
                 MoveResolutionKind::ConsumeFood { consumed_food } => {
                     if consumed_food_ids.insert(consumed_food) {
                         if let Some((q, r)) = positions_by_food_id.get(&consumed_food).copied() {
-                            food_removed_positions.push(RemovedFoodPosition {
-                                id: consumed_food,
+                            removed_positions.push(RemovedEntityPosition {
+                                entity_id: EntityId::Food(consumed_food),
                                 q,
                                 r,
                             });
@@ -387,7 +384,6 @@ impl Simulation {
         CommitResult {
             moves,
             removed_positions,
-            food_removed_positions,
             food_spawned,
             consumptions,
         }
@@ -453,7 +449,7 @@ impl Simulation {
         successful_reproductions
     }
 
-    fn lifecycle_phase(&mut self) -> (u64, Vec<RemovedOrganismPosition>) {
+    fn lifecycle_phase(&mut self) -> (u64, Vec<RemovedEntityPosition>) {
         self.organisms.sort_by_key(|organism| organism.id);
 
         let max_age = self.config.max_organism_age as u64;
@@ -470,8 +466,8 @@ impl Simulation {
             .organisms
             .iter()
             .filter(|organism| starved_set.contains(&organism.id))
-            .map(|organism| RemovedOrganismPosition {
-                id: organism.id,
+            .map(|organism| RemovedEntityPosition {
+                entity_id: EntityId::Organism(organism.id),
                 q: organism.q,
                 r: organism.r,
             })

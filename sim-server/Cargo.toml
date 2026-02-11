@@ -16,7 +16,7 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 tower-http.workspace = true
 sim-core = { path = "../sim-core" }
-sim-protocol = { path = "../sim-protocol" }
+sim-types = { path = "../sim-types" }
 
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json"] }

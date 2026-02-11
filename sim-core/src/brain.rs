@@ -1,6 +1,6 @@
 use crate::grid::hex_neighbor;
-use sim_protocol::{
-    ActionNeuronState, ActionType, BrainState, Entity, InterNeuronState, NeuronId, NeuronState,
+use sim_types::{
+    ActionNeuronState, ActionType, BrainState, EntityType, InterNeuronState, NeuronId, NeuronState,
     NeuronType, Occupant, OrganismGenome, OrganismId, SensoryNeuronState, SensoryReceptor,
     SynapseEdge,
 };
@@ -40,19 +40,19 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
         make_sensory_neuron(
             0,
             SensoryReceptor::Look {
-                look_target: Entity::Food,
+                look_target: EntityType::Food,
             },
         ),
         make_sensory_neuron(
             1,
             SensoryReceptor::Look {
-                look_target: Entity::Organism,
+                look_target: EntityType::Organism,
             },
         ),
         make_sensory_neuron(
             2,
             SensoryReceptor::Look {
-                look_target: Entity::OutOfBounds,
+                look_target: EntityType::OutOfBounds,
             },
         ),
         make_sensory_neuron(3, SensoryReceptor::Energy),
@@ -194,7 +194,7 @@ pub(crate) fn make_action_neuron(id: u32, action_type: ActionType) -> ActionNeur
 }
 
 pub(crate) fn evaluate_brain(
-    organism: &mut sim_protocol::OrganismState,
+    organism: &mut sim_types::OrganismState,
     world_width: i32,
     occupancy: &[Option<Occupant>],
     vision_distance: u32,
@@ -370,7 +370,7 @@ fn energy_sensor_value(energy: f32) -> f32 {
 }
 
 pub(crate) struct ScanResult {
-    pub(crate) target: Entity,
+    pub(crate) target: EntityType,
     pub(crate) signal: f32,
 }
 
@@ -379,7 +379,7 @@ pub(crate) struct ScanResult {
 /// strength: `(max_dist - dist + 1) / max_dist`. Returns `None` if all cells are empty.
 pub(crate) fn scan_ahead(
     position: (i32, i32),
-    facing: sim_protocol::FacingDirection,
+    facing: sim_types::FacingDirection,
     organism_id: OrganismId,
     world_width: i32,
     occupancy: &[Option<Occupant>],
@@ -392,7 +392,7 @@ pub(crate) fn scan_ahead(
         if current.0 < 0 || current.1 < 0 || current.0 >= world_width || current.1 >= world_width {
             let signal = (max_dist - d + 1) as f32 / max_dist as f32;
             return Some(ScanResult {
-                target: Entity::OutOfBounds,
+                target: EntityType::OutOfBounds,
                 signal,
             });
         }
@@ -402,14 +402,14 @@ pub(crate) fn scan_ahead(
             Some(Occupant::Food(_)) => {
                 let signal = (max_dist - d + 1) as f32 / max_dist as f32;
                 return Some(ScanResult {
-                    target: Entity::Food,
+                    target: EntityType::Food,
                     signal,
                 });
             }
             Some(Occupant::Organism(_)) => {
                 let signal = (max_dist - d + 1) as f32 / max_dist as f32;
                 return Some(ScanResult {
-                    target: Entity::Organism,
+                    target: EntityType::Organism,
                     signal,
                 });
             }

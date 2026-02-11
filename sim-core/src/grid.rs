@@ -1,6 +1,6 @@
 use crate::Simulation;
-use sim_protocol::FacingDirection;
-use sim_protocol::{FoodState, Occupant, OrganismState};
+use sim_types::FacingDirection;
+use sim_types::{FoodState, Occupant, OrganismState};
 
 pub(crate) fn world_capacity(width: u32) -> usize {
     width as usize * width as usize

@@ -10,7 +10,7 @@ rand_chacha.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-sim-protocol = { path = "../sim-protocol" }
+sim-types = { path = "../sim-types" }
 
 [dev-dependencies]
 serde_json.workspace = true

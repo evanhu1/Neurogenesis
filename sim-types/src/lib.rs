@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct OrganismId(pub u64);
@@ -59,16 +58,23 @@ pub enum NeuronType {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum Entity {
+pub enum EntityType {
     Food,
     Organism,
     OutOfBounds,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "entity_type", content = "id")]
+pub enum EntityId {
+    Organism(OrganismId),
+    Food(FoodId),
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "receptor_type")]
 pub enum SensoryReceptor {
-    Look { look_target: Entity },
+    Look { look_target: EntityType },
     Energy,
 }
 
@@ -240,16 +246,9 @@ pub struct OrganismMove {
     pub to: (i32, i32),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RemovedOrganismPosition {
-    pub id: OrganismId,
-    pub q: i32,
-    pub r: i32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RemovedFoodPosition {
-    pub id: FoodId,
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct RemovedEntityPosition {
+    pub entity_id: EntityId,
     pub q: i32,
     pub r: i32,
 }
@@ -258,76 +257,10 @@ pub struct RemovedFoodPosition {
 pub struct TickDelta {
     pub turn: u64,
     pub moves: Vec<OrganismMove>,
-    pub removed_positions: Vec<RemovedOrganismPosition>,
+    pub removed_positions: Vec<RemovedEntityPosition>,
     pub spawned: Vec<OrganismState>,
-    pub food_removed_positions: Vec<RemovedFoodPosition>,
     pub food_spawned: Vec<FoodState>,
     pub metrics: MetricsSnapshot,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SessionMetadata {
-    pub id: Uuid,
-    pub created_at_unix_ms: u128,
-    pub config: WorldConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct CreateSessionRequest {
-    pub config: WorldConfig,
-    pub seed: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct CreateSessionResponse {
-    pub metadata: SessionMetadata,
-    pub snapshot: WorldSnapshot,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct CountRequest {
-    pub count: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ResetRequest {
-    pub seed: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct FocusRequest {
-    pub organism_id: OrganismId,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ApiError {
-    pub code: String,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", content = "data")]
-pub enum ClientCommand {
-    Start { ticks_per_second: u32 },
-    Pause,
-    Step { count: u32 },
-    SetFocus { organism_id: OrganismId },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct FocusBrainData {
-    pub organism: OrganismState,
-    pub active_neuron_ids: Vec<NeuronId>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", content = "data")]
-pub enum ServerEvent {
-    StateSnapshot(WorldSnapshot),
-    TickDelta(TickDelta),
-    FocusBrain(FocusBrainData),
-    Metrics(MetricsSnapshot),
-    Error(ApiError),
 }
 
 #[cfg(test)]

@@ -9,8 +9,9 @@
   - `brain.rs`: network evaluation, mutation, and topology/synapse operators.
   - `spawn.rs`: initial spawn + reproduction/replacement spawn placement.
 - `grid.rs`: hex-grid geometry and occupancy helpers.
-- `sim-protocol/`: shared API/protocol types used by server and UI.
-- `sim-server/`: Axum HTTP + WebSocket server (`src/main.rs`).
+- `sim-types/`: shared domain types and structs used across all Rust crates.
+- `sim-server/`: Axum HTTP + WebSocket server (`src/main.rs`), with server-only
+  API types in `src/protocol.rs`.
 - `web-client/`: React + TailwindCSS + Vite canvas UI (`src/`), static entry in
   `index.html`.
 - `config/default.toml`: baseline simulation configuration.
@@ -44,8 +45,7 @@
 ## Testing Guidelines
 
 - Primary test runner: `cargo test --workspace`.
-- Place integration tests under each crate’s `tests/` directory (example:
-  `sim-core/tests/golden.rs` with fixtures in `sim-core/tests/fixtures/`).
+- Place integration tests under each crate’s `tests/` directory
 - Add deterministic tests for simulation behavior changes (fixed seeds, snapshot
   assertions).
 - No enforced coverage threshold currently; include tests for new logic and

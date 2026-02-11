@@ -7,10 +7,11 @@ use axum::{Json, Router};
 use futures::{SinkExt, StreamExt};
 use serde::Serialize;
 use sim_core::{derive_active_neuron_ids, SimError, Simulation};
-use sim_protocol::{
+use sim_server::protocol::{
     ApiError, ClientCommand, CountRequest, CreateSessionRequest, CreateSessionResponse,
-    FocusBrainData, FocusRequest, ResetRequest, ServerEvent, SessionMetadata, WorldSnapshot,
+    FocusBrainData, FocusRequest, ResetRequest, ServerEvent, SessionMetadata,
 };
+use sim_types::WorldSnapshot;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -46,7 +47,7 @@ struct HealthResponse {
 
 #[derive(Serialize)]
 struct StepResponse {
-    deltas: Vec<sim_protocol::TickDelta>,
+    deltas: Vec<sim_types::TickDelta>,
     snapshot: WorldSnapshot,
 }
 
@@ -413,7 +414,8 @@ mod tests {
     use super::*;
     use futures::{SinkExt, StreamExt};
     use reqwest::Client;
-    use sim_protocol::{CreateSessionRequest, ServerEvent, WorldConfig};
+    use sim_types::WorldConfig;
+    use sim_server::protocol::{CreateSessionRequest, ServerEvent};
     use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 
     async fn spawn_test_server() -> (String, tokio::task::JoinHandle<()>) {

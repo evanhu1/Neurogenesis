@@ -1,6 +1,6 @@
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
-use sim_protocol::{
+use sim_types::{
     FoodState, MetricsSnapshot, Occupant, OccupancyCell, OrganismGenome, OrganismId, OrganismState,
     SpeciesId, TickDelta, WorldConfig, WorldSnapshot,
 };

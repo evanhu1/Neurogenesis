@@ -1,6 +1,6 @@
 use crate::SimError;
 use rand::Rng;
-use sim_protocol::{
+use sim_types::{
     ActionType, NeuronId, OrganismGenome, SeedGenomeConfig, SensoryReceptor, SpeciesId, SynapseEdge,
 };
 use std::cmp::Ordering;
