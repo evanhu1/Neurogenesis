@@ -55,8 +55,6 @@ pub(super) fn stable_test_config() -> WorldConfig {
         world_width: 10,
         steps_per_second: 5,
         num_organisms: 10,
-        center_spawn_min_fraction: 0.25,
-        center_spawn_max_fraction: 0.75,
         starting_energy: 100.0,
         food_energy: 50.0,
         reproduction_energy_cost: 100.0,

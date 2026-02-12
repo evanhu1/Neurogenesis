@@ -40,10 +40,10 @@ rotation. `MoveForward` uses post-turn facing.
 ## Config
 
 `WorldConfig` fields: `world_width`, `steps_per_second`, `num_organisms`,
-`center_spawn_min_fraction`, `center_spawn_max_fraction`, `starting_energy`,
-`food_energy`, `reproduction_energy_cost`, `move_action_energy_cost`,
-`turn_energy_cost`, `food_coverage_divisor`, `max_organism_age`,
-`max_num_neurons`, `speciation_threshold`, `seed_genome_config`.
+`starting_energy`, `food_energy`, `reproduction_energy_cost`,
+`move_action_energy_cost`, `turn_energy_cost`, `food_coverage_divisor`,
+`max_organism_age`, `max_num_neurons`, `speciation_threshold`,
+`seed_genome_config`.
 
 `SeedGenomeConfig` fields: `num_neurons`, `num_synapses`, `vision_distance`,
 `mutation_rate_vision_distance`, `mutation_rate_weight`,

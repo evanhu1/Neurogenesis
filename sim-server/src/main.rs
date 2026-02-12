@@ -9,7 +9,8 @@ use serde::Serialize;
 use sim_core::{derive_active_neuron_ids, SimError, Simulation};
 use sim_server::protocol::{
     ApiError, ClientCommand, CountRequest, CreateSessionRequest, CreateSessionResponse,
-    FocusBrainData, FocusRequest, ResetRequest, ServerEvent, SessionMetadata, WorldSnapshotView,
+    FocusBrainData, FocusRequest, ResetRequest, ServerEvent, SessionMetadata, StepProgressData,
+    WorldSnapshotView,
 };
 use sim_types::WorldSnapshot;
 use std::collections::HashMap;
@@ -41,6 +42,24 @@ struct RuntimeState {
     runner: Option<JoinHandle<()>>,
 }
 
+const STEP_PROGRESS_TARGET_BATCHES: u32 = 48;
+const STEP_PROGRESS_MIN_BATCH_SIZE: u32 = 32;
+const STEP_PROGRESS_MAX_BATCH_SIZE: u32 = 2_048;
+const STEP_PROGRESS_TARGET_UPDATES: u32 = 64;
+
+fn step_batch_size(total_count: u32) -> u32 {
+    let target = (total_count / STEP_PROGRESS_TARGET_BATCHES).max(1);
+    target
+        .clamp(STEP_PROGRESS_MIN_BATCH_SIZE, STEP_PROGRESS_MAX_BATCH_SIZE)
+        .min(total_count.max(1))
+}
+
+fn step_progress_stride(total_count: u32) -> u32 {
+    total_count
+        .saturating_add(STEP_PROGRESS_TARGET_UPDATES.saturating_sub(1))
+        / STEP_PROGRESS_TARGET_UPDATES.max(1)
+}
+
 #[derive(Serialize)]
 struct HealthResponse {
     status: &'static str,
@@ -48,7 +67,6 @@ struct HealthResponse {
 
 #[derive(Serialize)]
 struct StepResponse {
-    deltas: Vec<sim_types::TickDelta>,
     snapshot: WorldSnapshot,
 }
 
@@ -141,6 +159,8 @@ async fn create_session(
         id,
         created_at_unix_ms: now_ms,
         config: req.config,
+        running: false,
+        ticks_per_second: simulation.config().steps_per_second,
     };
 
     let (events_tx, _events_rx) = broadcast::channel(1024);
@@ -169,7 +189,11 @@ async fn get_session_metadata(
     State(state): State<AppState>,
 ) -> Result<Json<SessionMetadata>, AppError> {
     let session = get_session(&state, id).await?;
-    Ok(Json(session.metadata.clone()))
+    let mut metadata = session.metadata.clone();
+    let runtime = session.runtime.lock().await;
+    metadata.running = runtime.running;
+    metadata.ticks_per_second = runtime.ticks_per_second;
+    Ok(Json(metadata))
 }
 
 async fn get_state(
@@ -188,17 +212,15 @@ async fn step_session(
 ) -> Result<Json<StepResponse>, AppError> {
     let session = get_session(&state, id).await?;
     let mut sim = session.simulation.lock().await;
-    let deltas = sim.step_n(req.count.max(1));
+    sim.advance_n(req.count.max(1));
     let snapshot = sim.snapshot();
     drop(sim);
 
-    for delta in &deltas {
-        let _ = session
-            .events
-            .send(ServerEvent::TickDelta(delta.clone().into()));
-    }
+    let _ = session
+        .events
+        .send(ServerEvent::StateSnapshot(snapshot.clone().into()));
 
-    Ok(Json(StepResponse { deltas, snapshot }))
+    Ok(Json(StepResponse { snapshot }))
 }
 
 async fn reset_session(
@@ -335,12 +357,42 @@ async fn handle_command(command: ClientCommand, session: Arc<Session>) -> Result
             Ok(())
         }
         ClientCommand::Step { count } => {
+            let requested_count = count.max(1);
+            let _ = session
+                .events
+                .send(ServerEvent::StepProgress(StepProgressData {
+                    requested_count,
+                    completed_count: 0,
+                }));
+
+            let batch_size = step_batch_size(requested_count);
+            let progress_stride = step_progress_stride(requested_count).max(1);
             let mut sim = session.simulation.lock().await;
-            let deltas = sim.step_n(count.max(1));
-            drop(sim);
-            for delta in deltas {
-                let _ = session.events.send(ServerEvent::TickDelta(delta.into()));
+            let mut completed_count = 0;
+            let mut next_progress_emit = progress_stride;
+            while completed_count < requested_count {
+                let remaining = requested_count.saturating_sub(completed_count);
+                let batch_count = remaining.min(batch_size);
+                sim.advance_n(batch_count);
+                completed_count = completed_count.saturating_add(batch_count);
+
+                let is_final_batch = completed_count == requested_count;
+                if is_final_batch || completed_count >= next_progress_emit {
+                    next_progress_emit = completed_count.saturating_add(progress_stride);
+                    let _ = session
+                        .events
+                        .send(ServerEvent::StepProgress(StepProgressData {
+                            requested_count,
+                            completed_count,
+                        }));
+                    tokio::task::yield_now().await;
+                }
             }
+            let snapshot = sim.snapshot();
+            drop(sim);
+            let _ = session
+                .events
+                .send(ServerEvent::StateSnapshot(snapshot.into()));
             Ok(())
         }
         ClientCommand::SetFocus { organism_id } => {

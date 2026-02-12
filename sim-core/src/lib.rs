@@ -125,6 +125,12 @@ impl Simulation {
         deltas
     }
 
+    pub fn advance_n(&mut self, count: u32) {
+        for _ in 0..count {
+            let _ = self.tick();
+        }
+    }
+
     pub fn focused_organism(&self, id: OrganismId) -> Option<OrganismState> {
         self.organisms
             .iter()
@@ -170,18 +176,6 @@ fn validate_world_config(config: &WorldConfig) -> Result<(), SimError> {
     if config.num_organisms == 0 {
         return Err(SimError::InvalidConfig(
             "num_organisms must be greater than zero".to_owned(),
-        ));
-    }
-    if !(0.0..=1.0).contains(&config.center_spawn_min_fraction)
-        || !(0.0..=1.0).contains(&config.center_spawn_max_fraction)
-    {
-        return Err(SimError::InvalidConfig(
-            "center spawn fractions must be within [0, 1]".to_owned(),
-        ));
-    }
-    if config.center_spawn_min_fraction >= config.center_spawn_max_fraction {
-        return Err(SimError::InvalidConfig(
-            "center_spawn_min_fraction must be less than center_spawn_max_fraction".to_owned(),
         ));
     }
     if config.starting_energy <= 0.0 {

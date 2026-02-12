@@ -11,6 +11,8 @@ pub struct SessionMetadata {
     pub id: Uuid,
     pub created_at_unix_ms: u128,
     pub config: WorldConfig,
+    pub running: bool,
+    pub ticks_per_second: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -59,6 +61,12 @@ pub enum ClientCommand {
 pub struct FocusBrainData {
     pub organism: OrganismState,
     pub active_neuron_ids: Vec<NeuronId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StepProgressData {
+    pub requested_count: u32,
+    pub completed_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -147,6 +155,7 @@ impl From<TickDelta> for TickDeltaView {
 pub enum ServerEvent {
     StateSnapshot(WorldSnapshotView),
     TickDelta(TickDeltaView),
+    StepProgress(StepProgressData),
     FocusBrain(FocusBrainData),
     Metrics(MetricsSnapshot),
     Error(ApiError),

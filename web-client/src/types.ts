@@ -22,8 +22,6 @@ export type WorldConfig = {
   world_width: number;
   steps_per_second: number;
   num_organisms: number;
-  center_spawn_min_fraction: number;
-  center_spawn_max_fraction: number;
   starting_energy: number;
   food_energy: number;
   reproduction_energy_cost: number;
@@ -171,6 +169,8 @@ export type SessionMetadata = {
   id: string;
   created_at_unix_ms: number;
   config: WorldConfig;
+  running: boolean;
+  ticks_per_second: number;
 };
 
 export type CreateSessionResponse = {
@@ -198,8 +198,13 @@ export type TickDelta = {
   metrics: MetricsSnapshot;
 };
 
+export type StepProgressData = {
+  requested_count: number;
+  completed_count: number;
+};
+
 export type ServerEvent = {
-  type: 'StateSnapshot' | 'TickDelta' | 'FocusBrain' | 'Metrics' | 'Error';
+  type: 'StateSnapshot' | 'TickDelta' | 'StepProgress' | 'FocusBrain' | 'Metrics' | 'Error';
   data: unknown;
 };
 
@@ -254,8 +259,6 @@ function parseDefaultConfigToml(tomlText: string): WorldConfig {
     world_width: parseRequiredNumber(worldLevel, 'world_width'),
     steps_per_second: parseRequiredNumber(worldLevel, 'steps_per_second'),
     num_organisms: parseRequiredNumber(worldLevel, 'num_organisms'),
-    center_spawn_min_fraction: parseRequiredNumber(worldLevel, 'center_spawn_min_fraction'),
-    center_spawn_max_fraction: parseRequiredNumber(worldLevel, 'center_spawn_max_fraction'),
     starting_energy: parseRequiredNumber(worldLevel, 'starting_energy'),
     food_energy: parseRequiredNumber(worldLevel, 'food_energy'),
     reproduction_energy_cost: parseRequiredNumber(worldLevel, 'reproduction_energy_cost'),

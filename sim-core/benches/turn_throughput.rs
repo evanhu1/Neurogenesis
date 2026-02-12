@@ -7,8 +7,6 @@ fn stable_perf_config() -> WorldConfig {
         world_width: 100,
         steps_per_second: 5,
         num_organisms: 2_000,
-        center_spawn_min_fraction: 0.25,
-        center_spawn_max_fraction: 0.75,
         starting_energy: 10_000.0,
         food_energy: 50.0,
         reproduction_energy_cost: 1_000_000_000.0,

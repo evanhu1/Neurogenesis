@@ -36,15 +36,21 @@ function statSection(title: string, stats: StatItem[]) {
   return (
     <section className="rounded-xl border border-accent/20 bg-white/85 p-3">
       <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink/75">{title}</h3>
-      <dl className="mt-2 grid grid-cols-[auto_1fr] items-baseline gap-x-3 gap-y-1 text-xs">
-        {stats.map((stat) => (
-          <div key={stat.label} className="contents">
-            <dt className="font-medium text-ink/65">{stat.label}</dt>
-            <dd className="truncate text-right font-mono text-ink/95">{stat.value}</dd>
-          </div>
-        ))}
-      </dl>
+      <div className="mt-2">{statList(stats)}</div>
     </section>
+  );
+}
+
+function statList(stats: StatItem[]) {
+  return (
+    <dl className="grid grid-cols-[auto_1fr] items-baseline gap-x-3 gap-y-1 text-xs">
+      {stats.map((stat) => (
+        <div key={stat.label} className="contents">
+          <dt className="font-medium text-ink/65">{stat.label}</dt>
+          <dd className="truncate text-right font-mono text-ink/95">{stat.value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -175,7 +181,7 @@ export function InspectorPanel({
             <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.14em] text-ink/75">
               Brain
             </summary>
-            <div className="mt-2">{statSection('Brain', summary.brainStats)}</div>
+            <div className="mt-2">{statList(summary.brainStats)}</div>
           </details>
 
           <details
@@ -186,7 +192,7 @@ export function InspectorPanel({
             <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.14em] text-ink/75">
               Genome
             </summary>
-            <div className="mt-2">{statSection('Genome', summary.genomeStats)}</div>
+            <div className="mt-2">{statList(summary.genomeStats)}</div>
           </details>
 
           <details

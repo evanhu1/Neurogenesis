@@ -149,8 +149,6 @@ pub struct WorldConfig {
     pub world_width: u32,
     pub steps_per_second: u32,
     pub num_organisms: u32,
-    pub center_spawn_min_fraction: f32,
-    pub center_spawn_max_fraction: f32,
     pub starting_energy: f32,
     pub food_energy: f32,
     pub reproduction_energy_cost: f32,

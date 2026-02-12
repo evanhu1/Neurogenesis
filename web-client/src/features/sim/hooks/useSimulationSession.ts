@@ -7,6 +7,7 @@ import type {
   OrganismState,
   ServerEvent,
   SessionMetadata,
+  StepProgressData,
   TickDelta,
   WorldOrganismState,
   WorldSnapshot,
@@ -41,6 +42,22 @@ function speciesCountsEqual(a: Record<string, number>, b: Record<string, number>
   return true;
 }
 
+function parseStepProgressData(data: unknown): StepProgressData | null {
+  if (!data || typeof data !== 'object') return null;
+  const candidate = data as Partial<StepProgressData>;
+  const requested = Number.isFinite(candidate.requested_count)
+    ? Math.max(1, Math.floor(candidate.requested_count as number))
+    : null;
+  const completed = Number.isFinite(candidate.completed_count)
+    ? Math.max(0, Math.floor(candidate.completed_count as number))
+    : null;
+  if (requested === null || completed === null) return null;
+  return {
+    requested_count: requested,
+    completed_count: Math.min(completed, requested),
+  };
+}
+
 function upsertSpeciesPopulationHistory(
   previous: SpeciesPopulationPoint[],
   point: SpeciesPopulationPoint,
@@ -70,6 +87,20 @@ function upsertSpeciesPopulationHistory(
   return trimmed.concat(point);
 }
 
+function nearestSpeedLevelIndex(ticksPerSecond: number): number {
+  if (!Number.isFinite(ticksPerSecond) || ticksPerSecond <= 0) return 0;
+  let bestIndex = 0;
+  let bestDistance = Math.abs(SPEED_LEVELS[0] - ticksPerSecond);
+  for (let i = 1; i < SPEED_LEVELS.length; i += 1) {
+    const distance = Math.abs(SPEED_LEVELS[i] - ticksPerSecond);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = i;
+    }
+  }
+  return bestIndex;
+}
+
 function syncFocusedOrganismFromWorld(
   focused: OrganismState | null,
   worldOrganism: WorldOrganismState,
@@ -97,6 +128,8 @@ export type SimulationSessionState = {
   focusedOrganism: OrganismState | null;
   activeNeuronIds: Set<number> | null;
   isRunning: boolean;
+  isStepPending: boolean;
+  stepProgress: StepProgressData | null;
   speedLevels: readonly number[];
   speedLevelIndex: number;
   errorText: string | null;
@@ -121,6 +154,8 @@ export function useSimulationSession(): SimulationSessionState {
   const [focusedOrganism, setFocusedOrganism] = useState<OrganismState | null>(null);
   const [activeNeuronIds, setActiveNeuronIds] = useState<Set<number> | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+  const [isStepPending, setIsStepPending] = useState(false);
+  const [stepProgress, setStepProgress] = useState<StepProgressData | null>(null);
   const [speedLevelIndex, setSpeedLevelIndex] = useState(1);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [deadCellFlashState, setDeadCellFlashState] = useState<DeadCellFlashState>(null);
@@ -140,6 +175,8 @@ export function useSimulationSession(): SimulationSessionState {
     switch (event.type) {
       case 'StateSnapshot': {
         const nextSnapshot = event.data as WorldSnapshot;
+        setIsStepPending(false);
+        setStepProgress(null);
         setDeadCellFlashState((prev) =>
           prev !== null && prev.turn !== nextSnapshot.turn ? null : prev,
         );
@@ -153,10 +190,19 @@ export function useSimulationSession(): SimulationSessionState {
             speciesCounts: normalizeSpeciesCounts(nextSnapshot.metrics.species_counts),
           }),
         );
+        const trackedFocusedId = focusedOrganismIdRef.current;
+        if (trackedFocusedId !== null) {
+          sendSimulationCommand(wsRef.current, {
+            type: 'SetFocus',
+            data: { organism_id: trackedFocusedId },
+          });
+        }
         break;
       }
       case 'TickDelta': {
         const delta = event.data as TickDelta;
+        setIsStepPending(false);
+        setStepProgress(null);
         setSpeciesPopulationHistory((previous) =>
           upsertSpeciesPopulationHistory(previous, {
             turn: delta.turn,
@@ -220,6 +266,15 @@ export function useSimulationSession(): SimulationSessionState {
         }
         break;
       }
+      case 'StepProgress': {
+        const progress = parseStepProgressData(event.data);
+        if (!progress) {
+          break;
+        }
+        setStepProgress(progress);
+        setIsStepPending(progress.completed_count < progress.requested_count);
+        break;
+      }
       case 'FocusBrain': {
         const { organism, active_neuron_ids } = event.data as FocusBrainData;
         const organismId = unwrapId(organism.id);
@@ -232,6 +287,8 @@ export function useSimulationSession(): SimulationSessionState {
         break;
       }
       case 'Error': {
+        setIsStepPending(false);
+        setStepProgress(null);
         const message =
           typeof event.data === 'string' ? event.data : 'Simulation server reported an error';
         setErrorText(message);
@@ -252,6 +309,7 @@ export function useSimulationSession(): SimulationSessionState {
         handleServerEvent,
         () => {
           setIsRunning(false);
+          setStepProgress(null);
           if (wsRef.current === nextSocket) {
             wsRef.current = null;
           }
@@ -270,7 +328,10 @@ export function useSimulationSession(): SimulationSessionState {
       setFocusedOrganismIdTracked(null);
       setFocusedOrganism(null);
       setActiveNeuronIds(null);
-      setIsRunning(false);
+      setIsRunning(metadata.running);
+      setIsStepPending(false);
+      setStepProgress(null);
+      setSpeedLevelIndex(nearestSpeedLevelIndex(metadata.ticks_per_second));
       setDeadCellFlashState(null);
       setBornCellFlashState(null);
       setSpeciesPopulationHistory([
@@ -341,7 +402,20 @@ export function useSimulationSession(): SimulationSessionState {
 
   const step = useCallback(
     (count: number) => {
-      sendCommand({ type: 'Step', data: { count } });
+      const requestedCount = Math.floor(count);
+      if (!Number.isFinite(requestedCount)) return;
+      const sent = sendCommand({ type: 'Step', data: { count: Math.max(1, requestedCount) } });
+      if (sent) {
+        setIsStepPending(true);
+        setStepProgress(
+          requestedCount > 1
+            ? {
+                requested_count: requestedCount,
+                completed_count: 0,
+              }
+            : null,
+        );
+      }
     },
     [sendCommand],
   );
@@ -350,6 +424,8 @@ export function useSimulationSession(): SimulationSessionState {
     if (!session) return;
     void request<WorldSnapshot>(`/v1/sessions/${session.id}/reset`, 'POST', { seed: null })
       .then((nextSnapshot) => {
+        setIsStepPending(false);
+        setStepProgress(null);
         setSnapshot(nextSnapshot);
         setSpeciesPopulationHistory([
           {
@@ -457,6 +533,8 @@ export function useSimulationSession(): SimulationSessionState {
     focusedOrganism,
     activeNeuronIds,
     isRunning,
+    isStepPending,
+    stepProgress,
     speedLevels: SPEED_LEVELS,
     speedLevelIndex,
     errorText,

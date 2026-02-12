@@ -2,7 +2,12 @@ import type { OrganismState, SessionMetadata, WorldSnapshot } from '../../types'
 
 export function formatSessionMeta(session: SessionMetadata | null): string {
   if (!session) return 'No session';
-  return `session=${session.id}\ncreated=${new Date(session.created_at_unix_ms).toISOString()}`;
+  return [
+    `session=${session.id}`,
+    `created=${new Date(session.created_at_unix_ms).toISOString()}`,
+    `running=${session.running}`,
+    `ticks_per_second=${session.ticks_per_second}`,
+  ].join('\n');
 }
 
 export function formatMetrics(snapshot: WorldSnapshot | null): string {

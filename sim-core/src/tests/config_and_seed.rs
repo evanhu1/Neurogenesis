@@ -5,6 +5,19 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use std::cmp::Ordering;
 
+fn mutation_rates(genome: &OrganismGenome) -> [f32; 8] {
+    [
+        genome.mutation_rate_vision_distance,
+        genome.mutation_rate_weight,
+        genome.mutation_rate_add_edge,
+        genome.mutation_rate_remove_edge,
+        genome.mutation_rate_split_edge,
+        genome.mutation_rate_inter_bias,
+        genome.mutation_rate_inter_update_rate,
+        genome.mutation_rate_action_bias,
+    ]
+}
+
 #[test]
 fn deterministic_seed() {
     let cfg = stable_test_config();
@@ -297,37 +310,148 @@ fn mutation_rate_self_adaptation_stays_bounded_and_changes_rates() {
     let mut rng = ChaCha8Rng::seed_from_u64(8080);
     let mut genome =
         crate::genome::generate_seed_genome(&cfg.seed_genome_config, cfg.max_num_neurons, &mut rng);
-    let initial_rates = [
-        genome.mutation_rate_vision_distance,
-        genome.mutation_rate_weight,
-        genome.mutation_rate_add_edge,
-        genome.mutation_rate_remove_edge,
-        genome.mutation_rate_split_edge,
-        genome.mutation_rate_inter_bias,
-        genome.mutation_rate_inter_update_rate,
-        genome.mutation_rate_action_bias,
-    ];
+    let initial_rates = mutation_rates(&genome);
 
     for _ in 0..200 {
         crate::genome::mutate_genome(&mut genome, cfg.max_num_neurons, &mut rng);
     }
 
-    let final_rates = [
-        genome.mutation_rate_vision_distance,
-        genome.mutation_rate_weight,
-        genome.mutation_rate_add_edge,
-        genome.mutation_rate_remove_edge,
-        genome.mutation_rate_split_edge,
-        genome.mutation_rate_inter_bias,
-        genome.mutation_rate_inter_update_rate,
-        genome.mutation_rate_action_bias,
-    ];
+    let final_rates = mutation_rates(&genome);
 
     assert!(final_rates
         .iter()
-        .all(|rate| rate.is_finite() && *rate >= 0.0 && *rate <= 1.0));
+        .all(|rate| rate.is_finite() && *rate > 0.0 && *rate < 1.0));
     assert!(final_rates
         .iter()
         .zip(initial_rates.iter())
         .any(|(a, b)| (a - b).abs() > 1e-5));
+}
+
+#[test]
+fn mutation_rate_self_adaptation_recovers_from_hard_boundaries() {
+    let mut genome = test_genome();
+    genome.mutation_rate_vision_distance = 0.0;
+    genome.mutation_rate_weight = 1.0;
+    genome.mutation_rate_add_edge = 0.0;
+    genome.mutation_rate_remove_edge = 1.0;
+    genome.mutation_rate_split_edge = 0.0;
+    genome.mutation_rate_inter_bias = 1.0;
+    genome.mutation_rate_inter_update_rate = 0.0;
+    genome.mutation_rate_action_bias = 1.0;
+
+    let mut rng = ChaCha8Rng::seed_from_u64(123_456);
+    crate::genome::mutate_genome(&mut genome, 1, &mut rng);
+
+    assert!(mutation_rates(&genome)
+        .iter()
+        .all(|rate| rate.is_finite() && *rate > 0.0 && *rate < 1.0));
+}
+
+#[test]
+fn mutation_rate_self_adaptation_long_horizon_stays_inside_open_interval() {
+    let mut cfg = stable_test_config();
+    cfg.seed_genome_config.num_neurons = 4;
+    cfg.max_num_neurons = 8;
+    cfg.seed_genome_config.num_synapses = 10;
+    cfg.seed_genome_config.mutation_rate_vision_distance = 0.25;
+    cfg.seed_genome_config.mutation_rate_weight = 0.25;
+    cfg.seed_genome_config.mutation_rate_add_edge = 0.25;
+    cfg.seed_genome_config.mutation_rate_remove_edge = 0.25;
+    cfg.seed_genome_config.mutation_rate_split_edge = 0.25;
+    cfg.seed_genome_config.mutation_rate_inter_bias = 0.25;
+    cfg.seed_genome_config.mutation_rate_inter_update_rate = 0.25;
+    cfg.seed_genome_config.mutation_rate_action_bias = 0.25;
+
+    let mut rng = ChaCha8Rng::seed_from_u64(777_777);
+    let mut genome =
+        crate::genome::generate_seed_genome(&cfg.seed_genome_config, cfg.max_num_neurons, &mut rng);
+
+    for _ in 0..10_000 {
+        crate::genome::mutate_genome(&mut genome, cfg.max_num_neurons, &mut rng);
+        assert!(mutation_rates(&genome)
+            .iter()
+            .all(|rate| rate.is_finite() && *rate > 0.0 && *rate < 1.0));
+    }
+}
+
+#[test]
+fn mutation_rate_self_adaptation_long_horizon_avoids_boundary_pileup() {
+    let mut cfg = stable_test_config();
+    cfg.seed_genome_config.num_neurons = 4;
+    cfg.max_num_neurons = 8;
+    cfg.seed_genome_config.num_synapses = 10;
+    cfg.seed_genome_config.mutation_rate_vision_distance = 0.25;
+    cfg.seed_genome_config.mutation_rate_weight = 0.25;
+    cfg.seed_genome_config.mutation_rate_add_edge = 0.25;
+    cfg.seed_genome_config.mutation_rate_remove_edge = 0.25;
+    cfg.seed_genome_config.mutation_rate_split_edge = 0.25;
+    cfg.seed_genome_config.mutation_rate_inter_bias = 0.25;
+    cfg.seed_genome_config.mutation_rate_inter_update_rate = 0.25;
+    cfg.seed_genome_config.mutation_rate_action_bias = 0.25;
+
+    const LINEAGE_COUNT: u64 = 64;
+    const GENERATIONS: usize = 3_000;
+    const NEAR_ZERO: f32 = 1.0e-3;
+    const NEAR_ONE: f32 = 0.999;
+
+    let mut exact_zero_count = 0usize;
+    let mut exact_one_count = 0usize;
+    let mut near_zero_count = 0usize;
+    let mut near_one_count = 0usize;
+    let mut total_rates = 0usize;
+    let mut final_rate_sum = 0.0f64;
+
+    for lineage_seed in 0..LINEAGE_COUNT {
+        let mut rng = ChaCha8Rng::seed_from_u64(20_000 + lineage_seed);
+        let mut genome = crate::genome::generate_seed_genome(
+            &cfg.seed_genome_config,
+            cfg.max_num_neurons,
+            &mut rng,
+        );
+        for _ in 0..GENERATIONS {
+            crate::genome::mutate_genome(&mut genome, cfg.max_num_neurons, &mut rng);
+        }
+
+        for rate in mutation_rates(&genome) {
+            if rate == 0.0 {
+                exact_zero_count += 1;
+            }
+            if rate == 1.0 {
+                exact_one_count += 1;
+            }
+            if rate <= NEAR_ZERO {
+                near_zero_count += 1;
+            }
+            if rate >= NEAR_ONE {
+                near_one_count += 1;
+            }
+            final_rate_sum += f64::from(rate);
+            total_rates += 1;
+        }
+    }
+
+    let near_zero_fraction = near_zero_count as f64 / total_rates as f64;
+    let near_one_fraction = near_one_count as f64 / total_rates as f64;
+    let mean_final_rate = final_rate_sum / total_rates as f64;
+
+    assert_eq!(
+        exact_zero_count, 0,
+        "exact_zero_count={exact_zero_count}, exact_one_count={exact_one_count}, near_zero_fraction={near_zero_fraction}, near_one_fraction={near_one_fraction}, mean_final_rate={mean_final_rate}"
+    );
+    assert_eq!(
+        exact_one_count, 0,
+        "exact_zero_count={exact_zero_count}, exact_one_count={exact_one_count}, near_zero_fraction={near_zero_fraction}, near_one_fraction={near_one_fraction}, mean_final_rate={mean_final_rate}"
+    );
+    assert!(
+        near_zero_fraction < 0.35,
+        "exact_zero_count={exact_zero_count}, exact_one_count={exact_one_count}, near_zero_fraction={near_zero_fraction}, near_one_fraction={near_one_fraction}, mean_final_rate={mean_final_rate}"
+    );
+    assert!(
+        near_one_fraction < 0.05,
+        "exact_zero_count={exact_zero_count}, exact_one_count={exact_one_count}, near_zero_fraction={near_zero_fraction}, near_one_fraction={near_one_fraction}, mean_final_rate={mean_final_rate}"
+    );
+    assert!(
+        mean_final_rate < 0.25,
+        "exact_zero_count={exact_zero_count}, exact_one_count={exact_one_count}, near_zero_fraction={near_zero_fraction}, near_one_fraction={near_one_fraction}, mean_final_rate={mean_final_rate}"
+    );
 }

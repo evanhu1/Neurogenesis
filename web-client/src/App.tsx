@@ -37,6 +37,8 @@ export default function App() {
           metricsText={metricsText}
           errorText={simulation.errorText}
           isRunning={simulation.isRunning}
+          isStepPending={simulation.isStepPending}
+          stepProgress={simulation.stepProgress}
           speedLevelIndex={simulation.speedLevelIndex}
           speedLevelCount={simulation.speedLevels.length}
           onNewSession={() => void simulation.createSession()}

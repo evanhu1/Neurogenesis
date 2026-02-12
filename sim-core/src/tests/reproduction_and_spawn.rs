@@ -80,8 +80,6 @@ fn reproduction_offspring_brain_runtime_state_is_reset() {
 #[test]
 fn reproduction_spawn_is_opposite_of_parent_facing() {
     let mut cfg = test_config(40, 1);
-    cfg.center_spawn_min_fraction = 0.45;
-    cfg.center_spawn_max_fraction = 0.55;
     cfg.seed_genome_config.mutation_rate_weight = 0.0;
     let mut sim = Simulation::new(cfg, 30).expect("simulation should initialize");
     configure_sim(

@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState, type ChangeEvent, type MutableRefObject } from 'react';
 import { unwrapId } from '../../protocol';
 import { colorForSpeciesId } from '../../speciesColor';
-import type { WorldOrganismState, WorldSnapshot } from '../../types';
+import type { StepProgressData, WorldOrganismState, WorldSnapshot } from '../../types';
 import type { SpeciesPopulationPoint } from '../sim/hooks/useSimulationSession';
 
 type ControlPanelProps = {
@@ -12,6 +12,8 @@ type ControlPanelProps = {
   metricsText: string;
   errorText: string | null;
   isRunning: boolean;
+  isStepPending: boolean;
+  stepProgress: StepProgressData | null;
   speedLevelIndex: number;
   speedLevelCount: number;
   onNewSession: () => void;
@@ -31,6 +33,8 @@ export function ControlPanel({
   metricsText,
   errorText,
   isRunning,
+  isStepPending,
+  stepProgress,
   speedLevelIndex,
   speedLevelCount,
   onNewSession,
@@ -41,11 +45,37 @@ export function ControlPanel({
   onFocusOrganism,
   panToHexRef,
 }: ControlPanelProps) {
+  const [skipCountInput, setSkipCountInput] = useState('1000');
+  const skipProgress = useMemo(() => {
+    if (!stepProgress || stepProgress.requested_count <= 1) return null;
+    const requested = Math.max(1, stepProgress.requested_count);
+    const completed = Math.min(requested, Math.max(0, stepProgress.completed_count));
+    const percent = Math.round((completed / requested) * 100);
+    return {
+      requested,
+      completed,
+      percent,
+    };
+  }, [stepProgress]);
+
   const handleSpeedLevelInput = (evt: ChangeEvent<HTMLInputElement>) => {
     const rawLevel = Number.parseInt(evt.target.value, 10);
     if (!Number.isFinite(rawLevel)) return;
     onSpeedLevelChange(rawLevel);
   };
+
+  const handleSkipCountInput = useCallback((evt: ChangeEvent<HTMLInputElement>) => {
+    setSkipCountInput(evt.target.value);
+  }, []);
+
+  const runSkip = useCallback(() => {
+    if (isStepPending) return;
+    const parsed = Number.parseInt(skipCountInput, 10);
+    if (!Number.isFinite(parsed)) return;
+    const count = Math.max(1, Math.min(parsed, 1_000_000_000));
+    onStep(count);
+    setSkipCountInput(String(count));
+  }, [isStepPending, onStep, skipCountInput]);
 
   return (
     <aside className="h-full overflow-auto rounded-2xl border border-accent/15 bg-panel/95 p-4 shadow-panel">
@@ -58,7 +88,11 @@ export function ControlPanel({
         <ControlButton label="New Session" onClick={onNewSession} />
         <ControlButton label="Reset" onClick={onReset} />
         <div className="flex w-full items-center gap-2 rounded-lg bg-white/70 px-2 py-1">
-          <ControlButton label={isRunning ? 'Pause' : 'Start'} onClick={onToggleRun} />
+          <ControlButton
+            label={isRunning ? 'Stop' : 'Start'}
+            onClick={onToggleRun}
+            disabled={isStepPending}
+          />
           <span className="text-xs" role="img" aria-label="turtle">🐢</span>
           <input
             aria-label="Simulation speed"
@@ -74,10 +108,46 @@ export function ControlPanel({
         </div>
       </div>
       <div className="mt-2 flex gap-2">
-        <ControlButton label="Step 1" onClick={() => onStep(1)} />
-        <ControlButton label="Step 10" onClick={() => onStep(10)} />
-        <ControlButton label="Step 100" onClick={() => onStep(100)} />
+        <ControlButton label="Step 1" onClick={() => onStep(1)} disabled={isStepPending} />
+        <ControlButton label="Step 10" onClick={() => onStep(10)} disabled={isStepPending} />
+        <ControlButton label="Step 100" onClick={() => onStep(100)} disabled={isStepPending} />
       </div>
+      <div className="mt-2 flex items-center gap-2 rounded-lg bg-white/70 px-2 py-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-ink/75">Skip X</span>
+        <input
+          aria-label="Skip step count"
+          type="number"
+          min={1}
+          step={1}
+          value={skipCountInput}
+          disabled={isStepPending}
+          onChange={handleSkipCountInput}
+          onKeyDown={(evt) => {
+            if (evt.key === 'Enter') {
+              runSkip();
+            }
+          }}
+          className="w-28 rounded-md border border-accent/30 bg-white px-2 py-1 font-mono text-sm text-ink outline-none ring-accent/20 focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:grayscale"
+        />
+        <ControlButton label="Skip" onClick={runSkip} disabled={isStepPending} />
+      </div>
+      {skipProgress ? (
+        <div className="mt-2 rounded-lg bg-white/70 px-2 py-2">
+          <div className="mb-1 flex items-center justify-between font-mono text-[11px] text-ink/75">
+            <span>Skipping {skipProgress.requested.toLocaleString()} ticks</span>
+            <span>
+              {skipProgress.completed.toLocaleString()} / {skipProgress.requested.toLocaleString()}{' '}
+              ({skipProgress.percent}%)
+            </span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-accent/20">
+            <div
+              className="h-full rounded-full bg-accent transition-[width] duration-200 ease-out"
+              style={{ width: `${skipProgress.percent}%` }}
+            />
+          </div>
+        </div>
+      ) : null}
 
       <h3 className="mt-3 text-sm font-semibold uppercase tracking-wide text-ink/80">
         Species Population
@@ -114,13 +184,17 @@ export function ControlPanel({
 type ControlButtonProps = {
   label: string;
   onClick: () => void;
+  disabled?: boolean;
 };
 
-function ControlButton({ label, onClick }: ControlButtonProps) {
+function ControlButton({ label, onClick, disabled = false }: ControlButtonProps) {
   return (
     <button
       onClick={onClick}
-      className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white transition hover:brightness-110"
+      disabled={disabled}
+      className={`rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white transition ${
+        disabled ? 'cursor-not-allowed opacity-50 grayscale' : 'hover:brightness-110'
+      }`}
     >
       {label}
     </button>
