@@ -1,7 +1,7 @@
 import { useMemo, useRef } from 'react';
 import { unwrapId } from './protocol';
-import { ControlPanel } from './features/layout/components/ControlPanel';
-import { InspectorPanel } from './features/layout/components/InspectorPanel';
+import { ControlPanel } from './features/control_panel/ControlPanel';
+import { InspectorPanel } from './features/inspector_panel/InspectorPanel';
 import { useSimulationSession } from './features/sim/hooks/useSimulationSession';
 import {
   formatFocusedStats,
@@ -33,7 +33,7 @@ export default function App() {
 
   return (
     <div className="h-screen bg-page px-4 py-4 text-ink sm:px-6 lg:px-8">
-      <div className="mx-auto grid h-full max-w-[1720px] gap-4 xl:grid-cols-[320px_minmax(480px,1fr)_460px]">
+      <div className="mx-auto grid h-full max-w-[1720px] gap-4 xl:grid-cols-[320px_minmax(480px,1fr)_400px]">
         <ControlPanel
           sessionMeta={sessionMeta}
           speciesPopulationHistory={simulation.speciesPopulationHistory}

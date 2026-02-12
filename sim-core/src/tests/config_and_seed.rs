@@ -1,5 +1,7 @@
 use super::support::*;
 use super::*;
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 use std::cmp::Ordering;
 
 #[test]
@@ -111,4 +113,42 @@ fn initial_food_population_matches_coverage_divisor() {
     let expected = (20_usize * 20) / cfg.food_coverage_divisor as usize;
     let sim = Simulation::new(cfg, 55).expect("simulation should initialize");
     assert_eq!(sim.foods.len(), expected);
+}
+
+#[test]
+fn seed_genome_initializes_update_rates_and_action_biases() {
+    let cfg = stable_test_config();
+    let mut rng = ChaCha8Rng::seed_from_u64(1234);
+    let genome = crate::genome::generate_seed_genome(&cfg.seed_genome_config, &mut rng);
+
+    assert_eq!(
+        genome.inter_update_rates.len(),
+        cfg.seed_genome_config.max_num_neurons as usize
+    );
+    assert!(genome
+        .inter_update_rates
+        .iter()
+        .all(|rate| (0.03..=1.0).contains(rate)));
+    assert_eq!(genome.action_biases, vec![0.0; ActionType::ALL.len()]);
+}
+
+#[test]
+fn inter_update_rate_mutation_clamps_to_strict_bounds() {
+    let mut cfg = stable_test_config();
+    cfg.seed_genome_config.num_neurons = 4;
+    cfg.seed_genome_config.max_num_neurons = 6;
+    cfg.seed_genome_config.num_synapses = 0;
+    cfg.seed_genome_config.mutation_rate = 1.0;
+
+    let mut rng = ChaCha8Rng::seed_from_u64(2026);
+    let mut genome = crate::genome::generate_seed_genome(&cfg.seed_genome_config, &mut rng);
+    genome.mutation_rate = 1.0;
+
+    for _ in 0..500 {
+        crate::genome::mutate_genome(&mut genome, &mut rng);
+        assert!(genome
+            .inter_update_rates
+            .iter()
+            .all(|rate| *rate >= 0.03 && *rate <= 1.0));
+    }
 }

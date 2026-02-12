@@ -1,5 +1,5 @@
-import type { BrainState } from '../../../types';
-import { BrainCanvas } from '../../inspector/components/BrainCanvas';
+import type { BrainState } from '../../types';
+import { BrainCanvas } from './BrainCanvas';
 
 type InspectorPanelProps = {
   focusMetaText: string;

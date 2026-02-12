@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useState, type ChangeEvent, type MutableRefObject } from 'react';
-import { unwrapId } from '../../../protocol';
-import { colorForSpeciesId } from '../../../speciesColor';
-import type { WorldOrganismState, WorldSnapshot } from '../../../types';
-import type { SpeciesPopulationPoint } from '../../sim/hooks/useSimulationSession';
+import { unwrapId } from '../../protocol';
+import { colorForSpeciesId } from '../../speciesColor';
+import type { WorldOrganismState, WorldSnapshot } from '../../types';
+import type { SpeciesPopulationPoint } from '../sim/hooks/useSimulationSession';
 
 type ControlPanelProps = {
   sessionMeta: string;

@@ -1,20 +1,21 @@
 use crate::grid::hex_neighbor;
+use crate::neuron_constants::{
+    ACTION_COUNT, ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE, INTER_UPDATE_RATE_MAX,
+    INTER_UPDATE_RATE_MIN,
+};
 use sim_types::{
     ActionNeuronState, ActionType, BrainState, EntityType, InterNeuronState, NeuronId, NeuronState,
     NeuronType, Occupant, OrganismGenome, OrganismId, SensoryNeuronState, SensoryReceptor,
     SynapseEdge,
 };
-use std::cmp::Ordering;
 
 fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
 }
 
 const ACTION_ACTIVATION_THRESHOLD: f32 = 0.5;
+const TURN_ACTION_DEADZONE: f32 = 0.3;
 const DEFAULT_BIAS: f32 = 0.0;
-const ACTION_COUNT: usize = ActionType::ALL.len();
-const INTER_ID_BASE: u32 = 1000;
-const ACTION_ID_BASE: u32 = 2000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub(crate) enum TurnChoice {
@@ -80,22 +81,34 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
     let mut inter = Vec::with_capacity(genome.num_neurons as usize);
     for i in 0..genome.num_neurons {
         let bias = genome.inter_biases.get(i as usize).copied().unwrap_or(0.0);
+        let update_rate = genome
+            .inter_update_rates
+            .get(i as usize)
+            .copied()
+            .unwrap_or(INTER_UPDATE_RATE_MAX)
+            .clamp(INTER_UPDATE_RATE_MIN, INTER_UPDATE_RATE_MAX);
         inter.push(InterNeuronState {
             neuron: make_neuron(NeuronId(INTER_ID_BASE + i), NeuronType::Inter, bias),
+            update_rate,
             synapses: Vec::new(),
         });
     }
 
     let mut action = Vec::with_capacity(ACTION_COUNT);
     for (idx, action_type) in ActionType::ALL.into_iter().enumerate() {
-        action.push(make_action_neuron(ACTION_ID_BASE + idx as u32, action_type));
+        let bias = genome.action_biases.get(idx).copied().unwrap_or(0.0);
+        action.push(make_action_neuron(
+            ACTION_ID_BASE + idx as u32,
+            action_type,
+            bias,
+        ));
     }
 
     // Valid neuron IDs for this brain
     let sensory_max = sensory.len() as u32; // 0..4
     let inter_count = genome.num_neurons as usize;
     let inter_max = INTER_ID_BASE + genome.num_neurons; // 1000..1000+n
-    let action_max = ACTION_ID_BASE + ACTION_COUNT as u32; // 2000..2004
+    let action_max = ACTION_ID_BASE + ACTION_COUNT_U32; // 2000..2004
 
     let is_valid_pre = |id: NeuronId| -> bool {
         id.0 < sensory_max || (id.0 >= INTER_ID_BASE && id.0 < inter_max)
@@ -118,9 +131,6 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
         }
         prev_key = Some(key);
 
-        if edge.pre_neuron_id == edge.post_neuron_id {
-            continue;
-        }
         if !is_valid_pre(edge.pre_neuron_id) || !is_valid_post(edge.post_neuron_id) {
             continue;
         }
@@ -181,9 +191,8 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
 pub(crate) fn action_index(action: ActionType) -> usize {
     match action {
         ActionType::MoveForward => 0,
-        ActionType::TurnLeft => 1,
-        ActionType::TurnRight => 2,
-        ActionType::Reproduce => 3,
+        ActionType::Turn => 1,
+        ActionType::Reproduce => 2,
     }
 }
 
@@ -205,9 +214,9 @@ pub(crate) fn make_sensory_neuron(id: u32, receptor: SensoryReceptor) -> Sensory
     }
 }
 
-pub(crate) fn make_action_neuron(id: u32, action_type: ActionType) -> ActionNeuronState {
+pub(crate) fn make_action_neuron(id: u32, action_type: ActionType, bias: f32) -> ActionNeuronState {
     ActionNeuronState {
-        neuron: make_neuron(NeuronId(id), NeuronType::Action, DEFAULT_BIAS),
+        neuron: make_neuron(NeuronId(id), NeuronType::Action, bias),
         action_type,
     }
 }
@@ -273,11 +282,20 @@ pub(crate) fn evaluate_brain(
     }
 
     for (idx, neuron) in brain.inter.iter_mut().enumerate() {
-        neuron.neuron.activation = scratch.inter_inputs[idx].tanh();
+        let alpha = neuron
+            .update_rate
+            .clamp(INTER_UPDATE_RATE_MIN, INTER_UPDATE_RATE_MAX);
+        let previous = scratch.prev_inter[idx];
+        let target = scratch.inter_inputs[idx].tanh();
+        neuron.neuron.activation = (1.0 - alpha) * previous + alpha * target;
     }
 
-    // Accumulate into action neurons (fixed-size array, no allocation)
+    // Accumulate into action neurons (fixed-size array, no allocation).
+    // Start with per-action bias terms.
     let mut action_inputs = [0.0f32; ACTION_COUNT];
+    for (idx, action) in brain.action.iter().enumerate() {
+        action_inputs[idx] = action.neuron.bias;
+    }
 
     for sensory in &brain.sensory {
         result.synapse_ops += accumulate_weighted_inputs(
@@ -298,7 +316,10 @@ pub(crate) fn evaluate_brain(
     }
 
     for (idx, action) in brain.action.iter_mut().enumerate() {
-        action.neuron.activation = sigmoid(action_inputs[idx]);
+        action.neuron.activation = match action.action_type {
+            ActionType::Turn => action_inputs[idx].tanh(),
+            _ => sigmoid(action_inputs[idx]),
+        };
         result.action_activations[action_index(action.action_type)] = action.neuron.activation;
     }
 
@@ -338,13 +359,8 @@ pub fn derive_active_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
     }
     match resolved.turn {
         TurnChoice::None => {}
-        TurnChoice::Left => active.push(
-            brain.action[action_index(ActionType::TurnLeft)]
-                .neuron
-                .neuron_id,
-        ),
-        TurnChoice::Right => active.push(
-            brain.action[action_index(ActionType::TurnRight)]
+        TurnChoice::Left | TurnChoice::Right => active.push(
+            brain.action[action_index(ActionType::Turn)]
                 .neuron
                 .neuron_id,
         ),
@@ -362,21 +378,15 @@ pub fn derive_active_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
 
 fn resolve_actions(activations: [f32; ACTION_COUNT]) -> ResolvedActions {
     let move_activation = activations[action_index(ActionType::MoveForward)];
-    let turn_left_activation = activations[action_index(ActionType::TurnLeft)];
-    let turn_right_activation = activations[action_index(ActionType::TurnRight)];
+    let turn_signal = activations[action_index(ActionType::Turn)];
     let reproduce_activation = activations[action_index(ActionType::Reproduce)];
 
-    let turn_left_active = turn_left_activation > ACTION_ACTIVATION_THRESHOLD;
-    let turn_right_active = turn_right_activation > ACTION_ACTIVATION_THRESHOLD;
-    let turn = match (turn_left_active, turn_right_active) {
-        (true, true) => match turn_left_activation.total_cmp(&turn_right_activation) {
-            Ordering::Greater => TurnChoice::Left,
-            Ordering::Less => TurnChoice::Right,
-            Ordering::Equal => TurnChoice::None,
-        },
-        (true, false) => TurnChoice::Left,
-        (false, true) => TurnChoice::Right,
-        (false, false) => TurnChoice::None,
+    let turn = if turn_signal > TURN_ACTION_DEADZONE {
+        TurnChoice::Right
+    } else if turn_signal < -TURN_ACTION_DEADZONE {
+        TurnChoice::Left
+    } else {
+        TurnChoice::None
     };
 
     let wants_move = move_activation > ACTION_ACTIVATION_THRESHOLD;

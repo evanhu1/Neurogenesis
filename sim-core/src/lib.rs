@@ -10,6 +10,7 @@ use thiserror::Error;
 mod brain;
 pub(crate) mod genome;
 mod grid;
+mod neuron_constants;
 mod spawn;
 mod turn;
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
-import { computeBaseHexSize, computeWorldFitZoom, type WorldViewport } from '../../../canvas';
+import { computeBaseHexSize, computeWorldFitZoom, type WorldViewport } from '../worldCanvas';
 
 const BASE_MIN_WORLD_ZOOM = 0.65;
 const ABSOLUTE_MIN_WORLD_ZOOM = 0.05;

@@ -33,8 +33,8 @@ indexed by `r * world_width + q`, where `Occupant` is `Organism(OrganismId)` or
 `Food(FoodId)`. At most one entity per cell.
 
 Six hex directions: `East (q+1,r)`, `NorthEast (q+1,r-1)`, `NorthWest (q,r-1)`,
-`West (q-1,r)`, `SouthWest (q-1,r+1)`, `SouthEast (q,r+1)`. Exactly one of
-`TurnLeft`/`TurnRight` active rotates one step; both or neither means no
+`West (q-1,r)`, `SouthWest (q-1,r+1)`, `SouthEast (q,r+1)`. `Turn` sign rotates
+one step (`<0` = left, `>0` = right), with a deadzone around `0` meaning no
 rotation. `MoveForward` uses post-turn facing.
 
 ## Config
@@ -89,18 +89,22 @@ Four sensory neurons:
   closest matching entity (with occlusion), or `0.0` if none found.
 - `Energy` — `(energy / 100).clamp(0, 1)`.
 
-Neuron IDs: sensory `0..4`, inter `1000..1000+n`, action `2000..2004`.
+Neuron IDs: sensory `0..4`, inter `1000..1000+n`, action `2000..2003`.
 
 Evaluation order: sensory→inter, inter→inter (previous tick activations), then
-sensory→action and inter→action. Inter uses `tanh`, action uses `sigmoid`.
-Action fires when activation `> 0.5`.
+sensory→action and inter→action. Inter uses per-neuron leaky integration:
+`h_i(t) = (1 - alpha_i) * h_i(t-1) + alpha_i * tanh(z_i(t))`, where
+`z_i(t) = b_i + sensory_to_inter_i + inter_to_inter_i(h(t-1))`.
+Actions use `sigmoid` except `Turn`, which uses `tanh`. Discrete action firing
+threshold remains `> 0.5` for non-turn actions.
 
-Actions: `MoveForward`, `TurnLeft`, `TurnRight`, `Reproduce`.
+Actions: `MoveForward`, `Turn`, `Reproduce`.
 
 ## Genome & Mutation
 
 `OrganismGenome`: `num_neurons`, `max_num_neurons`, `vision_distance`,
-`mutation_rate`, `inter_biases` (vec), `edges` (sorted `SynapseEdge` list).
+`mutation_rate`, `inter_biases` (vec), `inter_update_rates` (vec),
+`action_biases` (vec), `edges` (sorted `SynapseEdge` list).
 
 Mutation applies to offspring only, each type independently gated by
 `mutation_rate`:
@@ -115,6 +119,8 @@ Mutation applies to offspring only, each type independently gated by
 - Add edge: random non-duplicate (20 retries).
 - Remove edge: random swap-remove.
 - Bias perturbation: Gaussian (stddev 0.3), clamped `[-1.0, 1.0]`.
+- Inter update-rate perturbation: Gaussian (stddev 0.05), clamped `[0.03, 1.0]`.
+- Action bias perturbation: Gaussian (stddev 0.3), clamped `[-1.0, 1.0]`.
 
 ## Species
 

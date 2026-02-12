@@ -1,22 +1,20 @@
+use crate::neuron_constants::{
+    ACTION_COUNT, ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE, INTER_UPDATE_RATE_MAX,
+    SENSORY_COUNT, INTER_UPDATE_RATE_MIN,
+};
 use crate::SimError;
 use rand::Rng;
-use sim_types::{
-    ActionType, NeuronId, OrganismGenome, SeedGenomeConfig, SensoryReceptor, SynapseEdge,
-};
+use sim_types::{NeuronId, OrganismGenome, SeedGenomeConfig, SynapseEdge};
 use std::cmp::Ordering;
 
 const MAX_MUTATED_INTER_NEURONS: u32 = 256;
 const MIN_MUTATED_VISION_DISTANCE: u32 = 1;
 const MAX_MUTATED_VISION_DISTANCE: u32 = 32;
-const SYNAPSE_STRENGTH_MAX: f32 = 3.0;
+const SYNAPSE_STRENGTH_MAX: f32 = 2.0;
 const BIAS_MAX: f32 = 1.0;
+const INTER_UPDATE_RATE_PERTURBATION_STDDEV: f32 = 0.05;
 const WEIGHT_PERTURBATION_STDDEV: f32 = 0.3;
 const MUTATION_RATE_STEP: f32 = 0.01;
-
-const SENSORY_COUNT: u32 = SensoryReceptor::LOOK_NEURON_COUNT + 1;
-const ACTION_COUNT: u32 = ActionType::ALL.len() as u32;
-const INTER_ID_BASE: u32 = 1000;
-const ACTION_ID_BASE: u32 = 2000;
 
 pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     config: &SeedGenomeConfig,
@@ -25,6 +23,10 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     let inter_biases: Vec<f32> = (0..config.max_num_neurons)
         .map(|_| rng.random_range(-BIAS_MAX..BIAS_MAX))
         .collect();
+    let inter_update_rates: Vec<f32> = (0..config.max_num_neurons)
+        .map(|_| sample_log_uniform_update_rate(rng))
+        .collect();
+    let action_biases = vec![0.0; ACTION_COUNT];
 
     let mut edges = Vec::new();
     for _ in 0..config.num_synapses {
@@ -41,6 +43,8 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         vision_distance: config.vision_distance,
         mutation_rate: config.mutation_rate,
         inter_biases,
+        inter_update_rates,
+        action_biases,
         edges,
     }
 }
@@ -68,13 +72,14 @@ fn random_edge<R: Rng + ?Sized>(
     // Pre neurons: sensory (0..SENSORY_COUNT) + enabled inter (INTER_ID_BASE..INTER_ID_BASE+num_neurons)
     // Post neurons: enabled inter (INTER_ID_BASE..INTER_ID_BASE+num_neurons) + action (ACTION_ID_BASE..ACTION_ID_BASE+ACTION_COUNT)
     let pre_count = SENSORY_COUNT + num_neurons;
-    let post_count = num_neurons + ACTION_COUNT;
+    let post_count = num_neurons + ACTION_COUNT_U32;
 
     if pre_count == 0 || post_count == 0 {
         return None;
     }
 
-    // Try up to 20 times to find a non-duplicate, non-self edge
+    // Try up to 20 times to find a non-duplicate edge.
+    // Self-recurrence is allowed for enabled inter neurons.
     for _ in 0..20 {
         let pre_idx = rng.random_range(0..pre_count);
         let pre = if pre_idx < SENSORY_COUNT {
@@ -90,7 +95,7 @@ fn random_edge<R: Rng + ?Sized>(
             NeuronId(ACTION_ID_BASE + (post_idx - num_neurons))
         };
 
-        if pre == post {
+        if pre == post && !is_enabled_inter_neuron(pre, num_neurons) {
             continue;
         }
 
@@ -143,6 +148,20 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &
         genome.mutation_rate = (genome.mutation_rate + delta).clamp(0.0, 1.0);
     }
 
+    // Keep genome vectors aligned with current shape.
+    let target_inter_len = genome.max_num_neurons as usize;
+    if genome.inter_biases.len() < target_inter_len {
+        genome.inter_biases.resize(target_inter_len, 0.0);
+    }
+    if genome.inter_update_rates.len() < target_inter_len {
+        genome
+            .inter_update_rates
+            .resize(target_inter_len, INTER_UPDATE_RATE_MAX);
+    }
+    if genome.action_biases.len() < ACTION_COUNT {
+        genome.action_biases.resize(ACTION_COUNT, 0.0);
+    }
+
     // Graph mutations
     // Weight perturbation (2x rate — most common)
     if rng.random::<f32>() < rate * 2.0 && !genome.edges.is_empty() {
@@ -179,6 +198,29 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &
         );
     }
 
+    // Inter update-rate perturbation
+    if rng.random::<f32>() < rate && genome.num_neurons > 0 {
+        let idx = rng.random_range(0..genome.num_neurons as usize);
+        genome.inter_update_rates[idx] = perturb_range(
+            genome.inter_update_rates[idx],
+            INTER_UPDATE_RATE_PERTURBATION_STDDEV,
+            INTER_UPDATE_RATE_MIN,
+            INTER_UPDATE_RATE_MAX,
+            rng,
+        );
+    }
+
+    // Action bias perturbation
+    if rng.random::<f32>() < rate && !genome.action_biases.is_empty() {
+        let idx = rng.random_range(0..genome.action_biases.len());
+        genome.action_biases[idx] = perturb(
+            genome.action_biases[idx],
+            WEIGHT_PERTURBATION_STDDEV,
+            BIAS_MAX,
+            rng,
+        );
+    }
+
     sort_edges(&mut genome.edges);
     debug_assert_edges_sorted(&genome.edges);
 }
@@ -192,6 +234,9 @@ fn mutate_num_neurons<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R)
         let new_idx = old;
         if (new_idx as usize) < genome.inter_biases.len() {
             genome.inter_biases[new_idx as usize] = rng.random_range(-BIAS_MAX..BIAS_MAX);
+        }
+        if (new_idx as usize) < genome.inter_update_rates.len() {
+            genome.inter_update_rates[new_idx as usize] = sample_log_uniform_update_rate(rng);
         }
         let edge_count = rng.random_range(1..=2u32);
         for _ in 0..edge_count {
@@ -225,12 +270,32 @@ fn step_u32<R: Rng + ?Sized>(value: u32, min: u32, max: u32, rng: &mut R) -> u32
     }
 }
 
+fn sample_log_uniform_update_rate<R: Rng + ?Sized>(rng: &mut R) -> f32 {
+    let u: f32 = rng.random();
+    let ratio = INTER_UPDATE_RATE_MAX / INTER_UPDATE_RATE_MIN;
+    INTER_UPDATE_RATE_MIN * ratio.powf(u)
+}
+
+fn is_enabled_inter_neuron(id: NeuronId, num_neurons: u32) -> bool {
+    id.0 >= INTER_ID_BASE && id.0 < INTER_ID_BASE + num_neurons
+}
+
 /// Sample from a normal-ish distribution using Box-Muller, then clamp.
 fn perturb<R: Rng + ?Sized>(value: f32, stddev: f32, clamp_abs: f32, rng: &mut R) -> f32 {
+    let normal = normal_sample(rng);
+    (value + normal * stddev).clamp(-clamp_abs, clamp_abs)
+}
+
+/// Sample from a normal-ish distribution using Box-Muller, then clamp to [min, max].
+fn perturb_range<R: Rng + ?Sized>(value: f32, stddev: f32, min: f32, max: f32, rng: &mut R) -> f32 {
+    let normal = normal_sample(rng);
+    (value + normal * stddev).clamp(min, max)
+}
+
+fn normal_sample<R: Rng + ?Sized>(rng: &mut R) -> f32 {
     let u1: f32 = rng.random::<f32>().max(f32::EPSILON);
     let u2: f32 = rng.random::<f32>();
-    let normal = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos();
-    (value + normal * stddev).clamp(-clamp_abs, clamp_abs)
+    (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos()
 }
 
 /// L1 genome distance: scalar traits + bias vectors + merge-join over sorted edges.
@@ -247,6 +312,28 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
     for i in 0..max_bias_len {
         let ba = a.inter_biases.get(i).copied().unwrap_or(0.0);
         let bb = b.inter_biases.get(i).copied().unwrap_or(0.0);
+        dist += (ba - bb).abs();
+    }
+
+    let max_update_rate_len = a.inter_update_rates.len().max(b.inter_update_rates.len());
+    for i in 0..max_update_rate_len {
+        let aa = a
+            .inter_update_rates
+            .get(i)
+            .copied()
+            .unwrap_or(INTER_UPDATE_RATE_MAX);
+        let bb = b
+            .inter_update_rates
+            .get(i)
+            .copied()
+            .unwrap_or(INTER_UPDATE_RATE_MAX);
+        dist += (aa - bb).abs();
+    }
+
+    let max_action_bias_len = a.action_biases.len().max(b.action_biases.len());
+    for i in 0..max_action_bias_len {
+        let ba = a.action_biases.get(i).copied().unwrap_or(0.0);
+        let bb = b.action_biases.get(i).copied().unwrap_or(0.0);
         dist += (ba - bb).abs();
     }
 

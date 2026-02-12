@@ -1,5 +1,6 @@
 use super::support::*;
 use super::*;
+use crate::brain::{evaluate_brain, express_genome, BrainScratch};
 
 #[test]
 fn scan_ahead_returns_organism_with_distance_signal() {
@@ -211,15 +212,15 @@ fn scan_ahead_occlusion_closer_entity_blocks_farther() {
 #[test]
 fn turn_actions_rotate_facing() {
     assert_eq!(
-        facing_after_turn(FacingDirection::East, true, false),
+        facing_after_turn(FacingDirection::East, TurnChoice::Left),
         FacingDirection::NorthEast
     );
     assert_eq!(
-        facing_after_turn(FacingDirection::East, false, true),
+        facing_after_turn(FacingDirection::East, TurnChoice::Right),
         FacingDirection::SouthEast
     );
     assert_eq!(
-        facing_after_turn(FacingDirection::East, true, true),
+        facing_after_turn(FacingDirection::East, TurnChoice::None),
         FacingDirection::East
     );
 }
@@ -279,4 +280,129 @@ fn reproduce_blocks_move_and_turn() {
         .expect("organism should remain alive");
     assert_eq!((organism.q, organism.r), (3, 3));
     assert_eq!(organism.facing, FacingDirection::East);
+}
+
+#[test]
+fn turn_action_has_deadzone_around_zero() {
+    let mut organism = OrganismState {
+        id: OrganismId(0),
+        species_id: SpeciesId(0),
+        q: 1,
+        r: 1,
+        age_turns: 0,
+        facing: FacingDirection::East,
+        energy: 10.0,
+        consumptions_count: 0,
+        reproductions_count: 0,
+        genome: OrganismGenome {
+            num_neurons: 0,
+            max_num_neurons: 0,
+            vision_distance: 1,
+            mutation_rate: 0.0,
+            inter_biases: vec![],
+            inter_update_rates: vec![],
+            action_biases: vec![0.0, 0.05, 0.0],
+            edges: vec![],
+        },
+        brain: BrainState {
+            sensory: vec![],
+            inter: vec![],
+            action: vec![],
+            synapse_count: 0,
+        },
+    };
+    organism.brain = express_genome(&organism.genome);
+    let occupancy = vec![None; 9];
+    let mut scratch = BrainScratch::new();
+    let vision_distance = organism.genome.vision_distance;
+    let evaluation = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
+    assert_eq!(evaluation.resolved_actions.turn, TurnChoice::None);
+
+    organism.genome.action_biases[1] = 0.4;
+    organism.brain = express_genome(&organism.genome);
+    let vision_distance = organism.genome.vision_distance;
+    let evaluation = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
+    assert_eq!(evaluation.resolved_actions.turn, TurnChoice::Right);
+
+    organism.genome.action_biases[1] = -0.4;
+    organism.brain = express_genome(&organism.genome);
+    let vision_distance = organism.genome.vision_distance;
+    let evaluation = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
+    assert_eq!(evaluation.resolved_actions.turn, TurnChoice::Left);
+}
+
+#[test]
+fn self_recurrent_interneuron_uses_previous_activation_with_leaky_update() {
+    let genome = OrganismGenome {
+        num_neurons: 1,
+        max_num_neurons: 1,
+        vision_distance: 1,
+        mutation_rate: 0.0,
+        inter_biases: vec![0.0],
+        inter_update_rates: vec![0.5],
+        action_biases: vec![0.0; ActionType::ALL.len()],
+        edges: vec![SynapseEdge {
+            pre_neuron_id: NeuronId(1000),
+            post_neuron_id: NeuronId(1000),
+            weight: 2.0,
+        }],
+    };
+    let mut organism = OrganismState {
+        id: OrganismId(0),
+        species_id: SpeciesId(0),
+        q: 1,
+        r: 1,
+        age_turns: 0,
+        facing: FacingDirection::East,
+        energy: 10.0,
+        consumptions_count: 0,
+        reproductions_count: 0,
+        brain: express_genome(&genome),
+        genome,
+    };
+    organism.brain.inter[0].neuron.activation = 1.0;
+
+    let mut occupancy = vec![None; 9];
+    occupancy[4] = Some(Occupant::Organism(organism.id));
+    let mut scratch = BrainScratch::new();
+    let vision_distance = organism.genome.vision_distance;
+    let _ = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
+
+    let expected = 0.5 * 1.0 + 0.5 * 2.0_f32.tanh();
+    assert!((organism.brain.inter[0].neuron.activation - expected).abs() < 1e-5);
+}
+
+#[test]
+fn action_biases_drive_actions_without_incoming_edges() {
+    let genome = OrganismGenome {
+        num_neurons: 0,
+        max_num_neurons: 0,
+        vision_distance: 1,
+        mutation_rate: 0.0,
+        inter_biases: vec![],
+        inter_update_rates: vec![],
+        action_biases: vec![5.0, 0.0, 6.0],
+        edges: vec![],
+    };
+    let mut organism = OrganismState {
+        id: OrganismId(0),
+        species_id: SpeciesId(0),
+        q: 1,
+        r: 1,
+        age_turns: 0,
+        facing: FacingDirection::East,
+        energy: 10.0,
+        consumptions_count: 0,
+        reproductions_count: 0,
+        brain: express_genome(&genome),
+        genome,
+    };
+    let mut occupancy = vec![None; 9];
+    occupancy[4] = Some(Occupant::Organism(organism.id));
+    let mut scratch = BrainScratch::new();
+    let vision_distance = organism.genome.vision_distance;
+    let evaluation = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
+
+    assert!(evaluation.resolved_actions.wants_reproduce);
+    assert!(!evaluation.resolved_actions.wants_move);
 }

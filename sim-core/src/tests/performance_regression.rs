@@ -37,7 +37,7 @@ fn stable_perf_config() -> WorldConfig {
 fn median(values: &mut [f64]) -> f64 {
     values.sort_unstable_by(f64::total_cmp);
     let mid = values.len() / 2;
-    if values.len() % 2 == 0 {
+    if values.len().is_multiple_of(2) {
         (values[mid - 1] + values[mid]) / 2.0
     } else {
         values[mid]
@@ -83,10 +83,9 @@ fn turn_tick_scales_linearly_with_turn_count() {
 #[test]
 #[ignore = "performance-sensitive; run with --release --ignored"]
 fn turn_tick_median_ns_per_turn_within_budget() {
-    assert!(
-        !cfg!(debug_assertions),
-        "run this performance test with --release"
-    );
+    if cfg!(debug_assertions) {
+        panic!("run this performance test with --release");
+    }
 
     let budget_ns_per_turn = std::env::var("SIM_CORE_TICK_BUDGET_NS_PER_TURN")
         .ok()

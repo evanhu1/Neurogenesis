@@ -4,9 +4,9 @@ import {
   useLayoutEffect,
   useRef,
   type MouseEvent,
-  type MutableRefObject,
+  type RefObject,
 } from 'react';
-import { buildHexLayout, hexCenter, pickOrganismAtCanvasPoint, renderWorld } from '../../../canvas';
+import { buildHexLayout, hexCenter, pickOrganismAtCanvasPoint, renderWorld } from '../worldCanvas';
 import { unwrapId } from '../../../protocol';
 import type { WorldOrganismState, WorldSnapshot } from '../../../types';
 import { useWorldViewport } from '../hooks/useWorldViewport';
@@ -17,7 +17,7 @@ type WorldCanvasProps = {
   deadFlashCells: Array<{ q: number; r: number }> | null;
   bornFlashCells: Array<{ q: number; r: number }> | null;
   onOrganismSelect: (organism: WorldOrganismState) => void;
-  panToHexRef?: MutableRefObject<((q: number, r: number) => void) | null>;
+  panToHexRef?: RefObject<((q: number, r: number) => void) | null>;
 };
 
 export function WorldCanvas({
@@ -193,7 +193,7 @@ export function WorldCanvas({
       id="world-canvas"
       width={900}
       height={900}
-      className={`block h-full w-auto max-h-full max-w-full shrink-0 select-none rounded-xl border border-accent/20 bg-white ${cursorClass}`}
+      className={`block h-full w-full max-h-full max-w-full shrink-0 select-none rounded-xl border border-accent/20 bg-white ${cursorClass}`}
     />
   );
 }

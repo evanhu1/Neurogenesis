@@ -35,6 +35,8 @@ export type OrganismGenome = {
   vision_distance: number;
   mutation_rate: number;
   inter_biases: number[];
+  inter_update_rates: number[];
+  action_biases: number[];
   edges: SynapseEdge[];
 };
 
@@ -66,6 +68,7 @@ export type SensoryNeuronState = {
 
 export type InterNeuronState = {
   neuron: NeuronState;
+  update_rate: number;
   synapses: SynapseEdge[];
 };
 

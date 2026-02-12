@@ -16,15 +16,13 @@ pub struct FoodId(pub u64);
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ActionType {
     MoveForward,
-    TurnLeft,
-    TurnRight,
+    Turn,
     Reproduce,
 }
 impl ActionType {
-    pub const ALL: [ActionType; 4] = [
+    pub const ALL: [ActionType; 3] = [
         ActionType::MoveForward,
-        ActionType::TurnLeft,
-        ActionType::TurnRight,
+        ActionType::Turn,
         ActionType::Reproduce,
     ];
 }
@@ -90,6 +88,8 @@ pub struct OrganismGenome {
     pub vision_distance: u32,
     pub mutation_rate: f32,
     pub inter_biases: Vec<f32>,
+    pub inter_update_rates: Vec<f32>,
+    pub action_biases: Vec<f32>,
     pub edges: Vec<SynapseEdge>,
 }
 
@@ -158,6 +158,7 @@ pub struct SensoryNeuronState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct InterNeuronState {
     pub neuron: NeuronState,
+    pub update_rate: f32,
     pub synapses: Vec<SynapseEdge>,
 }
 

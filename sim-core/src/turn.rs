@@ -155,13 +155,8 @@ impl Simulation {
                 &mut scratch,
             );
 
-            let (turn_left_active, turn_right_active) = match evaluation.resolved_actions.turn {
-                TurnChoice::None => (false, false),
-                TurnChoice::Left => (true, false),
-                TurnChoice::Right => (false, true),
-            };
             let facing_after_turn =
-                facing_after_turn(snapshot_state.facing, turn_left_active, turn_right_active);
+                facing_after_turn(snapshot_state.facing, evaluation.resolved_actions.turn);
             let wants_move = evaluation.resolved_actions.wants_move;
             let wants_reproduce = evaluation.resolved_actions.wants_reproduce;
             let move_confidence =
@@ -526,16 +521,11 @@ fn reproduction_target(
 
 pub(crate) fn facing_after_turn(
     current: FacingDirection,
-    turn_left_active: bool,
-    turn_right_active: bool,
+    turn_choice: TurnChoice,
 ) -> FacingDirection {
-    if turn_left_active ^ turn_right_active {
-        if turn_left_active {
-            rotate_left(current)
-        } else {
-            rotate_right(current)
-        }
-    } else {
-        current
+    match turn_choice {
+        TurnChoice::None => current,
+        TurnChoice::Left => rotate_left(current),
+        TurnChoice::Right => rotate_right(current),
     }
 }
