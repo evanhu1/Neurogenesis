@@ -8,13 +8,13 @@ food_energy = 50.0
 reproduction_energy_cost = 100.0
 move_action_energy_cost = 1.0
 turn_energy_cost = 0.5
-food_coverage_divisor = 40
+food_coverage_divisor = 50
 max_organism_age = 500
 speciation_threshold = 50.0
 
 [seed_genome_config]
 num_neurons = 20
 max_num_neurons = 50
-num_synapses = 80
+num_synapses = 150
 mutation_rate = 0.1
 vision_distance = 10

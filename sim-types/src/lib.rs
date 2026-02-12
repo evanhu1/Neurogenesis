@@ -205,6 +205,7 @@ pub struct MetricsSnapshot {
     pub synapse_ops_last_turn: u64,
     pub actions_applied_last_turn: u64,
     pub consumptions_last_turn: u64,
+    pub predations_last_turn: u64,
     pub total_consumptions: u64,
     pub reproductions_last_turn: u64,
     pub starvations_last_turn: u64,

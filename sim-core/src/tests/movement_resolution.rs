@@ -211,6 +211,7 @@ fn contested_occupied_target_where_occupant_remains_uses_consume_path() {
     assert_eq!(moves.len(), 1);
     assert_eq!(moves.get(&OrganismId(0)), Some(&((1, 1), (2, 1))));
     assert_eq!(delta.metrics.consumptions_last_turn, 1);
+    assert_eq!(delta.metrics.predations_last_turn, 1);
     assert!(sim
         .organisms
         .iter()
@@ -261,6 +262,7 @@ fn move_into_food_consumes_and_replenishes_food_supply() {
     let target_food = (5_usize * 5) / sim.config.food_coverage_divisor as usize;
     assert_eq!(delta.food_spawned.len(), target_food);
     assert_eq!(delta.metrics.consumptions_last_turn, 1);
+    assert_eq!(delta.metrics.predations_last_turn, 0);
     assert_eq!(sim.foods.len(), target_food);
     assert_eq!(
         sim.occupant_at(2, 1),

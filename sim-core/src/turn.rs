@@ -73,6 +73,7 @@ struct CommitResult {
     removed_positions: Vec<RemovedEntityPosition>,
     food_spawned: Vec<FoodState>,
     consumptions: u64,
+    predations: u64,
 }
 
 impl Simulation {
@@ -96,6 +97,7 @@ impl Simulation {
         self.metrics.synapse_ops_last_turn = synapse_ops;
         self.metrics.actions_applied_last_turn = commit.moves.len() as u64 + reproductions;
         self.metrics.consumptions_last_turn = commit.consumptions;
+        self.metrics.predations_last_turn = commit.predations;
         self.metrics.total_consumptions += commit.consumptions;
         self.metrics.reproductions_last_turn = reproductions;
         self.metrics.starvations_last_turn = starvations;
@@ -278,6 +280,7 @@ impl Simulation {
         let mut consumed_energy = vec![0.0_f32; org_count];
         let mut removed_positions = Vec::new();
         let mut consumptions = 0_u64;
+        let mut predations = 0_u64;
 
         for resolution in resolutions {
             let actor_idx = self.organism_index(resolution.actor);
@@ -296,6 +299,7 @@ impl Simulation {
                         consumed_energy[actor_idx] += self.config.food_energy * 2.0;
                     }
                     consumptions += 1;
+                    predations += 1;
                 }
                 MoveResolutionKind::ConsumeFood {
                     consumed_food: food_id,
@@ -361,6 +365,7 @@ impl Simulation {
             removed_positions,
             food_spawned,
             consumptions,
+            predations,
         }
     }
 

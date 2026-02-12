@@ -4,7 +4,9 @@ import { colorForSpeciesId } from './speciesColor';
 
 const SQRT_3 = Math.sqrt(3);
 const FOOD_COLOR = '#16a34a';
-const GRID_LAYER_MAX_DIMENSION = 8192;
+const BASE_HEX_SIZE_AT_900PX = 8;
+const BASE_HEX_MIN_SIZE_PX = 6;
+const BASE_HEX_REFERENCE_CANVAS_PX = 900;
 
 type HexLayout = {
   size: number;
@@ -12,14 +14,6 @@ type HexLayout = {
   originY: number;
   worldWidth: number;
 };
-
-type GridLayerCache = {
-  key: string;
-  canvas: HTMLCanvasElement;
-  layout: HexLayout;
-};
-
-let gridLayerCache: GridLayerCache | null = null;
 
 export type WorldViewport = {
   zoom: number;
@@ -43,16 +37,39 @@ function toWorldSpace(
 export function computeBaseHexSize(
   canvasWidth: number,
   canvasHeight: number,
+  _worldWidth: number,
+): number {
+  const minCanvasDimension = Math.max(1, Math.min(canvasWidth, canvasHeight));
+  const scaledSize = (minCanvasDimension / BASE_HEX_REFERENCE_CANVAS_PX) * BASE_HEX_SIZE_AT_900PX;
+  return Math.max(BASE_HEX_MIN_SIZE_PX, scaledSize);
+}
+
+function computeWorldDimensionFactors(worldWidth: number) {
+  return {
+    widthFactor: SQRT_3 * (1.5 * Math.max(0, worldWidth - 1) + 1),
+    heightFactor: 1.5 * Math.max(0, worldWidth - 1) + 2,
+  };
+}
+
+export function computeWorldFitZoom(
+  canvasWidth: number,
+  canvasHeight: number,
   worldWidth: number,
 ): number {
-  const widthFactor = SQRT_3 * (1.5 * Math.max(0, worldWidth - 1) + 1);
-  const heightFactor = 1.5 * Math.max(0, worldWidth - 1) + 2;
-  return Math.min(canvasWidth / widthFactor, canvasHeight / heightFactor);
+  if (!Number.isFinite(worldWidth) || worldWidth <= 0) return 1;
+  const size = computeBaseHexSize(canvasWidth, canvasHeight, worldWidth);
+  if (!Number.isFinite(size) || size <= 0) return 1;
+  const { widthFactor, heightFactor } = computeWorldDimensionFactors(worldWidth);
+  const worldPixelWidth = widthFactor * size;
+  const worldPixelHeight = heightFactor * size;
+  if (worldPixelWidth <= 0 || worldPixelHeight <= 0) return 1;
+  const fitZoom = Math.min(canvasWidth / worldPixelWidth, canvasHeight / worldPixelHeight);
+  if (!Number.isFinite(fitZoom) || fitZoom <= 0) return 1;
+  return Math.min(1, fitZoom);
 }
 
 export function buildHexLayout(canvasWidth: number, canvasHeight: number, worldWidth: number): HexLayout {
-  const widthFactor = SQRT_3 * (1.5 * Math.max(0, worldWidth - 1) + 1);
-  const heightFactor = 1.5 * Math.max(0, worldWidth - 1) + 2;
+  const { widthFactor, heightFactor } = computeWorldDimensionFactors(worldWidth);
   const size = computeBaseHexSize(canvasWidth, canvasHeight, worldWidth);
 
   const worldPixelWidth = widthFactor * size;
@@ -88,57 +105,39 @@ function traceHex(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: n
   ctx.closePath();
 }
 
-function computeGridRenderScale(canvasWidth: number, canvasHeight: number, zoom: number): number {
-  const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
-  if (safeZoom <= 1) return 1;
-  const maxCanvasDimension = Math.max(canvasWidth, canvasHeight);
-  if (maxCanvasDimension <= 0) return 1;
-  const maxScaleByDimension = Math.max(1, Math.floor(GRID_LAYER_MAX_DIMENSION / maxCanvasDimension));
-  return Math.min(safeZoom, maxScaleByDimension);
-}
+function drawVisibleGrid(
+  ctx: CanvasRenderingContext2D,
+  layout: HexLayout,
+  minX: number,
+  maxX: number,
+  minY: number,
+  maxY: number,
+) {
+  const size = layout.size;
+  const worldWidth = layout.worldWidth;
+  if (size <= 0 || worldWidth <= 0) return;
 
-function getGridLayer(
-  canvasWidth: number,
-  canvasHeight: number,
-  worldWidth: number,
-  zoom: number,
-): GridLayerCache {
-  const renderScale = computeGridRenderScale(canvasWidth, canvasHeight, zoom);
-  const layerWidth = Math.max(1, Math.round(canvasWidth * renderScale));
-  const layerHeight = Math.max(1, Math.round(canvasHeight * renderScale));
-  const key = `${canvasWidth}x${canvasHeight}:${worldWidth}:${layerWidth}x${layerHeight}`;
-  if (gridLayerCache && gridLayerCache.key === key) {
-    return gridLayerCache;
-  }
+  const rMinEstimate = (minY - layout.originY) / (1.5 * size) - 1;
+  const rMaxEstimate = (maxY - layout.originY) / (1.5 * size) + 1;
+  const rStart = Math.max(0, Math.floor(rMinEstimate));
+  const rEnd = Math.min(worldWidth - 1, Math.ceil(rMaxEstimate));
 
-  const layer = document.createElement('canvas');
-  layer.width = layerWidth;
-  layer.height = layerHeight;
+  for (let r = rStart; r <= rEnd; r += 1) {
+    const qMinEstimate = (minX - layout.originX) / (SQRT_3 * size) - r / 2 - 1;
+    const qMaxEstimate = (maxX - layout.originX) / (SQRT_3 * size) - r / 2 + 1;
+    const qStart = Math.max(0, Math.floor(qMinEstimate));
+    const qEnd = Math.min(worldWidth - 1, Math.ceil(qMaxEstimate));
 
-  const layout = buildHexLayout(canvasWidth, canvasHeight, worldWidth);
-  const layerCtx = layer.getContext('2d');
-  if (layerCtx) {
-    const scaleX = layerWidth / canvasWidth;
-    const scaleY = layerHeight / canvasHeight;
-    layerCtx.save();
-    layerCtx.scale(scaleX, scaleY);
-    for (let r = 0; r < worldWidth; r += 1) {
-      for (let q = 0; q < worldWidth; q += 1) {
-        const center = hexCenter(layout, q, r);
-        traceHex(layerCtx, center.x, center.y, layout.size);
-        layerCtx.fillStyle = (q + r) % 2 === 0 ? '#cfd6e2' : '#e3e8f0';
-        layerCtx.fill();
-        layerCtx.strokeStyle = '#8a94a8';
-        layerCtx.lineWidth = 0.4;
-        layerCtx.stroke();
-      }
+    for (let q = qStart; q <= qEnd; q += 1) {
+      const center = hexCenter(layout, q, r);
+      traceHex(ctx, center.x, center.y, size);
+      ctx.fillStyle = (q + r) % 2 === 0 ? '#cfd6e2' : '#e3e8f0';
+      ctx.fill();
+      ctx.strokeStyle = '#8a94a8';
+      ctx.lineWidth = 0.4;
+      ctx.stroke();
     }
-    layerCtx.restore();
   }
-
-  const cacheEntry = { key, canvas: layer, layout };
-  gridLayerCache = cacheEntry;
-  return cacheEntry;
 }
 
 function facingDelta(direction: FacingDirection): [number, number] {
@@ -184,9 +183,14 @@ export function renderWorld(
   ctx.translate(-width / 2, -height / 2);
 
   const worldWidth = snapshot.config.world_width;
-  const gridLayer = getGridLayer(width, height, worldWidth, viewport.zoom);
-  const layout = gridLayer.layout;
-  ctx.drawImage(gridLayer.canvas, 0, 0, width, height);
+  const layout = buildHexLayout(width, height, worldWidth);
+  const topLeft = toWorldSpace(0, 0, width, height, viewport);
+  const bottomRight = toWorldSpace(width, height, width, height, viewport);
+  const minX = Math.min(topLeft.x, bottomRight.x) - layout.size * 2;
+  const maxX = Math.max(topLeft.x, bottomRight.x) + layout.size * 2;
+  const minY = Math.min(topLeft.y, bottomRight.y) - layout.size * 2;
+  const maxY = Math.max(topLeft.y, bottomRight.y) + layout.size * 2;
+  drawVisibleGrid(ctx, layout, minX, maxX, minY, maxY);
 
   if (deadFlashCells) {
     for (const cell of deadFlashCells) {

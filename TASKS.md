@@ -11,60 +11,76 @@
 
 ## Sequential Implementation Tasks
 
-1. Lock behavioral semantics for energy-based lifecycle and reproduction in the
-   turn runner before coding:
-   - Define exact per-turn order for: movement, move-energy spend, reproduce
-     action validation, reproduce-energy spend, baseline energy decay, and
-     starvation removal.
-   - Define whether move-energy cost is charged on move attempt or successful
-     committed move.
-   - Define whether consumption changes energy (and how).
-2. Update protocol/config schemas (`sim-protocol`) and defaults:
-   - Add world-level energy knobs to `WorldConfig` and `config/default.toml`:
-     `starting_energy`, `reproduction_energy_cost`, `move_action_energy_cost`.
-   - Add `ActionType::Reproduce` and extend `ActionType::ALL`.
-   - Replace `OrganismState.turns_since_last_consumption` with
-     `OrganismState.energy: f32`.
-   - Add/confirm per-organism successful reproduction metric field.
-   - Add world metric `reproductions_last_turn` and remove
-     `births_last_turn`.
-   - Remove species starvation dependency (`turns_to_starve`) entirely.
-3. Refactor `sim-core` turn-runner state structures:
-   - Expand brain evaluation action slots from 3 to 4.
-   - Add reproduce intent capture in `build_intents`.
-   - Remove hunger snapshot state and use energy snapshot state.
-4. Rework `commit_phase` + lifecycle handling in `sim-core/src/turn.rs`:
-   - Remove consume-triggered reproduction queueing.
-   - Apply move energy cost using the chosen semantics.
-   - Resolve reproduce action attempts using post-commit occupancy checks:
-     insufficient energy or blocked spawn cell => no-op; otherwise enqueue spawn
-     and deduct reproduction energy.
-   - Increment organism + world reproduction success metrics on successful
-     reproduce actions.
-   - Apply per-turn baseline energy decay and starvation at `energy <= 0.0`.
-5. Update spawn logic in `sim-core/src/spawn.rs`:
-   - Initialize new organisms with `starting_energy`.
-   - Keep reproduction placement opposite parent facing; skip when blocked/OOB.
-   - Ensure starvation replacements also start with configured energy.
-6. Remove hunger-based fields and logic across core:
-   - Delete all `turns_since_last_consumption` reads/writes and associated
-     validation.
-   - Remove now-obsolete `turns_to_starve` validation/use across the project.
-7. Update frontend protocol mirror/types and UI strings (`web-client`):
-   - Parse new world config energy fields.
-   - Replace focused-organism stats line from hunger counter to energy.
-   - Add reproduction success metric display if introduced in protocol.
-8. Update and expand tests:
-   - Update existing helpers for 4 action neurons (include `Reproduce`).
-   - Add deterministic tests for reproduce success/failure cases:
-     insufficient energy, blocked spawn, enough energy + free spawn.
-   - Add tests for move-energy spending and starvation at zero energy.
-   - Update/rebaseline golden fixture(s) affected by action-set and lifecycle
-     changes.
-9. Update docs/spec:
-   - Revise config, action set, turn pipeline, lifecycle, and metrics sections
-     in `specs/spec.md` to match the new energy budget model.
-10. Validate end-to-end:
-   - Run `cargo check --workspace`, `cargo test --workspace`, and
-     `cd web-client && npm run typecheck` to confirm protocol/core/client
-     consistency.
+### 1. Change Interneurons To Per-Interneuron Leaky Integrators
+
+1. Add state and genome fields.
+   - Add `update_rate: f32` to `InterNeuronState`.
+   - Add `inter_update_rates: Vec<f32>` to `OrganismGenome`.
+   - Keep validation aligned with `inter_biases` (`len == num_neurons`).
+2. Implement seed initialization for `inter_update_rates`.
+   - In `generate_seed_genome`, sample each update rate from a log-uniform
+     distribution on `[0.03, 1.0]`.
+   - Use deterministic RNG flow so fixed seed behavior is preserved.
+3. Implement mutation for per-neuron update rates.
+   - Add Gaussian perturbation with stddev near `0.05`.
+   - Clamp to a strict non-zero/stable range (same `[0.03, 1.0]` bounds).
+4. Update brain evaluation to leaky-integrator dynamics.
+   - Compute `z_i(t) = b_i + sensory_to_inter_sum_i + inter_to_inter_sum_i(h(t-1))`.
+   - Compute `h_i(t) = (1 - alpha_i) * h_i(t-1) + alpha_i * tanh(z_i(t))`.
+   - Ensure the recurrent term reads only `h(t-1)` to avoid order dependence.
+5. Add deterministic tests.
+   - Seed genome tests for update-rate count and bounds.
+   - Mutation tests for clamping and non-zero behavior.
+   - Brain-step tests for expected temporal smoothing with different `alpha_i`.
+6. Keep docs and protocol-adjacent types aligned.
+   - Update any affected spec/docs and shared type mirrors.
+
+### 2. Combine Left/Right Turn Into A Single Turn Action (tanh + deadzone)
+
+1. Replace separate turn actions in action definitions.
+   - Collapse `turn_left` and `turn_right` into one `turn` action signal.
+   - Update action IDs/enums/constants consistently across crates and client.
+2. Change turn output activation and interpretation.
+   - Use `tanh` for the turn action output (signed direction signal).
+   - Apply a deadzone around `0` (`|signal| <= epsilon` means no turn).
+   - Map sign to direction (`signal < 0` left, `signal > 0` right).
+3. Update intent generation and turn application.
+   - Ensure turning logic consumes the unified signed value.
+   - Preserve deterministic behavior and tie-breaking semantics.
+4. Update serialization/client handling.
+   - Align server protocol, client types, and UI behavior with one turn action.
+5. Add/adjust tests.
+   - Verify deadzone no-op behavior.
+   - Verify signed turning behavior and deterministic outcomes.
+
+### 3. Allow Self Recurrence In Interneurons
+
+1. Relax genome/edge validation rules.
+   - Permit `inter -> same inter` edges (self loops).
+2. Ensure evaluation semantics remain deterministic.
+   - Self-recurrent contribution must come from `h_i(t-1)` only.
+   - No same-tick feedback path should depend on neuron iteration order.
+3. Update genome generation and mutation behavior.
+   - Allow creation/retention of self-recurrent edges where inter->inter edges
+     are handled.
+4. Add tests.
+   - Validation test that self recurrence is accepted.
+   - Brain-step test confirming expected self-memory behavior across ticks.
+
+### 4. Allow Bias Term In Action Neurons
+
+1. Extend genome with action biases.
+   - Add `action_biases: Vec<f32>` to `OrganismGenome`.
+   - Validate count against the number of action neurons.
+2. Initialize action biases in seed genomes.
+   - Define initialization policy (e.g., zero or small random values) and keep
+     deterministic seed behavior.
+3. Add mutation support for action biases.
+   - Apply mutation gates consistent with existing genome mutation flow.
+   - Use bounded/clamped perturbations compatible with current bias handling.
+4. Update brain action evaluation.
+   - Add action bias term before action activation for each action neuron.
+   - Keep existing firing/threshold logic unless explicitly changed by task 2.
+5. Update tests and shared models.
+   - Add coverage for action bias effect on action outputs.
+   - Keep Rust/shared/client type definitions synchronized.

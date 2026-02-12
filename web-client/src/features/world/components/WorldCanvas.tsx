@@ -34,11 +34,13 @@ export function WorldCanvas({
   const deadFlashCellsRef = useRef<Array<{ q: number; r: number }> | null>(deadFlashCells);
   const bornFlashCellsRef = useRef<Array<{ q: number; r: number }> | null>(bornFlashCells);
   const onOrganismSelectRef = useRef(onOrganismSelect);
+  const hasAutoFitRef = useRef(false);
   const {
     viewportRef,
     isSpacePressed,
     cursorClass,
     zoomAtPointer,
+    fitWorldToCanvas,
     panToWorldPoint,
     onCanvasMouseDown,
     onCanvasMouseMove,
@@ -52,6 +54,27 @@ export function WorldCanvas({
   deadFlashCellsRef.current = deadFlashCells;
   bornFlashCellsRef.current = bornFlashCells;
   onOrganismSelectRef.current = onOrganismSelect;
+
+  useEffect(() => {
+    hasAutoFitRef.current = false;
+  }, [snapshot?.config.world_width]);
+
+  useEffect(() => {
+    if (!snapshot || hasAutoFitRef.current) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const displayWidth = Math.max(1, Math.floor(canvas.clientWidth * dpr));
+    const displayHeight = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+    if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+      canvas.width = displayWidth;
+      canvas.height = displayHeight;
+    }
+
+    fitWorldToCanvas(canvas, snapshot.config.world_width);
+    hasAutoFitRef.current = true;
+  }, [fitWorldToCanvas, snapshot]);
 
   useEffect(() => {
     if (!panToHexRef) return;

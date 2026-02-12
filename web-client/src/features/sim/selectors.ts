@@ -16,6 +16,7 @@ export function formatMetrics(snapshot: WorldSnapshot | null): string {
     `total_species_created=${snapshot.metrics.total_species_created}`,
     `food=${snapshot.foods.length}`,
     `consumptions_last_turn=${snapshot.metrics.consumptions_last_turn}`,
+    `predations_last_turn=${snapshot.metrics.predations_last_turn ?? 0}`,
     `total_food_eaten=${snapshot.metrics.total_consumptions}`,
     `reproductions_last_turn=${snapshot.metrics.reproductions_last_turn}`,
     `starvations_last_turn=${snapshot.metrics.starvations_last_turn}`,

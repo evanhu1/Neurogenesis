@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
-import { computeBaseHexSize, type WorldViewport } from '../../../canvas';
+import { computeBaseHexSize, computeWorldFitZoom, type WorldViewport } from '../../../canvas';
 
-const MIN_WORLD_ZOOM = 0.65;
+const BASE_MIN_WORLD_ZOOM = 0.65;
+const ABSOLUTE_MIN_WORLD_ZOOM = 0.05;
 const BASE_MAX_WORLD_ZOOM = 4;
 const ABSOLUTE_MAX_WORLD_ZOOM = 48;
 const TARGET_HEX_RADIUS_PX = 48;
 const WORLD_ZOOM_STEP = 1.12;
+const FIT_WORLD_MARGIN = 0.95;
 const DEFAULT_WORLD_VIEWPORT: WorldViewport = { zoom: 1, panX: 0, panY: 0 };
 
 function viewportEqual(a: WorldViewport, b: WorldViewport): boolean {
@@ -18,6 +20,14 @@ function computeMaxWorldZoom(canvas: HTMLCanvasElement, worldWidth: number | nul
   if (!Number.isFinite(baseHexSize) || baseHexSize <= 0) return BASE_MAX_WORLD_ZOOM;
   const zoomForTargetHexSize = TARGET_HEX_RADIUS_PX / baseHexSize;
   return Math.min(ABSOLUTE_MAX_WORLD_ZOOM, Math.max(BASE_MAX_WORLD_ZOOM, zoomForTargetHexSize));
+}
+
+function computeMinWorldZoom(canvas: HTMLCanvasElement, worldWidth: number | null | undefined): number {
+  if (!worldWidth || worldWidth <= 0) return BASE_MIN_WORLD_ZOOM;
+  const fitZoom = computeWorldFitZoom(canvas.width, canvas.height, worldWidth);
+  if (!Number.isFinite(fitZoom) || fitZoom <= 0) return BASE_MIN_WORLD_ZOOM;
+  const minFromFit = fitZoom * FIT_WORLD_MARGIN;
+  return Math.max(ABSOLUTE_MIN_WORLD_ZOOM, Math.min(BASE_MIN_WORLD_ZOOM, minFromFit));
 }
 
 function isInteractiveTarget(target: EventTarget | null): boolean {
@@ -70,8 +80,9 @@ export function useWorldViewport() {
 
       updateViewport((prev) => {
         const zoomFactor = deltaY < 0 ? WORLD_ZOOM_STEP : 1 / WORLD_ZOOM_STEP;
+        const minWorldZoom = computeMinWorldZoom(canvas, worldWidth);
         const maxWorldZoom = computeMaxWorldZoom(canvas, worldWidth);
-        const nextZoom = Math.max(MIN_WORLD_ZOOM, Math.min(maxWorldZoom, prev.zoom * zoomFactor));
+        const nextZoom = Math.max(minWorldZoom, Math.min(maxWorldZoom, prev.zoom * zoomFactor));
         if (nextZoom === prev.zoom) return prev;
 
         const worldX = (xPx - canvas.width / 2 - prev.panX) / prev.zoom + canvas.width / 2;
@@ -182,6 +193,23 @@ export function useWorldViewport() {
     [updateViewport],
   );
 
+  const fitWorldToCanvas = useCallback(
+    (canvas: HTMLCanvasElement, worldWidth: number | null | undefined) => {
+      if (!worldWidth || worldWidth <= 0) return;
+      const fitZoom = computeWorldFitZoom(canvas.width, canvas.height, worldWidth);
+      if (!Number.isFinite(fitZoom) || fitZoom <= 0) return;
+      const minWorldZoom = computeMinWorldZoom(canvas, worldWidth);
+      const maxWorldZoom = computeMaxWorldZoom(canvas, worldWidth);
+      const nextZoom = Math.max(minWorldZoom, Math.min(maxWorldZoom, fitZoom));
+
+      updateViewport((prev) => {
+        if (prev.zoom === nextZoom && prev.panX === 0 && prev.panY === 0) return prev;
+        return { zoom: nextZoom, panX: 0, panY: 0 };
+      });
+    },
+    [updateViewport],
+  );
+
   const cursorClass = isSpacePressed || isPanningWorld ? 'cursor-pointer' : 'cursor-default';
 
   return {
@@ -189,6 +217,7 @@ export function useWorldViewport() {
     isSpacePressed,
     cursorClass,
     zoomAtPointer,
+    fitWorldToCanvas,
     panToWorldPoint,
     onCanvasMouseDown,
     onCanvasMouseMove,
