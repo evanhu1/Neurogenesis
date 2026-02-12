@@ -23,13 +23,20 @@ fn stable_perf_config() -> WorldConfig {
         turn_energy_cost: 0.0,
         food_coverage_divisor: u32::MAX,
         max_organism_age: u32::MAX,
+        max_num_neurons: 50,
         speciation_threshold: 50.0,
         seed_genome_config: SeedGenomeConfig {
             num_neurons: 20,
-            max_num_neurons: 50,
             num_synapses: 80,
-            mutation_rate: 0.1,
             vision_distance: 10,
+            mutation_rate_vision_distance: 0.04,
+            mutation_rate_weight: 0.25,
+            mutation_rate_add_edge: 0.03,
+            mutation_rate_remove_edge: 0.02,
+            mutation_rate_split_edge: 0.005,
+            mutation_rate_inter_bias: 0.2,
+            mutation_rate_inter_update_rate: 0.12,
+            mutation_rate_action_bias: 0.2,
         },
     }
 }

@@ -33,7 +33,7 @@ export default function App() {
 
   return (
     <div className="h-screen bg-page px-4 py-4 text-ink sm:px-6 lg:px-8">
-      <div className="mx-auto grid h-full max-w-[1720px] gap-4 xl:grid-cols-[320px_minmax(480px,1fr)_400px]">
+      <div className="mx-auto grid h-full max-w-[1720px] gap-4 xl:grid-cols-[320px_minmax(480px,1fr)_450px]">
         <ControlPanel
           sessionMeta={sessionMeta}
           speciesPopulationHistory={simulation.speciesPopulationHistory}

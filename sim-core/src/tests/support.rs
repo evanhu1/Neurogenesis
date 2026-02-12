@@ -33,11 +33,18 @@ impl IntoEnergy for f64 {
 pub(super) fn test_genome() -> OrganismGenome {
     OrganismGenome {
         num_neurons: 1,
-        max_num_neurons: 1,
         vision_distance: 2,
-        mutation_rate: 0.0,
+        mutation_rate_vision_distance: 0.0,
+        mutation_rate_weight: 0.0,
+        mutation_rate_add_edge: 0.0,
+        mutation_rate_remove_edge: 0.0,
+        mutation_rate_split_edge: 0.0,
+        mutation_rate_inter_bias: 0.0,
+        mutation_rate_inter_update_rate: 0.0,
+        mutation_rate_action_bias: 0.0,
         inter_biases: vec![0.0],
         inter_update_rates: vec![1.0],
+        interneuron_types: vec![InterNeuronType::Excitatory],
         action_biases: vec![0.0; ActionType::ALL.len()],
         edges: vec![],
     }
@@ -57,13 +64,20 @@ pub(super) fn stable_test_config() -> WorldConfig {
         turn_energy_cost: 1.0,
         food_coverage_divisor: 40,
         max_organism_age: 500,
+        max_num_neurons: 1,
         speciation_threshold: 50.0,
         seed_genome_config: SeedGenomeConfig {
             num_neurons: 1,
-            max_num_neurons: 1,
             num_synapses: 0,
-            mutation_rate: 0.0,
             vision_distance: 2,
+            mutation_rate_vision_distance: 0.0,
+            mutation_rate_weight: 0.0,
+            mutation_rate_add_edge: 0.0,
+            mutation_rate_remove_edge: 0.0,
+            mutation_rate_split_edge: 0.0,
+            mutation_rate_inter_bias: 0.0,
+            mutation_rate_inter_update_rate: 0.0,
+            mutation_rate_action_bias: 0.0,
         },
     }
 }
@@ -126,6 +140,7 @@ fn forced_brain(
             activation: confidence,
             parent_ids: Vec::new(),
         },
+        interneuron_type: InterNeuronType::Excitatory,
         update_rate: 1.0,
         synapses: inter_synapses,
     }];

@@ -35,7 +35,11 @@ impl Simulation {
             let organism = match &request.kind {
                 SpawnRequestKind::Reproduction(reproduction) => {
                     let mut child_genome = reproduction.parent_genome.clone();
-                    mutate_genome(&mut child_genome, &mut self.rng);
+                    mutate_genome(
+                        &mut child_genome,
+                        self.config.max_num_neurons,
+                        &mut self.rng,
+                    );
 
                     let threshold = self.config.speciation_threshold;
                     let child_species_id = {
@@ -89,7 +93,8 @@ impl Simulation {
                 .pop()
                 .expect("initial population requires at least one unique cell per organism");
             let id = self.alloc_organism_id();
-            let genome = generate_seed_genome(&seed_config, &mut self.rng);
+            let genome =
+                generate_seed_genome(&seed_config, self.config.max_num_neurons, &mut self.rng);
             let brain = express_genome(&genome);
 
             // Seed genomes are independently random — each gets its own species.

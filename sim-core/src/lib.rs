@@ -210,6 +210,21 @@ fn validate_world_config(config: &WorldConfig) -> Result<(), SimError> {
             "turn_energy_cost must be >= 0".to_owned(),
         ));
     }
+    if config.max_num_neurons == 0 {
+        return Err(SimError::InvalidConfig(
+            "max_num_neurons must be greater than zero".to_owned(),
+        ));
+    }
+    if config.max_num_neurons > 256 {
+        return Err(SimError::InvalidConfig(
+            "max_num_neurons must be <= 256".to_owned(),
+        ));
+    }
+    if config.max_num_neurons < config.seed_genome_config.num_neurons {
+        return Err(SimError::InvalidConfig(
+            "max_num_neurons must be >= seed_genome_config.num_neurons".to_owned(),
+        ));
+    }
     if config.food_coverage_divisor == 0 {
         return Err(SimError::InvalidConfig(
             "food_coverage_divisor must be greater than zero".to_owned(),

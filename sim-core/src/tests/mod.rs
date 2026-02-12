@@ -3,7 +3,7 @@ pub(super) use crate::brain::{make_action_neuron, make_sensory_neuron, scan_ahea
 pub(super) use crate::turn::facing_after_turn;
 pub(super) use sim_types::{
     ActionType, BrainState, EntityId, EntityType, FacingDirection, FoodId, FoodState,
-    InterNeuronState, NeuronId, NeuronState, NeuronType, Occupant, OrganismGenome,
+    InterNeuronState, InterNeuronType, NeuronId, NeuronState, NeuronType, Occupant, OrganismGenome,
     SeedGenomeConfig, SensoryReceptor, SpeciesId, SynapseEdge,
 };
 pub(super) use std::collections::{HashMap, HashSet};

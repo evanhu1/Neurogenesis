@@ -6,10 +6,16 @@ export type FoodId = { 0: number } | number;
 
 export type SeedGenomeConfig = {
   num_neurons: number;
-  max_num_neurons: number;
   num_synapses: number;
-  mutation_rate: number;
   vision_distance: number;
+  mutation_rate_vision_distance: number;
+  mutation_rate_weight: number;
+  mutation_rate_add_edge: number;
+  mutation_rate_remove_edge: number;
+  mutation_rate_split_edge: number;
+  mutation_rate_inter_bias: number;
+  mutation_rate_inter_update_rate: number;
+  mutation_rate_action_bias: number;
 };
 
 export type WorldConfig = {
@@ -25,20 +31,30 @@ export type WorldConfig = {
   turn_energy_cost: number;
   food_coverage_divisor: number;
   max_organism_age: number;
+  max_num_neurons: number;
   speciation_threshold: number;
   seed_genome_config: SeedGenomeConfig;
 };
 
 export type OrganismGenome = {
   num_neurons: number;
-  max_num_neurons: number;
   vision_distance: number;
-  mutation_rate: number;
+  mutation_rate_vision_distance: number;
+  mutation_rate_weight: number;
+  mutation_rate_add_edge: number;
+  mutation_rate_remove_edge: number;
+  mutation_rate_split_edge: number;
+  mutation_rate_inter_bias: number;
+  mutation_rate_inter_update_rate: number;
+  mutation_rate_action_bias: number;
   inter_biases: number[];
   inter_update_rates: number[];
+  interneuron_types: InterNeuronType[];
   action_biases: number[];
   edges: SynapseEdge[];
 };
+
+export type InterNeuronType = 'Excitatory' | 'Inhibitory';
 
 export type SynapseEdge = {
   pre_neuron_id: number | { 0: number };
@@ -68,6 +84,7 @@ export type SensoryNeuronState = {
 
 export type InterNeuronState = {
   neuron: NeuronState;
+  interneuron_type: InterNeuronType;
   update_rate: number;
   synapses: SynapseEdge[];
 };
@@ -246,13 +263,26 @@ function parseDefaultConfigToml(tomlText: string): WorldConfig {
     turn_energy_cost: parseRequiredNumber(worldLevel, 'turn_energy_cost'),
     food_coverage_divisor: parseRequiredNumber(worldLevel, 'food_coverage_divisor'),
     max_organism_age: parseRequiredNumber(worldLevel, 'max_organism_age'),
+    max_num_neurons: parseRequiredNumber(worldLevel, 'max_num_neurons'),
     speciation_threshold: parseNumberWithDefault(worldLevel, 'speciation_threshold', 50.0),
     seed_genome_config: {
       num_neurons: parseRequiredNumber(genomeSource, 'num_neurons'),
-      max_num_neurons: parseRequiredNumber(genomeSource, 'max_num_neurons'),
       num_synapses: parseRequiredNumber(genomeSource, 'num_synapses'),
-      mutation_rate: parseRequiredNumber(genomeSource, 'mutation_rate'),
       vision_distance: parseNumberWithDefault(genomeSource, 'vision_distance', 2),
+      mutation_rate_vision_distance: parseRequiredNumber(
+        genomeSource,
+        'mutation_rate_vision_distance',
+      ),
+      mutation_rate_weight: parseRequiredNumber(genomeSource, 'mutation_rate_weight'),
+      mutation_rate_add_edge: parseRequiredNumber(genomeSource, 'mutation_rate_add_edge'),
+      mutation_rate_remove_edge: parseRequiredNumber(genomeSource, 'mutation_rate_remove_edge'),
+      mutation_rate_split_edge: parseRequiredNumber(genomeSource, 'mutation_rate_split_edge'),
+      mutation_rate_inter_bias: parseRequiredNumber(genomeSource, 'mutation_rate_inter_bias'),
+      mutation_rate_inter_update_rate: parseRequiredNumber(
+        genomeSource,
+        'mutation_rate_inter_update_rate',
+      ),
+      mutation_rate_action_bias: parseRequiredNumber(genomeSource, 'mutation_rate_action_bias'),
     },
   };
 }

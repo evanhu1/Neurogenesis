@@ -6,6 +6,7 @@ export type BrainTransform = { x: number; y: number; scale: number };
 const LAYER_GAP = 160;
 const NEURON_GAP = 65;
 const NODE_RADIUS = 10;
+const DEFAULT_ZOOM_INSET = 1.1;
 
 type BrainNode = {
   id: number;
@@ -14,6 +15,7 @@ type BrainNode = {
   activation: number;
   bias: number;
   updateRate?: number;
+  interneuronType?: 'Excitatory' | 'Inhibitory';
   isActive: boolean;
 };
 
@@ -59,6 +61,7 @@ export function computeBrainLayout(
           activation: neuron.neuron.activation,
           bias: neuron.neuron.bias,
           updateRate: neuron.update_rate,
+          interneuronType: neuron.interneuron_type,
           isActive: activeNeuronIds?.has(nid) ?? false,
         };
       }),
@@ -121,7 +124,8 @@ export function zoomToFitBrain(
   const padding = 30;
   const contentW = bounds.maxX - bounds.minX + padding * 2;
   const contentH = bounds.maxY - bounds.minY + padding * 2;
-  const scale = Math.min(canvasW / contentW, canvasH / contentH, 2.5);
+  const fitScale = Math.min(canvasW / contentW, canvasH / contentH);
+  const scale = Math.min(fitScale * DEFAULT_ZOOM_INSET, 2.5);
   const cx = (bounds.minX + bounds.maxX) / 2;
   const cy = (bounds.minY + bounds.maxY) / 2;
   return {
@@ -348,7 +352,14 @@ export function renderBrain(
   // Draw nodes
   for (const [, node] of positions) {
     ctx.beginPath();
-    ctx.fillStyle = node.type === 'sensory' ? '#1167b1' : node.type === 'inter' ? '#1f9aa8' : '#16a34a';
+    ctx.fillStyle =
+      node.type === 'sensory'
+        ? '#f59e0b'
+        : node.type === 'inter'
+          ? node.interneuronType === 'Inhibitory'
+            ? '#dc2626'
+            : '#2563eb'
+          : '#16a34a';
     ctx.arc(node.x, node.y, NODE_RADIUS, 0, Math.PI * 2);
     ctx.fill();
     if (node.isActive) {
@@ -367,8 +378,10 @@ export function renderBrain(
       ctx.fillStyle = '#43556f';
       const metricsY = hasLabel ? node.y + 16 : node.y + 4;
       ctx.fillText(`h=${node.activation.toFixed(2)}`, node.x + 12, metricsY);
-      if (node.type === 'inter') {
+      if (node.type === 'inter' || node.type === 'action') {
         ctx.fillText(`b=${node.bias.toFixed(2)}`, node.x + 12, metricsY + 12);
+      }
+      if (node.type === 'inter') {
         if (node.updateRate != null) {
           ctx.fillText(`\u03B1=${node.updateRate.toFixed(2)}`, node.x + 12, metricsY + 24);
         }

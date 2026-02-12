@@ -9,78 +9,130 @@
 - Keep turn-runner behavior updates explicitly documented in `specs/spec.md`
   because `specs/TURN_RUNNER_SPEC.md` is not present in this repo.
 
+# Goals
+
+Mutation changes:
+
+- Replace add neuron mutation with Split edge operator, which uniform samples
+  one edge and replaces it with edge to new neuron and edge from new neuron to
+  the old post neuron target.
+- Get rid of the remove neuron mutation.
+- Separate mutation rates per gene instead of one global rate. Each mutation
+  rate itself is mutable with a global mutation rate mutation rate (1 /
+  sqrt(2*sqrt(n))) where n = number of mutable genes. expose each individual
+  mutation rate as a config parameter, and make structural mutations much rarer
+  than non structural ones (add neuron vs adjust weight).
+- Use Gaussian perturb for all continuous parameters — weights, bias, mutation
+  rates — instead of +/-1
+
+Brain model changes:
+
+- Make sensory output synapses all excitatory (positive weight)
+- Add a interneuron_type field to the interneuron that specifies enum
+  ExcitatoryNeuron or InhibitoryNeuron. Assert somewhere that the weight is
+  correspondingly positive or negative
+- Inductive bias 80/20 distribution of excitatory to inhibitory neurons in the
+  random generation of new neurons
+- Implement Dale’s law when creating new synapses or mutating them: Each neuron
+  has a type ∈ {E, I}. All outgoing weights must share the same sign.
+- Change synapse strength distribution to be log-normal, when creating synapses
+
 ## Sequential Implementation Tasks
 
-### 1. Change Interneurons To Per-Interneuron Leaky Integrators
+1. **Define the new genome/brain data model surface (before coding logic).**
+   - Add an interneuron polarity enum in `sim-types` (excitatory/inhibitory).
+   - Add `interneuron_type` to `InterNeuronState`.
+   - Replace single `mutation_rate` with explicit per-gene mutation-rate fields
+     in `OrganismGenome` and `SeedGenomeConfig`.
+   - Include mutation-rate genes for every mutable operator/parameter we intend
+     to keep (weights, biases, update-rates, structural ops, scalar traits).
 
-1. Add state and genome fields.
-   - Add `update_rate: f32` to `InterNeuronState`.
-   - Add `inter_update_rates: Vec<f32>` to `OrganismGenome`.
-   - Keep validation aligned with `inter_biases` (`len == num_neurons`).
-2. Implement seed initialization for `inter_update_rates`.
-   - In `generate_seed_genome`, sample each update rate from a log-uniform
-     distribution on `[0.03, 1.0]`.
-   - Use deterministic RNG flow so fixed seed behavior is preserved.
-3. Implement mutation for per-neuron update rates.
-   - Add Gaussian perturbation with stddev near `0.05`.
-   - Clamp to a strict non-zero/stable range (same `[0.03, 1.0]` bounds).
-4. Update brain evaluation to leaky-integrator dynamics.
-   - Compute `z_i(t) = b_i + sensory_to_inter_sum_i + inter_to_inter_sum_i(h(t-1))`.
-   - Compute `h_i(t) = (1 - alpha_i) * h_i(t-1) + alpha_i * tanh(z_i(t))`.
-   - Ensure the recurrent term reads only `h(t-1)` to avoid order dependence.
-5. Add deterministic tests.
-   - Seed genome tests for update-rate count and bounds.
-   - Mutation tests for clamping and non-zero behavior.
-   - Brain-step tests for expected temporal smoothing with different `alpha_i`.
-6. Keep docs and protocol-adjacent types aligned.
-   - Update any affected spec/docs and shared type mirrors.
+2. **Propagate schema changes everywhere they are serialized/deserialized.**
+   - Update `sim-types/src/lib.rs` structs and serde compatibility.
+   - Update `config/default.toml` with all individual mutation-rate config keys.
+   - Update `web-client/src/types.ts` and default TOML parser to match new
+     config/genome fields.
+   - Update any UI selectors that still reference the removed
+     `genome.mutation_rate`.
 
-### 2. Combine Left/Right Turn Into A Single Turn Action (tanh + deadzone)
+3. **Introduce shared helpers for signed/log-normal synapse generation and
+   Gaussian perturbation.**
+   - Add helper(s) in `sim-core/src/genome.rs` for log-normal magnitude
+     sampling.
+   - Add helper(s) to derive required sign from neuron source type (sensory
+     always `+`, excitatory `+`, inhibitory `-`).
+   - Ensure continuous mutations (weights, biases, mutation-rate genes) use
+     Gaussian perturbation, not stepwise deltas.
 
-1. Replace separate turn actions in action definitions.
-   - Collapse `turn_left` and `turn_right` into one `turn` action signal.
-   - Update action IDs/enums/constants consistently across crates and client.
-2. Change turn output activation and interpretation.
-   - Use `tanh` for the turn action output (signed direction signal).
-   - Apply a deadzone around `0` (`|signal| <= epsilon` means no turn).
-   - Map sign to direction (`signal < 0` left, `signal > 0` right).
-3. Update intent generation and turn application.
-   - Ensure turning logic consumes the unified signed value.
-   - Preserve deterministic behavior and tie-breaking semantics.
-4. Update serialization/client handling.
-   - Align server protocol, client types, and UI behavior with one turn action.
-5. Add/adjust tests.
-   - Verify deadzone no-op behavior.
-   - Verify signed turning behavior and deterministic outcomes.
+4. **Implement interneuron-type generation and persistence.**
+   - Seed generation assigns interneuron types with 80/20 excitatory/inhibitory
+     split.
+   - New neurons created by structural mutation also use the same 80/20 prior.
+   - Keep per-neuron type vectors aligned when neuron count changes.
 
-### 3. Allow Self Recurrence In Interneurons
+5. **Refactor structural mutation operators.**
+   - Remove the old add-neuron mutation behavior.
+   - Remove neuron-removal mutation behavior.
+   - Add split-edge mutation:
+     - Uniformly sample an existing edge.
+     - Remove it.
+     - Insert edge `(old_pre -> new_inter)` and edge `(new_inter -> old_post)`.
+     - Respect ID bounds, edge uniqueness, sorted edge invariants, and
+       neuron-count limits.
 
-1. Relax genome/edge validation rules.
-   - Permit `inter -> same inter` edges (self loops).
-2. Ensure evaluation semantics remain deterministic.
-   - Self-recurrent contribution must come from `h_i(t-1)` only.
-   - No same-tick feedback path should depend on neuron iteration order.
-3. Update genome generation and mutation behavior.
-   - Allow creation/retention of self-recurrent edges where inter->inter edges
-     are handled.
-4. Add tests.
-   - Validation test that self recurrence is accepted.
-   - Brain-step test confirming expected self-memory behavior across ticks.
+6. **Apply per-gene mutation rates with self-adaptive mutation-rate mutation.**
+   - Gate each mutation operator by its own mutation-rate gene.
+   - Mutate mutation-rate genes themselves using global rate-rate
+     `tau = 1 / sqrt(2 * sqrt(n))`, `n = number of mutable genes`.
+   - Clamp all mutation rates to valid bounds and keep structural rates much
+     smaller than non-structural defaults in config.
 
-### 4. Allow Bias Term In Action Neurons
+7. **Enforce Dale’s law and sensory-excitatory constraints in mutation +
+   generation paths.**
+   - Every newly created/perturbed synapse must keep the sign implied by its
+     pre-neuron type.
+   - Sensory outgoing synapses must always remain positive.
+   - Edge-add and edge-split flows both enforce this invariant.
 
-1. Extend genome with action biases.
-   - Add `action_biases: Vec<f32>` to `OrganismGenome`.
-   - Validate count against the number of action neurons.
-2. Initialize action biases in seed genomes.
-   - Define initialization policy (e.g., zero or small random values) and keep
-     deterministic seed behavior.
-3. Add mutation support for action biases.
-   - Apply mutation gates consistent with existing genome mutation flow.
-   - Use bounded/clamped perturbations compatible with current bias handling.
-4. Update brain action evaluation.
-   - Add action bias term before action activation for each action neuron.
-   - Keep existing firing/threshold logic unless explicitly changed by task 2.
-5. Update tests and shared models.
-   - Add coverage for action bias effect on action outputs.
-   - Keep Rust/shared/client type definitions synchronized.
+8. **Add runtime assertions in brain expression for invariant safety.**
+   - In `sim-core/src/brain.rs`, assert that sensory outgoing weights are
+     positive.
+   - Assert that each inter neuron’s outgoing edges match its declared
+     `interneuron_type` sign.
+   - Keep assertions deterministic and cheap in release (debug assertions where
+     appropriate).
+
+9. **Update genome-distance and validation logic for new genes.**
+   - Include new mutation-rate genes and interneuron-type differences in
+     `genome_distance`.
+   - Replace old single-rate config validation with per-field validation for all
+     mutation-rate config parameters.
+   - Validate any new structural constraints (e.g., vector lengths, sign
+     consistency if validated at genome layer).
+
+10. **Repair and extend Rust tests for behavior + determinism.**
+
+- Update existing tests/fixtures/bench configs that currently construct
+  `mutation_rate`.
+- Add focused tests for:
+  - split-edge operator behavior,
+  - no neuron-removal mutation,
+  - sensory edges always positive,
+  - Dale’s law sign enforcement,
+  - mutation-rate self-adaptation bounds/stability.
+- Keep fixed RNG seeds for reproducibility.
+
+11. **Run full validation and fix regressions.**
+
+- Run `cargo check --workspace`.
+- Run `cargo test --workspace`.
+- Run frontend type checks/build if TS types changed
+  (`cd web-client && npm run build && npm run typecheck`).
+- Resolve all compile/test failures caused by schema and behavior updates.
+
+12. **Update project docs/spec to reflect final behavior.**
+
+- Document new mutation operators and mutation-rate gene system.
+- Document interneuron polarity model, sensory excitatory constraint, Dale’s
+  law, and log-normal synapse init.
+- Ensure docs align with final implemented constants/defaults.

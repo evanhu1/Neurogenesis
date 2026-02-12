@@ -56,6 +56,18 @@ pub enum NeuronType {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum InterNeuronType {
+    Excitatory,
+    Inhibitory,
+}
+
+impl Default for InterNeuronType {
+    fn default() -> Self {
+        Self::Excitatory
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum EntityType {
     Food,
     Organism,
@@ -84,11 +96,27 @@ impl SensoryReceptor {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OrganismGenome {
     pub num_neurons: u32,
-    pub max_num_neurons: u32,
     pub vision_distance: u32,
-    pub mutation_rate: f32,
+    #[serde(default)]
+    pub mutation_rate_vision_distance: f32,
+    #[serde(default)]
+    pub mutation_rate_weight: f32,
+    #[serde(default)]
+    pub mutation_rate_add_edge: f32,
+    #[serde(default)]
+    pub mutation_rate_remove_edge: f32,
+    #[serde(default)]
+    pub mutation_rate_split_edge: f32,
+    #[serde(default)]
+    pub mutation_rate_inter_bias: f32,
+    #[serde(default)]
+    pub mutation_rate_inter_update_rate: f32,
+    #[serde(default)]
+    pub mutation_rate_action_bias: f32,
     pub inter_biases: Vec<f32>,
     pub inter_update_rates: Vec<f32>,
+    #[serde(default)]
+    pub interneuron_types: Vec<InterNeuronType>,
     pub action_biases: Vec<f32>,
     pub edges: Vec<SynapseEdge>,
 }
@@ -96,10 +124,24 @@ pub struct OrganismGenome {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SeedGenomeConfig {
     pub num_neurons: u32,
-    pub max_num_neurons: u32,
     pub num_synapses: u32,
-    pub mutation_rate: f32,
     pub vision_distance: u32,
+    #[serde(default)]
+    pub mutation_rate_vision_distance: f32,
+    #[serde(default)]
+    pub mutation_rate_weight: f32,
+    #[serde(default)]
+    pub mutation_rate_add_edge: f32,
+    #[serde(default)]
+    pub mutation_rate_remove_edge: f32,
+    #[serde(default)]
+    pub mutation_rate_split_edge: f32,
+    #[serde(default)]
+    pub mutation_rate_inter_bias: f32,
+    #[serde(default)]
+    pub mutation_rate_inter_update_rate: f32,
+    #[serde(default)]
+    pub mutation_rate_action_bias: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -116,6 +158,7 @@ pub struct WorldConfig {
     pub turn_energy_cost: f32,
     pub food_coverage_divisor: u32,
     pub max_organism_age: u32,
+    pub max_num_neurons: u32,
     pub speciation_threshold: f32,
     pub seed_genome_config: SeedGenomeConfig,
 }
@@ -158,6 +201,8 @@ pub struct SensoryNeuronState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct InterNeuronState {
     pub neuron: NeuronState,
+    #[serde(default)]
+    pub interneuron_type: InterNeuronType,
     pub update_rate: f32,
     pub synapses: Vec<SynapseEdge>,
 }

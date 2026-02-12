@@ -7,6 +7,7 @@ const FOOD_COLOR = '#16a34a';
 const BASE_HEX_SIZE_AT_900PX = 8;
 const BASE_HEX_MIN_SIZE_PX = 6;
 const BASE_HEX_REFERENCE_CANVAS_PX = 900;
+const GRID_SHADE_BY_COLOR_CLASS = ['#cfd6e2', '#dbe2ec', '#e6ebf3'] as const;
 
 type HexLayout = {
   size: number;
@@ -131,7 +132,9 @@ function drawVisibleGrid(
     for (let q = qStart; q <= qEnd; q += 1) {
       const center = hexCenter(layout, q, r);
       traceHex(ctx, center.x, center.y, size);
-      ctx.fillStyle = (q + r) % 2 === 0 ? '#cfd6e2' : '#e3e8f0';
+      // Proper 3-coloring for axial hex coordinates: no adjacent cells share a shade.
+      const colorClass = ((q - r) % 3 + 3) % 3;
+      ctx.fillStyle = GRID_SHADE_BY_COLOR_CLASS[colorClass];
       ctx.fill();
       ctx.strokeStyle = '#8a94a8';
       ctx.lineWidth = 0.4;

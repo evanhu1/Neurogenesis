@@ -41,7 +41,7 @@ fn spawn_queue_order_is_deterministic_under_limited_space() {
 #[test]
 fn reproduction_offspring_brain_runtime_state_is_reset() {
     let mut cfg = test_config(8, 1);
-    cfg.seed_genome_config.mutation_rate = 0.0;
+    cfg.seed_genome_config.mutation_rate_weight = 0.0;
     let mut sim = Simulation::new(cfg, 31).expect("simulation should initialize");
     configure_sim(
         &mut sim,
@@ -82,7 +82,7 @@ fn reproduction_spawn_is_opposite_of_parent_facing() {
     let mut cfg = test_config(40, 1);
     cfg.center_spawn_min_fraction = 0.45;
     cfg.center_spawn_max_fraction = 0.55;
-    cfg.seed_genome_config.mutation_rate = 0.0;
+    cfg.seed_genome_config.mutation_rate_weight = 0.0;
     let mut sim = Simulation::new(cfg, 30).expect("simulation should initialize");
     configure_sim(
         &mut sim,
@@ -249,8 +249,10 @@ fn reproduce_action_fails_when_turn_upkeep_leaves_insufficient_energy() {
 fn reproduction_can_create_new_species_via_genome_distance() {
     let mut cfg = test_config(7, 1);
     cfg.reproduction_energy_cost = 20.0;
-    // High mutation rate ensures child genome diverges from parent
-    cfg.seed_genome_config.mutation_rate = 1.0;
+    // High mutation pressure ensures child genome diverges from parent
+    cfg.seed_genome_config.mutation_rate_weight = 1.0;
+    cfg.seed_genome_config.mutation_rate_add_edge = 1.0;
+    cfg.seed_genome_config.mutation_rate_split_edge = 1.0;
     // Very low threshold so even a small mutation creates a new species
     cfg.speciation_threshold = 0.001;
     let mut sim = Simulation::new(cfg, 88).expect("simulation should initialize");
@@ -266,15 +268,17 @@ fn reproduction_can_create_new_species_via_genome_distance() {
         0.7,
         30.0,
     );
-    // Give parent a genome with high mutation_rate so child will diverge
-    parent.genome.mutation_rate = 1.0;
+    // Give parent a genome with high mutation pressure so child will diverge
+    parent.genome.mutation_rate_weight = 1.0;
+    parent.genome.mutation_rate_add_edge = 1.0;
+    parent.genome.mutation_rate_split_edge = 1.0;
     enable_reproduce_action(&mut parent);
     configure_sim(&mut sim, vec![parent]);
 
     let delta = tick_once(&mut sim);
     assert_eq!(delta.metrics.reproductions_last_turn, 1);
     assert_eq!(delta.spawned.len(), 1);
-    // With threshold=0.001 and mutation_rate=1.0, child should be a new species
+    // With threshold=0.001 and high mutation pressure, child should be a new species
     assert_ne!(delta.spawned[0].species_id, SpeciesId(0));
     assert!(sim.species_registry.len() >= 2);
 }

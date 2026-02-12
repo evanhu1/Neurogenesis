@@ -4,9 +4,9 @@ use crate::neuron_constants::{
     INTER_UPDATE_RATE_MIN,
 };
 use sim_types::{
-    ActionNeuronState, ActionType, BrainState, EntityType, InterNeuronState, NeuronId, NeuronState,
-    NeuronType, Occupant, OrganismGenome, OrganismId, SensoryNeuronState, SensoryReceptor,
-    SynapseEdge,
+    ActionNeuronState, ActionType, BrainState, EntityType, InterNeuronState, InterNeuronType,
+    NeuronId, NeuronState, NeuronType, Occupant, OrganismGenome, OrganismId, SensoryNeuronState,
+    SensoryReceptor, SynapseEdge,
 };
 
 fn sigmoid(x: f32) -> f32 {
@@ -87,8 +87,14 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
             .copied()
             .unwrap_or(INTER_UPDATE_RATE_MAX)
             .clamp(INTER_UPDATE_RATE_MIN, INTER_UPDATE_RATE_MAX);
+        let interneuron_type = genome
+            .interneuron_types
+            .get(i as usize)
+            .copied()
+            .unwrap_or(InterNeuronType::Excitatory);
         inter.push(InterNeuronState {
             neuron: make_neuron(NeuronId(INTER_ID_BASE + i), NeuronType::Inter, bias),
+            interneuron_type,
             update_rate,
             synapses: Vec::new(),
         });
@@ -133,6 +139,28 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
 
         if !is_valid_pre(edge.pre_neuron_id) || !is_valid_post(edge.post_neuron_id) {
             continue;
+        }
+
+        if edge.pre_neuron_id.0 < sensory_max {
+            debug_assert!(
+                edge.weight > 0.0,
+                "sensory outgoing synapse must be positive"
+            );
+        } else if edge.pre_neuron_id.0 >= INTER_ID_BASE && edge.pre_neuron_id.0 < inter_max {
+            let idx = (edge.pre_neuron_id.0 - INTER_ID_BASE) as usize;
+            let required_positive =
+                matches!(inter[idx].interneuron_type, InterNeuronType::Excitatory);
+            if required_positive {
+                debug_assert!(
+                    edge.weight > 0.0,
+                    "excitatory interneuron outgoing synapse must be positive"
+                );
+            } else {
+                debug_assert!(
+                    edge.weight < 0.0,
+                    "inhibitory interneuron outgoing synapse must be negative"
+                );
+            }
         }
 
         // Add to the correct pre-neuron's synapse list

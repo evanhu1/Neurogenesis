@@ -50,6 +50,7 @@ export function formatFocusedStats(focusedOrganism: OrganismState | null): strin
     `vision_distance=${focusedOrganism.genome.vision_distance}`,
     `genome_neurons=${focusedOrganism.genome.num_neurons}`,
     `genome_edges=${focusedOrganism.genome.edges.length}`,
-    `mutation_rate=${focusedOrganism.genome.mutation_rate.toFixed(3)}`,
+    `mut_weight=${focusedOrganism.genome.mutation_rate_weight.toFixed(3)}`,
+    `mut_split_edge=${focusedOrganism.genome.mutation_rate_split_edge.toFixed(3)}`,
   ].join('\n');
 }

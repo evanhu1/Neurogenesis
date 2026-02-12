@@ -43,10 +43,13 @@ rotation. `MoveForward` uses post-turn facing.
 `center_spawn_min_fraction`, `center_spawn_max_fraction`, `starting_energy`,
 `food_energy`, `reproduction_energy_cost`, `move_action_energy_cost`,
 `turn_energy_cost`, `food_coverage_divisor`, `max_organism_age`,
-`speciation_threshold`, `seed_genome_config`.
+`max_num_neurons`, `speciation_threshold`, `seed_genome_config`.
 
-`SeedGenomeConfig` fields: `num_neurons`, `max_num_neurons`, `num_synapses`,
-`mutation_rate`, `vision_distance`.
+`SeedGenomeConfig` fields: `num_neurons`, `num_synapses`, `vision_distance`,
+`mutation_rate_vision_distance`, `mutation_rate_weight`,
+`mutation_rate_add_edge`, `mutation_rate_remove_edge`,
+`mutation_rate_split_edge`, `mutation_rate_inter_bias`,
+`mutation_rate_inter_update_rate`, `mutation_rate_action_bias`.
 
 Defaults are in `config/default.toml`.
 
@@ -87,7 +90,7 @@ Four sensory neurons:
 - `Look(Food)`, `Look(Organism)`, `Look(OutOfBounds)` — scan forward up to
   `vision_distance` hexes. Signal = `(max_dist - dist + 1) / max_dist` for the
   closest matching entity (with occlusion), or `0.0` if none found.
-- `Energy` — `(energy / 100).clamp(0, 1)`.
+- `Energy` — `ln(1 + energy) / ln(101)` with negative energy clamped to `0`.
 
 Neuron IDs: sensory `0..4`, inter `1000..1000+n`, action `2000..2003`.
 
@@ -100,27 +103,50 @@ threshold remains `> 0.5` for non-turn actions.
 
 Actions: `MoveForward`, `Turn`, `Reproduce`.
 
+Interneurons carry a polarity (`Excitatory` or `Inhibitory`). Sensory neurons
+are always excitatory. Dale's law is enforced for generated/mutated synapses:
+all outgoing weights from a neuron share the sign implied by source type.
+
 ## Genome & Mutation
 
-`OrganismGenome`: `num_neurons`, `max_num_neurons`, `vision_distance`,
-`mutation_rate`, `inter_biases` (vec), `inter_update_rates` (vec),
-`action_biases` (vec), `edges` (sorted `SynapseEdge` list).
+`OrganismGenome`: `num_neurons`, `vision_distance`,
+`inter_biases` (vec), `inter_update_rates` (vec), `interneuron_types` (vec),
+`action_biases` (vec), `edges` (sorted `SynapseEdge` list), and explicit
+per-operator mutation-rate genes:
 
-Mutation applies to offspring only, each type independently gated by
-`mutation_rate`:
+- `mutation_rate_vision_distance`
+- `mutation_rate_weight`
+- `mutation_rate_add_edge`
+- `mutation_rate_remove_edge`
+- `mutation_rate_split_edge`
+- `mutation_rate_inter_bias`
+- `mutation_rate_inter_update_rate`
+- `mutation_rate_action_bias`
 
-- `num_neurons` +/-1 `[0, max_num_neurons]` — add inits bias + 1-2 edges, remove
-  prunes incident edges.
-- `max_num_neurons` +/-1 `[num_neurons, 256]`.
+Mutation applies to offspring only. Each operator is gated by its own mutation
+rate gene, and mutation-rate genes self-adapt every mutation step using
+`tau = 1 / sqrt(2 * sqrt(n))`, where `n` is the number of mutation-rate genes.
+
+Implemented operators:
+
 - `vision_distance` +/-1 `[1, 32]`.
-- `mutation_rate` +/-0.01 `[0.0, 1.0]`.
-- Weight perturbation (gated at `2 * rate`): Gaussian (stddev 0.3), clamped
-  `[-3.0, 3.0]`.
-- Add edge: random non-duplicate (20 retries).
+- Weight perturbation: Gaussian additive (stddev `0.3`), then sign-projected to
+  satisfy source neuron polarity and clamped by magnitude.
+- Add edge: random non-duplicate (20 retries), weight magnitude sampled from a
+  log-normal distribution and signed by source neuron polarity.
 - Remove edge: random swap-remove.
-- Bias perturbation: Gaussian (stddev 0.3), clamped `[-1.0, 1.0]`.
-- Inter update-rate perturbation: Gaussian (stddev 0.05), clamped `[0.03, 1.0]`.
-- Action bias perturbation: Gaussian (stddev 0.3), clamped `[-1.0, 1.0]`.
+- Split edge (replaces old add-neuron mutation): sample one existing edge
+  uniformly, remove it, add a new interneuron, and insert
+  `(old_pre -> new_inter)` + `(new_inter -> old_post)`.
+- Inter bias perturbation: Gaussian additive (stddev `0.15`), clamped
+  `[-1.0, 1.0]`.
+- Inter update-rate perturbation: Gaussian additive (stddev `0.05`), clamped
+  `[0.1, 1.0]`.
+- Action bias perturbation: Gaussian additive (stddev `0.15`), clamped
+  `[-1.0, 1.0]`.
+
+The old neuron-removal mutation is removed.
+`max_num_neurons` is not a mutable genome gene; it is a global world-level cap.
 
 ## Species
 
