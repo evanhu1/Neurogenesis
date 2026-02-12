@@ -138,6 +138,23 @@ fn initial_food_population_matches_coverage_divisor() {
 }
 
 #[test]
+fn validate_state_accepts_fresh_simulation() {
+    let sim = Simulation::new(stable_test_config(), 55).expect("simulation should initialize");
+    sim.validate_state()
+        .expect("freshly initialized simulation state should validate");
+}
+
+#[test]
+fn validate_state_rejects_invalid_occupancy_mapping() {
+    let mut sim = Simulation::new(stable_test_config(), 88).expect("simulation should initialize");
+    sim.occupancy.fill(None);
+    let err = sim
+        .validate_state()
+        .expect_err("occupancy mismatch should fail validation");
+    assert!(err.to_string().contains("occupancy vector"));
+}
+
+#[test]
 fn seed_genome_initializes_log_taus_and_action_biases() {
     let cfg = stable_test_config();
     let mut rng = ChaCha8Rng::seed_from_u64(1234);

@@ -27,6 +27,82 @@ pub struct CreateSessionResponse {
     pub snapshot: WorldSnapshotView,
 }
 
+fn default_ticks_per_world() -> u64 {
+    1_000
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CreateBatchRunRequest {
+    pub config: WorldConfig,
+    pub world_count: u32,
+    pub universe_seed: u64,
+    #[serde(default = "default_ticks_per_world")]
+    pub ticks_per_world: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CreateBatchRunResponse {
+    pub run_id: Uuid,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum BatchRunStatus {
+    Running,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BatchAggregateStats {
+    pub total_organisms_alive: u64,
+    pub total_species_alive: u64,
+    pub mean_organisms_alive: f64,
+    pub mean_species_alive: f64,
+    pub min_organisms_alive: u32,
+    pub max_organisms_alive: u32,
+    pub min_species_alive: u32,
+    pub max_species_alive: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", content = "data")]
+pub enum ArchivedWorldSource {
+    BatchRun {
+        run_id: Uuid,
+        world_index: u32,
+        universe_seed: u64,
+        world_seed: u64,
+        ticks_simulated: u64,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ArchivedWorldSummary {
+    pub world_id: Uuid,
+    pub created_at_unix_ms: u128,
+    pub turn: u64,
+    pub organisms_alive: u32,
+    pub species_alive: u32,
+    pub source: ArchivedWorldSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BatchRunStatusResponse {
+    pub run_id: Uuid,
+    pub created_at_unix_ms: u128,
+    pub status: BatchRunStatus,
+    pub total_worlds: u32,
+    pub completed_worlds: u32,
+    pub aggregate: Option<BatchAggregateStats>,
+    pub worlds: Vec<ArchivedWorldSummary>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ListArchivedWorldsResponse {
+    pub worlds: Vec<ArchivedWorldSummary>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CountRequest {
     pub count: u32,

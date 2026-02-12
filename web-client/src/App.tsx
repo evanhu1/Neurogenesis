@@ -36,6 +36,8 @@ export default function App() {
           snapshot={simulation.snapshot}
           metricsText={metricsText}
           errorText={simulation.errorText}
+          batchRunStatus={simulation.batchRunStatus}
+          archivedWorlds={simulation.archivedWorlds}
           isRunning={simulation.isRunning}
           isStepPending={simulation.isStepPending}
           stepProgress={simulation.stepProgress}
@@ -47,6 +49,10 @@ export default function App() {
           onSpeedLevelChange={simulation.setSpeedLevelIndex}
           onStep={simulation.step}
           onFocusOrganism={simulation.focusOrganism}
+          onStartBatchRun={(worldCount, ticksPerWorld, universeSeed) =>
+            void simulation.startBatchRun(worldCount, ticksPerWorld, universeSeed)
+          }
+          onLoadArchivedWorld={(worldId) => void simulation.loadArchivedWorld(worldId)}
           panToHexRef={panToHexRef}
         />
 

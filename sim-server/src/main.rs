@@ -5,27 +5,33 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::{SinkExt, StreamExt};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sim_core::{derive_active_neuron_ids, SimError, Simulation};
 use sim_server::protocol::{
-    ApiError, ClientCommand, CountRequest, CreateSessionRequest, CreateSessionResponse,
-    FocusBrainData, FocusRequest, ResetRequest, ServerEvent, SessionMetadata, StepProgressData,
-    WorldSnapshotView,
+    ApiError, ArchivedWorldSource, ArchivedWorldSummary, BatchAggregateStats, BatchRunStatus,
+    BatchRunStatusResponse, ClientCommand, CountRequest, CreateBatchRunRequest,
+    CreateBatchRunResponse, CreateSessionRequest, CreateSessionResponse, FocusBrainData,
+    FocusRequest, ListArchivedWorldsResponse, ResetRequest, ServerEvent, SessionMetadata,
+    StepProgressData, WorldSnapshotView,
 };
 use sim_types::WorldSnapshot;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::fs;
+use std::path::PathBuf;
+use std::sync::{Arc, RwLock as StdRwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast, Mutex, RwLock};
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, JoinSet};
 use tower_http::cors::CorsLayer;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 #[derive(Clone)]
 struct AppState {
     sessions: Arc<RwLock<HashMap<Uuid, Arc<Session>>>>,
+    batch_runs: Arc<RwLock<HashMap<Uuid, Arc<BatchRun>>>>,
+    world_archive: Arc<WorldArchiveStore>,
 }
 
 struct Session {
@@ -42,10 +48,49 @@ struct RuntimeState {
     runner: Option<JoinHandle<()>>,
 }
 
+struct BatchRun {
+    id: Uuid,
+    created_at_unix_ms: u128,
+    total_worlds: u32,
+    inner: Mutex<BatchRunInner>,
+}
+
+struct BatchRunInner {
+    completed_worlds: u32,
+    status: BatchRunStatus,
+    worlds: Vec<ArchivedWorldSummary>,
+    aggregate: Option<BatchAggregateStats>,
+    error: Option<String>,
+}
+
+const WORLD_ARCHIVE_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ArchivedWorldFile {
+    schema_version: u32,
+    world_id: Uuid,
+    created_at_unix_ms: u128,
+    source: ArchivedWorldSource,
+    summary: ArchivedWorldSummary,
+    simulation: Simulation,
+}
+
+#[derive(Debug, Clone)]
+struct ArchivedWorldIndexEntry {
+    summary: ArchivedWorldSummary,
+    file_name: String,
+}
+
+struct WorldArchiveStore {
+    worlds_dir: PathBuf,
+    by_id: StdRwLock<HashMap<Uuid, ArchivedWorldIndexEntry>>,
+}
+
 const STEP_PROGRESS_TARGET_BATCHES: u32 = 48;
 const STEP_PROGRESS_MIN_BATCH_SIZE: u32 = 32;
 const STEP_PROGRESS_MAX_BATCH_SIZE: u32 = 2_048;
 const STEP_PROGRESS_TARGET_UPDATES: u32 = 64;
+const DEFAULT_BATCH_TICKS_PER_WORLD: u64 = 1_000;
 
 fn step_batch_size(total_count: u32) -> u32 {
     let target = (total_count / STEP_PROGRESS_TARGET_BATCHES).max(1);
@@ -55,9 +100,267 @@ fn step_batch_size(total_count: u32) -> u32 {
 }
 
 fn step_progress_stride(total_count: u32) -> u32 {
-    total_count
-        .saturating_add(STEP_PROGRESS_TARGET_UPDATES.saturating_sub(1))
+    total_count.saturating_add(STEP_PROGRESS_TARGET_UPDATES.saturating_sub(1))
         / STEP_PROGRESS_TARGET_UPDATES.max(1)
+}
+
+fn now_unix_ms() -> Result<u128, AppError> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| AppError::Internal(e.to_string()))
+        .map(|duration| duration.as_millis())
+}
+
+fn archive_worlds_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("worlds")
+}
+
+fn splitmix64(mut z: u64) -> u64 {
+    z = z.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+fn world_seed(universe_seed: u64, world_index: u32) -> u64 {
+    splitmix64(universe_seed ^ (world_index as u64).wrapping_mul(0x9E37_79B9))
+}
+
+fn simulate_ticks(simulation: &mut Simulation, ticks: u64) {
+    let mut remaining = ticks;
+    while remaining > 0 {
+        let next_batch = remaining.min(u32::MAX as u64) as u32;
+        simulation.advance_n(next_batch);
+        remaining -= next_batch as u64;
+    }
+}
+
+fn compute_batch_aggregate(worlds: &[ArchivedWorldSummary]) -> Option<BatchAggregateStats> {
+    if worlds.is_empty() {
+        return None;
+    }
+
+    let mut total_organisms_alive = 0_u64;
+    let mut total_species_alive = 0_u64;
+    let mut min_organisms_alive = u32::MAX;
+    let mut max_organisms_alive = 0_u32;
+    let mut min_species_alive = u32::MAX;
+    let mut max_species_alive = 0_u32;
+
+    for world in worlds {
+        total_organisms_alive = total_organisms_alive.saturating_add(world.organisms_alive as u64);
+        total_species_alive = total_species_alive.saturating_add(world.species_alive as u64);
+        min_organisms_alive = min_organisms_alive.min(world.organisms_alive);
+        max_organisms_alive = max_organisms_alive.max(world.organisms_alive);
+        min_species_alive = min_species_alive.min(world.species_alive);
+        max_species_alive = max_species_alive.max(world.species_alive);
+    }
+
+    let world_count = worlds.len() as f64;
+    Some(BatchAggregateStats {
+        total_organisms_alive,
+        total_species_alive,
+        mean_organisms_alive: total_organisms_alive as f64 / world_count,
+        mean_species_alive: total_species_alive as f64 / world_count,
+        min_organisms_alive,
+        max_organisms_alive,
+        min_species_alive,
+        max_species_alive,
+    })
+}
+
+impl WorldArchiveStore {
+    fn bootstrap(worlds_dir: PathBuf) -> Result<Self, AppError> {
+        fs::create_dir_all(&worlds_dir).map_err(|err| {
+            AppError::Internal(format!(
+                "failed to create worlds archive directory {}: {err}",
+                worlds_dir.display()
+            ))
+        })?;
+
+        let mut by_id = HashMap::new();
+        let read_dir = fs::read_dir(&worlds_dir).map_err(|err| {
+            AppError::Internal(format!(
+                "failed to read worlds archive directory {}: {err}",
+                worlds_dir.display()
+            ))
+        })?;
+
+        for entry in read_dir {
+            let entry = match entry {
+                Ok(item) => item,
+                Err(err) => {
+                    warn!("failed to read worlds archive entry: {err}");
+                    continue;
+                }
+            };
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(err) => {
+                    warn!("failed to read archive file type: {err}");
+                    continue;
+                }
+            };
+            if !file_type.is_file() {
+                continue;
+            }
+            if entry.path().extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            let bytes = match fs::read(entry.path()) {
+                Ok(contents) => contents,
+                Err(err) => {
+                    warn!("failed to read archive file {}: {err}", file_name);
+                    continue;
+                }
+            };
+            let archived_world = match serde_json::from_slice::<ArchivedWorldFile>(&bytes) {
+                Ok(world) => world,
+                Err(err) => {
+                    warn!("failed to parse archive file {}: {err}", file_name);
+                    continue;
+                }
+            };
+            if archived_world.schema_version != WORLD_ARCHIVE_SCHEMA_VERSION {
+                warn!(
+                    "skipping archive {} with schema version {} (expected {})",
+                    file_name, archived_world.schema_version, WORLD_ARCHIVE_SCHEMA_VERSION
+                );
+                continue;
+            }
+
+            by_id.insert(
+                archived_world.world_id,
+                ArchivedWorldIndexEntry {
+                    summary: archived_world.summary,
+                    file_name,
+                },
+            );
+        }
+
+        Ok(Self {
+            worlds_dir,
+            by_id: StdRwLock::new(by_id),
+        })
+    }
+
+    fn path_for(&self, file_name: &str) -> PathBuf {
+        self.worlds_dir.join(file_name)
+    }
+
+    fn load_world_file(&self, world_id: Uuid) -> Result<ArchivedWorldFile, AppError> {
+        let entry =
+            {
+                let by_id = self.by_id.read().map_err(|_| {
+                    AppError::Internal("failed to lock world archive index".to_owned())
+                })?;
+                by_id.get(&world_id).cloned().ok_or_else(|| {
+                    AppError::NotFound(format!("archived world {world_id} not found"))
+                })?
+            };
+        let bytes = fs::read(self.path_for(&entry.file_name)).map_err(|err| {
+            AppError::Internal(format!(
+                "failed to read archived world {} from disk: {err}",
+                entry.file_name
+            ))
+        })?;
+        let archived_world: ArchivedWorldFile = serde_json::from_slice(&bytes).map_err(|err| {
+            AppError::Internal(format!(
+                "failed to parse archived world {}: {err}",
+                entry.file_name
+            ))
+        })?;
+        if archived_world.schema_version != WORLD_ARCHIVE_SCHEMA_VERSION {
+            return Err(AppError::BadRequest(format!(
+                "archived world schema version {} is unsupported (expected {})",
+                archived_world.schema_version, WORLD_ARCHIVE_SCHEMA_VERSION
+            )));
+        }
+        Ok(archived_world)
+    }
+
+    fn persist_batch_world(
+        &self,
+        run_id: Uuid,
+        world_index: u32,
+        universe_seed: u64,
+        world_seed: u64,
+        ticks_simulated: u64,
+        simulation: Simulation,
+    ) -> Result<ArchivedWorldSummary, AppError> {
+        let world_id = Uuid::new_v4();
+        let created_at_unix_ms = now_unix_ms()?;
+        let snapshot = simulation.snapshot();
+        let species_alive = snapshot.metrics.species_counts.len() as u32;
+        let summary = ArchivedWorldSummary {
+            world_id,
+            created_at_unix_ms,
+            turn: snapshot.turn,
+            organisms_alive: snapshot.metrics.organisms,
+            species_alive,
+            source: ArchivedWorldSource::BatchRun {
+                run_id,
+                world_index,
+                universe_seed,
+                world_seed,
+                ticks_simulated,
+            },
+        };
+        let archived_world = ArchivedWorldFile {
+            schema_version: WORLD_ARCHIVE_SCHEMA_VERSION,
+            world_id,
+            created_at_unix_ms,
+            source: summary.source.clone(),
+            summary: summary.clone(),
+            simulation,
+        };
+        let file_name = format!("{created_at_unix_ms}_{world_id}.json");
+        let temp_file_name = format!("{file_name}.tmp");
+        let temp_path = self.path_for(&temp_file_name);
+        let final_path = self.path_for(&file_name);
+
+        let encoded = serde_json::to_vec_pretty(&archived_world).map_err(|err| {
+            AppError::Internal(format!("failed to encode archived world {world_id}: {err}"))
+        })?;
+        fs::write(&temp_path, encoded).map_err(|err| {
+            AppError::Internal(format!(
+                "failed to write archived world temp file {}: {err}",
+                temp_path.display()
+            ))
+        })?;
+        fs::rename(&temp_path, &final_path).map_err(|err| {
+            AppError::Internal(format!(
+                "failed to finalize archived world {}: {err}",
+                final_path.display()
+            ))
+        })?;
+
+        let mut by_id = self
+            .by_id
+            .write()
+            .map_err(|_| AppError::Internal("failed to lock world archive index".to_owned()))?;
+        by_id.insert(
+            world_id,
+            ArchivedWorldIndexEntry {
+                summary: summary.clone(),
+                file_name,
+            },
+        );
+        Ok(summary)
+    }
+
+    fn list_worlds(&self) -> Result<Vec<ArchivedWorldSummary>, AppError> {
+        let by_id = self
+            .by_id
+            .read()
+            .map_err(|_| AppError::Internal("failed to lock world archive index".to_owned()))?;
+        let mut worlds: Vec<ArchivedWorldSummary> =
+            by_id.values().map(|entry| entry.summary.clone()).collect();
+        worlds.sort_by(|a, b| b.created_at_unix_ms.cmp(&a.created_at_unix_ms));
+        Ok(worlds)
+    }
 }
 
 #[derive(Serialize)]
@@ -76,6 +379,18 @@ enum AppError {
     BadRequest(String),
     Internal(String),
 }
+
+impl std::fmt::Display for AppError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AppError::NotFound(message)
+            | AppError::BadRequest(message)
+            | AppError::Internal(message) => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for AppError {}
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
@@ -109,7 +424,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let app = build_app(new_state());
+    let app = build_app(new_state()?);
 
     let addr = std::env::var("SIM_SERVER_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".to_owned());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -118,15 +433,22 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn new_state() -> AppState {
-    AppState {
+fn new_state() -> Result<AppState, AppError> {
+    let world_archive = Arc::new(WorldArchiveStore::bootstrap(archive_worlds_dir())?);
+    Ok(AppState {
         sessions: Arc::new(RwLock::new(HashMap::new())),
-    }
+        batch_runs: Arc::new(RwLock::new(HashMap::new())),
+        world_archive,
+    })
 }
 
 fn build_app(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/v1/world-runs", post(create_batch_run))
+        .route("/v1/world-runs/{id}", get(get_batch_run_status))
+        .route("/v1/worlds", get(list_archived_worlds))
+        .route("/v1/worlds/{id}/sessions", post(create_session_from_world))
         .route("/v1/sessions", post(create_session))
         .route("/v1/sessions/{id}", get(get_session_metadata))
         .route("/v1/sessions/{id}/state", get(get_state))
@@ -142,25 +464,116 @@ async fn health() -> Json<HealthResponse> {
     Json(HealthResponse { status: "ok" })
 }
 
+async fn create_batch_run(
+    State(state): State<AppState>,
+    Json(req): Json<CreateBatchRunRequest>,
+) -> Result<Json<CreateBatchRunResponse>, AppError> {
+    if req.world_count == 0 {
+        return Err(AppError::BadRequest(
+            "world_count must be greater than zero".to_owned(),
+        ));
+    }
+
+    let ticks_per_world = if req.ticks_per_world == 0 {
+        DEFAULT_BATCH_TICKS_PER_WORLD
+    } else {
+        req.ticks_per_world
+    };
+    let run_id = Uuid::new_v4();
+    let created_at_unix_ms = now_unix_ms()?;
+    let batch_run = Arc::new(BatchRun {
+        id: run_id,
+        created_at_unix_ms,
+        total_worlds: req.world_count,
+        inner: Mutex::new(BatchRunInner {
+            completed_worlds: 0,
+            status: BatchRunStatus::Running,
+            worlds: Vec::with_capacity(req.world_count as usize),
+            aggregate: None,
+            error: None,
+        }),
+    });
+
+    {
+        let mut runs = state.batch_runs.write().await;
+        runs.insert(run_id, batch_run.clone());
+    }
+
+    tokio::spawn(run_batch_simulations(
+        state.clone(),
+        batch_run,
+        req.config,
+        req.world_count,
+        req.universe_seed,
+        ticks_per_world,
+    ));
+
+    Ok(Json(CreateBatchRunResponse { run_id }))
+}
+
+async fn get_batch_run_status(
+    Path(id): Path<Uuid>,
+    State(state): State<AppState>,
+) -> Result<Json<BatchRunStatusResponse>, AppError> {
+    let run = {
+        let runs = state.batch_runs.read().await;
+        runs.get(&id)
+            .cloned()
+            .ok_or_else(|| AppError::NotFound(format!("world run {id} not found")))?
+    };
+    let inner = run.inner.lock().await;
+    Ok(Json(BatchRunStatusResponse {
+        run_id: run.id,
+        created_at_unix_ms: run.created_at_unix_ms,
+        status: inner.status.clone(),
+        total_worlds: run.total_worlds,
+        completed_worlds: inner.completed_worlds,
+        aggregate: inner.aggregate.clone(),
+        worlds: inner.worlds.clone(),
+        error: inner.error.clone(),
+    }))
+}
+
+async fn list_archived_worlds(
+    State(state): State<AppState>,
+) -> Result<Json<ListArchivedWorldsResponse>, AppError> {
+    let worlds = state.world_archive.list_worlds()?;
+    Ok(Json(ListArchivedWorldsResponse { worlds }))
+}
+
+async fn create_session_from_world(
+    Path(id): Path<Uuid>,
+    State(state): State<AppState>,
+) -> Result<Json<CreateSessionResponse>, AppError> {
+    let archived_world = state.world_archive.load_world_file(id)?;
+    archived_world.simulation.validate_state()?;
+    let response = create_runtime_session(&state, archived_world.simulation).await?;
+    Ok(Json(response))
+}
+
 async fn create_session(
     State(state): State<AppState>,
     Json(req): Json<CreateSessionRequest>,
 ) -> Result<Json<CreateSessionResponse>, AppError> {
-    let now_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| AppError::Internal(e.to_string()))?
-        .as_millis();
-    let id = Uuid::new_v4();
-
     let simulation = Simulation::new(req.config.clone(), req.seed)?;
-    let snapshot = simulation.snapshot();
+    let response = create_runtime_session(&state, simulation).await?;
+    Ok(Json(response))
+}
 
+async fn create_runtime_session(
+    state: &AppState,
+    simulation: Simulation,
+) -> Result<CreateSessionResponse, AppError> {
+    let now_ms = now_unix_ms()?;
+    let id = Uuid::new_v4();
+    let snapshot = simulation.snapshot();
+    let ticks_per_second = simulation.config().steps_per_second;
     let metadata = SessionMetadata {
         id,
         created_at_unix_ms: now_ms,
-        config: req.config,
+        config: simulation.config().clone(),
         running: false,
-        ticks_per_second: simulation.config().steps_per_second,
+        ticks_per_second,
     };
 
     let (events_tx, _events_rx) = broadcast::channel(1024);
@@ -170,7 +583,7 @@ async fn create_session(
         events: events_tx,
         runtime: Mutex::new(RuntimeState {
             running: false,
-            ticks_per_second: metadata.config.steps_per_second,
+            ticks_per_second,
             runner: None,
         }),
     });
@@ -178,10 +591,117 @@ async fn create_session(
     let mut sessions = state.sessions.write().await;
     sessions.insert(id, session);
 
-    Ok(Json(CreateSessionResponse {
+    Ok(CreateSessionResponse {
         metadata,
         snapshot: snapshot.into(),
-    }))
+    })
+}
+
+async fn run_batch_simulations(
+    state: AppState,
+    run: Arc<BatchRun>,
+    config: sim_types::WorldConfig,
+    world_count: u32,
+    universe_seed: u64,
+    ticks_per_world: u64,
+) {
+    let max_parallelism = std::thread::available_parallelism()
+        .map(|value| value.get())
+        .unwrap_or(1)
+        .max(1);
+    let mut join_set = JoinSet::new();
+
+    for world_index in 0..world_count {
+        let run_id = run.id;
+        let world_archive = state.world_archive.clone();
+        let world_config = config.clone();
+        let seed = world_seed(universe_seed, world_index);
+        join_set.spawn(async move {
+            tokio::task::spawn_blocking(move || -> Result<ArchivedWorldSummary, AppError> {
+                let mut simulation = Simulation::new(world_config, seed)?;
+                simulate_ticks(&mut simulation, ticks_per_world);
+                world_archive.persist_batch_world(
+                    run_id,
+                    world_index,
+                    universe_seed,
+                    seed,
+                    ticks_per_world,
+                    simulation,
+                )
+            })
+            .await
+            .map_err(|err| AppError::Internal(format!("world worker join error: {err}")))?
+        });
+
+        if join_set.len() >= max_parallelism {
+            let completed = join_set.join_next().await;
+            if handle_batch_world_result(run.clone(), completed)
+                .await
+                .is_err()
+            {
+                join_set.abort_all();
+                return;
+            }
+        }
+    }
+
+    while !join_set.is_empty() {
+        let completed = join_set.join_next().await;
+        if handle_batch_world_result(run.clone(), completed)
+            .await
+            .is_err()
+        {
+            join_set.abort_all();
+            return;
+        }
+    }
+
+    let mut inner = run.inner.lock().await;
+    if inner.error.is_none() {
+        inner.worlds.sort_by(|a, b| match (&a.source, &b.source) {
+            (
+                ArchivedWorldSource::BatchRun {
+                    world_index: left_index,
+                    ..
+                },
+                ArchivedWorldSource::BatchRun {
+                    world_index: right_index,
+                    ..
+                },
+            ) => left_index.cmp(right_index),
+        });
+        inner.aggregate = compute_batch_aggregate(&inner.worlds);
+        inner.status = BatchRunStatus::Completed;
+    }
+}
+
+async fn handle_batch_world_result(
+    run: Arc<BatchRun>,
+    completed: Option<Result<Result<ArchivedWorldSummary, AppError>, tokio::task::JoinError>>,
+) -> Result<(), ()> {
+    let Some(result) = completed else {
+        return Ok(());
+    };
+    match result {
+        Ok(Ok(summary)) => {
+            let mut inner = run.inner.lock().await;
+            inner.completed_worlds = inner.completed_worlds.saturating_add(1);
+            inner.worlds.push(summary);
+            Ok(())
+        }
+        Ok(Err(err)) => {
+            let mut inner = run.inner.lock().await;
+            inner.status = BatchRunStatus::Failed;
+            inner.error = Some(err.to_string());
+            Err(())
+        }
+        Err(err) => {
+            let mut inner = run.inner.lock().await;
+            inner.status = BatchRunStatus::Failed;
+            inner.error = Some(format!("world worker task failed: {err}"));
+            Err(())
+        }
+    }
 }
 
 async fn get_session_metadata(

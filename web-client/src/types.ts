@@ -178,6 +178,58 @@ export type CreateSessionResponse = {
   snapshot: WorldSnapshot;
 };
 
+export type BatchRunStatus = 'Running' | 'Completed' | 'Failed';
+
+export type BatchAggregateStats = {
+  total_organisms_alive: number;
+  total_species_alive: number;
+  mean_organisms_alive: number;
+  mean_species_alive: number;
+  min_organisms_alive: number;
+  max_organisms_alive: number;
+  min_species_alive: number;
+  max_species_alive: number;
+};
+
+export type ArchivedWorldSource = {
+  type: 'BatchRun';
+  data: {
+    run_id: string;
+    world_index: number;
+    universe_seed: number;
+    world_seed: number;
+    ticks_simulated: number;
+  };
+};
+
+export type ArchivedWorldSummary = {
+  world_id: string;
+  created_at_unix_ms: number;
+  turn: number;
+  organisms_alive: number;
+  species_alive: number;
+  source: ArchivedWorldSource;
+};
+
+export type CreateBatchRunResponse = {
+  run_id: string;
+};
+
+export type BatchRunStatusResponse = {
+  run_id: string;
+  created_at_unix_ms: number;
+  status: BatchRunStatus;
+  total_worlds: number;
+  completed_worlds: number;
+  aggregate: BatchAggregateStats | null;
+  worlds: ArchivedWorldSummary[];
+  error: string | null;
+};
+
+export type ListArchivedWorldsResponse = {
+  worlds: ArchivedWorldSummary[];
+};
+
 export type EntityId =
   | { entity_type: 'Organism'; id: OrganismId }
   | { entity_type: 'Food'; id: FoodId };

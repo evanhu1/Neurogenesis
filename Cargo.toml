@@ -16,7 +16,7 @@ anyhow = "1"
 axum = { version = "0.8", features = ["ws", "macros", "json"] }
 futures = "0.3"
 rand = "0.9"
-rand_chacha = "0.9"
+rand_chacha = { version = "0.9", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

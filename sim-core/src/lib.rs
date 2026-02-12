@@ -1,10 +1,11 @@
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
+use serde::{Deserialize, Serialize};
 use sim_types::{
     FoodId, FoodState, MetricsSnapshot, OccupancyCell, Occupant, OrganismGenome, OrganismId,
     OrganismState, SpeciesId, TickDelta, WorldConfig, WorldSnapshot,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use thiserror::Error;
 
 mod brain;
@@ -22,9 +23,11 @@ mod tests;
 pub enum SimError {
     #[error("invalid world config: {0}")]
     InvalidConfig(String),
+    #[error("invalid simulation state: {0}")]
+    InvalidState(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Simulation {
     config: WorldConfig,
     species_registry: BTreeMap<SpeciesId, OrganismGenome>,
@@ -140,6 +143,151 @@ impl Simulation {
 
     pub fn metrics(&self) -> &MetricsSnapshot {
         &self.metrics
+    }
+
+    pub fn validate_state(&self) -> Result<(), SimError> {
+        validate_world_config(&self.config)?;
+        genome::validate_seed_genome_config(&self.config.seed_genome_config)?;
+
+        let expected_capacity = grid::world_capacity(self.config.world_width);
+        if self.occupancy.len() != expected_capacity {
+            return Err(SimError::InvalidState(format!(
+                "occupancy length {} does not match expected capacity {}",
+                self.occupancy.len(),
+                expected_capacity
+            )));
+        }
+
+        if !self
+            .organisms
+            .windows(2)
+            .all(|window| window[0].id < window[1].id)
+        {
+            return Err(SimError::InvalidState(
+                "organisms must be sorted by ascending id".to_owned(),
+            ));
+        }
+
+        if !self
+            .foods
+            .windows(2)
+            .all(|window| window[0].id < window[1].id)
+        {
+            return Err(SimError::InvalidState(
+                "foods must be sorted by ascending id".to_owned(),
+            ));
+        }
+
+        let width = self.config.world_width as i32;
+        let mut expected_occupancy = vec![None; expected_capacity];
+
+        for organism in &self.organisms {
+            if organism.q < 0 || organism.r < 0 || organism.q >= width || organism.r >= width {
+                return Err(SimError::InvalidState(format!(
+                    "organism {:?} is out of bounds at ({}, {})",
+                    organism.id, organism.q, organism.r
+                )));
+            }
+            let idx = organism.r as usize * width as usize + organism.q as usize;
+            if expected_occupancy[idx].is_some() {
+                return Err(SimError::InvalidState(format!(
+                    "duplicate occupancy at ({}, {})",
+                    organism.q, organism.r
+                )));
+            }
+            expected_occupancy[idx] = Some(Occupant::Organism(organism.id));
+        }
+
+        for food in &self.foods {
+            if food.q < 0 || food.r < 0 || food.q >= width || food.r >= width {
+                return Err(SimError::InvalidState(format!(
+                    "food {:?} is out of bounds at ({}, {})",
+                    food.id, food.q, food.r
+                )));
+            }
+            let idx = food.r as usize * width as usize + food.q as usize;
+            if expected_occupancy[idx].is_some() {
+                return Err(SimError::InvalidState(format!(
+                    "duplicate occupancy at ({}, {})",
+                    food.q, food.r
+                )));
+            }
+            expected_occupancy[idx] = Some(Occupant::Food(food.id));
+        }
+
+        if self.occupancy != expected_occupancy {
+            return Err(SimError::InvalidState(
+                "occupancy vector does not match organism/food positions".to_owned(),
+            ));
+        }
+
+        let max_organism_id = self.organisms.iter().map(|o| o.id.0).max().unwrap_or(0);
+        if !self.organisms.is_empty() && self.next_organism_id <= max_organism_id {
+            return Err(SimError::InvalidState(format!(
+                "next_organism_id {} must be greater than max organism id {}",
+                self.next_organism_id, max_organism_id
+            )));
+        }
+
+        let max_food_id = self.foods.iter().map(|f| f.id.0).max().unwrap_or(0);
+        if !self.foods.is_empty() && self.next_food_id <= max_food_id {
+            return Err(SimError::InvalidState(format!(
+                "next_food_id {} must be greater than max food id {}",
+                self.next_food_id, max_food_id
+            )));
+        }
+
+        let max_species_id = self
+            .species_registry
+            .keys()
+            .map(|id| id.0)
+            .max()
+            .unwrap_or(0);
+        if !self.species_registry.is_empty() && self.next_species_id <= max_species_id {
+            return Err(SimError::InvalidState(format!(
+                "next_species_id {} must be greater than max species id {}",
+                self.next_species_id, max_species_id
+            )));
+        }
+
+        let living_species: HashSet<SpeciesId> =
+            self.organisms.iter().map(|o| o.species_id).collect();
+        let known_species: HashSet<SpeciesId> = self.species_registry.keys().copied().collect();
+        if !living_species.is_subset(&known_species) {
+            return Err(SimError::InvalidState(
+                "species_registry is missing one or more living species".to_owned(),
+            ));
+        }
+
+        let mut computed_species_counts = BTreeMap::new();
+        for organism in &self.organisms {
+            *computed_species_counts
+                .entry(organism.species_id)
+                .or_insert(0_u32) += 1;
+        }
+
+        if self.metrics.organisms != self.organisms.len() as u32 {
+            return Err(SimError::InvalidState(format!(
+                "metrics.organisms {} does not match organism count {}",
+                self.metrics.organisms,
+                self.organisms.len()
+            )));
+        }
+
+        if self.metrics.species_counts != computed_species_counts {
+            return Err(SimError::InvalidState(
+                "metrics.species_counts does not match organism population".to_owned(),
+            ));
+        }
+
+        if self.metrics.total_species_created != self.next_species_id {
+            return Err(SimError::InvalidState(format!(
+                "metrics.total_species_created {} does not match next_species_id {}",
+                self.metrics.total_species_created, self.next_species_id
+            )));
+        }
+
+        Ok(())
     }
 
     pub(crate) fn organism_index(&self, id: OrganismId) -> usize {

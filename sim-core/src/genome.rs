@@ -306,14 +306,10 @@ fn mutate_split_edge<R: Rng + ?Sized>(
         weight: clamp_signed_weight(split_edge.weight, pre_sign),
     };
 
-    let new_sign = match new_type {
-        InterNeuronType::Excitatory => 1.0,
-        InterNeuronType::Inhibitory => -1.0,
-    };
     let edge_from_new = SynapseEdge {
         pre_neuron_id: new_inter_id,
         post_neuron_id: split_edge.post_neuron_id,
-        weight: sample_signed_lognormal_weight(new_sign, rng),
+        weight: clamp_signed_weight(split_edge.weight, pre_sign),
     };
 
     genome.edges.push(edge_to_new);

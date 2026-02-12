@@ -2,8 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { applyTickDelta, findOrganism, unwrapId } from '../../../protocol';
 import { DEFAULT_CONFIG } from '../../../types';
 import type {
+  ArchivedWorldSummary,
+  BatchRunStatusResponse,
+  CreateBatchRunResponse,
   CreateSessionResponse,
   FocusBrainData,
+  ListArchivedWorldsResponse,
   OrganismState,
   ServerEvent,
   SessionMetadata,
@@ -27,6 +31,7 @@ export type SpeciesPopulationPoint = {
 
 const MAX_SPECIES_HISTORY_POINTS = 2048;
 const FOCUS_POLL_INTERVAL_MS = 100;
+const BATCH_RUN_POLL_INTERVAL_MS = 500;
 
 function normalizeSpeciesCounts(speciesCounts: Record<string, number>): Record<string, number> {
   return { ...speciesCounts };
@@ -123,6 +128,8 @@ function syncFocusedOrganismFromWorld(
 export type SimulationSessionState = {
   session: SessionMetadata | null;
   snapshot: WorldSnapshot | null;
+  batchRunStatus: BatchRunStatusResponse | null;
+  archivedWorlds: ArchivedWorldSummary[];
   speciesPopulationHistory: SpeciesPopulationPoint[];
   focusedOrganismId: number | null;
   focusedOrganism: OrganismState | null;
@@ -142,11 +149,17 @@ export type SimulationSessionState = {
   step: (count: number) => void;
   focusOrganism: (organism: WorldOrganismState) => void;
   defocusOrganism: () => void;
+  startBatchRun: (worldCount: number, ticksPerWorld: number, universeSeed: number) => Promise<void>;
+  loadArchivedWorld: (worldId: string) => Promise<void>;
+  refreshArchivedWorlds: () => Promise<void>;
 };
 
 export function useSimulationSession(): SimulationSessionState {
   const [session, setSession] = useState<SessionMetadata | null>(null);
   const [snapshot, setSnapshot] = useState<WorldSnapshot | null>(null);
+  const [activeBatchRunId, setActiveBatchRunId] = useState<string | null>(null);
+  const [batchRunStatus, setBatchRunStatus] = useState<BatchRunStatusResponse | null>(null);
+  const [archivedWorlds, setArchivedWorlds] = useState<ArchivedWorldSummary[]>([]);
   const [speciesPopulationHistory, setSpeciesPopulationHistory] = useState<
     SpeciesPopulationPoint[]
   >([]);
@@ -359,6 +372,48 @@ export function useSimulationSession(): SimulationSessionState {
     }
   }, [applyLoadedSession, request]);
 
+  const refreshArchivedWorlds = useCallback(async () => {
+    const payload = await request<ListArchivedWorldsResponse>('/v1/worlds', 'GET');
+    setArchivedWorlds(payload.worlds);
+  }, [request]);
+
+  const loadArchivedWorld = useCallback(
+    async (worldId: string) => {
+      try {
+        setErrorText(null);
+        const payload = await request<CreateSessionResponse>(`/v1/worlds/${worldId}/sessions`, 'POST');
+        applyLoadedSession(payload.metadata, payload.snapshot);
+      } catch (err) {
+        setErrorText(err instanceof Error ? err.message : 'Failed to load archived world');
+      }
+    },
+    [applyLoadedSession, request],
+  );
+
+  const startBatchRun = useCallback(
+    async (worldCount: number, ticksPerWorld: number, universeSeed: number) => {
+      const normalizedWorldCount = Math.max(1, Math.floor(worldCount));
+      const normalizedTicksPerWorld = Math.max(1, Math.floor(ticksPerWorld));
+      const normalizedUniverseSeed = Math.max(0, Math.floor(universeSeed));
+      const config = snapshot?.config ?? session?.config ?? DEFAULT_CONFIG;
+
+      try {
+        setErrorText(null);
+        const payload = await request<CreateBatchRunResponse>('/v1/world-runs', 'POST', {
+          config,
+          world_count: normalizedWorldCount,
+          ticks_per_world: normalizedTicksPerWorld,
+          universe_seed: normalizedUniverseSeed,
+        });
+        setBatchRunStatus(null);
+        setActiveBatchRunId(payload.run_id);
+      } catch (err) {
+        setErrorText(err instanceof Error ? err.message : 'Failed to start world batch run');
+      }
+    },
+    [request, session, snapshot],
+  );
+
   const restoreSession = useCallback(
     async (sessionId: string): Promise<boolean> => {
       try {
@@ -506,6 +561,58 @@ export function useSimulationSession(): SimulationSessionState {
   }, [createSession, restoreSession]);
 
   useEffect(() => {
+    void refreshArchivedWorlds().catch((err: unknown) => {
+      if (err instanceof Error) {
+        setErrorText(err.message);
+      }
+    });
+  }, [refreshArchivedWorlds]);
+
+  useEffect(() => {
+    if (!activeBatchRunId) return;
+    let cancelled = false;
+    let timerId: number | null = null;
+
+    const poll = async () => {
+      try {
+        const status = await request<BatchRunStatusResponse>(`/v1/world-runs/${activeBatchRunId}`, 'GET');
+        if (cancelled) return;
+        setBatchRunStatus(status);
+
+        if (status.status === 'Running') {
+          timerId = window.setTimeout(() => {
+            void poll();
+          }, BATCH_RUN_POLL_INTERVAL_MS);
+          return;
+        }
+
+        setActiveBatchRunId(null);
+        if (status.error) {
+          setErrorText(status.error);
+        }
+        void refreshArchivedWorlds().catch((err: unknown) => {
+          if (err instanceof Error) {
+            setErrorText(err.message);
+          }
+        });
+      } catch (err) {
+        if (cancelled) return;
+        setActiveBatchRunId(null);
+        setErrorText(err instanceof Error ? err.message : 'Failed to fetch world run status');
+      }
+    };
+
+    void poll();
+
+    return () => {
+      cancelled = true;
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [activeBatchRunId, refreshArchivedWorlds, request]);
+
+  useEffect(() => {
     return () => {
       wsRef.current?.close();
     };
@@ -528,6 +635,8 @@ export function useSimulationSession(): SimulationSessionState {
   return {
     session,
     snapshot,
+    batchRunStatus,
+    archivedWorlds,
     speciesPopulationHistory,
     focusedOrganismId,
     focusedOrganism,
@@ -547,5 +656,8 @@ export function useSimulationSession(): SimulationSessionState {
     step,
     focusOrganism,
     defocusOrganism,
+    startBatchRun,
+    loadArchivedWorld,
+    refreshArchivedWorlds,
   };
 }
