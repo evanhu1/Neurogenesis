@@ -1,4 +1,4 @@
-# NeuroGenesis
+# Neurogenesis
 
 Neuromorphic brains grown from scratch with simulated evolution in Rust.
 

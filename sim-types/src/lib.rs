@@ -114,7 +114,7 @@ pub struct OrganismGenome {
     #[serde(default)]
     pub mutation_rate_action_bias: f32,
     pub inter_biases: Vec<f32>,
-    pub inter_update_rates: Vec<f32>,
+    pub inter_log_taus: Vec<f32>,
     #[serde(default)]
     pub interneuron_types: Vec<InterNeuronType>,
     pub action_biases: Vec<f32>,
@@ -203,7 +203,7 @@ pub struct InterNeuronState {
     pub neuron: NeuronState,
     #[serde(default)]
     pub interneuron_type: InterNeuronType,
-    pub update_rate: f32,
+    pub alpha: f32,
     pub synapses: Vec<SynapseEdge>,
 }
 

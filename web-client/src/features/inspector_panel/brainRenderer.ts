@@ -14,7 +14,7 @@ type BrainNode = {
   label?: string;
   activation: number;
   bias: number;
-  updateRate?: number;
+  alpha?: number;
   interneuronType?: 'Excitatory' | 'Inhibitory';
   isActive: boolean;
 };
@@ -60,7 +60,7 @@ export function computeBrainLayout(
           type: 'inter',
           activation: neuron.neuron.activation,
           bias: neuron.neuron.bias,
-          updateRate: neuron.update_rate,
+          alpha: neuron.alpha,
           interneuronType: neuron.interneuron_type,
           isActive: activeNeuronIds?.has(nid) ?? false,
         };
@@ -382,8 +382,8 @@ export function renderBrain(
         ctx.fillText(`b=${node.bias.toFixed(2)}`, node.x + 12, metricsY + 12);
       }
       if (node.type === 'inter') {
-        if (node.updateRate != null) {
-          ctx.fillText(`\u03B1=${node.updateRate.toFixed(2)}`, node.x + 12, metricsY + 24);
+        if (node.alpha != null) {
+          ctx.fillText(`\u03B1=${node.alpha.toFixed(2)}`, node.x + 12, metricsY + 24);
         }
       }
     }

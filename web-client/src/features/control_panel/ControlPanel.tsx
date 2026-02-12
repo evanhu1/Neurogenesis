@@ -49,7 +49,7 @@ export function ControlPanel({
 
   return (
     <aside className="h-full overflow-auto rounded-2xl border border-accent/15 bg-panel/95 p-4 shadow-panel">
-      <h1 className="text-2xl font-semibold tracking-tight">NeuroGenesis</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">Neurogenesis</h1>
       <pre className="mt-3 whitespace-pre-wrap rounded-xl bg-slate-100/80 p-3 font-mono text-xs">
         {sessionMeta}
       </pre>

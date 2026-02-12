@@ -1,5 +1,5 @@
+use crate::genome::{inter_alpha_from_log_tau, DEFAULT_INTER_LOG_TAU};
 use crate::grid::hex_neighbor;
-use crate::genome::{INTER_UPDATE_RATE_MAX, INTER_UPDATE_RATE_MIN};
 use sim_types::{
     ActionNeuronState, ActionType, BrainState, EntityType, InterNeuronState, InterNeuronType,
     NeuronId, NeuronState, NeuronType, Occupant, OrganismGenome, OrganismId, SensoryNeuronState,
@@ -83,12 +83,12 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
     let mut inter = Vec::with_capacity(genome.num_neurons as usize);
     for i in 0..genome.num_neurons {
         let bias = genome.inter_biases.get(i as usize).copied().unwrap_or(0.0);
-        let update_rate = genome
-            .inter_update_rates
+        let log_tau = genome
+            .inter_log_taus
             .get(i as usize)
             .copied()
-            .unwrap_or(INTER_UPDATE_RATE_MAX)
-            .clamp(INTER_UPDATE_RATE_MIN, INTER_UPDATE_RATE_MAX);
+            .unwrap_or(DEFAULT_INTER_LOG_TAU);
+        let alpha = inter_alpha_from_log_tau(log_tau);
         let interneuron_type = genome
             .interneuron_types
             .get(i as usize)
@@ -97,7 +97,7 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
         inter.push(InterNeuronState {
             neuron: make_neuron(NeuronId(INTER_ID_BASE + i), NeuronType::Inter, bias),
             interneuron_type,
-            update_rate,
+            alpha,
             synapses: Vec::new(),
         });
     }
@@ -312,8 +312,7 @@ pub(crate) fn evaluate_brain(
     }
 
     for (idx, neuron) in brain.inter.iter_mut().enumerate() {
-        let alpha = neuron
-            .update_rate;
+        let alpha = neuron.alpha;
         let previous = scratch.prev_inter[idx];
         let target = scratch.inter_inputs[idx].tanh();
         neuron.neuron.activation = (1.0 - alpha) * previous + alpha * target;

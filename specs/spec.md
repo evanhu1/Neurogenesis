@@ -1,14 +1,12 @@
-# NeuroGenesis Spec
+# Neurogenesis Spec
 
 This file is the authoritative implementation-aligned specification for the
 simulation engine, including turn-runner behavior.
 
 ## World
 
-- Grid: bounded axial hex coordinates `(q, r)` with
-  `0 <= q,r < world_width`.
-- Occupancy: dense `Vec<Option<Occupant>>` indexed by
-  `r * world_width + q`.
+- Grid: bounded axial hex coordinates `(q, r)` with `0 <= q,r < world_width`.
+- Occupancy: dense `Vec<Option<Occupant>>` indexed by `r * world_width + q`.
 - One entity per cell (`Organism(OrganismId)` or `Food(FoodId)`).
 
 ## Turn Runner
@@ -23,8 +21,8 @@ Each tick executes in strict order:
 5. Commit: apply moves/facing/consumption/energy transfers and food replenish.
 6. Reproduction queue: eligible organisms queue spawn at hex behind them.
 7. Age: increment `age_turns`.
-8. Spawn: process queue in deterministic order, mutate offspring genomes,
-   assign species.
+8. Spawn: process queue in deterministic order, mutate offspring genomes, assign
+   species.
 9. Metrics & delta: prune extinct species and emit `TickDelta`.
 
 Determinism: fixed config + RNG seed + command sequence produces identical
@@ -37,14 +35,12 @@ results.
     `Energy`)
   - Inter: `1000..1000+n`
   - Action: `2000..2003` (`MoveForward`, `Turn`, `Reproduce`)
-- Interneurons include `interneuron_type`:
-  `Excitatory` or `Inhibitory`.
+- Interneurons include `interneuron_type`: `Excitatory` or `Inhibitory`.
 - Evaluation:
   - sensory -> inter
   - inter(t-1) -> inter
   - sensory/inter -> action
-- Inter update:
-  `h_i(t) = (1-alpha_i) * h_i(t-1) + alpha_i * tanh(input_i(t))`,
+- Inter update: `h_i(t) = (1-alpha_i) * h_i(t-1) + alpha_i * tanh(input_i(t))`,
   `alpha_i in [0.1, 1.0]`.
 - Action outputs:
   - `Turn`: `tanh`
@@ -99,10 +95,8 @@ Mutation is applied to offspring genomes only.
 ### Self-adaptive mutation rates
 
 - Mutation-rate genes mutate every mutation step using:
-  `tau = 1 / sqrt(2 * sqrt(n))`
-  where `n = number of mutation-rate genes`.
-- Rate update form:
-  `rate <- clamp(rate * exp(tau * N(0,1)), 0, 1)`.
+  `tau = 1 / sqrt(2 * sqrt(n))` where `n = number of mutation-rate genes`.
+- Rate update form: `rate <- clamp(rate * exp(tau * N(0,1)), 0, 1)`.
 
 ### Operator gating
 

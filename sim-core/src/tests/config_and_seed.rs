@@ -1,5 +1,6 @@
 use super::support::*;
 use super::*;
+use crate::genome::{INTER_LOG_TAU_MAX, INTER_LOG_TAU_MIN};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use std::cmp::Ordering;
@@ -124,25 +125,25 @@ fn initial_food_population_matches_coverage_divisor() {
 }
 
 #[test]
-fn seed_genome_initializes_update_rates_and_action_biases() {
+fn seed_genome_initializes_log_taus_and_action_biases() {
     let cfg = stable_test_config();
     let mut rng = ChaCha8Rng::seed_from_u64(1234);
     let genome =
         crate::genome::generate_seed_genome(&cfg.seed_genome_config, cfg.max_num_neurons, &mut rng);
 
-    assert_eq!(
-        genome.inter_update_rates.len(),
-        cfg.max_num_neurons as usize
-    );
+    assert_eq!(genome.inter_log_taus.len(), cfg.max_num_neurons as usize);
     assert!(genome
-        .inter_update_rates
+        .inter_log_taus
         .iter()
-        .all(|rate| (0.1..=1.0).contains(rate)));
-    assert_eq!(genome.action_biases, vec![0.0; ActionType::ALL.len()]);
+        .all(|log_tau| *log_tau >= INTER_LOG_TAU_MIN && *log_tau <= INTER_LOG_TAU_MAX));
+    assert!(genome
+        .action_biases
+        .iter()
+        .all(|bias| *bias >= -1.0 && *bias <= 1.0));
 }
 
 #[test]
-fn inter_update_rate_mutation_clamps_to_strict_bounds() {
+fn inter_log_tau_mutation_clamps_to_strict_bounds() {
     let mut cfg = stable_test_config();
     cfg.seed_genome_config.num_neurons = 4;
     cfg.max_num_neurons = 6;
@@ -157,9 +158,9 @@ fn inter_update_rate_mutation_clamps_to_strict_bounds() {
     for _ in 0..500 {
         crate::genome::mutate_genome(&mut genome, cfg.max_num_neurons, &mut rng);
         assert!(genome
-            .inter_update_rates
+            .inter_log_taus
             .iter()
-            .all(|rate| *rate >= 0.1 && *rate <= 1.0));
+            .all(|log_tau| *log_tau >= INTER_LOG_TAU_MIN && *log_tau <= INTER_LOG_TAU_MAX));
     }
 }
 
@@ -167,7 +168,7 @@ fn inter_update_rate_mutation_clamps_to_strict_bounds() {
 fn split_edge_operator_replaces_edge_and_adds_interneuron() {
     let mut genome = test_genome();
     genome.inter_biases = vec![0.0, 0.0];
-    genome.inter_update_rates = vec![1.0, 1.0];
+    genome.inter_log_taus = vec![0.0, 0.0];
     genome.interneuron_types = vec![InterNeuronType::Excitatory, InterNeuronType::Excitatory];
     genome.edges = vec![SynapseEdge {
         pre_neuron_id: NeuronId(0),

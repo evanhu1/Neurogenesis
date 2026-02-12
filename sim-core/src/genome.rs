@@ -1,6 +1,4 @@
-use crate::brain::{
-    ACTION_COUNT, ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT,
-};
+use crate::brain::{ACTION_COUNT, ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT};
 use crate::SimError;
 use rand::Rng;
 use sim_types::{InterNeuronType, NeuronId, OrganismGenome, SeedGenomeConfig, SynapseEdge};
@@ -18,9 +16,12 @@ const INTER_TYPE_EXCITATORY_PRIOR: f32 = 0.8;
 
 const WEIGHT_PERTURBATION_STDDEV: f32 = 0.3;
 const BIAS_PERTURBATION_STDDEV: f32 = 0.15;
-const INTER_UPDATE_RATE_PERTURBATION_STDDEV: f32 = 0.05;
-pub(crate) const INTER_UPDATE_RATE_MAX: f32 = 1.0;
-pub(crate) const INTER_UPDATE_RATE_MIN: f32 = 0.2;
+const INTER_LOG_TAU_PERTURBATION_STDDEV: f32 = 0.05;
+pub(crate) const INTER_TAU_MIN: f32 = 0.1;
+pub(crate) const INTER_TAU_MAX: f32 = 15.0;
+pub(crate) const INTER_LOG_TAU_MIN: f32 = -2.302_585_1;
+pub(crate) const INTER_LOG_TAU_MAX: f32 = 2.995_732_3;
+pub(crate) const DEFAULT_INTER_LOG_TAU: f32 = 0.0;
 
 pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     config: &SeedGenomeConfig,
@@ -30,15 +31,15 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     let inter_biases: Vec<f32> = (0..world_max_num_neurons)
         .map(|_| sample_initial_bias(rng))
         .collect();
-    let inter_update_rates: Vec<f32> = (0..world_max_num_neurons)
-        .map(|_| sample_log_uniform_update_rate(rng))
+    let inter_log_taus: Vec<f32> = (0..world_max_num_neurons)
+        .map(|_| sample_uniform_log_tau(rng))
         .collect();
     let interneuron_types: Vec<InterNeuronType> = (0..world_max_num_neurons)
         .map(|_| sample_interneuron_type(rng))
         .collect();
     let action_biases: Vec<f32> = (0..ACTION_COUNT)
-    .map(|_| sample_initial_bias(rng))
-    .collect();
+        .map(|_| sample_initial_bias(rng))
+        .collect();
 
     let mut edges = Vec::new();
     for _ in 0..config.num_synapses {
@@ -61,7 +62,7 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         mutation_rate_inter_update_rate: config.mutation_rate_inter_update_rate,
         mutation_rate_action_bias: config.mutation_rate_action_bias,
         inter_biases,
-        inter_update_rates,
+        inter_log_taus,
         interneuron_types,
         action_biases,
         edges,
@@ -247,12 +248,10 @@ fn align_genome_vectors<R: Rng + ?Sized>(
     }
     genome.inter_biases.truncate(target_inter_len);
 
-    while genome.inter_update_rates.len() < target_inter_len {
-        genome
-            .inter_update_rates
-            .push(sample_log_uniform_update_rate(rng));
+    while genome.inter_log_taus.len() < target_inter_len {
+        genome.inter_log_taus.push(sample_uniform_log_tau(rng));
     }
-    genome.inter_update_rates.truncate(target_inter_len);
+    genome.inter_log_taus.truncate(target_inter_len);
 
     while genome.interneuron_types.len() < target_inter_len {
         genome.interneuron_types.push(sample_interneuron_type(rng));
@@ -280,7 +279,7 @@ fn mutate_split_edge<R: Rng + ?Sized>(
 
     let new_idx = genome.num_neurons as usize;
     if new_idx >= genome.inter_biases.len()
-        || new_idx >= genome.inter_update_rates.len()
+        || new_idx >= genome.inter_log_taus.len()
         || new_idx >= genome.interneuron_types.len()
     {
         genome.edges.push(split_edge);
@@ -290,7 +289,7 @@ fn mutate_split_edge<R: Rng + ?Sized>(
     let new_type = sample_interneuron_type(rng);
     genome.interneuron_types[new_idx] = new_type;
     genome.inter_biases[new_idx] = sample_initial_bias(rng);
-    genome.inter_update_rates[new_idx] = sample_log_uniform_update_rate(rng);
+    genome.inter_log_taus[new_idx] = sample_uniform_log_tau(rng);
 
     let new_inter_id = NeuronId(INTER_ID_BASE + genome.num_neurons);
     genome.num_neurons += 1;
@@ -384,11 +383,11 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
 
     if rng.random::<f32>() < genome.mutation_rate_inter_update_rate && genome.num_neurons > 0 {
         let idx = rng.random_range(0..genome.num_neurons as usize);
-        genome.inter_update_rates[idx] = perturb_clamped(
-            genome.inter_update_rates[idx],
-            INTER_UPDATE_RATE_PERTURBATION_STDDEV,
-            INTER_UPDATE_RATE_MIN,
-            INTER_UPDATE_RATE_MAX,
+        genome.inter_log_taus[idx] = perturb_clamped(
+            genome.inter_log_taus[idx],
+            INTER_LOG_TAU_PERTURBATION_STDDEV,
+            INTER_LOG_TAU_MIN,
+            INTER_LOG_TAU_MAX,
             rng,
         );
     }
@@ -425,14 +424,24 @@ fn step_u32<R: Rng + ?Sized>(value: u32, min: u32, max: u32, rng: &mut R) -> u32
     }
 }
 
-fn sample_log_uniform_update_rate<R: Rng + ?Sized>(rng: &mut R) -> f32 {
-    let u: f32 = rng.random();
-    let ratio = INTER_UPDATE_RATE_MAX / INTER_UPDATE_RATE_MIN;
-    INTER_UPDATE_RATE_MIN * ratio.powf(u)
+fn sample_uniform_log_tau<R: Rng + ?Sized>(rng: &mut R) -> f32 {
+    rng.random_range(INTER_LOG_TAU_MIN..=INTER_LOG_TAU_MAX)
+}
+
+pub(crate) fn inter_alpha_from_log_tau(log_tau: f32) -> f32 {
+    let clamped_log_tau = log_tau.clamp(INTER_LOG_TAU_MIN, INTER_LOG_TAU_MAX);
+    let tau = clamped_log_tau.exp().clamp(INTER_TAU_MIN, INTER_TAU_MAX);
+    1.0 - (-1.0 / tau).exp()
 }
 
 fn sample_initial_bias<R: Rng + ?Sized>(rng: &mut R) -> f32 {
-    perturb_clamped(0.0, BIAS_PERTURBATION_STDDEV * 2.0, -BIAS_MAX, BIAS_MAX, rng)
+    perturb_clamped(
+        0.0,
+        BIAS_PERTURBATION_STDDEV * 2.0,
+        -BIAS_MAX,
+        BIAS_MAX,
+        rng,
+    )
 }
 
 fn is_enabled_inter_neuron(id: NeuronId, num_neurons: u32) -> bool {
@@ -456,11 +465,8 @@ fn normal_sample<R: Rng + ?Sized>(rng: &mut R) -> f32 {
     (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos()
 }
 
-/// L1 genome distance: scalar traits + mutation-rate genes + vectors + merge-join over sorted edges.
+/// L1 genome distance: scalar traits + mutation-rate genes + vectors.
 pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
-    debug_assert_edges_sorted(&a.edges);
-    debug_assert_edges_sorted(&b.edges);
-
     let mut dist = (a.num_neurons as f32 - b.num_neurons as f32).abs()
         + (a.vision_distance as f32 - b.vision_distance as f32).abs();
 
@@ -477,7 +483,7 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
             .get(i)
             .copied()
             .unwrap_or(InterNeuronType::Excitatory);
-        let tb = b
+        let tb: InterNeuronType = b
             .interneuron_types
             .get(i)
             .copied()
@@ -485,61 +491,6 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
         if ta != tb {
             dist += 1.0;
         }
-    }
-
-    let max_bias_len = a.inter_biases.len().max(b.inter_biases.len());
-    for i in 0..max_bias_len {
-        let ba = a.inter_biases.get(i).copied().unwrap_or(0.0);
-        let bb = b.inter_biases.get(i).copied().unwrap_or(0.0);
-        dist += (ba - bb).abs();
-    }
-
-    let max_update_rate_len = a.inter_update_rates.len().max(b.inter_update_rates.len());
-    for i in 0..max_update_rate_len {
-        let aa = a
-            .inter_update_rates
-            .get(i)
-            .copied()
-            .unwrap_or(INTER_UPDATE_RATE_MAX);
-        let bb = b
-            .inter_update_rates
-            .get(i)
-            .copied()
-            .unwrap_or(INTER_UPDATE_RATE_MAX);
-        dist += (aa - bb).abs();
-    }
-
-    let max_action_bias_len = a.action_biases.len().max(b.action_biases.len());
-    for i in 0..max_action_bias_len {
-        let ba = a.action_biases.get(i).copied().unwrap_or(0.0);
-        let bb = b.action_biases.get(i).copied().unwrap_or(0.0);
-        dist += (ba - bb).abs();
-    }
-
-    // Merge-join over sorted edges
-    let (mut ai, mut bi) = (0, 0);
-    while ai < a.edges.len() && bi < b.edges.len() {
-        match edge_key(&a.edges[ai]).cmp(&edge_key(&b.edges[bi])) {
-            Ordering::Equal => {
-                dist += (a.edges[ai].weight - b.edges[bi].weight).abs();
-                ai += 1;
-                bi += 1;
-            }
-            Ordering::Less => {
-                dist += a.edges[ai].weight.abs();
-                ai += 1;
-            }
-            Ordering::Greater => {
-                dist += b.edges[bi].weight.abs();
-                bi += 1;
-            }
-        }
-    }
-    for edge in &a.edges[ai..] {
-        dist += edge.weight.abs();
-    }
-    for edge in &b.edges[bi..] {
-        dist += edge.weight.abs();
     }
 
     dist

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { unwrapId } from '../../protocol';
 import type { BrainState, OrganismState } from '../../types';
 import { BrainCanvas } from './BrainCanvas';
@@ -21,6 +21,8 @@ type StatItem = {
   label: string;
   value: string;
 };
+
+type SectionKey = 'brain' | 'genome' | 'mutationRates';
 
 function formatFloat(value: number, digits = 3): string {
   return Number.isFinite(value) ? value.toFixed(digits) : 'n/a';
@@ -53,6 +55,19 @@ export function InspectorPanel({
   activeNeuronIds,
   onDefocus,
 }: InspectorPanelProps) {
+  const [expandedSections, setExpandedSections] = useState<Record<SectionKey, boolean>>({
+    brain: false,
+    genome: false,
+    mutationRates: false,
+  });
+
+  const setSectionOpen = (key: SectionKey, isOpen: boolean) => {
+    setExpandedSections((prev) => {
+      if (prev[key] === isOpen) return prev;
+      return { ...prev, [key]: isOpen };
+    });
+  };
+
   const summary = useMemo(() => {
     if (!focusedOrganism) return null;
     const genome = focusedOrganism.genome;
@@ -118,7 +133,7 @@ export function InspectorPanel({
         { label: 'Vision Distance', value: String(genome.vision_distance) },
         { label: 'Genome Edges', value: String(genome.edges.length) },
         { label: 'Inter Bias Genes', value: String(genome.inter_biases.length) },
-        { label: 'Inter Update Genes', value: String(genome.inter_update_rates.length) },
+        { label: 'Inter Tau Genes', value: String(genome.inter_log_taus.length) },
         { label: 'Action Bias Genes', value: String(genome.action_biases.length) },
         { label: 'Inter Excitatory', value: String(interExcitatoryCount) },
         { label: 'Inter Inhibitory', value: String(interInhibitoryCount) },
@@ -152,21 +167,33 @@ export function InspectorPanel({
       ) : (
         <div className="mt-3 space-y-3">
           {statSection('Core', summary.coreStats)}
-          <details className="rounded-xl border border-accent/20 bg-white/85 p-3">
+          <details
+            open={expandedSections.brain}
+            onToggle={(event) => setSectionOpen('brain', event.currentTarget.open)}
+            className="rounded-xl border border-accent/20 bg-white/85 p-3"
+          >
             <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.14em] text-ink/75">
               Brain
             </summary>
             <div className="mt-2">{statSection('Brain', summary.brainStats)}</div>
           </details>
 
-          <details className="rounded-xl border border-accent/20 bg-white/85 p-3">
+          <details
+            open={expandedSections.genome}
+            onToggle={(event) => setSectionOpen('genome', event.currentTarget.open)}
+            className="rounded-xl border border-accent/20 bg-white/85 p-3"
+          >
             <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.14em] text-ink/75">
               Genome
             </summary>
             <div className="mt-2">{statSection('Genome', summary.genomeStats)}</div>
           </details>
 
-          <details className="rounded-xl border border-accent/20 bg-white/85 p-3">
+          <details
+            open={expandedSections.mutationRates}
+            onToggle={(event) => setSectionOpen('mutationRates', event.currentTarget.open)}
+            className="rounded-xl border border-accent/20 bg-white/85 p-3"
+          >
             <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.14em] text-ink/75">
               Mutation Rates
             </summary>

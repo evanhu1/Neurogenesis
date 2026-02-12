@@ -48,7 +48,7 @@ export type OrganismGenome = {
   mutation_rate_inter_update_rate: number;
   mutation_rate_action_bias: number;
   inter_biases: number[];
-  inter_update_rates: number[];
+  inter_log_taus: number[];
   interneuron_types: InterNeuronType[];
   action_biases: number[];
   edges: SynapseEdge[];
@@ -85,7 +85,7 @@ export type SensoryNeuronState = {
 export type InterNeuronState = {
   neuron: NeuronState;
   interneuron_type: InterNeuronType;
-  update_rate: number;
+  alpha: number;
   synapses: SynapseEdge[];
 };
 

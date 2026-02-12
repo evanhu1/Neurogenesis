@@ -43,7 +43,7 @@ pub(super) fn test_genome() -> OrganismGenome {
         mutation_rate_inter_update_rate: 0.0,
         mutation_rate_action_bias: 0.0,
         inter_biases: vec![0.0],
-        inter_update_rates: vec![1.0],
+        inter_log_taus: vec![0.0],
         interneuron_types: vec![InterNeuronType::Excitatory],
         action_biases: vec![0.0; ActionType::ALL.len()],
         edges: vec![],
@@ -141,7 +141,7 @@ fn forced_brain(
             parent_ids: Vec::new(),
         },
         interneuron_type: InterNeuronType::Excitatory,
-        update_rate: 1.0,
+        alpha: 1.0,
         synapses: inter_synapses,
     }];
     let mut action = vec![

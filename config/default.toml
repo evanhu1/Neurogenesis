@@ -11,7 +11,7 @@ turn_energy_cost = 0.5
 food_coverage_divisor = 25
 max_organism_age = 500
 max_num_neurons = 50
-speciation_threshold = 50.0
+speciation_threshold = 20.0
 
 [seed_genome_config]
 num_neurons = 10
