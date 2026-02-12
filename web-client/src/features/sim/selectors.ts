@@ -1,4 +1,3 @@
-import { unwrapId } from '../../protocol';
 import type { OrganismState, SessionMetadata, WorldSnapshot } from '../../types';
 
 export function formatSessionMeta(session: SessionMetadata | null): string {
@@ -33,24 +32,4 @@ export function formatFocusMeta(
     return 'Click an organism';
   }
   return `focused organism: ${focusedOrganismId} at (${focusedOrganism.q}, ${focusedOrganism.r})`;
-}
-
-export function formatFocusedStats(focusedOrganism: OrganismState | null): string {
-  if (!focusedOrganism) return 'No organism selected';
-  return [
-    `id=${unwrapId(focusedOrganism.id)}`,
-    `species_id=${unwrapId(focusedOrganism.species_id)}`,
-    `position=(${focusedOrganism.q}, ${focusedOrganism.r})`,
-    `facing=${focusedOrganism.facing}`,
-    `age_turns=${focusedOrganism.age_turns}`,
-    `energy=${focusedOrganism.energy.toFixed(2)}`,
-    `consumptions_count=${focusedOrganism.consumptions_count}`,
-    `reproductions_count=${focusedOrganism.reproductions_count}`,
-    `synapse_count=${focusedOrganism.brain.synapse_count}`,
-    `vision_distance=${focusedOrganism.genome.vision_distance}`,
-    `genome_neurons=${focusedOrganism.genome.num_neurons}`,
-    `genome_edges=${focusedOrganism.genome.edges.length}`,
-    `mut_weight=${focusedOrganism.genome.mutation_rate_weight.toFixed(3)}`,
-    `mut_split_edge=${focusedOrganism.genome.mutation_rate_split_edge.toFixed(3)}`,
-  ].join('\n');
 }

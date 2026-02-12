@@ -225,7 +225,7 @@ export function useSimulationSession(): SimulationSessionState {
         const organismId = unwrapId(organism.id);
         setFocusedOrganismIdTracked(organismId);
         setFocusedOrganism(organism);
-        setActiveNeuronIds(new Set(active_neuron_ids));
+        setActiveNeuronIds(new Set(active_neuron_ids.map((id) => unwrapId(id))));
         break;
       }
       case 'Metrics': {

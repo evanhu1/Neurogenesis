@@ -313,8 +313,7 @@ pub(crate) fn evaluate_brain(
 
     for (idx, neuron) in brain.inter.iter_mut().enumerate() {
         let alpha = neuron
-            .update_rate
-            .clamp(INTER_UPDATE_RATE_MIN, INTER_UPDATE_RATE_MAX);
+            .update_rate;
         let previous = scratch.prev_inter[idx];
         let target = scratch.inter_inputs[idx].tanh();
         neuron.neuron.activation = (1.0 - alpha) * previous + alpha * target;

@@ -1,22 +1,139 @@
-import type { BrainState } from '../../types';
+import { useMemo } from 'react';
+import { unwrapId } from '../../protocol';
+import type { BrainState, OrganismState } from '../../types';
 import { BrainCanvas } from './BrainCanvas';
 
 type InspectorPanelProps = {
   focusMetaText: string;
-  focusedStatsText: string;
+  focusedOrganism: OrganismState | null;
   focusedBrain: BrainState | null;
   activeNeuronIds: Set<number> | null;
   onDefocus: () => void;
 };
 
-export function InspectorPanel({ focusMetaText, focusedStatsText, focusedBrain, activeNeuronIds, onDefocus }: InspectorPanelProps) {
+type MutationRateItem = {
+  key: keyof OrganismState['genome'];
+  label: string;
+  value: number;
+};
+
+type StatItem = {
+  label: string;
+  value: string;
+};
+
+function formatFloat(value: number, digits = 3): string {
+  return Number.isFinite(value) ? value.toFixed(digits) : 'n/a';
+}
+
+function formatPercent(value: number): string {
+  return `${(value * 100).toFixed(2)}%`;
+}
+
+function statSection(title: string, stats: StatItem[]) {
   return (
-    <aside className="h-full overflow-auto rounded-2xl border border-accent/15 bg-panel/95 p-4 shadow-panel">
+    <section className="rounded-xl border border-accent/20 bg-white/85 p-3">
+      <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink/75">{title}</h3>
+      <dl className="mt-2 grid grid-cols-[auto_1fr] items-baseline gap-x-3 gap-y-1 text-xs">
+        {stats.map((stat) => (
+          <div key={stat.label} className="contents">
+            <dt className="font-medium text-ink/65">{stat.label}</dt>
+            <dd className="truncate text-right font-mono text-ink/95">{stat.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+export function InspectorPanel({
+  focusMetaText,
+  focusedOrganism,
+  focusedBrain,
+  activeNeuronIds,
+  onDefocus,
+}: InspectorPanelProps) {
+  const summary = useMemo(() => {
+    if (!focusedOrganism) return null;
+    const genome = focusedOrganism.genome;
+    const interExcitatoryCount = genome.interneuron_types.filter((v) => v === 'Excitatory').length;
+    const interInhibitoryCount = genome.interneuron_types.length - interExcitatoryCount;
+    const activeNeuronCount = activeNeuronIds?.size ?? 0;
+
+    const mutationRates: MutationRateItem[] = [
+      {
+        key: 'mutation_rate_vision_distance',
+        label: 'Vision Distance',
+        value: genome.mutation_rate_vision_distance,
+      },
+      { key: 'mutation_rate_weight', label: 'Weight', value: genome.mutation_rate_weight },
+      { key: 'mutation_rate_add_edge', label: 'Add Edge', value: genome.mutation_rate_add_edge },
+      {
+        key: 'mutation_rate_remove_edge',
+        label: 'Remove Edge',
+        value: genome.mutation_rate_remove_edge,
+      },
+      {
+        key: 'mutation_rate_split_edge',
+        label: 'Split Edge',
+        value: genome.mutation_rate_split_edge,
+      },
+      {
+        key: 'mutation_rate_inter_bias',
+        label: 'Inter Bias',
+        value: genome.mutation_rate_inter_bias,
+      },
+      {
+        key: 'mutation_rate_inter_update_rate',
+        label: 'Inter Update',
+        value: genome.mutation_rate_inter_update_rate,
+      },
+      {
+        key: 'mutation_rate_action_bias',
+        label: 'Action Bias',
+        value: genome.mutation_rate_action_bias,
+      },
+    ];
+
+    return {
+      coreStats: [
+        { label: 'Organism ID', value: String(unwrapId(focusedOrganism.id)) },
+        { label: 'Species ID', value: String(unwrapId(focusedOrganism.species_id)) },
+        { label: 'Position', value: `(${focusedOrganism.q}, ${focusedOrganism.r})` },
+        { label: 'Facing', value: focusedOrganism.facing },
+        { label: 'Age (turns)', value: String(focusedOrganism.age_turns) },
+        { label: 'Energy', value: formatFloat(focusedOrganism.energy, 2) },
+        { label: 'Consumptions', value: String(focusedOrganism.consumptions_count) },
+        { label: 'Reproductions', value: String(focusedOrganism.reproductions_count) },
+      ] satisfies StatItem[],
+      brainStats: [
+        { label: 'Sensory Neurons', value: String(focusedOrganism.brain.sensory.length) },
+        { label: 'Inter Neurons', value: String(focusedOrganism.brain.inter.length) },
+        { label: 'Action Neurons', value: String(focusedOrganism.brain.action.length) },
+        { label: 'Synapses', value: String(focusedOrganism.brain.synapse_count) },
+        { label: 'Active Neurons', value: String(activeNeuronCount) },
+      ] satisfies StatItem[],
+      genomeStats: [
+        { label: 'Genome Neurons', value: String(genome.num_neurons) },
+        { label: 'Vision Distance', value: String(genome.vision_distance) },
+        { label: 'Genome Edges', value: String(genome.edges.length) },
+        { label: 'Inter Bias Genes', value: String(genome.inter_biases.length) },
+        { label: 'Inter Update Genes', value: String(genome.inter_update_rates.length) },
+        { label: 'Action Bias Genes', value: String(genome.action_biases.length) },
+        { label: 'Inter Excitatory', value: String(interExcitatoryCount) },
+        { label: 'Inter Inhibitory', value: String(interInhibitoryCount) },
+      ] satisfies StatItem[],
+      mutationRates,
+    };
+  }, [activeNeuronIds, focusedOrganism]);
+
+  return (
+    <aside className="h-full overflow-auto rounded-2xl border border-accent/20 bg-gradient-to-b from-white/95 to-slate-50/90 p-4 shadow-panel">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold tracking-tight">Organism Inspector</h2>
+        <h2 className="text-lg font-semibold tracking-tight text-ink">Organism Inspector</h2>
         <button
           onClick={onDefocus}
-          className="rounded p-1 text-ink/40 transition hover:bg-slate-200 hover:text-ink/80"
+          className="rounded-md p-1 text-ink/40 transition hover:bg-slate-200 hover:text-ink/80"
           aria-label="Close inspector"
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
@@ -24,18 +141,68 @@ export function InspectorPanel({ focusMetaText, focusedStatsText, focusedBrain, 
           </svg>
         </button>
       </div>
-      <div className="mt-2 rounded-xl bg-slate-100/80 p-3 font-mono text-xs">{focusMetaText}</div>
-      <section className="mt-3 rounded-xl border border-accent/15 bg-white/80 p-3">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-ink/80">Stats</h3>
-        <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-slate-100/80 p-3 font-mono text-xs">
-          {focusedStatsText}
-        </pre>
-      </section>
-      <section className="mt-3 rounded-xl border border-accent/15 bg-white/80 p-3">
+      <div className="mt-2 rounded-xl border border-accent/15 bg-slate-100/70 p-3 font-mono text-[11px] text-ink/80">
+        {focusMetaText}
+      </div>
+
+      {!summary ? (
+        <section className="mt-3 rounded-xl border border-dashed border-accent/30 bg-white/80 px-4 py-6 text-sm text-ink/70">
+          Select an organism in the world to inspect its stats, genome, mutation rates, and neural activity.
+        </section>
+      ) : (
+        <div className="mt-3 space-y-3">
+          {statSection('Core', summary.coreStats)}
+          <details className="rounded-xl border border-accent/20 bg-white/85 p-3">
+            <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.14em] text-ink/75">
+              Brain
+            </summary>
+            <div className="mt-2">{statSection('Brain', summary.brainStats)}</div>
+          </details>
+
+          <details className="rounded-xl border border-accent/20 bg-white/85 p-3">
+            <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.14em] text-ink/75">
+              Genome
+            </summary>
+            <div className="mt-2">{statSection('Genome', summary.genomeStats)}</div>
+          </details>
+
+          <details className="rounded-xl border border-accent/20 bg-white/85 p-3">
+            <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.14em] text-ink/75">
+              Mutation Rates
+            </summary>
+            <ul className="mt-2 space-y-2">
+              {summary.mutationRates.map((entry) => {
+                const clamped = Math.max(0, Math.min(1, entry.value));
+                return (
+                  <li key={entry.key} className="rounded-lg bg-slate-100/80 p-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-ink/80">{entry.label}</span>
+                      <span className="font-mono text-ink/90">{formatPercent(entry.value)}</span>
+                    </div>
+                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-300/80">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-blue-600"
+                        style={{ width: `${clamped * 100}%` }}
+                      />
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </details>
+        </div>
+      )}
+
+          <section className="mt-3 rounded-xl border border-accent/20 bg-white/85 p-3">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-ink/80">Brain</h3>
-        <BrainCanvas focusedBrain={focusedBrain} activeNeuronIds={activeNeuronIds} />
+        <div className="mt-2 h-[440px]">
+          <BrainCanvas
+            focusedBrain={focusedBrain}
+            activeNeuronIds={activeNeuronIds}
+            focusOrganismId={focusedOrganism ? unwrapId(focusedOrganism.id) : null}
+          />
+        </div>
       </section>
     </aside>
   );
 }
-

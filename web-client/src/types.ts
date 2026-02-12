@@ -72,7 +72,7 @@ export type NeuronState = {
 
 export type FocusBrainData = {
   organism: OrganismState;
-  active_neuron_ids: number[];
+  active_neuron_ids: Array<number | { 0: number }>;
 };
 
 export type SensoryNeuronState = {

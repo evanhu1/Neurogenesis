@@ -4,7 +4,6 @@ import { ControlPanel } from './features/control_panel/ControlPanel';
 import { InspectorPanel } from './features/inspector_panel/InspectorPanel';
 import { useSimulationSession } from './features/sim/hooks/useSimulationSession';
 import {
-  formatFocusedStats,
   formatFocusMeta,
   formatMetrics,
   formatSessionMeta,
@@ -20,10 +19,6 @@ export default function App() {
   const focusMetaText = useMemo(
     () => formatFocusMeta(simulation.focusedOrganismId, simulation.focusedOrganism),
     [simulation.focusedOrganism, simulation.focusedOrganismId],
-  );
-  const focusedStatsText = useMemo(
-    () => formatFocusedStats(simulation.focusedOrganism),
-    [simulation.focusedOrganism],
   );
   const focusedSpeciesId = useMemo(
     () =>
@@ -67,7 +62,7 @@ export default function App() {
 
         <InspectorPanel
           focusMetaText={focusMetaText}
-          focusedStatsText={focusedStatsText}
+          focusedOrganism={simulation.focusedOrganism}
           focusedBrain={simulation.focusedOrganism?.brain ?? null}
           activeNeuronIds={simulation.activeNeuronIds}
           onDefocus={simulation.defocusOrganism}
