@@ -1,8 +1,5 @@
 use crate::grid::hex_neighbor;
-use crate::neuron_constants::{
-    ACTION_COUNT, ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE, INTER_UPDATE_RATE_MAX,
-    INTER_UPDATE_RATE_MIN,
-};
+use crate::genome::{INTER_UPDATE_RATE_MAX, INTER_UPDATE_RATE_MIN};
 use sim_types::{
     ActionNeuronState, ActionType, BrainState, EntityType, InterNeuronState, InterNeuronType,
     NeuronId, NeuronState, NeuronType, Occupant, OrganismGenome, OrganismId, SensoryNeuronState,
@@ -16,6 +13,11 @@ fn sigmoid(x: f32) -> f32 {
 const ACTION_ACTIVATION_THRESHOLD: f32 = 0.5;
 const TURN_ACTION_DEADZONE: f32 = 0.3;
 const DEFAULT_BIAS: f32 = 0.0;
+pub(crate) const SENSORY_COUNT: u32 = SensoryReceptor::LOOK_NEURON_COUNT + 1;
+pub(crate) const ACTION_COUNT: usize = ActionType::ALL.len();
+pub(crate) const ACTION_COUNT_U32: u32 = ACTION_COUNT as u32;
+pub(crate) const INTER_ID_BASE: u32 = 1000;
+pub(crate) const ACTION_ID_BASE: u32 = 2000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub(crate) enum TurnChoice {

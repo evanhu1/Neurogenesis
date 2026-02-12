@@ -1,6 +1,5 @@
-use crate::neuron_constants::{
-    ACTION_COUNT, ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE, INTER_UPDATE_RATE_MAX,
-    INTER_UPDATE_RATE_MIN, SENSORY_COUNT,
+use crate::brain::{
+    ACTION_COUNT, ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT,
 };
 use crate::SimError;
 use rand::Rng;
@@ -20,6 +19,8 @@ const INTER_TYPE_EXCITATORY_PRIOR: f32 = 0.8;
 const WEIGHT_PERTURBATION_STDDEV: f32 = 0.3;
 const BIAS_PERTURBATION_STDDEV: f32 = 0.15;
 const INTER_UPDATE_RATE_PERTURBATION_STDDEV: f32 = 0.05;
+pub(crate) const INTER_UPDATE_RATE_MAX: f32 = 1.0;
+pub(crate) const INTER_UPDATE_RATE_MIN: f32 = 0.2;
 
 pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     config: &SeedGenomeConfig,
@@ -221,15 +222,14 @@ fn mutation_rate_genes(genome: &OrganismGenome) -> [f32; 8] {
 
 fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
     let mut rates = mutation_rate_genes_mut(genome);
-    let n = rates.len() as f32;
-    let tau = 1.0 / (2.0 * n.sqrt()).sqrt();
+    let shared_normal = normal_sample(rng);
 
     for rate in &mut rates {
         if **rate <= 0.0 {
             continue;
         }
-        let z = normal_sample(rng);
-        **rate = (**rate * (tau * z).exp()).clamp(0.0, 1.0);
+        let gene_normal = normal_sample(rng);
+        **rate = (**rate * (shared_normal - gene_normal).exp()).clamp(0.0, 1.0);
     }
 }
 

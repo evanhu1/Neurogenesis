@@ -97,9 +97,9 @@ Neuron IDs: sensory `0..4`, inter `1000..1000+n`, action `2000..2003`.
 Evaluation order: sensory→inter, inter→inter (previous tick activations), then
 sensory→action and inter→action. Inter uses per-neuron leaky integration:
 `h_i(t) = (1 - alpha_i) * h_i(t-1) + alpha_i * tanh(z_i(t))`, where
-`z_i(t) = b_i + sensory_to_inter_i + inter_to_inter_i(h(t-1))`.
-Actions use `sigmoid` except `Turn`, which uses `tanh`. Discrete action firing
-threshold remains `> 0.5` for non-turn actions.
+`z_i(t) = b_i + sensory_to_inter_i + inter_to_inter_i(h(t-1))`. Actions use
+`sigmoid` except `Turn`, which uses `tanh`. Discrete action firing threshold
+remains `> 0.5` for non-turn actions.
 
 Actions: `MoveForward`, `Turn`, `Reproduce`.
 
@@ -109,19 +109,10 @@ all outgoing weights from a neuron share the sign implied by source type.
 
 ## Genome & Mutation
 
-`OrganismGenome`: `num_neurons`, `vision_distance`,
-`inter_biases` (vec), `inter_update_rates` (vec), `interneuron_types` (vec),
-`action_biases` (vec), `edges` (sorted `SynapseEdge` list), and explicit
-per-operator mutation-rate genes:
-
-- `mutation_rate_vision_distance`
-- `mutation_rate_weight`
-- `mutation_rate_add_edge`
-- `mutation_rate_remove_edge`
-- `mutation_rate_split_edge`
-- `mutation_rate_inter_bias`
-- `mutation_rate_inter_update_rate`
-- `mutation_rate_action_bias`
+`OrganismGenome`: `num_neurons`, `vision_distance`, `inter_biases` (vec),
+`inter_update_rates` (vec), `interneuron_types` (vec), `action_biases` (vec),
+`edges` (sorted `SynapseEdge` list), and explicit per-operator mutation-rate
+genes.
 
 Mutation applies to offspring only. Each operator is gated by its own mutation
 rate gene, and mutation-rate genes self-adapt every mutation step using
@@ -145,8 +136,8 @@ Implemented operators:
 - Action bias perturbation: Gaussian additive (stddev `0.15`), clamped
   `[-1.0, 1.0]`.
 
-The old neuron-removal mutation is removed.
-`max_num_neurons` is not a mutable genome gene; it is a global world-level cap.
+The old neuron-removal mutation is removed. `max_num_neurons` is not a mutable
+genome gene; it is a global world-level cap.
 
 ## Species
 
