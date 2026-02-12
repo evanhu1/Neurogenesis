@@ -1,11 +1,13 @@
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
+use rayon::{ThreadPool, ThreadPoolBuilder};
 use serde::{Deserialize, Serialize};
 use sim_types::{
     FoodId, FoodState, MetricsSnapshot, OccupancyCell, Occupant, OrganismGenome, OrganismId,
     OrganismState, SpeciesId, TickDelta, WorldConfig, WorldSnapshot,
 };
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::{Arc, Mutex, OnceLock};
 use thiserror::Error;
 
 mod brain;
@@ -41,6 +43,54 @@ pub struct Simulation {
     foods: Vec<FoodState>,
     occupancy: Vec<Option<Occupant>>,
     metrics: MetricsSnapshot,
+    #[serde(skip, default = "default_intent_parallelism")]
+    intent_parallelism: usize,
+    #[serde(skip, default = "default_intent_parallel_min_organisms")]
+    intent_parallel_min_organisms: usize,
+}
+
+fn default_intent_parallelism() -> usize {
+    1
+}
+
+fn default_intent_parallel_min_organisms() -> usize {
+    256
+}
+
+fn intent_pool_registry() -> &'static Mutex<HashMap<usize, Arc<ThreadPool>>> {
+    static REGISTRY: OnceLock<Mutex<HashMap<usize, Arc<ThreadPool>>>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub(crate) fn install_with_intent_pool<R, F>(threads: usize, work: F) -> R
+where
+    R: Send,
+    F: FnOnce() -> R + Send,
+{
+    let threads = threads.max(1);
+    if threads == 1 || rayon::current_thread_index().is_some() {
+        return work();
+    }
+
+    let pool = {
+        let mut registry = intent_pool_registry()
+            .lock()
+            .expect("intent pool registry lock must not be poisoned");
+        registry
+            .entry(threads)
+            .or_insert_with(|| {
+                Arc::new(
+                    ThreadPoolBuilder::new()
+                        .num_threads(threads)
+                        .thread_name(|idx| format!("sim-intent-{idx}"))
+                        .build()
+                        .expect("intent thread pool must build"),
+                )
+            })
+            .clone()
+    };
+
+    pool.install(work)
 }
 
 impl Simulation {
@@ -62,6 +112,8 @@ impl Simulation {
             foods: Vec::new(),
             occupancy: vec![None; capacity],
             metrics: MetricsSnapshot::default(),
+            intent_parallelism: default_intent_parallelism(),
+            intent_parallel_min_organisms: default_intent_parallel_min_organisms(),
         };
 
         sim.spawn_initial_population();
@@ -72,6 +124,14 @@ impl Simulation {
 
     pub fn config(&self) -> &WorldConfig {
         &self.config
+    }
+
+    pub fn set_intent_parallelism(&mut self, threads: usize) {
+        self.intent_parallelism = threads.max(1);
+    }
+
+    pub fn set_intent_parallel_min_organisms(&mut self, min_organisms: usize) {
+        self.intent_parallel_min_organisms = min_organisms.max(1);
     }
 
     pub fn snapshot(&self) -> WorldSnapshot {
@@ -143,6 +203,14 @@ impl Simulation {
 
     pub fn metrics(&self) -> &MetricsSnapshot {
         &self.metrics
+    }
+
+    pub(crate) fn should_parallelize_intents(&self, organism_count: usize) -> bool {
+        self.intent_parallelism > 1 && organism_count >= self.intent_parallel_min_organisms
+    }
+
+    pub(crate) fn intent_parallelism(&self) -> usize {
+        self.intent_parallelism
     }
 
     pub fn validate_state(&self) -> Result<(), SimError> {

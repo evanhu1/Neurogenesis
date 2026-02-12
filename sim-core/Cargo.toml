@@ -10,6 +10,7 @@ rand_chacha.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+rayon.workspace = true
 sim-types = { path = "../sim-types" }
 
 [dev-dependencies]

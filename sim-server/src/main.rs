@@ -2,7 +2,7 @@ use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{Path, State, WebSocketUpgrade};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -124,6 +124,20 @@ fn splitmix64(mut z: u64) -> u64 {
 
 fn world_seed(universe_seed: u64, world_index: u32) -> u64 {
     splitmix64(universe_seed ^ (world_index as u64).wrapping_mul(0x9E37_79B9))
+}
+
+fn available_cpu_parallelism() -> usize {
+    std::thread::available_parallelism()
+        .map(|value| value.get())
+        .unwrap_or(1)
+        .max(1)
+}
+
+fn batch_parallelism_plan(world_count: u32) -> (usize, usize) {
+    let total_cpu = available_cpu_parallelism();
+    let world_workers = (world_count as usize).min(total_cpu).max(1);
+    let threads_per_world = (total_cpu / world_workers).max(1);
+    (world_workers, threads_per_world)
 }
 
 fn simulate_ticks(simulation: &mut Simulation, ticks: u64) {
@@ -351,6 +365,66 @@ impl WorldArchiveStore {
         Ok(summary)
     }
 
+    fn persist_session_world(
+        &self,
+        session_id: Uuid,
+        simulation: Simulation,
+    ) -> Result<ArchivedWorldSummary, AppError> {
+        let world_id = Uuid::new_v4();
+        let created_at_unix_ms = now_unix_ms()?;
+        let snapshot = simulation.snapshot();
+        let species_alive = snapshot.metrics.species_counts.len() as u32;
+        let summary = ArchivedWorldSummary {
+            world_id,
+            created_at_unix_ms,
+            turn: snapshot.turn,
+            organisms_alive: snapshot.metrics.organisms,
+            species_alive,
+            source: ArchivedWorldSource::Session { session_id },
+        };
+        let archived_world = ArchivedWorldFile {
+            schema_version: WORLD_ARCHIVE_SCHEMA_VERSION,
+            world_id,
+            created_at_unix_ms,
+            source: summary.source.clone(),
+            summary: summary.clone(),
+            simulation,
+        };
+        let file_name = format!("{created_at_unix_ms}_{world_id}.json");
+        let temp_file_name = format!("{file_name}.tmp");
+        let temp_path = self.path_for(&temp_file_name);
+        let final_path = self.path_for(&file_name);
+
+        let encoded = serde_json::to_vec_pretty(&archived_world).map_err(|err| {
+            AppError::Internal(format!("failed to encode archived world {world_id}: {err}"))
+        })?;
+        fs::write(&temp_path, encoded).map_err(|err| {
+            AppError::Internal(format!(
+                "failed to write archived world temp file {}: {err}",
+                temp_path.display()
+            ))
+        })?;
+        fs::rename(&temp_path, &final_path).map_err(|err| {
+            AppError::Internal(format!(
+                "failed to finalize archived world {}: {err}",
+                final_path.display()
+            ))
+        })?;
+
+        let mut by_id = self
+            .by_id
+            .write()
+            .map_err(|_| AppError::Internal("failed to lock world archive index".to_owned()))?;
+        by_id.insert(
+            world_id,
+            ArchivedWorldIndexEntry {
+                summary: summary.clone(),
+                file_name,
+            },
+        );
+        Ok(summary)
+    }
+
     fn list_worlds(&self) -> Result<Vec<ArchivedWorldSummary>, AppError> {
         let by_id = self
             .by_id
@@ -360,6 +434,34 @@ impl WorldArchiveStore {
             by_id.values().map(|entry| entry.summary.clone()).collect();
         worlds.sort_by(|a, b| b.created_at_unix_ms.cmp(&a.created_at_unix_ms));
         Ok(worlds)
+    }
+
+    fn delete_world(&self, world_id: Uuid) -> Result<ArchivedWorldSummary, AppError> {
+        let removed_entry = {
+            let mut by_id = self
+                .by_id
+                .write()
+                .map_err(|_| AppError::Internal("failed to lock world archive index".to_owned()))?;
+            by_id
+                .remove(&world_id)
+                .ok_or_else(|| AppError::NotFound(format!("archived world {world_id} not found")))?
+        };
+
+        let path = self.path_for(&removed_entry.file_name);
+        match fs::remove_file(&path) {
+            Ok(()) => Ok(removed_entry.summary),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(removed_entry.summary),
+            Err(err) => {
+                let mut by_id = self.by_id.write().map_err(|_| {
+                    AppError::Internal("failed to lock world archive index".to_owned())
+                })?;
+                by_id.insert(world_id, removed_entry);
+                Err(AppError::Internal(format!(
+                    "failed to delete archived world {}: {err}",
+                    path.display()
+                )))
+            }
+        }
     }
 }
 
@@ -448,12 +550,14 @@ fn build_app(state: AppState) -> Router {
         .route("/v1/world-runs", post(create_batch_run))
         .route("/v1/world-runs/{id}", get(get_batch_run_status))
         .route("/v1/worlds", get(list_archived_worlds))
+        .route("/v1/worlds/{id}", delete(delete_archived_world))
         .route("/v1/worlds/{id}/sessions", post(create_session_from_world))
         .route("/v1/sessions", post(create_session))
         .route("/v1/sessions/{id}", get(get_session_metadata))
         .route("/v1/sessions/{id}/state", get(get_state))
         .route("/v1/sessions/{id}/step", post(step_session))
         .route("/v1/sessions/{id}/reset", post(reset_session))
+        .route("/v1/sessions/{id}/archive", post(save_session_world))
         .route("/v1/sessions/{id}/focus", post(set_focus))
         .route("/v1/sessions/{id}/stream", get(stream_session))
         .layer(CorsLayer::permissive())
@@ -551,6 +655,17 @@ async fn create_session_from_world(
     Ok(Json(response))
 }
 
+async fn delete_archived_world(
+    Path(id): Path<Uuid>,
+    State(state): State<AppState>,
+) -> Result<Json<ArchivedWorldSummary>, AppError> {
+    let world_archive = state.world_archive.clone();
+    let summary = tokio::task::spawn_blocking(move || world_archive.delete_world(id))
+        .await
+        .map_err(|err| AppError::Internal(format!("archive delete worker join error: {err}")))??;
+    Ok(Json(summary))
+}
+
 async fn create_session(
     State(state): State<AppState>,
     Json(req): Json<CreateSessionRequest>,
@@ -562,8 +677,10 @@ async fn create_session(
 
 async fn create_runtime_session(
     state: &AppState,
-    simulation: Simulation,
+    mut simulation: Simulation,
 ) -> Result<CreateSessionResponse, AppError> {
+    simulation.set_intent_parallelism(available_cpu_parallelism());
+    simulation.set_intent_parallel_min_organisms(1);
     let now_ms = now_unix_ms()?;
     let id = Uuid::new_v4();
     let snapshot = simulation.snapshot();
@@ -605,10 +722,7 @@ async fn run_batch_simulations(
     universe_seed: u64,
     ticks_per_world: u64,
 ) {
-    let max_parallelism = std::thread::available_parallelism()
-        .map(|value| value.get())
-        .unwrap_or(1)
-        .max(1);
+    let (max_world_workers, threads_per_world) = batch_parallelism_plan(world_count);
     let mut join_set = JoinSet::new();
 
     for world_index in 0..world_count {
@@ -616,9 +730,12 @@ async fn run_batch_simulations(
         let world_archive = state.world_archive.clone();
         let world_config = config.clone();
         let seed = world_seed(universe_seed, world_index);
+        let intent_threads = threads_per_world;
         join_set.spawn(async move {
             tokio::task::spawn_blocking(move || -> Result<ArchivedWorldSummary, AppError> {
                 let mut simulation = Simulation::new(world_config, seed)?;
+                simulation.set_intent_parallelism(intent_threads);
+                simulation.set_intent_parallel_min_organisms(1);
                 simulate_ticks(&mut simulation, ticks_per_world);
                 world_archive.persist_batch_world(
                     run_id,
@@ -633,7 +750,7 @@ async fn run_batch_simulations(
             .map_err(|err| AppError::Internal(format!("world worker join error: {err}")))?
         });
 
-        if join_set.len() >= max_parallelism {
+        if join_set.len() >= max_world_workers {
             let completed = join_set.join_next().await;
             if handle_batch_world_result(run.clone(), completed)
                 .await
@@ -669,6 +786,7 @@ async fn run_batch_simulations(
                     ..
                 },
             ) => left_index.cmp(right_index),
+            _ => std::cmp::Ordering::Equal,
         });
         inner.aggregate = compute_batch_aggregate(&inner.worlds);
         inner.status = BatchRunStatus::Completed;
@@ -759,6 +877,23 @@ async fn reset_session(
         .send(ServerEvent::StateSnapshot(snapshot.clone().into()));
 
     Ok(Json(snapshot.into()))
+}
+
+async fn save_session_world(
+    Path(id): Path<Uuid>,
+    State(state): State<AppState>,
+) -> Result<Json<ArchivedWorldSummary>, AppError> {
+    let session = get_session(&state, id).await?;
+    let sim = {
+        let sim_guard = session.simulation.lock().await;
+        sim_guard.clone()
+    };
+
+    let world_archive = state.world_archive.clone();
+    let summary = tokio::task::spawn_blocking(move || world_archive.persist_session_world(id, sim))
+        .await
+        .map_err(|err| AppError::Internal(format!("session archive worker join error: {err}")))??;
+    Ok(Json(summary))
 }
 
 async fn set_focus(

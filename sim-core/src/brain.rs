@@ -368,12 +368,6 @@ pub fn derive_active_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
         }
     }
 
-    for inter in &brain.inter {
-        if inter.neuron.activation > 0.0 {
-            active.push(inter.neuron.neuron_id);
-        }
-    }
-
     let action_activations: [f32; ACTION_COUNT] =
         std::array::from_fn(|i| brain.action[i].neuron.activation);
 

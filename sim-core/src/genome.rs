@@ -309,11 +309,27 @@ fn mutate_split_edge<R: Rng + ?Sized>(
     let edge_from_new = SynapseEdge {
         pre_neuron_id: new_inter_id,
         post_neuron_id: split_edge.post_neuron_id,
-        weight: clamp_signed_weight(split_edge.weight, pre_sign),
+        weight: clamp_signed_weight(
+            split_edge.weight,
+            source_weight_sign(new_inter_id, genome.num_neurons, &genome.interneuron_types)
+                .unwrap_or(1.0),
+        ),
     };
 
     genome.edges.push(edge_to_new);
     genome.edges.push(edge_from_new);
+}
+
+fn normalize_edge_signs(genome: &mut OrganismGenome) {
+    for edge in &mut genome.edges {
+        if let Some(required_sign) = source_weight_sign(
+            edge.pre_neuron_id,
+            genome.num_neurons,
+            &genome.interneuron_types,
+        ) {
+            edge.weight = clamp_signed_weight(edge.weight, required_sign);
+        }
+    }
 }
 
 pub(crate) fn mutate_genome<R: Rng + ?Sized>(
@@ -399,6 +415,7 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
         );
     }
 
+    normalize_edge_signs(genome);
     sort_edges(&mut genome.edges);
     debug_assert_edges_sorted(&genome.edges);
 }

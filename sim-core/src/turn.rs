@@ -2,9 +2,10 @@ use crate::brain::{action_index, evaluate_brain, BrainScratch, TurnChoice};
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right};
 use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 use crate::Simulation;
+use rayon::prelude::*;
 use sim_types::{
     ActionType, EntityId, FacingDirection, FoodId, FoodState, Occupant, OrganismFacing, OrganismId,
-    OrganismMove, RemovedEntityPosition, SpeciesId, TickDelta,
+    OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId, TickDelta,
 };
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
@@ -23,12 +24,6 @@ struct TurnSnapshot {
     organism_count: usize,
     organism_ids: Vec<OrganismId>,
     organism_states: Vec<SnapshotOrganismState>,
-}
-
-impl TurnSnapshot {
-    fn in_bounds(&self, q: i32, r: i32) -> bool {
-        q >= 0 && r >= 0 && q < self.world_width && r < self.world_width
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -141,43 +136,41 @@ impl Simulation {
     }
 
     fn build_intents(&mut self, snapshot: &TurnSnapshot) -> Vec<OrganismIntent> {
+        if self.should_parallelize_intents(snapshot.organism_count) {
+            let intent_threads = self.intent_parallelism();
+            let world_width = snapshot.world_width;
+            let occupancy = &snapshot.occupancy;
+            let organism_ids = &snapshot.organism_ids;
+            let organism_states = &snapshot.organism_states;
+            return crate::install_with_intent_pool(intent_threads, || {
+                self.organisms
+                    .par_iter_mut()
+                    .enumerate()
+                    .map_init(BrainScratch::new, |scratch, (idx, organism)| {
+                        build_intent_for_organism(
+                            organism,
+                            world_width,
+                            occupancy,
+                            organism_states[idx],
+                            organism_ids[idx],
+                            scratch,
+                        )
+                    })
+                    .collect()
+            });
+        }
+
         let mut intents = Vec::with_capacity(snapshot.organism_count);
         let mut scratch = BrainScratch::new();
         for idx in 0..snapshot.organism_count {
-            let snapshot_state = snapshot.organism_states[idx];
-
-            let vision_distance = self.organisms[idx].genome.vision_distance;
-            let evaluation = evaluate_brain(
+            intents.push(build_intent_for_organism(
                 &mut self.organisms[idx],
                 snapshot.world_width,
                 &snapshot.occupancy,
-                vision_distance,
+                snapshot.organism_states[idx],
+                snapshot.organism_ids[idx],
                 &mut scratch,
-            );
-
-            let facing_after_turn =
-                facing_after_turn(snapshot_state.facing, evaluation.resolved_actions.turn);
-            let wants_move = evaluation.resolved_actions.wants_move;
-            let wants_reproduce = evaluation.resolved_actions.wants_reproduce;
-            let move_confidence =
-                evaluation.action_activations[action_index(ActionType::MoveForward)];
-            let move_target = if wants_move {
-                let target = hex_neighbor((snapshot_state.q, snapshot_state.r), facing_after_turn);
-                snapshot.in_bounds(target.0, target.1).then_some(target)
-            } else {
-                None
-            };
-
-            intents.push(OrganismIntent {
-                id: snapshot.organism_ids[idx],
-                from: (snapshot_state.q, snapshot_state.r),
-                facing_after_turn,
-                wants_move,
-                wants_reproduce,
-                move_target,
-                move_confidence,
-                synapse_ops: evaluation.synapse_ops,
-            });
+            ));
         }
         intents
     }
@@ -493,6 +486,42 @@ fn compare_move_candidates(a: &MoveCandidate, b: &MoveCandidate) -> Ordering {
     a.confidence
         .total_cmp(&b.confidence)
         .then_with(|| b.actor.cmp(&a.actor))
+}
+
+fn build_intent_for_organism(
+    organism: &mut OrganismState,
+    world_width: i32,
+    occupancy: &[Option<Occupant>],
+    snapshot_state: SnapshotOrganismState,
+    organism_id: OrganismId,
+    scratch: &mut BrainScratch,
+) -> OrganismIntent {
+    let vision_distance = organism.genome.vision_distance;
+    let evaluation = evaluate_brain(organism, world_width, occupancy, vision_distance, scratch);
+
+    let facing_after_turn =
+        facing_after_turn(snapshot_state.facing, evaluation.resolved_actions.turn);
+    let wants_move = evaluation.resolved_actions.wants_move;
+    let wants_reproduce = evaluation.resolved_actions.wants_reproduce;
+    let move_confidence = evaluation.action_activations[action_index(ActionType::MoveForward)];
+    let move_target = if wants_move {
+        let target = hex_neighbor((snapshot_state.q, snapshot_state.r), facing_after_turn);
+        (target.0 >= 0 && target.1 >= 0 && target.0 < world_width && target.1 < world_width)
+            .then_some(target)
+    } else {
+        None
+    };
+
+    OrganismIntent {
+        id: organism_id,
+        from: (snapshot_state.q, snapshot_state.r),
+        facing_after_turn,
+        wants_move,
+        wants_reproduce,
+        move_target,
+        move_confidence,
+        synapse_ops: evaluation.synapse_ops,
+    }
 }
 
 fn occupancy_snapshot_cell(

@@ -30,6 +30,8 @@ type ControlPanelProps = {
   onSpeedLevelChange: (levelIndex: number) => void;
   onStep: (count: number) => void;
   onFocusOrganism: (organism: WorldOrganismState) => void;
+  onSaveCurrentWorld: () => void;
+  onDeleteArchivedWorld: (worldId: string) => void;
   onStartBatchRun: (worldCount: number, ticksPerWorld: number, universeSeed: number) => void;
   onLoadArchivedWorld: (worldId: string) => void;
   panToHexRef: MutableRefObject<((q: number, r: number) => void) | null>;
@@ -55,6 +57,8 @@ export function ControlPanel({
   onSpeedLevelChange,
   onStep,
   onFocusOrganism,
+  onSaveCurrentWorld,
+  onDeleteArchivedWorld,
   onStartBatchRun,
   onLoadArchivedWorld,
   panToHexRef,
@@ -156,6 +160,7 @@ export function ControlPanel({
       <div className="mt-3 flex flex-wrap gap-2">
         <ControlButton label="New Session" onClick={onNewSession} />
         <ControlButton label="Reset" onClick={onReset} />
+        <ControlButton label="Save World" onClick={onSaveCurrentWorld} disabled={!snapshot} />
         <div className="flex w-full items-center gap-2 rounded-lg bg-white/70 px-2 py-1">
           <ControlButton
             label={isRunning ? 'Stop' : 'Start'}
@@ -341,7 +346,13 @@ export function ControlPanel({
                     org={world.organisms_alive} species={world.species_alive}
                   </div>
                 </div>
-                <ControlButton label="Load" onClick={() => onLoadArchivedWorld(world.world_id)} />
+                <div className="flex items-center gap-1">
+                  <ControlButton label="Load" onClick={() => onLoadArchivedWorld(world.world_id)} />
+                  <ControlButton
+                    label="Delete"
+                    onClick={() => onDeleteArchivedWorld(world.world_id)}
+                  />
+                </div>
               </div>
             ))}
           </div>

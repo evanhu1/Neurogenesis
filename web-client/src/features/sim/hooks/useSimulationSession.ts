@@ -149,6 +149,8 @@ export type SimulationSessionState = {
   step: (count: number) => void;
   focusOrganism: (organism: WorldOrganismState) => void;
   defocusOrganism: () => void;
+  saveCurrentWorld: () => Promise<void>;
+  deleteArchivedWorld: (worldId: string) => Promise<void>;
   startBatchRun: (worldCount: number, ticksPerWorld: number, universeSeed: number) => Promise<void>;
   loadArchivedWorld: (worldId: string) => Promise<void>;
   refreshArchivedWorlds: () => Promise<void>;
@@ -388,6 +390,37 @@ export function useSimulationSession(): SimulationSessionState {
       }
     },
     [applyLoadedSession, request],
+  );
+
+  const saveCurrentWorld = useCallback(async () => {
+    if (!session) return;
+    try {
+      setErrorText(null);
+      await request<ArchivedWorldSummary>(`/v1/sessions/${session.id}/archive`, 'POST');
+      await refreshArchivedWorlds();
+    } catch (err) {
+      setErrorText(err instanceof Error ? err.message : 'Failed to save current world');
+    }
+  }, [refreshArchivedWorlds, request, session]);
+
+  const deleteArchivedWorld = useCallback(
+    async (worldId: string) => {
+      try {
+        setErrorText(null);
+        await request<ArchivedWorldSummary>(`/v1/worlds/${worldId}`, 'DELETE');
+        await refreshArchivedWorlds();
+        setBatchRunStatus((current) => {
+          if (!current) return current;
+          return {
+            ...current,
+            worlds: current.worlds.filter((world) => world.world_id !== worldId),
+          };
+        });
+      } catch (err) {
+        setErrorText(err instanceof Error ? err.message : 'Failed to delete archived world');
+      }
+    },
+    [refreshArchivedWorlds, request],
   );
 
   const startBatchRun = useCallback(
@@ -656,6 +689,8 @@ export function useSimulationSession(): SimulationSessionState {
     step,
     focusOrganism,
     defocusOrganism,
+    saveCurrentWorld,
+    deleteArchivedWorld,
     startBatchRun,
     loadArchivedWorld,
     refreshArchivedWorlds,

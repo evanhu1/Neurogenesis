@@ -74,6 +74,9 @@ pub enum ArchivedWorldSource {
         world_seed: u64,
         ticks_simulated: u64,
     },
+    Session {
+        session_id: Uuid,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

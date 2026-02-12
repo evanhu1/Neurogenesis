@@ -229,6 +229,41 @@ fn split_edge_operator_replaces_edge_and_adds_interneuron() {
         .edges
         .iter()
         .any(|edge| edge.pre_neuron_id == NeuronId(1001) && edge.post_neuron_id == NeuronId(2000)));
+    let split_outgoing = genome
+        .edges
+        .iter()
+        .find(|edge| edge.pre_neuron_id == NeuronId(1001) && edge.post_neuron_id == NeuronId(2000))
+        .expect("split edge should create outgoing edge from new interneuron");
+    match genome.interneuron_types[1] {
+        InterNeuronType::Excitatory => assert!(split_outgoing.weight > 0.0),
+        InterNeuronType::Inhibitory => assert!(split_outgoing.weight < 0.0),
+    }
+}
+
+#[test]
+fn mutate_genome_repairs_legacy_wrong_sign_edges() {
+    let mut genome = test_genome();
+    genome.interneuron_types = vec![InterNeuronType::Inhibitory];
+    genome.edges = vec![SynapseEdge {
+        pre_neuron_id: NeuronId(1000),
+        post_neuron_id: NeuronId(2000),
+        weight: 0.4,
+    }];
+    genome.mutation_rate_vision_distance = 0.0;
+    genome.mutation_rate_weight = 0.0;
+    genome.mutation_rate_add_edge = 0.0;
+    genome.mutation_rate_remove_edge = 0.0;
+    genome.mutation_rate_split_edge = 0.0;
+    genome.mutation_rate_inter_bias = 0.0;
+    genome.mutation_rate_inter_update_rate = 0.0;
+    genome.mutation_rate_action_bias = 0.0;
+
+    let mut rng = ChaCha8Rng::seed_from_u64(77);
+    crate::genome::mutate_genome(&mut genome, 1, &mut rng);
+    assert!(
+        genome.edges[0].weight < 0.0,
+        "inhibitory outgoing edge should be normalized to a negative weight"
+    );
 }
 
 #[test]

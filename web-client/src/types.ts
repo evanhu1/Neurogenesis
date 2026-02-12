@@ -191,16 +191,23 @@ export type BatchAggregateStats = {
   max_species_alive: number;
 };
 
-export type ArchivedWorldSource = {
-  type: 'BatchRun';
-  data: {
-    run_id: string;
-    world_index: number;
-    universe_seed: number;
-    world_seed: number;
-    ticks_simulated: number;
-  };
-};
+export type ArchivedWorldSource =
+  | {
+      type: 'BatchRun';
+      data: {
+        run_id: string;
+        world_index: number;
+        universe_seed: number;
+        world_seed: number;
+        ticks_simulated: number;
+      };
+    }
+  | {
+      type: 'Session';
+      data: {
+        session_id: string;
+      };
+    };
 
 export type ArchivedWorldSummary = {
   world_id: string;

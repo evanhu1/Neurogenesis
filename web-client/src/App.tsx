@@ -49,6 +49,8 @@ export default function App() {
           onSpeedLevelChange={simulation.setSpeedLevelIndex}
           onStep={simulation.step}
           onFocusOrganism={simulation.focusOrganism}
+          onSaveCurrentWorld={() => void simulation.saveCurrentWorld()}
+          onDeleteArchivedWorld={(worldId) => void simulation.deleteArchivedWorld(worldId)}
           onStartBatchRun={(worldCount, ticksPerWorld, universeSeed) =>
             void simulation.startBatchRun(worldCount, ticksPerWorld, universeSeed)
           }
