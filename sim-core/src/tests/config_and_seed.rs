@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 
 #[test]
 fn deterministic_seed() {
-    let cfg = WorldConfig::default();
+    let cfg = stable_test_config();
     let mut a = Simulation::new(cfg.clone(), 42).expect("simulation A should initialize");
     let mut b = Simulation::new(cfg, 42).expect("simulation B should initialize");
     a.step_n(30);
@@ -55,7 +55,7 @@ fn population_metrics_track_species_counts() {
 
 #[test]
 fn different_seed_changes_state() {
-    let cfg = WorldConfig::default();
+    let cfg = stable_test_config();
     let mut a = Simulation::new(cfg.clone(), 42).expect("simulation A should initialize");
     let mut b = Simulation::new(cfg, 43).expect("simulation B should initialize");
     a.step_n(10);
@@ -68,17 +68,15 @@ fn different_seed_changes_state() {
 
 #[test]
 fn config_validation_rejects_zero_world_width() {
-    let cfg = WorldConfig {
-        world_width: 0,
-        ..WorldConfig::default()
-    };
+    let mut cfg = stable_test_config();
+    cfg.world_width = 0;
     let err = Simulation::new(cfg, 1).expect_err("expected invalid config error");
     assert!(err.to_string().contains("world_width"));
 }
 
 #[test]
 fn config_validation_rejects_mutation_rate_out_of_range() {
-    let mut cfg = WorldConfig::default();
+    let mut cfg = stable_test_config();
     cfg.seed_genome_config.mutation_rate = 1.5;
     let err = Simulation::new(cfg, 1).expect_err("expected invalid config error");
     assert!(err.to_string().contains("mutation_rate"));
@@ -86,7 +84,7 @@ fn config_validation_rejects_mutation_rate_out_of_range() {
 
 #[test]
 fn config_validation_rejects_zero_vision_distance() {
-    let mut cfg = WorldConfig::default();
+    let mut cfg = stable_test_config();
     cfg.seed_genome_config.vision_distance = 0;
     let err = Simulation::new(cfg, 1).expect_err("expected invalid config error");
     assert!(err.to_string().contains("vision_distance"));
@@ -94,11 +92,9 @@ fn config_validation_rejects_zero_vision_distance() {
 
 #[test]
 fn population_is_capped_by_world_capacity_without_overlap() {
-    let mut cfg = WorldConfig {
-        world_width: 3,
-        num_organisms: 20,
-        ..WorldConfig::default()
-    };
+    let mut cfg = stable_test_config();
+    cfg.world_width = 3;
+    cfg.num_organisms = 20;
     cfg.seed_genome_config.num_neurons = 0;
     cfg.seed_genome_config.num_synapses = 0;
     let sim = Simulation::new(cfg, 3).expect("simulation should initialize");

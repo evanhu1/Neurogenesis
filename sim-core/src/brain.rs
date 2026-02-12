@@ -12,13 +12,28 @@ fn sigmoid(x: f32) -> f32 {
 
 const ACTION_ACTIVATION_THRESHOLD: f32 = 0.5;
 const DEFAULT_BIAS: f32 = 0.0;
-const ACTION_COUNT: usize = 4;
+const ACTION_COUNT: usize = ActionType::ALL.len();
 const INTER_ID_BASE: u32 = 1000;
 const ACTION_ID_BASE: u32 = 2000;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub(crate) enum TurnChoice {
+    #[default]
+    None,
+    Left,
+    Right,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub(crate) struct ResolvedActions {
+    pub(crate) turn: TurnChoice,
+    pub(crate) wants_move: bool,
+    pub(crate) wants_reproduce: bool,
+}
+
 #[derive(Default)]
 pub(crate) struct BrainEvaluation {
-    pub(crate) actions: [bool; ACTION_COUNT],
+    pub(crate) resolved_actions: ResolvedActions,
     pub(crate) action_activations: [f32; ACTION_COUNT],
     pub(crate) synapse_ops: u64,
 }
@@ -287,16 +302,14 @@ pub(crate) fn evaluate_brain(
         result.action_activations[action_index(action.action_type)] = action.neuron.activation;
     }
 
-    if let Some(selected_idx) = select_action(result.action_activations) {
-        result.actions[selected_idx] = true;
-    }
+    result.resolved_actions = resolve_actions(result.action_activations);
 
     result
 }
 
 /// Derives the set of active neuron IDs from a brain's current activation state.
 /// Sensory/Inter neurons are active when activation > 0.0.
-/// Action neurons use winner-take-all with ACTION_ACTIVATION_THRESHOLD.
+/// Action neurons use policy-based resolution with ACTION_ACTIVATION_THRESHOLD.
 pub fn derive_active_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
     let mut active = Vec::new();
 
@@ -314,25 +327,73 @@ pub fn derive_active_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
 
     let action_activations: [f32; ACTION_COUNT] =
         std::array::from_fn(|i| brain.action[i].neuron.activation);
-    if let Some(winner_idx) = select_action(action_activations) {
-        active.push(brain.action[winner_idx].neuron.neuron_id);
+
+    let resolved = resolve_actions(action_activations);
+    if resolved.wants_move {
+        active.push(
+            brain.action[action_index(ActionType::MoveForward)]
+                .neuron
+                .neuron_id,
+        );
+    }
+    match resolved.turn {
+        TurnChoice::None => {}
+        TurnChoice::Left => active.push(
+            brain.action[action_index(ActionType::TurnLeft)]
+                .neuron
+                .neuron_id,
+        ),
+        TurnChoice::Right => active.push(
+            brain.action[action_index(ActionType::TurnRight)]
+                .neuron
+                .neuron_id,
+        ),
+    }
+    if resolved.wants_reproduce {
+        active.push(
+            brain.action[action_index(ActionType::Reproduce)]
+                .neuron
+                .neuron_id,
+        );
     }
 
     active
 }
 
-fn select_action(activations: [f32; ACTION_COUNT]) -> Option<usize> {
-    let mut best_idx = 0;
-    let mut best_activation = activations[0];
+fn resolve_actions(activations: [f32; ACTION_COUNT]) -> ResolvedActions {
+    let move_activation = activations[action_index(ActionType::MoveForward)];
+    let turn_left_activation = activations[action_index(ActionType::TurnLeft)];
+    let turn_right_activation = activations[action_index(ActionType::TurnRight)];
+    let reproduce_activation = activations[action_index(ActionType::Reproduce)];
 
-    for (idx, &activation) in activations.iter().enumerate().skip(1) {
-        if activation.total_cmp(&best_activation) == Ordering::Greater {
-            best_idx = idx;
-            best_activation = activation;
-        }
+    let turn_left_active = turn_left_activation > ACTION_ACTIVATION_THRESHOLD;
+    let turn_right_active = turn_right_activation > ACTION_ACTIVATION_THRESHOLD;
+    let turn = match (turn_left_active, turn_right_active) {
+        (true, true) => match turn_left_activation.total_cmp(&turn_right_activation) {
+            Ordering::Greater => TurnChoice::Left,
+            Ordering::Less => TurnChoice::Right,
+            Ordering::Equal => TurnChoice::None,
+        },
+        (true, false) => TurnChoice::Left,
+        (false, true) => TurnChoice::Right,
+        (false, false) => TurnChoice::None,
+    };
+
+    let wants_move = move_activation > ACTION_ACTIVATION_THRESHOLD;
+    let wants_reproduce = reproduce_activation > ACTION_ACTIVATION_THRESHOLD;
+    if wants_reproduce {
+        return ResolvedActions {
+            turn: TurnChoice::None,
+            wants_move: false,
+            wants_reproduce: true,
+        };
     }
 
-    (best_activation > ACTION_ACTIVATION_THRESHOLD).then_some(best_idx)
+    ResolvedActions {
+        turn,
+        wants_move,
+        wants_reproduce: false,
+    }
 }
 
 /// Accumulates weighted inputs using arithmetic index resolution.

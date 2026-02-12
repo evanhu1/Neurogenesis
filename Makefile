@@ -1,4 +1,4 @@
-.PHONY: fmt lint test check web-install web-build
+.PHONY: fmt lint test check perf-test web-install web-build
 
 fmt:
 	cargo fmt --all
@@ -11,6 +11,9 @@ check:
 
 test:
 	cargo test --workspace
+
+perf-test:
+	cargo test -p sim-core --release performance_regression -- --ignored --nocapture
 
 web-install:
 	cd web-client && npm install

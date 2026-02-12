@@ -141,6 +141,14 @@ incrementally; periodic full `WorldSnapshot`s serve as sync points.
 
 `cargo bench -p sim-core --bench turn_throughput`
 
+Performance regression guard tests (ignored by default):
+
+`cargo test -p sim-core --release performance_regression -- --ignored --nocapture`
+
+Optional CI budget override:
+
+`SIM_CORE_TICK_BUDGET_NS_PER_TURN=130000 make perf-test`
+
 ## To Do
 
 - [ ] Cull useless neurons and synapses, neuronal pruning (also simulating

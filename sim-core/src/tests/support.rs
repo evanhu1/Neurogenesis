@@ -41,21 +41,35 @@ pub(super) fn test_genome() -> OrganismGenome {
     }
 }
 
+pub(super) fn stable_test_config() -> WorldConfig {
+    WorldConfig {
+        world_width: 10,
+        steps_per_second: 5,
+        num_organisms: 10,
+        center_spawn_min_fraction: 0.25,
+        center_spawn_max_fraction: 0.75,
+        starting_energy: 100.0,
+        food_energy: 50.0,
+        reproduction_energy_cost: 100.0,
+        move_action_energy_cost: 1.0,
+        turn_energy_cost: 1.0,
+        food_coverage_divisor: 40,
+        max_organism_age: 500,
+        speciation_threshold: 50.0,
+        seed_genome_config: SeedGenomeConfig {
+            num_neurons: 1,
+            max_num_neurons: 1,
+            num_synapses: 0,
+            mutation_rate: 0.0,
+            vision_distance: 2,
+        },
+    }
+}
+
 pub(super) fn test_config(world_width: u32, num_organisms: u32) -> WorldConfig {
-    let mut config = WorldConfig {
-        world_width,
-        num_organisms,
-        ..WorldConfig::default()
-    };
-    config.turn_energy_cost = 1.0;
-    config.move_action_energy_cost = 1.0;
-    config.seed_genome_config = SeedGenomeConfig {
-        num_neurons: 1,
-        max_num_neurons: 1,
-        num_synapses: 0,
-        mutation_rate: 0.0,
-        vision_distance: 2,
-    };
+    let mut config = stable_test_config();
+    config.world_width = world_width;
+    config.num_organisms = num_organisms;
     config
 }
 

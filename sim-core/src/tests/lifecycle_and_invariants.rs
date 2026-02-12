@@ -50,8 +50,8 @@ fn starvation_and_reproduction_interact_in_same_turn() {
     );
 
     let delta = tick_once(&mut sim);
-    assert_eq!(delta.metrics.consumptions_last_turn, 1);
-    assert_eq!(delta.metrics.reproductions_last_turn, 0);
+    assert_eq!(delta.metrics.consumptions_last_turn, 0);
+    assert_eq!(delta.metrics.reproductions_last_turn, 1);
     assert_eq!(delta.metrics.starvations_last_turn, 1);
     assert_eq!(
         delta
@@ -59,21 +59,19 @@ fn starvation_and_reproduction_interact_in_same_turn() {
             .iter()
             .map(|entry| entry.entity_id)
             .collect::<Vec<_>>(),
-        vec![
-            EntityId::Organism(OrganismId(1)),
-            EntityId::Organism(OrganismId(2))
-        ]
+        vec![EntityId::Organism(OrganismId(2))]
     );
-    assert!(delta.spawned.is_empty());
-    assert_eq!(sim.organisms.len(), 2);
-    let consumer = sim
+    assert_eq!(delta.spawned.len(), 1);
+    assert_eq!((delta.spawned[0].q, delta.spawned[0].r), (0, 1));
+    assert_eq!(sim.organisms.len(), 4);
+    let reproducer = sim
         .organisms
         .iter()
         .find(|organism| organism.id == OrganismId(0))
-        .expect("consumer should survive");
-    assert_eq!(consumer.consumptions_count, 1);
-    assert_eq!(consumer.reproductions_count, 0);
-    assert!(consumer.energy > 0.0);
+        .expect("reproducer should survive");
+    assert_eq!(reproducer.consumptions_count, 0);
+    assert_eq!(reproducer.reproductions_count, 1);
+    assert_eq!(reproducer.energy, 0.0);
 }
 
 #[test]

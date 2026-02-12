@@ -11,6 +11,7 @@ pub(super) use std::collections::{HashMap, HashSet};
 mod config_and_seed;
 mod lifecycle_and_invariants;
 mod movement_resolution;
+mod performance_regression;
 mod reproduction_and_spawn;
 mod sensing_and_actions;
 mod support;

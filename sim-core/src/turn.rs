@@ -1,4 +1,4 @@
-use crate::brain::{action_index, evaluate_brain, BrainScratch};
+use crate::brain::{action_index, evaluate_brain, BrainScratch, TurnChoice};
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right};
 use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 use crate::Simulation;
@@ -153,12 +153,15 @@ impl Simulation {
                 &mut scratch,
             );
 
-            let turn_left_active = evaluation.actions[action_index(ActionType::TurnLeft)];
-            let turn_right_active = evaluation.actions[action_index(ActionType::TurnRight)];
+            let (turn_left_active, turn_right_active) = match evaluation.resolved_actions.turn {
+                TurnChoice::None => (false, false),
+                TurnChoice::Left => (true, false),
+                TurnChoice::Right => (false, true),
+            };
             let facing_after_turn =
                 facing_after_turn(snapshot_state.facing, turn_left_active, turn_right_active);
-            let wants_move = evaluation.actions[action_index(ActionType::MoveForward)];
-            let wants_reproduce = evaluation.actions[action_index(ActionType::Reproduce)];
+            let wants_move = evaluation.resolved_actions.wants_move;
+            let wants_reproduce = evaluation.resolved_actions.wants_reproduce;
             let move_confidence =
                 evaluation.action_activations[action_index(ActionType::MoveForward)];
             let move_target = if wants_move {

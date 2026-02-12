@@ -225,7 +225,7 @@ fn turn_actions_rotate_facing() {
 }
 
 #[test]
-fn only_highest_activation_action_runs_each_turn() {
+fn move_and_turn_can_be_composed_in_same_turn() {
     let cfg = test_config(6, 1);
     let mut sim = Simulation::new(cfg, 75).expect("simulation should initialize");
     configure_sim(
@@ -246,7 +246,7 @@ fn only_highest_activation_action_runs_each_turn() {
     let delta = tick_once(&mut sim);
     assert_eq!(delta.moves.len(), 1);
     assert_eq!(delta.moves[0].id, OrganismId(0));
-    assert_eq!(delta.moves[0].to, (3, 2));
+    assert_eq!(delta.moves[0].to, (3, 1));
     assert_eq!(delta.metrics.reproductions_last_turn, 0);
 
     let organism = sim
@@ -254,5 +254,29 @@ fn only_highest_activation_action_runs_each_turn() {
         .iter()
         .find(|organism| organism.id == OrganismId(0))
         .expect("organism should remain alive");
+    assert_eq!(organism.facing, FacingDirection::NorthEast);
+}
+
+#[test]
+fn reproduce_blocks_move_and_turn() {
+    let mut cfg = test_config(7, 1);
+    cfg.reproduction_energy_cost = 5.0;
+    let mut sim = Simulation::new(cfg, 76).expect("simulation should initialize");
+    let mut organism = make_organism(0, 3, 3, FacingDirection::East, true, true, false, 0.8, 10.0);
+    enable_reproduce_action(&mut organism);
+    configure_sim(&mut sim, vec![organism]);
+
+    let delta = tick_once(&mut sim);
+    assert!(delta.moves.is_empty());
+    assert_eq!(delta.metrics.reproductions_last_turn, 1);
+    assert_eq!(delta.spawned.len(), 1);
+    assert_eq!((delta.spawned[0].q, delta.spawned[0].r), (2, 3));
+
+    let organism = sim
+        .organisms
+        .iter()
+        .find(|organism| organism.id == OrganismId(0))
+        .expect("organism should remain alive");
+    assert_eq!((organism.q, organism.r), (3, 3));
     assert_eq!(organism.facing, FacingDirection::East);
 }
