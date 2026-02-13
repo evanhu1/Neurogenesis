@@ -151,7 +151,6 @@ impl Simulation {
     }
 
     fn build_intents(&mut self, snapshot: &TurnSnapshot) -> Vec<OrganismIntent> {
-        let max_organism_age = self.config.max_organism_age;
         if self.should_parallelize_intents(snapshot.organism_count) {
             let intent_threads = self.intent_parallelism();
             let world_width = snapshot.world_width;
@@ -165,7 +164,6 @@ impl Simulation {
                     .map_init(BrainScratch::new, |scratch, (idx, organism)| {
                         build_intent_for_organism(
                             organism,
-                            max_organism_age,
                             world_width,
                             occupancy,
                             organism_states[idx],
@@ -182,7 +180,6 @@ impl Simulation {
         for idx in 0..snapshot.organism_count {
             intents.push(build_intent_for_organism(
                 &mut self.organisms[idx],
-                max_organism_age,
                 snapshot.world_width,
                 &snapshot.occupancy,
                 snapshot.organism_states[idx],
@@ -429,6 +426,10 @@ impl Simulation {
             if parent_energy < reproduction_energy_cost {
                 continue;
             }
+            let maturity_age = u64::from(self.organisms[org_idx].genome.age_of_maturity);
+            if self.organisms[org_idx].age_turns < maturity_age {
+                continue;
+            }
             let parent_q = self.organisms[org_idx].q;
             let parent_r = self.organisms[org_idx].r;
             let parent_facing = self.organisms[org_idx].facing;
@@ -535,7 +536,6 @@ fn intent_action_priority(action: IntentActionKind) -> u8 {
 
 fn build_intent_for_organism(
     organism: &mut OrganismState,
-    max_organism_age: u32,
     world_width: i32,
     occupancy: &[Option<Occupant>],
     snapshot_state: SnapshotOrganismState,
@@ -544,7 +544,7 @@ fn build_intent_for_organism(
 ) -> OrganismIntent {
     let vision_distance = organism.genome.vision_distance;
     let evaluation = evaluate_brain(organism, world_width, occupancy, vision_distance, scratch);
-    apply_runtime_plasticity(organism, max_organism_age);
+    apply_runtime_plasticity(organism);
 
     let turn_choice = evaluation.resolved_actions.turn;
     let wants_move = evaluation.resolved_actions.wants_move;

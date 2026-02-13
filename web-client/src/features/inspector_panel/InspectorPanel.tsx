@@ -83,6 +83,11 @@ export function InspectorPanel({
 
     const mutationRates: MutationRateItem[] = [
       {
+        key: 'mutation_rate_age_of_maturity',
+        label: 'Age Maturity',
+        value: genome.mutation_rate_age_of_maturity,
+      },
+      {
         key: 'mutation_rate_vision_distance',
         label: 'Vision Distance',
         value: genome.mutation_rate_vision_distance,
@@ -146,6 +151,7 @@ export function InspectorPanel({
       genomeStats: [
         { label: 'Genome Neurons', value: String(genome.num_neurons) },
         { label: 'Vision Distance', value: String(genome.vision_distance) },
+        { label: 'Age Maturity', value: String(genome.age_of_maturity) },
         { label: 'Genome Edges', value: String(genome.edges.length) },
         { label: 'Inter Bias Genes', value: String(genome.inter_biases.length) },
         { label: 'Inter Tau Genes', value: String(genome.inter_log_taus.length) },

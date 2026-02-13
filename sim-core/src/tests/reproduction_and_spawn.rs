@@ -212,6 +212,41 @@ fn reproduce_action_succeeds_when_energy_and_space_allow_it() {
 }
 
 #[test]
+fn reproduce_action_requires_parent_to_reach_age_of_maturity() {
+    let mut cfg = test_config(7, 1);
+    cfg.reproduction_energy_cost = 20.0;
+    let mut sim = Simulation::new(cfg, 74).expect("simulation should initialize");
+    let mut parent = make_organism(
+        0,
+        3,
+        3,
+        FacingDirection::East,
+        false,
+        false,
+        false,
+        0.7,
+        30.0,
+    );
+    parent.age_turns = 1;
+    parent.genome.age_of_maturity = 2;
+    enable_reproduce_action(&mut parent);
+    configure_sim(&mut sim, vec![parent]);
+
+    let delta = tick_once(&mut sim);
+    assert_eq!(delta.metrics.reproductions_last_turn, 0);
+    assert!(delta.spawned.is_empty());
+
+    let parent_after = sim
+        .organisms
+        .iter()
+        .find(|organism| organism.id == OrganismId(0))
+        .expect("parent should remain alive");
+    assert_eq!(parent_after.age_turns, 2);
+    assert_eq!(parent_after.reproductions_count, 0);
+    assert_eq!(parent_after.energy, 29.0);
+}
+
+#[test]
 fn reproduce_action_fails_when_turn_upkeep_leaves_insufficient_energy() {
     let cfg = test_config(7, 1);
     let mut sim = Simulation::new(cfg, 75).expect("simulation should initialize");

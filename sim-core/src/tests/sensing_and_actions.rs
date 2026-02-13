@@ -324,10 +324,12 @@ fn turn_action_has_deadzone_around_zero() {
         genome: OrganismGenome {
             num_neurons: 0,
             vision_distance: 1,
+            age_of_maturity: 0,
             hebb_eta_baseline: 0.0,
             hebb_eta_gain: 0.0,
             eligibility_decay_lambda: 0.9,
             synapse_prune_threshold: 0.01,
+            mutation_rate_age_of_maturity: 0.0,
             mutation_rate_vision_distance: 0.0,
             mutation_rate_add_edge: 0.0,
             mutation_rate_remove_edge: 0.0,
@@ -375,10 +377,12 @@ fn self_recurrent_interneuron_uses_previous_activation_with_leaky_update() {
     let genome = OrganismGenome {
         num_neurons: 1,
         vision_distance: 1,
+        age_of_maturity: 0,
         hebb_eta_baseline: 0.0,
         hebb_eta_gain: 0.0,
         eligibility_decay_lambda: 0.9,
         synapse_prune_threshold: 0.01,
+        mutation_rate_age_of_maturity: 0.0,
         mutation_rate_vision_distance: 0.0,
         mutation_rate_add_edge: 0.0,
         mutation_rate_remove_edge: 0.0,
@@ -429,10 +433,12 @@ fn action_biases_drive_actions_without_incoming_edges() {
     let genome = OrganismGenome {
         num_neurons: 0,
         vision_distance: 1,
+        age_of_maturity: 100,
         hebb_eta_baseline: 0.0,
         hebb_eta_gain: 0.0,
         eligibility_decay_lambda: 0.9,
         synapse_prune_threshold: 0.01,
+        mutation_rate_age_of_maturity: 0.0,
         mutation_rate_vision_distance: 0.0,
         mutation_rate_add_edge: 0.0,
         mutation_rate_remove_edge: 0.0,
@@ -476,10 +482,12 @@ fn oja_update_adjusts_weight_and_eligibility_for_active_synapse() {
     let genome = OrganismGenome {
         num_neurons: 1,
         vision_distance: 1,
+        age_of_maturity: 0,
         hebb_eta_baseline: 0.1,
         hebb_eta_gain: 0.0,
         eligibility_decay_lambda: 0.9,
         synapse_prune_threshold: 0.0,
+        mutation_rate_age_of_maturity: 0.0,
         mutation_rate_vision_distance: 0.0,
         mutation_rate_add_edge: 0.0,
         mutation_rate_remove_edge: 0.0,
@@ -524,7 +532,7 @@ fn oja_update_adjusts_weight_and_eligibility_for_active_synapse() {
     let post = organism.brain.action[action_index(ActionType::MoveForward)]
         .neuron
         .activation;
-    apply_runtime_plasticity(&mut organism, 500);
+    apply_runtime_plasticity(&mut organism);
 
     let edge = &organism.brain.inter[0].synapses[0];
     let expected_eligibility = pre * post;
@@ -539,10 +547,12 @@ fn synapse_pruning_requires_weight_and_eligibility_below_threshold() {
     let genome = OrganismGenome {
         num_neurons: 0,
         vision_distance: 1,
+        age_of_maturity: 100,
         hebb_eta_baseline: 0.0,
         hebb_eta_gain: 0.0,
         eligibility_decay_lambda: 0.9,
         synapse_prune_threshold: 0.1,
+        mutation_rate_age_of_maturity: 0.0,
         mutation_rate_vision_distance: 0.0,
         mutation_rate_add_edge: 0.0,
         mutation_rate_remove_edge: 0.0,
@@ -577,7 +587,7 @@ fn synapse_pruning_requires_weight_and_eligibility_below_threshold() {
         genome,
     };
 
-    apply_runtime_plasticity(&mut organism, 500);
+    apply_runtime_plasticity(&mut organism);
     assert_eq!(organism.brain.sensory[0].synapses.len(), 1);
     assert_eq!(organism.brain.synapse_count, 1);
 }
@@ -587,10 +597,12 @@ fn synapse_pruning_runs_on_schedule_and_removes_edges_when_both_are_low() {
     let genome = OrganismGenome {
         num_neurons: 0,
         vision_distance: 1,
+        age_of_maturity: 100,
         hebb_eta_baseline: 0.0,
         hebb_eta_gain: 0.0,
         eligibility_decay_lambda: 0.9,
         synapse_prune_threshold: 0.1,
+        mutation_rate_age_of_maturity: 0.0,
         mutation_rate_vision_distance: 0.0,
         mutation_rate_add_edge: 0.0,
         mutation_rate_remove_edge: 0.0,
@@ -625,9 +637,59 @@ fn synapse_pruning_runs_on_schedule_and_removes_edges_when_both_are_low() {
         genome,
     };
 
-    apply_runtime_plasticity(&mut organism, 500);
+    apply_runtime_plasticity(&mut organism);
     assert!(organism.brain.sensory[0].synapses.is_empty());
     assert_eq!(organism.brain.synapse_count, 0);
+}
+
+#[test]
+fn synapse_pruning_waits_until_age_of_maturity() {
+    let genome = OrganismGenome {
+        num_neurons: 0,
+        vision_distance: 1,
+        age_of_maturity: 150,
+        hebb_eta_baseline: 0.0,
+        hebb_eta_gain: 0.0,
+        eligibility_decay_lambda: 0.9,
+        synapse_prune_threshold: 0.1,
+        mutation_rate_age_of_maturity: 0.0,
+        mutation_rate_vision_distance: 0.0,
+        mutation_rate_add_edge: 0.0,
+        mutation_rate_remove_edge: 0.0,
+        mutation_rate_split_edge: 0.0,
+        mutation_rate_inter_bias: 0.0,
+        mutation_rate_inter_update_rate: 0.0,
+        mutation_rate_action_bias: 0.0,
+        mutation_rate_eligibility_decay_lambda: 0.0,
+        mutation_rate_synapse_prune_threshold: 0.0,
+        inter_biases: vec![],
+        inter_log_taus: vec![],
+        interneuron_types: vec![],
+        action_biases: vec![0.0; ActionType::ALL.len()],
+        edges: vec![SynapseEdge {
+            pre_neuron_id: NeuronId(0),
+            post_neuron_id: NeuronId(2000),
+            weight: 0.05,
+            eligibility: 0.0,
+        }],
+    };
+    let mut organism = OrganismState {
+        id: OrganismId(0),
+        species_id: SpeciesId(0),
+        q: 1,
+        r: 1,
+        age_turns: 100,
+        facing: FacingDirection::East,
+        energy: 10.0,
+        consumptions_count: 0,
+        reproductions_count: 0,
+        brain: express_genome(&genome),
+        genome,
+    };
+
+    apply_runtime_plasticity(&mut organism);
+    assert_eq!(organism.brain.sensory[0].synapses.len(), 1);
+    assert_eq!(organism.brain.synapse_count, 1);
 }
 
 fn run_single_oja_step_with_dopamine_bias(dopamine_bias: f32) -> (f32, f32, f32, f32) {
@@ -637,10 +699,12 @@ fn run_single_oja_step_with_dopamine_bias(dopamine_bias: f32) -> (f32, f32, f32,
     let genome = OrganismGenome {
         num_neurons: 1,
         vision_distance: 1,
+        age_of_maturity: 0,
         hebb_eta_baseline: 0.0,
         hebb_eta_gain: 0.2,
         eligibility_decay_lambda: 0.9,
         synapse_prune_threshold: 0.0,
+        mutation_rate_age_of_maturity: 0.0,
         mutation_rate_vision_distance: 0.0,
         mutation_rate_add_edge: 0.0,
         mutation_rate_remove_edge: 0.0,
@@ -686,7 +750,7 @@ fn run_single_oja_step_with_dopamine_bias(dopamine_bias: f32) -> (f32, f32, f32,
         .neuron
         .activation;
     let weight_before = organism.brain.inter[0].synapses[0].weight;
-    apply_runtime_plasticity(&mut organism, 500);
+    apply_runtime_plasticity(&mut organism);
 
     let edge = &organism.brain.inter[0].synapses[0];
     (

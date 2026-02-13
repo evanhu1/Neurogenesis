@@ -100,6 +100,8 @@ impl SensoryReceptor {
 pub struct OrganismGenome {
     pub num_neurons: u32,
     pub vision_distance: u32,
+    #[serde(default = "default_age_of_maturity")]
+    pub age_of_maturity: u32,
     #[serde(default)]
     pub hebb_eta_baseline: f32,
     #[serde(default)]
@@ -108,6 +110,8 @@ pub struct OrganismGenome {
     pub eligibility_decay_lambda: f32,
     #[serde(default)]
     pub synapse_prune_threshold: f32,
+    #[serde(default)]
+    pub mutation_rate_age_of_maturity: f32,
     #[serde(default)]
     pub mutation_rate_vision_distance: f32,
     #[serde(default)]
@@ -139,6 +143,8 @@ pub struct SeedGenomeConfig {
     pub num_neurons: u32,
     pub num_synapses: u32,
     pub vision_distance: u32,
+    #[serde(default = "default_age_of_maturity")]
+    pub age_of_maturity: u32,
     #[serde(default)]
     pub hebb_eta_baseline: f32,
     #[serde(default)]
@@ -147,6 +153,8 @@ pub struct SeedGenomeConfig {
     pub eligibility_decay_lambda: f32,
     #[serde(default)]
     pub synapse_prune_threshold: f32,
+    #[serde(default)]
+    pub mutation_rate_age_of_maturity: f32,
     #[serde(default)]
     pub mutation_rate_vision_distance: f32,
     #[serde(default)]
@@ -322,6 +330,10 @@ pub struct SynapseEdge {
 
 fn default_eligibility_decay_lambda() -> f32 {
     0.9
+}
+
+fn default_age_of_maturity() -> u32 {
+    0
 }
 
 fn default_food_regrowth_min_cooldown_turns() -> u32 {

@@ -6,10 +6,12 @@ export type SeedGenomeConfig = {
   num_neurons: number;
   num_synapses: number;
   vision_distance: number;
+  age_of_maturity: number;
   hebb_eta_baseline: number;
   hebb_eta_gain: number;
   eligibility_decay_lambda: number;
   synapse_prune_threshold: number;
+  mutation_rate_age_of_maturity: number;
   mutation_rate_vision_distance: number;
   mutation_rate_add_edge: number;
   mutation_rate_remove_edge: number;
@@ -47,10 +49,12 @@ export type WorldConfig = {
 export type OrganismGenome = {
   num_neurons: number;
   vision_distance: number;
+  age_of_maturity: number;
   hebb_eta_baseline: number;
   hebb_eta_gain: number;
   eligibility_decay_lambda: number;
   synapse_prune_threshold: number;
+  mutation_rate_age_of_maturity: number;
   mutation_rate_vision_distance: number;
   mutation_rate_add_edge: number;
   mutation_rate_remove_edge: number;

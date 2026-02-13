@@ -7,6 +7,8 @@ use sim_types::{
 
 const MIN_MUTATED_VISION_DISTANCE: u32 = 1;
 const MAX_MUTATED_VISION_DISTANCE: u32 = 32;
+const MIN_MUTATED_AGE_OF_MATURITY: u32 = 0;
+const MAX_MUTATED_AGE_OF_MATURITY: u32 = 10_000;
 const SYNAPSE_STRENGTH_MAX: f32 = 4.0;
 const SYNAPSE_STRENGTH_MIN: f32 = 0.001;
 const BIAS_MAX: f32 = 1.0;
@@ -75,6 +77,9 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     OrganismGenome {
         num_neurons: config.num_neurons.min(world_max_num_neurons),
         vision_distance: config.vision_distance,
+        age_of_maturity: config
+            .age_of_maturity
+            .clamp(MIN_MUTATED_AGE_OF_MATURITY, MAX_MUTATED_AGE_OF_MATURITY),
         hebb_eta_baseline: config
             .hebb_eta_baseline
             .clamp(ETA_BASELINE_MIN, ETA_BASELINE_MAX),
@@ -93,6 +98,7 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         } else {
             DEFAULT_SYNAPSE_PRUNE_THRESHOLD
         },
+        mutation_rate_age_of_maturity: config.mutation_rate_age_of_maturity,
         mutation_rate_vision_distance: config.mutation_rate_vision_distance,
         mutation_rate_add_edge: config.mutation_rate_add_edge,
         mutation_rate_remove_edge: config.mutation_rate_remove_edge,
@@ -237,8 +243,9 @@ fn random_edge<R: Rng + ?Sized>(
     None
 }
 
-fn mutation_rate_genes_mut(genome: &mut OrganismGenome) -> [&mut f32; 9] {
+fn mutation_rate_genes_mut(genome: &mut OrganismGenome) -> [&mut f32; 10] {
     [
+        &mut genome.mutation_rate_age_of_maturity,
         &mut genome.mutation_rate_vision_distance,
         &mut genome.mutation_rate_add_edge,
         &mut genome.mutation_rate_remove_edge,
@@ -251,8 +258,9 @@ fn mutation_rate_genes_mut(genome: &mut OrganismGenome) -> [&mut f32; 9] {
     ]
 }
 
-fn mutation_rate_genes(genome: &OrganismGenome) -> [f32; 9] {
+fn mutation_rate_genes(genome: &OrganismGenome) -> [f32; 10] {
     [
+        genome.mutation_rate_age_of_maturity,
         genome.mutation_rate_vision_distance,
         genome.mutation_rate_add_edge,
         genome.mutation_rate_remove_edge,
@@ -383,6 +391,15 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
 ) {
     align_genome_vectors(genome, world_max_num_neurons, rng);
     mutate_mutation_rate_genes(genome, rng);
+
+    if rng.random::<f32>() < genome.mutation_rate_age_of_maturity {
+        genome.age_of_maturity = step_u32(
+            genome.age_of_maturity,
+            MIN_MUTATED_AGE_OF_MATURITY,
+            MAX_MUTATED_AGE_OF_MATURITY,
+            rng,
+        );
+    }
 
     if rng.random::<f32>() < genome.mutation_rate_vision_distance {
         genome.vision_distance = step_u32(
@@ -618,6 +635,7 @@ fn normal_sample<R: Rng + ?Sized>(rng: &mut R) -> f32 {
 pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
     let mut dist = (a.num_neurons as f32 - b.num_neurons as f32).abs()
         + (a.vision_distance as f32 - b.vision_distance as f32).abs()
+        + (a.age_of_maturity as f32 - b.age_of_maturity as f32).abs()
         + (a.hebb_eta_baseline - b.hebb_eta_baseline).abs()
         + (a.hebb_eta_gain - b.hebb_eta_gain).abs()
         + (a.eligibility_decay_lambda - b.eligibility_decay_lambda).abs()
@@ -685,6 +703,16 @@ pub(crate) fn validate_seed_genome_config(config: &SeedGenomeConfig) -> Result<(
         )));
     }
 
+    if config.age_of_maturity > MAX_MUTATED_AGE_OF_MATURITY {
+        return Err(SimError::InvalidConfig(format!(
+            "age_of_maturity must be <= {MAX_MUTATED_AGE_OF_MATURITY}"
+        )));
+    }
+
+    validate_rate(
+        "mutation_rate_age_of_maturity",
+        config.mutation_rate_age_of_maturity,
+    )?;
     validate_rate(
         "mutation_rate_vision_distance",
         config.mutation_rate_vision_distance,

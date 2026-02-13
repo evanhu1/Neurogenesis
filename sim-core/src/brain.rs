@@ -16,8 +16,6 @@ const DEFAULT_BIAS: f32 = 0.0;
 const OJA_WEIGHT_CLAMP_ENABLED: bool = true;
 const OJA_WEIGHT_MAGNITUDE_MIN: f32 = 0.001;
 const OJA_WEIGHT_MAGNITUDE_MAX: f32 = 4.0;
-const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
-const SYNAPSE_PRUNE_LIFESPAN_PERCENT: u64 = 10;
 pub(crate) const SENSORY_COUNT: u32 = SensoryReceptor::LOOK_NEURON_COUNT + 1;
 pub(crate) const ACTION_COUNT: usize = ActionType::ALL.len();
 pub(crate) const ACTION_COUNT_U32: u32 = ACTION_COUNT as u32;
@@ -358,13 +356,10 @@ pub(crate) fn evaluate_brain(
     result
 }
 
-pub(crate) fn apply_runtime_plasticity(
-    organism: &mut sim_types::OrganismState,
-    max_organism_age: u32,
-) {
+pub(crate) fn apply_runtime_plasticity(organism: &mut sim_types::OrganismState) {
     let lambda = organism.genome.eligibility_decay_lambda.clamp(0.0, 1.0);
     let weight_prune_threshold = organism.genome.synapse_prune_threshold.max(0.0);
-    let should_prune = should_prune_synapses(organism.age_turns, max_organism_age);
+    let should_prune = should_prune_synapses(organism.age_turns, organism.genome.age_of_maturity);
 
     let brain = &mut organism.brain;
     let inter_activations: Vec<f32> = brain
@@ -410,12 +405,9 @@ pub(crate) fn apply_runtime_plasticity(
     }
 }
 
-fn should_prune_synapses(age_turns: u64, max_organism_age: u32) -> bool {
-    if max_organism_age == 0 {
-        return false;
-    }
-    let minimum_age = (u64::from(max_organism_age) * SYNAPSE_PRUNE_LIFESPAN_PERCENT) / 100;
-    age_turns >= minimum_age && age_turns % SYNAPSE_PRUNE_INTERVAL_TICKS == 0
+fn should_prune_synapses(age_turns: u64, age_of_maturity: u32) -> bool {
+    let maturity_ticks = u64::from(age_of_maturity.max(1));
+    age_turns >= maturity_ticks && age_turns % maturity_ticks == 0
 }
 
 fn tune_synapses(
@@ -477,14 +469,14 @@ fn prune_low_weight_synapses(brain: &mut BrainState, threshold: f32) {
     for sensory in &mut brain.sensory {
         let before = sensory.synapses.len();
         sensory.synapses.retain(|synapse| {
-            synapse.weight.abs() >= threshold || synapse.eligibility.abs() >= threshold
+            synapse.weight.abs() >= threshold || synapse.eligibility.abs() >= (2.0f32 * threshold)
         });
         pruned_any |= sensory.synapses.len() != before;
     }
     for inter in &mut brain.inter {
         let before = inter.synapses.len();
         inter.synapses.retain(|synapse| {
-            synapse.weight.abs() >= threshold || synapse.eligibility.abs() >= threshold
+            synapse.weight.abs() >= threshold || synapse.eligibility.abs() >= (2.0f32 * threshold)
         });
         pruned_any |= inter.synapses.len() != before;
     }

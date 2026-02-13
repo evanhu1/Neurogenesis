@@ -5,8 +5,9 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use std::cmp::Ordering;
 
-fn mutation_rates(genome: &OrganismGenome) -> [f32; 9] {
+fn mutation_rates(genome: &OrganismGenome) -> [f32; 10] {
     [
+        genome.mutation_rate_age_of_maturity,
         genome.mutation_rate_vision_distance,
         genome.mutation_rate_add_edge,
         genome.mutation_rate_remove_edge,
