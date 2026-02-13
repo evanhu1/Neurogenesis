@@ -15,8 +15,6 @@ import { useWorldViewport } from '../hooks/useWorldViewport';
 type WorldCanvasProps = {
   snapshot: WorldSnapshot | null;
   focusedOrganismId: number | null;
-  deadFlashCells: Array<{ q: number; r: number }> | null;
-  bornFlashCells: Array<{ q: number; r: number }> | null;
   onOrganismSelect: (organism: WorldOrganismState) => void;
   panToHexRef?: RefObject<((q: number, r: number) => void) | null>;
 };
@@ -24,16 +22,12 @@ type WorldCanvasProps = {
 export function WorldCanvas({
   snapshot,
   focusedOrganismId,
-  deadFlashCells,
-  bornFlashCells,
   onOrganismSelect,
   panToHexRef,
 }: WorldCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const snapshotRef = useRef<WorldSnapshot | null>(snapshot);
   const focusedOrganismIdRef = useRef<number | null>(focusedOrganismId);
-  const deadFlashCellsRef = useRef<Array<{ q: number; r: number }> | null>(deadFlashCells);
-  const bornFlashCellsRef = useRef<Array<{ q: number; r: number }> | null>(bornFlashCells);
   const onOrganismSelectRef = useRef(onOrganismSelect);
   const hasAutoFitRef = useRef(false);
   const [showOrganisms, setShowOrganisms] = useState(true);
@@ -56,8 +50,6 @@ export function WorldCanvas({
   // Keep refs synchronized during render so the RAF draw loop sees latest props immediately.
   snapshotRef.current = snapshot;
   focusedOrganismIdRef.current = focusedOrganismId;
-  deadFlashCellsRef.current = deadFlashCells;
-  bornFlashCellsRef.current = bornFlashCells;
   onOrganismSelectRef.current = onOrganismSelect;
   showOrganismsRef.current = showOrganisms;
   showPlantsRef.current = showPlants;
@@ -179,8 +171,6 @@ export function WorldCanvas({
             snapshotRef.current,
             focusedOrganismIdRef.current,
             viewportRef.current,
-            deadFlashCellsRef.current,
-            bornFlashCellsRef.current,
             {
               organisms: showOrganismsRef.current,
               plants: showPlantsRef.current,

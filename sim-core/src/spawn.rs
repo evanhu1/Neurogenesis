@@ -210,14 +210,17 @@ impl Simulation {
                 continue;
             }
             if self.occupancy[event.tile_idx].is_some() {
-                self.schedule_food_regrowth_with_delay(
-                    event.tile_idx,
-                    u64::from(self.config.food_regrowth_retry_cooldown_turns.max(1)),
-                );
+                let retry_delay = self.occupied_retry_delay();
+                self.schedule_food_regrowth_with_delay(event.tile_idx, retry_delay);
                 continue;
             }
-            if let Some(food) = self.spawn_food_at_cell(event.tile_idx) {
-                spawned.push(food);
+            if self.accept_fertility_sample(event.tile_idx) {
+                if let Some(food) = self.spawn_food_at_cell(event.tile_idx) {
+                    spawned.push(food);
+                }
+            } else {
+                let delay = self.regrowth_delay_for_tile(event.tile_idx);
+                self.schedule_food_regrowth_with_delay(event.tile_idx, delay);
             }
         }
 
@@ -285,6 +288,14 @@ impl Simulation {
         };
         let base_delay = cooldown.saturating_add(jitter);
         (f64::from(base_delay) / f64::from(self.config.plant_growth_speed)).ceil() as u64
+    }
+
+    fn occupied_retry_delay(&mut self) -> u64 {
+        let base = u64::from(self.config.food_regrowth_retry_cooldown_turns.max(1));
+        if base == 1 {
+            return 1;
+        }
+        base + self.rng.random_range(0..base)
     }
 
     fn accept_fertility_sample(&mut self, tile_idx: usize) -> bool {

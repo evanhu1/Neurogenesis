@@ -171,8 +171,6 @@ export function renderWorld(
   snapshot: WorldSnapshot | null,
   focusedOrganismId: number | null,
   viewport: WorldViewport,
-  deadFlashCells: Array<{ q: number; r: number }> | null,
-  bornFlashCells: Array<{ q: number; r: number }> | null,
   visibility: RenderVisibility = { organisms: true, plants: true },
 ) {
   const width = canvas.width;
@@ -200,24 +198,6 @@ export function renderWorld(
   const minY = Math.min(topLeft.y, bottomRight.y) - layout.size * 2;
   const maxY = Math.max(topLeft.y, bottomRight.y) + layout.size * 2;
   drawVisibleGrid(ctx, layout, minX, maxX, minY, maxY);
-
-  if (deadFlashCells) {
-    for (const cell of deadFlashCells) {
-      const center = hexCenter(layout, cell.q, cell.r);
-      traceHex(ctx, center.x, center.y, layout.size - 0.5);
-      ctx.fillStyle = 'rgba(248, 113, 113, 0.42)';
-      ctx.fill();
-    }
-  }
-
-  if (bornFlashCells) {
-    for (const cell of bornFlashCells) {
-      const center = hexCenter(layout, cell.q, cell.r);
-      traceHex(ctx, center.x, center.y, layout.size - 0.5);
-      ctx.fillStyle = 'rgba(134, 239, 172, 0.45)';
-      ctx.fill();
-    }
-  }
 
   if (visibility.plants) {
     const plants = Array.isArray(snapshot.foods) ? snapshot.foods : [];

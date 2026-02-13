@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ChangeEvent, type MutableRefObject } from 'react';
+import { useCallback, useMemo, useRef, useState, type ChangeEvent, type MutableRefObject } from 'react';
 import { unwrapId } from '../../protocol';
 import { colorForSpeciesId } from '../../speciesColor';
 import type {
@@ -72,6 +72,7 @@ export function ControlPanel({
   const [ticksInput, setTicksInput] = useState('1000');
   const [archivedWorldSortMode, setArchivedWorldSortMode] =
     useState<ArchivedWorldSortMode>('Newest');
+  const speciesCycleRef = useRef<{ speciesId: string; index: number } | null>(null);
   const isBatchRunning = batchRunStatus?.status === 'Running';
   const skipProgress = useMemo(() => {
     if (!stepProgress || stepProgress.requested_count <= 1) return null;
@@ -162,11 +163,14 @@ export function ControlPanel({
         focusedSpeciesId={focusedSpeciesId}
         onSpeciesClick={(speciesId) => {
           if (!snapshot) return;
-          const candidates = snapshot.organisms.filter(
-            (o) => String(unwrapId(o.species_id)) === speciesId,
-          );
+          const candidates = snapshot.organisms
+            .filter((o) => String(unwrapId(o.species_id)) === speciesId)
+            .sort((a, b) => b.energy - a.energy);
           if (candidates.length === 0) return;
-          const organism = candidates[Math.floor(Math.random() * candidates.length)];
+          const prev = speciesCycleRef.current;
+          const index = prev && prev.speciesId === speciesId ? (prev.index + 1) % candidates.length : 0;
+          speciesCycleRef.current = { speciesId, index };
+          const organism = candidates[index];
           onFocusOrganism(organism);
           panToHexRef.current?.(organism.q, organism.r);
         }}

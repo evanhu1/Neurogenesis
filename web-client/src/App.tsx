@@ -64,8 +64,6 @@ export default function App() {
             key={simulation.session?.id ?? 'no-session'}
             snapshot={simulation.snapshot}
             focusedOrganismId={simulation.focusedOrganismId}
-            deadFlashCells={simulation.deadFlashCells}
-            bornFlashCells={simulation.bornFlashCells}
             onOrganismSelect={simulation.focusOrganism}
             panToHexRef={panToHexRef}
           />

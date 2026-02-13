@@ -20,9 +20,6 @@ import { createSimHttpClient } from '../api/simHttpClient';
 import { apiBase, SPEED_LEVELS, wsBase } from '../constants';
 import { clearPersistedSessionId, loadPersistedSessionId, persistSessionId } from '../storage';
 
-type DeadCellFlashState = { turn: number; cells: Array<{ q: number; r: number }> } | null;
-type BornCellFlashState = { turn: number; cells: Array<{ q: number; r: number }> } | null;
-
 export type SpeciesPopulationPoint = {
   turn: number;
   speciesCounts: Record<string, number>;
@@ -139,8 +136,6 @@ export type SimulationSessionState = {
   speedLevels: readonly number[];
   speedLevelIndex: number;
   errorText: string | null;
-  deadFlashCells: Array<{ q: number; r: number }> | null;
-  bornFlashCells: Array<{ q: number; r: number }> | null;
   createSession: () => Promise<void>;
   resetSession: () => void;
   toggleRun: () => void;
@@ -182,9 +177,6 @@ export function useSimulationSession(): SimulationSessionState {
   const [stepProgress, setStepProgress] = useState<StepProgressData | null>(null);
   const [speedLevelIndex, setSpeedLevelIndex] = useState(1);
   const [errorText, setErrorText] = useState<string | null>(null);
-  const [deadCellFlashState, setDeadCellFlashState] = useState<DeadCellFlashState>(null);
-  const [bornCellFlashState, setBornCellFlashState] = useState<BornCellFlashState>(null);
-
   const wsRef = useRef<WebSocket | null>(null);
   const focusedOrganismIdRef = useRef<number | null>(null);
   const nextFocusPollAtMsRef = useRef(0);
@@ -201,12 +193,6 @@ export function useSimulationSession(): SimulationSessionState {
         const nextSnapshot = event.data as WorldSnapshot;
         setIsStepPending(false);
         setStepProgress(null);
-        setDeadCellFlashState((prev) =>
-          prev !== null && prev.turn !== nextSnapshot.turn ? null : prev,
-        );
-        setBornCellFlashState((prev) =>
-          prev !== null && prev.turn !== nextSnapshot.turn ? null : prev,
-        );
         setSnapshot(nextSnapshot);
         setSpeciesPopulationHistory((previous) =>
           upsertSpeciesPopulationHistory(previous, {
@@ -233,44 +219,6 @@ export function useSimulationSession(): SimulationSessionState {
             speciesCounts: normalizeSpeciesCounts(delta.metrics.species_counts),
           }),
         );
-
-        // Compute flash cells OUTSIDE the setSnapshot updater to avoid
-        // calling setState inside a setState updater (causes cascading renders).
-        const removedPositions = Array.isArray(delta.removed_positions)
-          ? delta.removed_positions
-          : [];
-
-        if (removedPositions.length > 0) {
-          const seenCells = new Set<string>();
-          const cells: Array<{ q: number; r: number }> = [];
-          for (const entry of removedPositions) {
-            const key = `${entry.q},${entry.r}`;
-            if (seenCells.has(key)) continue;
-            seenCells.add(key);
-            cells.push({ q: entry.q, r: entry.r });
-          }
-          setDeadCellFlashState(cells.length > 0 ? { turn: delta.turn, cells } : null);
-        } else {
-          setDeadCellFlashState((currentFlash) =>
-            currentFlash !== null && delta.turn > currentFlash.turn ? null : currentFlash,
-          );
-        }
-
-        if (delta.spawned.length > 0) {
-          const seenCells = new Set<string>();
-          const cells: Array<{ q: number; r: number }> = [];
-          for (const spawned of delta.spawned) {
-            const key = `${spawned.q},${spawned.r}`;
-            if (seenCells.has(key)) continue;
-            seenCells.add(key);
-            cells.push({ q: spawned.q, r: spawned.r });
-          }
-          setBornCellFlashState(cells.length > 0 ? { turn: delta.turn, cells } : null);
-        } else {
-          setBornCellFlashState((currentFlash) =>
-            currentFlash !== null && delta.turn > currentFlash.turn ? null : currentFlash,
-          );
-        }
 
         setSnapshot((prev) => {
           if (!prev) return prev;
@@ -356,8 +304,6 @@ export function useSimulationSession(): SimulationSessionState {
       setIsStepPending(false);
       setStepProgress(null);
       setSpeedLevelIndex(nearestSpeedLevelIndex(metadata.ticks_per_second));
-      setDeadCellFlashState(null);
-      setBornCellFlashState(null);
       setSpeciesPopulationHistory([
         {
           turn: loadedSnapshot.turn,
@@ -565,8 +511,6 @@ export function useSimulationSession(): SimulationSessionState {
         setFocusedOrganismIdTracked(null);
         setFocusedOrganism(null);
         setActiveNeuronIds(null);
-        setDeadCellFlashState(null);
-        setBornCellFlashState(null);
       })
       .catch((err) => {
         setErrorText(err instanceof Error ? err.message : 'Failed to reset session');
@@ -692,20 +636,6 @@ export function useSimulationSession(): SimulationSessionState {
     };
   }, []);
 
-  const deadFlashCells = useMemo(() => {
-    if (!snapshot) return null;
-    if (!deadCellFlashState) return null;
-    if (deadCellFlashState.turn !== snapshot.turn) return null;
-    return deadCellFlashState.cells;
-  }, [deadCellFlashState, snapshot]);
-
-  const bornFlashCells = useMemo(() => {
-    if (!snapshot) return null;
-    if (!bornCellFlashState) return null;
-    if (bornCellFlashState.turn !== snapshot.turn) return null;
-    return bornCellFlashState.cells;
-  }, [bornCellFlashState, snapshot]);
-
   return {
     session,
     snapshot,
@@ -721,8 +651,6 @@ export function useSimulationSession(): SimulationSessionState {
     speedLevels: SPEED_LEVELS,
     speedLevelIndex,
     errorText,
-    deadFlashCells,
-    bornFlashCells,
     createSession,
     resetSession,
     toggleRun,
