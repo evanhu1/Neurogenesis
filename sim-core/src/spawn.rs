@@ -15,6 +15,8 @@ use sim_types::{
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct FoodRegrowthEvent {
     pub(crate) due_turn: u64,
+    #[serde(default)]
+    pub(crate) tie_break: u64,
     pub(crate) tile_idx: usize,
     pub(crate) generation: u32,
 }
@@ -152,13 +154,6 @@ impl Simulation {
         (self.config.num_organisms as usize).min(world_capacity(self.config.world_width))
     }
 
-    fn target_food_count(&self) -> usize {
-        let capacity = world_capacity(self.config.world_width) as f64;
-        (capacity * f64::from(self.config.plant_target_coverage))
-            .floor()
-            .clamp(0.0, capacity) as usize
-    }
-
     pub(crate) fn initialize_food_ecology(&mut self) {
         let capacity = world_capacity(self.config.world_width);
         self.food_fertility = build_fertility_map(self.config.world_width, self.seed, &self.config);
@@ -169,53 +164,12 @@ impl Simulation {
 
     pub(crate) fn seed_initial_food_supply(&mut self) {
         self.ensure_food_ecology_state();
-        let target = self.target_food_count();
-        if self.foods.len() >= target {
-            return;
-        }
-
-        let need = target - self.foods.len();
-        let max_attempts = need * 96;
-        let mut added = 0_usize;
-        let mut attempts = 0;
-
-        while added < need && attempts < max_attempts {
-            let cell_idx = self.rng.random_range(0..self.food_fertility.len());
-            if self.occupancy[cell_idx].is_some() || !self.accept_fertility_sample(cell_idx) {
-                attempts += 1;
+        for cell_idx in 0..self.food_fertility.len() {
+            if self.occupancy[cell_idx].is_some() {
                 continue;
             }
-            if self.spawn_food_at_cell(cell_idx).is_some() {
-                added += 1;
-            }
-        }
-
-        if added < need {
-            let mut candidates: Vec<usize> = self
-                .occupancy
-                .iter()
-                .enumerate()
-                .filter_map(
-                    |(idx, occupant)| {
-                        if occupant.is_none() {
-                            Some(idx)
-                        } else {
-                            None
-                        }
-                    },
-                )
-                .collect();
-
-            candidates
-                .sort_unstable_by(|a, b| self.food_fertility[*b].cmp(&self.food_fertility[*a]));
-
-            for idx in candidates {
-                if added >= need {
-                    break;
-                }
-                if self.spawn_food_at_cell(idx).is_some() {
-                    added += 1;
-                }
+            if self.accept_fertility_sample(cell_idx) {
+                let _ = self.spawn_food_at_cell(cell_idx);
             }
         }
     }
@@ -239,10 +193,9 @@ impl Simulation {
 
     pub(crate) fn replenish_food_supply(&mut self) -> Vec<FoodState> {
         self.ensure_food_ecology_state();
-        let target = self.target_food_count();
         let mut spawned = Vec::new();
 
-        while self.foods.len() < target {
+        loop {
             let Some(next_event) = self.food_regrowth_queue.first().copied() else {
                 break;
             };
@@ -312,6 +265,7 @@ impl Simulation {
         self.food_regrowth_generation[tile_idx] = generation;
         self.food_regrowth_queue.insert(FoodRegrowthEvent {
             due_turn: self.turn.saturating_add(delay),
+            tie_break: hash_2d(tile_idx as i64, generation as i64, self.seed),
             tile_idx,
             generation,
         });
@@ -329,7 +283,8 @@ impl Simulation {
             self.rng
                 .random_range(0..=self.config.food_regrowth_jitter_turns)
         };
-        u64::from(cooldown.saturating_add(jitter))
+        let base_delay = cooldown.saturating_add(jitter);
+        (f64::from(base_delay) / f64::from(self.config.plant_growth_speed)).ceil() as u64
     }
 
     fn accept_fertility_sample(&mut self, tile_idx: usize) -> bool {

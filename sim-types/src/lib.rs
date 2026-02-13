@@ -185,7 +185,7 @@ pub struct WorldConfig {
     pub reproduction_energy_cost: f32,
     pub move_action_energy_cost: f32,
     pub turn_energy_cost: f32,
-    pub plant_target_coverage: f32,
+    pub plant_growth_speed: f32,
     #[serde(default = "default_food_regrowth_min_cooldown_turns")]
     pub food_regrowth_min_cooldown_turns: u32,
     #[serde(default = "default_food_regrowth_max_cooldown_turns")]
@@ -217,9 +217,11 @@ struct WorldConfigDeserialize {
     move_action_energy_cost: f32,
     turn_energy_cost: f32,
     #[serde(default)]
-    plant_target_coverage: Option<f32>,
+    plant_growth_speed: Option<f32>,
     #[serde(default)]
-    food_coverage_divisor: Option<u32>,
+    _legacy_plant_target_coverage: Option<f32>,
+    #[serde(default)]
+    _legacy_food_coverage_divisor: Option<u32>,
     #[serde(default = "default_food_regrowth_min_cooldown_turns")]
     food_regrowth_min_cooldown_turns: u32,
     #[serde(default = "default_food_regrowth_max_cooldown_turns")]
@@ -246,12 +248,9 @@ impl<'de> Deserialize<'de> for WorldConfig {
         D: serde::Deserializer<'de>,
     {
         let raw = WorldConfigDeserialize::deserialize(deserializer)?;
-        let plant_target_coverage = match (raw.plant_target_coverage, raw.food_coverage_divisor) {
-            (Some(coverage), _) => coverage,
-            (None, Some(divisor)) if divisor > 0 => 1.0 / divisor as f32,
-            (None, Some(_)) => 0.0,
-            (None, None) => default_plant_target_coverage(),
-        };
+        let plant_growth_speed = raw
+            .plant_growth_speed
+            .unwrap_or_else(default_plant_growth_speed);
         Ok(Self {
             world_width: raw.world_width,
             steps_per_second: raw.steps_per_second,
@@ -261,7 +260,7 @@ impl<'de> Deserialize<'de> for WorldConfig {
             reproduction_energy_cost: raw.reproduction_energy_cost,
             move_action_energy_cost: raw.move_action_energy_cost,
             turn_energy_cost: raw.turn_energy_cost,
-            plant_target_coverage,
+            plant_growth_speed,
             food_regrowth_min_cooldown_turns: raw.food_regrowth_min_cooldown_turns,
             food_regrowth_max_cooldown_turns: raw.food_regrowth_max_cooldown_turns,
             food_regrowth_jitter_turns: raw.food_regrowth_jitter_turns,
@@ -364,8 +363,8 @@ fn default_food_fertility_floor() -> f32 {
     0.04
 }
 
-fn default_plant_target_coverage() -> f32 {
-    0.02
+fn default_plant_growth_speed() -> f32 {
+    1.0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -517,17 +516,18 @@ mod tests {
     }
 
     #[test]
-    fn legacy_food_coverage_divisor_deserializes_to_plant_target_coverage() {
+    fn legacy_coverage_config_deserializes_with_default_growth_speed() {
         let cfg = WorldConfig::default();
         let mut value = serde_json::to_value(&cfg).expect("serialize config to value");
         let object = value
             .as_object_mut()
             .expect("world config JSON value must be an object");
-        object.remove("plant_target_coverage");
-        object.insert("food_coverage_divisor".to_owned(), json!(50));
+        object.remove("plant_growth_speed");
+        object.insert("plant_target_coverage".to_owned(), json!(0.05));
+        object.insert("food_coverage_divisor".to_owned(), json!(20));
 
         let parsed: WorldConfig =
             serde_json::from_value(value).expect("deserialize legacy world config");
-        assert!((parsed.plant_target_coverage - 0.02).abs() < f32::EPSILON);
+        assert!((parsed.plant_growth_speed - 1.0).abs() < f32::EPSILON);
     }
 }

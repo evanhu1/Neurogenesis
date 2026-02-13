@@ -330,7 +330,7 @@ impl Simulation {
                     let prey_idx = self.organism_index(prey_id);
                     let drain = self.organisms[prey_idx]
                         .energy
-                        .min(self.config.food_energy)
+                        .min(self.config.food_energy * 2.0f32)
                         .max(0.0);
                     if drain <= 0.0 {
                         continue;

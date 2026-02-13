@@ -32,7 +32,7 @@ export type WorldConfig = {
   reproduction_energy_cost: number;
   move_action_energy_cost: number;
   turn_energy_cost: number;
-  plant_target_coverage: number;
+  plant_growth_speed: number;
   food_regrowth_min_cooldown_turns: number;
   food_regrowth_max_cooldown_turns: number;
   food_regrowth_jitter_turns: number;

@@ -109,11 +109,11 @@ fn config_validation_rejects_max_num_neurons_out_of_range() {
 }
 
 #[test]
-fn config_validation_rejects_invalid_plant_target_coverage() {
+fn config_validation_rejects_invalid_plant_growth_speed() {
     let mut cfg = stable_test_config();
-    cfg.plant_target_coverage = 1.1;
+    cfg.plant_growth_speed = 0.0;
     let err = Simulation::new(cfg, 1).expect_err("expected invalid config error");
-    assert!(err.to_string().contains("plant_target_coverage"));
+    assert!(err.to_string().contains("plant_growth_speed"));
 }
 
 #[test]
@@ -140,10 +140,11 @@ fn population_is_capped_by_world_capacity_without_overlap() {
 }
 
 #[test]
-fn initial_food_population_matches_target_coverage() {
-    let cfg = test_config(20, 4);
-    let expected = ((20_usize * 20) as f32 * cfg.plant_target_coverage).floor() as usize;
+fn initial_food_population_fills_all_empty_tiles_when_fertility_floor_is_one() {
+    let mut cfg = test_config(20, 4);
+    cfg.food_fertility_floor = 1.0;
     let sim = Simulation::new(cfg, 55).expect("simulation should initialize");
+    let expected = (20_usize * 20) - sim.organisms.len();
     assert_eq!(sim.foods.len(), expected);
 }
 
