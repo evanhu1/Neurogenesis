@@ -570,7 +570,7 @@ fn synapse_pruning_requires_weight_and_eligibility_below_threshold() {
             pre_neuron_id: NeuronId(0),
             post_neuron_id: NeuronId(2000),
             weight: 0.05,
-            eligibility: 1.0,
+            eligibility: 2.0,
         }],
     };
     let mut organism = OrganismState {

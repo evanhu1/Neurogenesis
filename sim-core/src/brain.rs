@@ -16,6 +16,7 @@ const DEFAULT_BIAS: f32 = 0.0;
 const OJA_WEIGHT_CLAMP_ENABLED: bool = true;
 const OJA_WEIGHT_MAGNITUDE_MIN: f32 = 0.001;
 const OJA_WEIGHT_MAGNITUDE_MAX: f32 = 4.0;
+const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
 pub(crate) const SENSORY_COUNT: u32 = SensoryReceptor::LOOK_NEURON_COUNT + 1;
 pub(crate) const ACTION_COUNT: usize = ActionType::ALL.len();
 pub(crate) const ACTION_COUNT_U32: u32 = ACTION_COUNT as u32;
@@ -406,8 +407,8 @@ pub(crate) fn apply_runtime_plasticity(organism: &mut sim_types::OrganismState) 
 }
 
 fn should_prune_synapses(age_turns: u64, age_of_maturity: u32) -> bool {
-    let maturity_ticks = u64::from(age_of_maturity.max(1));
-    age_turns >= maturity_ticks && age_turns % maturity_ticks == 0
+    let maturity_ticks = u64::from(age_of_maturity);
+    age_turns >= maturity_ticks && age_turns % SYNAPSE_PRUNE_INTERVAL_TICKS == 0
 }
 
 fn tune_synapses(
