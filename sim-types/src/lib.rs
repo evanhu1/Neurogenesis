@@ -100,6 +100,14 @@ pub struct OrganismGenome {
     pub num_neurons: u32,
     pub vision_distance: u32,
     #[serde(default)]
+    pub hebb_eta_baseline: f32,
+    #[serde(default)]
+    pub hebb_eta_gain: f32,
+    #[serde(default = "default_eligibility_decay_lambda")]
+    pub eligibility_decay_lambda: f32,
+    #[serde(default)]
+    pub synapse_prune_threshold: f32,
+    #[serde(default)]
     pub mutation_rate_vision_distance: f32,
     #[serde(default)]
     pub mutation_rate_weight: f32,
@@ -115,6 +123,10 @@ pub struct OrganismGenome {
     pub mutation_rate_inter_update_rate: f32,
     #[serde(default)]
     pub mutation_rate_action_bias: f32,
+    #[serde(default)]
+    pub mutation_rate_eligibility_decay_lambda: f32,
+    #[serde(default)]
+    pub mutation_rate_synapse_prune_threshold: f32,
     pub inter_biases: Vec<f32>,
     pub inter_log_taus: Vec<f32>,
     #[serde(default)]
@@ -129,6 +141,14 @@ pub struct SeedGenomeConfig {
     pub num_synapses: u32,
     pub vision_distance: u32,
     #[serde(default)]
+    pub hebb_eta_baseline: f32,
+    #[serde(default)]
+    pub hebb_eta_gain: f32,
+    #[serde(default = "default_eligibility_decay_lambda")]
+    pub eligibility_decay_lambda: f32,
+    #[serde(default)]
+    pub synapse_prune_threshold: f32,
+    #[serde(default)]
     pub mutation_rate_vision_distance: f32,
     #[serde(default)]
     pub mutation_rate_weight: f32,
@@ -144,6 +164,10 @@ pub struct SeedGenomeConfig {
     pub mutation_rate_inter_update_rate: f32,
     #[serde(default)]
     pub mutation_rate_action_bias: f32,
+    #[serde(default)]
+    pub mutation_rate_eligibility_decay_lambda: f32,
+    #[serde(default)]
+    pub mutation_rate_synapse_prune_threshold: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -179,6 +203,12 @@ pub struct SynapseEdge {
     pub pre_neuron_id: NeuronId,
     pub post_neuron_id: NeuronId,
     pub weight: f32,
+    #[serde(default)]
+    pub eligibility: f32,
+}
+
+fn default_eligibility_decay_lambda() -> f32 {
+    0.9
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

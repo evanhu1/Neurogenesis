@@ -20,6 +20,10 @@ fn stable_perf_config() -> WorldConfig {
             num_neurons: 20,
             num_synapses: 80,
             vision_distance: 10,
+            hebb_eta_baseline: 0.0,
+            hebb_eta_gain: 0.0,
+            eligibility_decay_lambda: 0.9,
+            synapse_prune_threshold: 0.01,
             mutation_rate_vision_distance: 0.04,
             mutation_rate_weight: 0.25,
             mutation_rate_add_edge: 0.03,
@@ -28,6 +32,8 @@ fn stable_perf_config() -> WorldConfig {
             mutation_rate_inter_bias: 0.2,
             mutation_rate_inter_update_rate: 0.12,
             mutation_rate_action_bias: 0.2,
+            mutation_rate_eligibility_decay_lambda: 0.05,
+            mutation_rate_synapse_prune_threshold: 0.05,
         },
     }
 }

@@ -51,8 +51,9 @@ export default function App() {
           onFocusOrganism={simulation.focusOrganism}
           onSaveCurrentWorld={() => void simulation.saveCurrentWorld()}
           onDeleteArchivedWorld={(worldId) => void simulation.deleteArchivedWorld(worldId)}
-          onStartBatchRun={(worldCount, ticksPerWorld, universeSeed) =>
-            void simulation.startBatchRun(worldCount, ticksPerWorld, universeSeed)
+          onDeleteAllArchivedWorlds={() => void simulation.deleteAllArchivedWorlds()}
+          onStartBatchRun={(worldCount, ticksPerWorld) =>
+            void simulation.startBatchRun(worldCount, ticksPerWorld)
           }
           onLoadArchivedWorld={(worldId) => void simulation.loadArchivedWorld(worldId)}
           panToHexRef={panToHexRef}

@@ -8,6 +8,16 @@ const MAX_MUTATED_VISION_DISTANCE: u32 = 32;
 const SYNAPSE_STRENGTH_MAX: f32 = 4.0;
 const SYNAPSE_STRENGTH_MIN: f32 = 0.001;
 const BIAS_MAX: f32 = 1.0;
+const ETA_BASELINE_MIN: f32 = 0.0;
+const ETA_BASELINE_MAX: f32 = 0.2;
+const ETA_GAIN_MIN: f32 = -1.0;
+const ETA_GAIN_MAX: f32 = 1.0;
+const ELIGIBILITY_DECAY_LAMBDA_MIN: f32 = 0.0;
+const ELIGIBILITY_DECAY_LAMBDA_MAX: f32 = 1.0;
+const SYNAPSE_PRUNE_THRESHOLD_MIN: f32 = 0.0;
+const SYNAPSE_PRUNE_THRESHOLD_MAX: f32 = 1.0;
+const DEFAULT_ELIGIBILITY_DECAY_LAMBDA: f32 = 0.9;
+const DEFAULT_SYNAPSE_PRUNE_THRESHOLD: f32 = 0.01;
 
 const SYNAPSE_WEIGHT_LOG_NORMAL_MU: f32 = -0.5;
 const SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA: f32 = 0.8;
@@ -19,6 +29,10 @@ const MUTATION_RATE_MAX: f32 = 1.0 - MUTATION_RATE_MIN;
 const WEIGHT_PERTURBATION_STDDEV: f32 = 0.3;
 const BIAS_PERTURBATION_STDDEV: f32 = 0.15;
 const INTER_LOG_TAU_PERTURBATION_STDDEV: f32 = 0.05;
+const ETA_BASELINE_PERTURBATION_STDDEV: f32 = 0.01;
+const ETA_GAIN_PERTURBATION_STDDEV: f32 = 0.05;
+const ELIGIBILITY_DECAY_LAMBDA_PERTURBATION_STDDEV: f32 = 0.05;
+const SYNAPSE_PRUNE_THRESHOLD_PERTURBATION_STDDEV: f32 = 0.02;
 pub(crate) const INTER_TAU_MIN: f32 = 0.1;
 pub(crate) const INTER_TAU_MAX: f32 = 15.0;
 pub(crate) const INTER_LOG_TAU_MIN: f32 = -2.302_585_1;
@@ -55,6 +69,24 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     OrganismGenome {
         num_neurons: config.num_neurons.min(world_max_num_neurons),
         vision_distance: config.vision_distance,
+        hebb_eta_baseline: config
+            .hebb_eta_baseline
+            .clamp(ETA_BASELINE_MIN, ETA_BASELINE_MAX),
+        hebb_eta_gain: config.hebb_eta_gain.clamp(ETA_GAIN_MIN, ETA_GAIN_MAX),
+        eligibility_decay_lambda: if config.eligibility_decay_lambda.is_finite() {
+            config
+                .eligibility_decay_lambda
+                .clamp(ELIGIBILITY_DECAY_LAMBDA_MIN, ELIGIBILITY_DECAY_LAMBDA_MAX)
+        } else {
+            DEFAULT_ELIGIBILITY_DECAY_LAMBDA
+        },
+        synapse_prune_threshold: if config.synapse_prune_threshold.is_finite() {
+            config
+                .synapse_prune_threshold
+                .clamp(SYNAPSE_PRUNE_THRESHOLD_MIN, SYNAPSE_PRUNE_THRESHOLD_MAX)
+        } else {
+            DEFAULT_SYNAPSE_PRUNE_THRESHOLD
+        },
         mutation_rate_vision_distance: config.mutation_rate_vision_distance,
         mutation_rate_weight: config.mutation_rate_weight,
         mutation_rate_add_edge: config.mutation_rate_add_edge,
@@ -63,6 +95,8 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         mutation_rate_inter_bias: config.mutation_rate_inter_bias,
         mutation_rate_inter_update_rate: config.mutation_rate_inter_update_rate,
         mutation_rate_action_bias: config.mutation_rate_action_bias,
+        mutation_rate_eligibility_decay_lambda: config.mutation_rate_eligibility_decay_lambda,
+        mutation_rate_synapse_prune_threshold: config.mutation_rate_synapse_prune_threshold,
         inter_biases,
         inter_log_taus,
         interneuron_types,
@@ -192,12 +226,13 @@ fn random_edge<R: Rng + ?Sized>(
             pre_neuron_id: pre,
             post_neuron_id: post,
             weight,
+            eligibility: 0.0,
         });
     }
     None
 }
 
-fn mutation_rate_genes_mut(genome: &mut OrganismGenome) -> [&mut f32; 8] {
+fn mutation_rate_genes_mut(genome: &mut OrganismGenome) -> [&mut f32; 10] {
     [
         &mut genome.mutation_rate_vision_distance,
         &mut genome.mutation_rate_weight,
@@ -207,10 +242,12 @@ fn mutation_rate_genes_mut(genome: &mut OrganismGenome) -> [&mut f32; 8] {
         &mut genome.mutation_rate_inter_bias,
         &mut genome.mutation_rate_inter_update_rate,
         &mut genome.mutation_rate_action_bias,
+        &mut genome.mutation_rate_eligibility_decay_lambda,
+        &mut genome.mutation_rate_synapse_prune_threshold,
     ]
 }
 
-fn mutation_rate_genes(genome: &OrganismGenome) -> [f32; 8] {
+fn mutation_rate_genes(genome: &OrganismGenome) -> [f32; 10] {
     [
         genome.mutation_rate_vision_distance,
         genome.mutation_rate_weight,
@@ -220,6 +257,8 @@ fn mutation_rate_genes(genome: &OrganismGenome) -> [f32; 8] {
         genome.mutation_rate_inter_bias,
         genome.mutation_rate_inter_update_rate,
         genome.mutation_rate_action_bias,
+        genome.mutation_rate_eligibility_decay_lambda,
+        genome.mutation_rate_synapse_prune_threshold,
     ]
 }
 
@@ -304,6 +343,7 @@ fn mutate_split_edge<R: Rng + ?Sized>(
         pre_neuron_id: split_edge.pre_neuron_id,
         post_neuron_id: new_inter_id,
         weight: clamp_signed_weight(split_edge.weight, pre_sign),
+        eligibility: 0.0,
     };
 
     let edge_from_new = SynapseEdge {
@@ -314,6 +354,7 @@ fn mutate_split_edge<R: Rng + ?Sized>(
             source_weight_sign(new_inter_id, genome.num_neurons, &genome.interneuron_types)
                 .unwrap_or(1.0),
         ),
+        eligibility: 0.0,
     };
 
     genome.edges.push(edge_to_new);
@@ -339,6 +380,26 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
 ) {
     align_genome_vectors(genome, world_max_num_neurons, rng);
     mutate_mutation_rate_genes(genome, rng);
+
+    if rng.random::<f32>() < genome.mutation_rate_weight {
+        genome.hebb_eta_baseline = perturb_clamped(
+            genome.hebb_eta_baseline,
+            ETA_BASELINE_PERTURBATION_STDDEV,
+            ETA_BASELINE_MIN,
+            ETA_BASELINE_MAX,
+            rng,
+        );
+    }
+
+    if rng.random::<f32>() < genome.mutation_rate_weight {
+        genome.hebb_eta_gain = perturb_clamped(
+            genome.hebb_eta_gain,
+            ETA_GAIN_PERTURBATION_STDDEV,
+            ETA_GAIN_MIN,
+            ETA_GAIN_MAX,
+            rng,
+        );
+    }
 
     if rng.random::<f32>() < genome.mutation_rate_vision_distance {
         genome.vision_distance = step_u32(
@@ -415,6 +476,26 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
         );
     }
 
+    if rng.random::<f32>() < genome.mutation_rate_eligibility_decay_lambda {
+        genome.eligibility_decay_lambda = perturb_clamped(
+            genome.eligibility_decay_lambda,
+            ELIGIBILITY_DECAY_LAMBDA_PERTURBATION_STDDEV,
+            ELIGIBILITY_DECAY_LAMBDA_MIN,
+            ELIGIBILITY_DECAY_LAMBDA_MAX,
+            rng,
+        );
+    }
+
+    if rng.random::<f32>() < genome.mutation_rate_synapse_prune_threshold {
+        genome.synapse_prune_threshold = perturb_clamped(
+            genome.synapse_prune_threshold,
+            SYNAPSE_PRUNE_THRESHOLD_PERTURBATION_STDDEV,
+            SYNAPSE_PRUNE_THRESHOLD_MIN,
+            SYNAPSE_PRUNE_THRESHOLD_MAX,
+            rng,
+        );
+    }
+
     normalize_edge_signs(genome);
     sort_edges(&mut genome.edges);
     debug_assert_edges_sorted(&genome.edges);
@@ -461,6 +542,91 @@ fn is_enabled_inter_neuron(id: NeuronId, num_neurons: u32) -> bool {
     id.0 >= INTER_ID_BASE && id.0 < INTER_ID_BASE + num_neurons
 }
 
+fn inter_neuron_index(id: NeuronId, num_neurons: u32) -> Option<usize> {
+    if is_enabled_inter_neuron(id, num_neurons) {
+        Some((id.0 - INTER_ID_BASE) as usize)
+    } else {
+        None
+    }
+}
+
+fn compact_enabled_prefix<T: Clone>(values: &mut [T], enabled_len: usize, keep_mask: &[bool]) {
+    let prefix_len = enabled_len.min(values.len()).min(keep_mask.len());
+    if prefix_len == 0 {
+        return;
+    }
+
+    let mut kept_values = Vec::with_capacity(prefix_len);
+    for idx in 0..prefix_len {
+        if keep_mask[idx] {
+            kept_values.push(values[idx].clone());
+        }
+    }
+
+    for (idx, value) in kept_values.into_iter().enumerate() {
+        values[idx] = value;
+    }
+}
+
+pub(crate) fn prune_disconnected_inter_neurons(genome: &mut OrganismGenome) {
+    let old_num_neurons = genome.num_neurons as usize;
+    if old_num_neurons == 0 {
+        return;
+    }
+
+    let mut connected = vec![false; old_num_neurons];
+    for edge in &genome.edges {
+        if let Some(idx) = inter_neuron_index(edge.pre_neuron_id, genome.num_neurons) {
+            connected[idx] = true;
+        }
+        if let Some(idx) = inter_neuron_index(edge.post_neuron_id, genome.num_neurons) {
+            connected[idx] = true;
+        }
+    }
+
+    if connected.iter().all(|is_connected| *is_connected) {
+        return;
+    }
+
+    let mut new_idx_of_old = vec![u32::MAX; old_num_neurons];
+    let mut next_new_idx = 0_u32;
+    for (old_idx, is_connected) in connected.iter().enumerate() {
+        if *is_connected {
+            new_idx_of_old[old_idx] = next_new_idx;
+            next_new_idx = next_new_idx.saturating_add(1);
+        }
+    }
+
+    let old_num_neurons_u32 = genome.num_neurons;
+    let mut compacted_edges = Vec::with_capacity(genome.edges.len());
+    for mut edge in genome.edges.drain(..) {
+        if let Some(pre_idx) = inter_neuron_index(edge.pre_neuron_id, old_num_neurons_u32) {
+            let mapped = new_idx_of_old[pre_idx];
+            if mapped == u32::MAX {
+                continue;
+            }
+            edge.pre_neuron_id = NeuronId(INTER_ID_BASE + mapped);
+        }
+        if let Some(post_idx) = inter_neuron_index(edge.post_neuron_id, old_num_neurons_u32) {
+            let mapped = new_idx_of_old[post_idx];
+            if mapped == u32::MAX {
+                continue;
+            }
+            edge.post_neuron_id = NeuronId(INTER_ID_BASE + mapped);
+        }
+        compacted_edges.push(edge);
+    }
+
+    compact_enabled_prefix(&mut genome.inter_biases, old_num_neurons, &connected);
+    compact_enabled_prefix(&mut genome.inter_log_taus, old_num_neurons, &connected);
+    compact_enabled_prefix(&mut genome.interneuron_types, old_num_neurons, &connected);
+
+    genome.num_neurons = next_new_idx;
+    genome.edges = compacted_edges;
+    sort_edges(&mut genome.edges);
+    genome.edges.dedup_by(|a, b| edge_key(a) == edge_key(b));
+}
+
 fn perturb_clamped<R: Rng + ?Sized>(
     value: f32,
     stddev: f32,
@@ -481,7 +647,11 @@ fn normal_sample<R: Rng + ?Sized>(rng: &mut R) -> f32 {
 /// L1 genome distance: scalar traits + mutation-rate genes + vectors.
 pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
     let mut dist = (a.num_neurons as f32 - b.num_neurons as f32).abs()
-        + (a.vision_distance as f32 - b.vision_distance as f32).abs();
+        + (a.vision_distance as f32 - b.vision_distance as f32).abs()
+        + (a.hebb_eta_baseline - b.hebb_eta_baseline).abs()
+        + (a.hebb_eta_gain - b.hebb_eta_gain).abs()
+        + (a.eligibility_decay_lambda - b.eligibility_decay_lambda).abs()
+        + (a.synapse_prune_threshold - b.synapse_prune_threshold).abs();
 
     let a_rates = mutation_rate_genes(a);
     let b_rates = mutation_rate_genes(b);
@@ -520,6 +690,31 @@ fn validate_rate(name: &str, rate: f32) -> Result<(), SimError> {
 }
 
 pub(crate) fn validate_seed_genome_config(config: &SeedGenomeConfig) -> Result<(), SimError> {
+    if !(ETA_BASELINE_MIN..=ETA_BASELINE_MAX).contains(&config.hebb_eta_baseline) {
+        return Err(SimError::InvalidConfig(format!(
+            "hebb_eta_baseline must be within [{ETA_BASELINE_MIN}, {ETA_BASELINE_MAX}]"
+        )));
+    }
+    if !(ETA_GAIN_MIN..=ETA_GAIN_MAX).contains(&config.hebb_eta_gain) {
+        return Err(SimError::InvalidConfig(format!(
+            "hebb_eta_gain must be within [{ETA_GAIN_MIN}, {ETA_GAIN_MAX}]"
+        )));
+    }
+    if !(ELIGIBILITY_DECAY_LAMBDA_MIN..=ELIGIBILITY_DECAY_LAMBDA_MAX)
+        .contains(&config.eligibility_decay_lambda)
+    {
+        return Err(SimError::InvalidConfig(format!(
+            "eligibility_decay_lambda must be within [{ELIGIBILITY_DECAY_LAMBDA_MIN}, {ELIGIBILITY_DECAY_LAMBDA_MAX}]"
+        )));
+    }
+    if !(SYNAPSE_PRUNE_THRESHOLD_MIN..=SYNAPSE_PRUNE_THRESHOLD_MAX)
+        .contains(&config.synapse_prune_threshold)
+    {
+        return Err(SimError::InvalidConfig(format!(
+            "synapse_prune_threshold must be within [{SYNAPSE_PRUNE_THRESHOLD_MIN}, {SYNAPSE_PRUNE_THRESHOLD_MAX}]"
+        )));
+    }
+
     validate_rate(
         "mutation_rate_vision_distance",
         config.mutation_rate_vision_distance,
@@ -539,6 +734,14 @@ pub(crate) fn validate_seed_genome_config(config: &SeedGenomeConfig) -> Result<(
     validate_rate(
         "mutation_rate_action_bias",
         config.mutation_rate_action_bias,
+    )?;
+    validate_rate(
+        "mutation_rate_eligibility_decay_lambda",
+        config.mutation_rate_eligibility_decay_lambda,
+    )?;
+    validate_rate(
+        "mutation_rate_synapse_prune_threshold",
+        config.mutation_rate_synapse_prune_threshold,
     )?;
 
     if config.vision_distance < MIN_MUTATED_VISION_DISTANCE {

@@ -8,6 +8,10 @@ export type SeedGenomeConfig = {
   num_neurons: number;
   num_synapses: number;
   vision_distance: number;
+  hebb_eta_baseline: number;
+  hebb_eta_gain: number;
+  eligibility_decay_lambda: number;
+  synapse_prune_threshold: number;
   mutation_rate_vision_distance: number;
   mutation_rate_weight: number;
   mutation_rate_add_edge: number;
@@ -16,6 +20,8 @@ export type SeedGenomeConfig = {
   mutation_rate_inter_bias: number;
   mutation_rate_inter_update_rate: number;
   mutation_rate_action_bias: number;
+  mutation_rate_eligibility_decay_lambda: number;
+  mutation_rate_synapse_prune_threshold: number;
 };
 
 export type WorldConfig = {
@@ -37,6 +43,10 @@ export type WorldConfig = {
 export type OrganismGenome = {
   num_neurons: number;
   vision_distance: number;
+  hebb_eta_baseline: number;
+  hebb_eta_gain: number;
+  eligibility_decay_lambda: number;
+  synapse_prune_threshold: number;
   mutation_rate_vision_distance: number;
   mutation_rate_weight: number;
   mutation_rate_add_edge: number;
@@ -45,6 +55,8 @@ export type OrganismGenome = {
   mutation_rate_inter_bias: number;
   mutation_rate_inter_update_rate: number;
   mutation_rate_action_bias: number;
+  mutation_rate_eligibility_decay_lambda: number;
+  mutation_rate_synapse_prune_threshold: number;
   inter_biases: number[];
   inter_log_taus: number[];
   interneuron_types: InterNeuronType[];
@@ -58,6 +70,7 @@ export type SynapseEdge = {
   pre_neuron_id: number | { 0: number };
   post_neuron_id: number | { 0: number };
   weight: number;
+  eligibility: number;
 };
 
 export type NeuronState = {
@@ -331,6 +344,10 @@ function parseDefaultConfigToml(tomlText: string): WorldConfig {
       num_neurons: parseRequiredNumber(genomeSource, 'num_neurons'),
       num_synapses: parseRequiredNumber(genomeSource, 'num_synapses'),
       vision_distance: parseNumberWithDefault(genomeSource, 'vision_distance', 2),
+      hebb_eta_baseline: parseNumberWithDefault(genomeSource, 'hebb_eta_baseline', 0.0),
+      hebb_eta_gain: parseNumberWithDefault(genomeSource, 'hebb_eta_gain', 0.0),
+      eligibility_decay_lambda: parseNumberWithDefault(genomeSource, 'eligibility_decay_lambda', 0.9),
+      synapse_prune_threshold: parseNumberWithDefault(genomeSource, 'synapse_prune_threshold', 0.01),
       mutation_rate_vision_distance: parseRequiredNumber(
         genomeSource,
         'mutation_rate_vision_distance',
@@ -345,6 +362,16 @@ function parseDefaultConfigToml(tomlText: string): WorldConfig {
         'mutation_rate_inter_update_rate',
       ),
       mutation_rate_action_bias: parseRequiredNumber(genomeSource, 'mutation_rate_action_bias'),
+      mutation_rate_eligibility_decay_lambda: parseNumberWithDefault(
+        genomeSource,
+        'mutation_rate_eligibility_decay_lambda',
+        0.0,
+      ),
+      mutation_rate_synapse_prune_threshold: parseNumberWithDefault(
+        genomeSource,
+        'mutation_rate_synapse_prune_threshold',
+        0.0,
+      ),
     },
   };
 }

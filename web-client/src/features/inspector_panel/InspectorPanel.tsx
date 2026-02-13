@@ -114,6 +114,16 @@ export function InspectorPanel({
         label: 'Action Bias',
         value: genome.mutation_rate_action_bias,
       },
+      {
+        key: 'mutation_rate_eligibility_decay_lambda',
+        label: 'Elig Lambda',
+        value: genome.mutation_rate_eligibility_decay_lambda,
+      },
+      {
+        key: 'mutation_rate_synapse_prune_threshold',
+        label: 'Prune Thresh',
+        value: genome.mutation_rate_synapse_prune_threshold,
+      },
     ];
 
     return {

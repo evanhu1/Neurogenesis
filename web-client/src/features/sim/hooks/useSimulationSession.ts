@@ -151,10 +151,20 @@ export type SimulationSessionState = {
   defocusOrganism: () => void;
   saveCurrentWorld: () => Promise<void>;
   deleteArchivedWorld: (worldId: string) => Promise<void>;
-  startBatchRun: (worldCount: number, ticksPerWorld: number, universeSeed: number) => Promise<void>;
+  deleteAllArchivedWorlds: () => Promise<void>;
+  startBatchRun: (worldCount: number, ticksPerWorld: number) => Promise<void>;
   loadArchivedWorld: (worldId: string) => Promise<void>;
   refreshArchivedWorlds: () => Promise<void>;
 };
+
+function nextRandomUniverseSeed(): number {
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const value = new Uint32Array(1);
+    crypto.getRandomValues(value);
+    return value[0];
+  }
+  return Math.floor(Math.random() * 0x1_0000_0000);
+}
 
 export function useSimulationSession(): SimulationSessionState {
   const [session, setSession] = useState<SessionMetadata | null>(null);
@@ -423,11 +433,42 @@ export function useSimulationSession(): SimulationSessionState {
     [refreshArchivedWorlds, request],
   );
 
+  const deleteAllArchivedWorlds = useCallback(async () => {
+    if (archivedWorlds.length === 0) return;
+    setErrorText(null);
+
+    const worldIds = archivedWorlds.map((world) => world.world_id);
+    const deletedWorldIds = new Set<string>();
+    const deleteResults = await Promise.allSettled(
+      worldIds.map(async (worldId) => {
+        await request<ArchivedWorldSummary>(`/v1/worlds/${worldId}`, 'DELETE');
+        deletedWorldIds.add(worldId);
+      }),
+    );
+
+    await refreshArchivedWorlds();
+    setBatchRunStatus((current) => {
+      if (!current || deletedWorldIds.size === 0) return current;
+      return {
+        ...current,
+        worlds: current.worlds.filter((world) => !deletedWorldIds.has(world.world_id)),
+      };
+    });
+
+    const failedDeletes = deleteResults.reduce((count, result) => {
+      return result.status === 'rejected' ? count + 1 : count;
+    }, 0);
+    if (failedDeletes > 0) {
+      const suffix = failedDeletes === 1 ? '' : 's';
+      setErrorText(`Failed to delete ${failedDeletes} archived world${suffix}`);
+    }
+  }, [archivedWorlds, refreshArchivedWorlds, request]);
+
   const startBatchRun = useCallback(
-    async (worldCount: number, ticksPerWorld: number, universeSeed: number) => {
+    async (worldCount: number, ticksPerWorld: number) => {
       const normalizedWorldCount = Math.max(1, Math.floor(worldCount));
       const normalizedTicksPerWorld = Math.max(1, Math.floor(ticksPerWorld));
-      const normalizedUniverseSeed = Math.max(0, Math.floor(universeSeed));
+      const normalizedUniverseSeed = nextRandomUniverseSeed();
       const config = snapshot?.config ?? session?.config ?? DEFAULT_CONFIG;
 
       try {
@@ -691,6 +732,7 @@ export function useSimulationSession(): SimulationSessionState {
     defocusOrganism,
     saveCurrentWorld,
     deleteArchivedWorld,
+    deleteAllArchivedWorlds,
     startBatchRun,
     loadArchivedWorld,
     refreshArchivedWorlds,

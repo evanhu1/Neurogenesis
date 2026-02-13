@@ -13,6 +13,12 @@ fn sigmoid(x: f32) -> f32 {
 const ACTION_ACTIVATION_THRESHOLD: f32 = 0.5;
 const TURN_ACTION_DEADZONE: f32 = 0.3;
 const DEFAULT_BIAS: f32 = 0.0;
+const NEUROMODULATOR_SIGNAL: f32 = 0.0;
+const OJA_WEIGHT_CLAMP_ENABLED: bool = true;
+const OJA_WEIGHT_MAGNITUDE_MIN: f32 = 0.001;
+const OJA_WEIGHT_MAGNITUDE_MAX: f32 = 4.0;
+const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
+const SYNAPSE_PRUNE_LIFESPAN_PERCENT: u64 = 20;
 pub(crate) const SENSORY_COUNT: u32 = SensoryReceptor::LOOK_NEURON_COUNT + 1;
 pub(crate) const ACTION_COUNT: usize = ActionType::ALL.len();
 pub(crate) const ACTION_COUNT_U32: u32 = ACTION_COUNT as u32;
@@ -358,6 +364,209 @@ pub(crate) fn evaluate_brain(
     result
 }
 
+pub(crate) fn apply_runtime_plasticity(
+    organism: &mut sim_types::OrganismState,
+    max_organism_age: u32,
+) {
+    let eta = (organism.genome.hebb_eta_baseline
+        + organism.genome.hebb_eta_gain * NEUROMODULATOR_SIGNAL)
+        .max(0.0);
+    let lambda = organism.genome.eligibility_decay_lambda.clamp(0.0, 1.0);
+    let prune_threshold = organism.genome.synapse_prune_threshold.max(0.0);
+    let should_prune = should_prune_synapses(organism.age_turns, max_organism_age);
+
+    let brain = &mut organism.brain;
+    let inter_activations: Vec<f32> = brain
+        .inter
+        .iter()
+        .map(|inter| inter.neuron.activation)
+        .collect();
+    let action_activations: [f32; ACTION_COUNT] =
+        std::array::from_fn(|idx| brain.action[idx].neuron.activation);
+
+    for sensory in &mut brain.sensory {
+        tune_synapses(
+            &mut sensory.synapses,
+            sensory.neuron.activation,
+            1.0,
+            eta,
+            lambda,
+            &inter_activations,
+            &action_activations,
+        );
+    }
+
+    for inter in &mut brain.inter {
+        let required_sign = match inter.interneuron_type {
+            InterNeuronType::Excitatory => 1.0,
+            InterNeuronType::Inhibitory => -1.0,
+        };
+        tune_synapses(
+            &mut inter.synapses,
+            inter.neuron.activation,
+            required_sign,
+            eta,
+            lambda,
+            &inter_activations,
+            &action_activations,
+        );
+    }
+
+    if should_prune {
+        prune_low_eligibility_synapses(brain, prune_threshold);
+    }
+}
+
+fn should_prune_synapses(age_turns: u64, max_organism_age: u32) -> bool {
+    if max_organism_age == 0 {
+        return false;
+    }
+    let minimum_age = (u64::from(max_organism_age) * SYNAPSE_PRUNE_LIFESPAN_PERCENT) / 100;
+    age_turns >= minimum_age && age_turns % SYNAPSE_PRUNE_INTERVAL_TICKS == 0
+}
+
+fn tune_synapses(
+    edges: &mut [SynapseEdge],
+    pre_activation: f32,
+    required_sign: f32,
+    eta: f32,
+    lambda: f32,
+    inter_activations: &[f32],
+    action_activations: &[f32; ACTION_COUNT],
+) {
+    for edge in edges {
+        let post_activation =
+            match post_activation(edge.post_neuron_id, inter_activations, action_activations) {
+                Some(value) => value,
+                None => continue,
+            };
+        edge.eligibility = (1.0 - lambda) * edge.eligibility + (pre_activation * post_activation);
+        let updated_weight =
+            edge.weight + eta * post_activation * (pre_activation - post_activation * edge.weight);
+        edge.weight = constrain_weight(updated_weight, required_sign);
+    }
+}
+
+fn post_activation(
+    neuron_id: NeuronId,
+    inter_activations: &[f32],
+    action_activations: &[f32; ACTION_COUNT],
+) -> Option<f32> {
+    if neuron_id.0 >= ACTION_ID_BASE {
+        let action_idx = (neuron_id.0 - ACTION_ID_BASE) as usize;
+        return action_activations.get(action_idx).copied();
+    }
+    if neuron_id.0 >= INTER_ID_BASE {
+        let inter_idx = (neuron_id.0 - INTER_ID_BASE) as usize;
+        return inter_activations.get(inter_idx).copied();
+    }
+    None
+}
+
+fn constrain_weight(weight: f32, required_sign: f32) -> f32 {
+    let magnitude = if OJA_WEIGHT_CLAMP_ENABLED {
+        weight
+            .abs()
+            .clamp(OJA_WEIGHT_MAGNITUDE_MIN, OJA_WEIGHT_MAGNITUDE_MAX)
+    } else {
+        weight.abs().max(OJA_WEIGHT_MAGNITUDE_MIN)
+    };
+    if required_sign.is_sign_negative() {
+        -magnitude
+    } else {
+        magnitude
+    }
+}
+
+fn prune_low_eligibility_synapses(brain: &mut BrainState, threshold: f32) {
+    let mut pruned_any = false;
+
+    for sensory in &mut brain.sensory {
+        let before = sensory.synapses.len();
+        sensory
+            .synapses
+            .retain(|synapse| synapse.eligibility.abs() >= threshold);
+        pruned_any |= sensory.synapses.len() != before;
+    }
+    for inter in &mut brain.inter {
+        let before = inter.synapses.len();
+        inter
+            .synapses
+            .retain(|synapse| synapse.eligibility.abs() >= threshold);
+        pruned_any |= inter.synapses.len() != before;
+    }
+
+    if pruned_any {
+        refresh_parent_ids_and_synapse_count(brain);
+    }
+}
+
+fn refresh_parent_ids_and_synapse_count(brain: &mut BrainState) {
+    let inter_len = brain.inter.len();
+    let action_len = brain.action.len();
+    let mut inter_parent_ids: Vec<Vec<NeuronId>> = vec![Vec::new(); inter_len];
+    let mut action_parent_ids: Vec<Vec<NeuronId>> = vec![Vec::new(); action_len];
+
+    for sensory in &brain.sensory {
+        let pre_id = sensory.neuron.neuron_id;
+        for synapse in &sensory.synapses {
+            if synapse.post_neuron_id.0 >= INTER_ID_BASE {
+                let inter_idx = synapse.post_neuron_id.0.wrapping_sub(INTER_ID_BASE) as usize;
+                if inter_idx < inter_parent_ids.len() {
+                    inter_parent_ids[inter_idx].push(pre_id);
+                    continue;
+                }
+            }
+            if synapse.post_neuron_id.0 >= ACTION_ID_BASE {
+                let action_idx = synapse.post_neuron_id.0.wrapping_sub(ACTION_ID_BASE) as usize;
+                if action_idx < action_parent_ids.len() {
+                    action_parent_ids[action_idx].push(pre_id);
+                }
+            }
+        }
+    }
+
+    for inter in &brain.inter {
+        let pre_id = inter.neuron.neuron_id;
+        for synapse in &inter.synapses {
+            if synapse.post_neuron_id.0 >= INTER_ID_BASE {
+                let inter_idx = synapse.post_neuron_id.0.wrapping_sub(INTER_ID_BASE) as usize;
+                if inter_idx < inter_parent_ids.len() {
+                    inter_parent_ids[inter_idx].push(pre_id);
+                    continue;
+                }
+            }
+            if synapse.post_neuron_id.0 >= ACTION_ID_BASE {
+                let action_idx = synapse.post_neuron_id.0.wrapping_sub(ACTION_ID_BASE) as usize;
+                if action_idx < action_parent_ids.len() {
+                    action_parent_ids[action_idx].push(pre_id);
+                }
+            }
+        }
+    }
+
+    for (idx, inter) in brain.inter.iter_mut().enumerate() {
+        let mut parents = std::mem::take(&mut inter_parent_ids[idx]);
+        parents.sort();
+        parents.dedup();
+        inter.neuron.parent_ids = parents;
+    }
+    for (idx, action) in brain.action.iter_mut().enumerate() {
+        let mut parents = std::mem::take(&mut action_parent_ids[idx]);
+        parents.sort();
+        parents.dedup();
+        action.neuron.parent_ids = parents;
+    }
+
+    let synapse_count = brain
+        .sensory
+        .iter()
+        .map(|n| n.synapses.len())
+        .sum::<usize>()
+        + brain.inter.iter().map(|n| n.synapses.len()).sum::<usize>();
+    brain.synapse_count = synapse_count as u32;
+}
+
 /// Derives the set of active neuron IDs from a brain's current activation state.
 /// Sensory/Inter neurons are active when activation > 0.0.
 /// Action neurons use policy-based resolution with ACTION_ACTIVATION_THRESHOLD.
@@ -423,20 +632,11 @@ fn resolve_actions(activations: [f32; ACTION_COUNT]) -> ResolvedActions {
     let wants_move = move_activation > ACTION_ACTIVATION_THRESHOLD;
     let wants_consume = consume_activation > ACTION_ACTIVATION_THRESHOLD;
     let wants_reproduce = reproduce_activation > ACTION_ACTIVATION_THRESHOLD;
-    if wants_reproduce {
-        return ResolvedActions {
-            turn: TurnChoice::None,
-            wants_move: false,
-            wants_consume: false,
-            wants_reproduce: true,
-        };
-    }
-
     ResolvedActions {
         turn,
         wants_move,
         wants_consume,
-        wants_reproduce: false,
+        wants_reproduce,
     }
 }
 

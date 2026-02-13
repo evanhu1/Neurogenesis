@@ -32,10 +32,13 @@ type ControlPanelProps = {
   onFocusOrganism: (organism: WorldOrganismState) => void;
   onSaveCurrentWorld: () => void;
   onDeleteArchivedWorld: (worldId: string) => void;
-  onStartBatchRun: (worldCount: number, ticksPerWorld: number, universeSeed: number) => void;
+  onDeleteAllArchivedWorlds: () => void;
+  onStartBatchRun: (worldCount: number, ticksPerWorld: number) => void;
   onLoadArchivedWorld: (worldId: string) => void;
   panToHexRef: MutableRefObject<((q: number, r: number) => void) | null>;
 };
+
+type ArchivedWorldSortMode = 'Newest' | 'OrganismsAlive';
 
 export function ControlPanel({
   sessionMeta,
@@ -59,6 +62,7 @@ export function ControlPanel({
   onFocusOrganism,
   onSaveCurrentWorld,
   onDeleteArchivedWorld,
+  onDeleteAllArchivedWorlds,
   onStartBatchRun,
   onLoadArchivedWorld,
   panToHexRef,
@@ -66,9 +70,8 @@ export function ControlPanel({
   const [skipCountInput, setSkipCountInput] = useState('1000');
   const [worldCountInput, setWorldCountInput] = useState('8');
   const [ticksInput, setTicksInput] = useState('1000');
-  const [universeSeedInput, setUniverseSeedInput] = useState(() =>
-    String(Math.floor(Date.now() / 1000)),
-  );
+  const [archivedWorldSortMode, setArchivedWorldSortMode] =
+    useState<ArchivedWorldSortMode>('Newest');
   const isBatchRunning = batchRunStatus?.status === 'Running';
   const skipProgress = useMemo(() => {
     if (!stepProgress || stepProgress.requested_count <= 1) return null;
@@ -117,21 +120,33 @@ export function ControlPanel({
     return filtered.length > 0 ? filtered.join('\n') : 'No metrics';
   }, [metricsText]);
 
+  const sortedArchivedWorlds = useMemo(() => {
+    const worlds = [...archivedWorlds];
+    worlds.sort((a, b) => {
+      if (archivedWorldSortMode === 'OrganismsAlive') {
+        if (b.organisms_alive !== a.organisms_alive) {
+          return b.organisms_alive - a.organisms_alive;
+        }
+      }
+      if (b.created_at_unix_ms !== a.created_at_unix_ms) {
+        return b.created_at_unix_ms - a.created_at_unix_ms;
+      }
+      return a.world_id.localeCompare(b.world_id);
+    });
+    return worlds;
+  }, [archivedWorldSortMode, archivedWorlds]);
+
   const runBatch = useCallback(() => {
     if (isBatchRunning) return;
     const parsedWorldCount = Number.parseInt(worldCountInput, 10);
     const parsedTicks = Number.parseInt(ticksInput, 10);
-    const parsedUniverseSeed = Number.parseInt(universeSeedInput, 10);
     if (!Number.isFinite(parsedWorldCount) || !Number.isFinite(parsedTicks)) return;
-    if (!Number.isFinite(parsedUniverseSeed)) return;
     const worldCount = Math.max(1, parsedWorldCount);
     const ticks = Math.max(1, parsedTicks);
-    const universeSeed = Math.max(0, parsedUniverseSeed);
-    onStartBatchRun(worldCount, ticks, universeSeed);
+    onStartBatchRun(worldCount, ticks);
     setWorldCountInput(String(worldCount));
     setTicksInput(String(ticks));
-    setUniverseSeedInput(String(universeSeed));
-  }, [isBatchRunning, onStartBatchRun, ticksInput, universeSeedInput, worldCountInput]);
+  }, [isBatchRunning, onStartBatchRun, ticksInput, worldCountInput]);
 
   return (
     <aside className="h-full overflow-auto rounded-2xl border border-accent/15 bg-panel/95 p-4 shadow-panel">
@@ -225,7 +240,7 @@ export function ControlPanel({
 
       <h3 className="mt-3 text-sm font-semibold uppercase tracking-wide text-ink/80">World Batch</h3>
       <div className="mt-2 space-y-2 rounded-lg bg-white/70 px-2 py-2">
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           <label className="text-[11px] text-ink/70">
             N
             <input
@@ -247,18 +262,6 @@ export function ControlPanel({
               value={ticksInput}
               disabled={isBatchRunning}
               onChange={(evt) => setTicksInput(evt.target.value)}
-              className="mt-1 w-full rounded-md border border-accent/30 bg-white px-2 py-1 font-mono text-sm text-ink outline-none ring-accent/20 focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:grayscale"
-            />
-          </label>
-          <label className="text-[11px] text-ink/70">
-            Universe Seed
-            <input
-              type="number"
-              min={0}
-              step={1}
-              value={universeSeedInput}
-              disabled={isBatchRunning}
-              onChange={(evt) => setUniverseSeedInput(evt.target.value)}
               className="mt-1 w-full rounded-md border border-accent/30 bg-white px-2 py-1 font-mono text-sm text-ink outline-none ring-accent/20 focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:grayscale"
             />
           </label>
@@ -301,41 +304,36 @@ export function ControlPanel({
         </div>
       ) : null}
 
-      {batchRunStatus?.worlds.length ? (
-        <div className="mt-2 rounded-lg bg-white/70 px-2 py-2">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink/75">
-            Latest Batch Worlds
-          </div>
-          <div className="space-y-2">
-            {batchRunStatus.worlds.slice(0, 12).map((world) => {
-              const worldIndex =
-                world.source.type === 'BatchRun' ? world.source.data.world_index : null;
-              return (
-                <div
-                  key={world.world_id}
-                  className="flex items-center justify-between rounded-md bg-slate-100/80 px-2 py-1"
-                >
-                  <div className="font-mono text-[11px] text-ink/80">
-                    <div>world #{worldIndex ?? '?'}</div>
-                    <div>
-                      org={world.organisms_alive} species={world.species_alive}
-                    </div>
-                  </div>
-                  <ControlButton label="Load" onClick={() => onLoadArchivedWorld(world.world_id)} />
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ) : null}
-
       {archivedWorlds.length ? (
         <div className="mt-2 rounded-lg bg-white/70 px-2 py-2">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink/75">
-            Archived Worlds
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-xs font-semibold uppercase tracking-wide text-ink/75">
+              Archived Worlds
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-[11px] font-semibold uppercase tracking-wide text-ink/70">
+                Sort
+                <select
+                  value={archivedWorldSortMode}
+                  onChange={(evt) =>
+                    setArchivedWorldSortMode(evt.target.value as ArchivedWorldSortMode)
+                  }
+                  className="ml-1 rounded-md border border-accent/30 bg-white px-1.5 py-1 font-mono text-[11px] text-ink outline-none ring-accent/20 focus:ring-2"
+                >
+                  <option value="Newest">Newest</option>
+                  <option value="OrganismsAlive">Alive Organisms</option>
+                </select>
+              </label>
+              <button
+                onClick={onDeleteAllArchivedWorlds}
+                className="rounded-md border border-rose-300 bg-rose-100 px-2 py-1 text-[11px] font-semibold text-rose-700 transition hover:bg-rose-200"
+              >
+                Delete All
+              </button>
+            </div>
           </div>
-          <div className="space-y-2">
-            {archivedWorlds.slice(0, 8).map((world) => (
+          <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+            {sortedArchivedWorlds.map((world) => (
               <div
                 key={world.world_id}
                 className="flex items-center justify-between rounded-md bg-slate-100/80 px-2 py-1"

@@ -34,6 +34,10 @@ pub(super) fn test_genome() -> OrganismGenome {
     OrganismGenome {
         num_neurons: 1,
         vision_distance: 2,
+        hebb_eta_baseline: 0.0,
+        hebb_eta_gain: 0.0,
+        eligibility_decay_lambda: 0.9,
+        synapse_prune_threshold: 0.01,
         mutation_rate_vision_distance: 0.0,
         mutation_rate_weight: 0.0,
         mutation_rate_add_edge: 0.0,
@@ -42,6 +46,8 @@ pub(super) fn test_genome() -> OrganismGenome {
         mutation_rate_inter_bias: 0.0,
         mutation_rate_inter_update_rate: 0.0,
         mutation_rate_action_bias: 0.0,
+        mutation_rate_eligibility_decay_lambda: 0.0,
+        mutation_rate_synapse_prune_threshold: 0.0,
         inter_biases: vec![0.0],
         inter_log_taus: vec![0.0],
         interneuron_types: vec![InterNeuronType::Excitatory],
@@ -68,6 +74,10 @@ pub(super) fn stable_test_config() -> WorldConfig {
             num_neurons: 1,
             num_synapses: 0,
             vision_distance: 2,
+            hebb_eta_baseline: 0.0,
+            hebb_eta_gain: 0.0,
+            eligibility_decay_lambda: 0.9,
+            synapse_prune_threshold: 0.01,
             mutation_rate_vision_distance: 0.0,
             mutation_rate_weight: 0.0,
             mutation_rate_add_edge: 0.0,
@@ -76,6 +86,8 @@ pub(super) fn stable_test_config() -> WorldConfig {
             mutation_rate_inter_bias: 0.0,
             mutation_rate_inter_update_rate: 0.0,
             mutation_rate_action_bias: 0.0,
+            mutation_rate_eligibility_decay_lambda: 0.0,
+            mutation_rate_synapse_prune_threshold: 0.0,
         },
     }
 }
@@ -112,6 +124,7 @@ fn forced_brain(
             pre_neuron_id: NeuronId(1000),
             post_neuron_id: NeuronId(2000),
             weight: if wants_move { 8.0 } else { -8.0 },
+            eligibility: 0.0,
         },
         SynapseEdge {
             pre_neuron_id: NeuronId(1000),
@@ -123,16 +136,19 @@ fn forced_brain(
             } else {
                 0.0
             },
+            eligibility: 0.0,
         },
         SynapseEdge {
             pre_neuron_id: NeuronId(1000),
             post_neuron_id: NeuronId(2002),
             weight: -8.0,
+            eligibility: 0.0,
         },
         SynapseEdge {
             pre_neuron_id: NeuronId(1000),
             post_neuron_id: NeuronId(2003),
             weight: -8.0,
+            eligibility: 0.0,
         },
     ];
     let inter = vec![InterNeuronState {
@@ -218,6 +234,7 @@ pub(super) fn enable_reproduce_action(organism: &mut OrganismState) {
             pre_neuron_id: inter_id,
             post_neuron_id: NeuronId(2003),
             weight: 8.0,
+            eligibility: 0.0,
         });
         organism.brain.inter[0]
             .synapses
@@ -249,6 +266,7 @@ pub(super) fn enable_consume_action(organism: &mut OrganismState) {
             pre_neuron_id: inter_id,
             post_neuron_id: NeuronId(2002),
             weight: 8.0,
+            eligibility: 0.0,
         });
         organism.brain.inter[0]
             .synapses

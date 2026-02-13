@@ -5,7 +5,7 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use std::cmp::Ordering;
 
-fn mutation_rates(genome: &OrganismGenome) -> [f32; 8] {
+fn mutation_rates(genome: &OrganismGenome) -> [f32; 10] {
     [
         genome.mutation_rate_vision_distance,
         genome.mutation_rate_weight,
@@ -15,6 +15,8 @@ fn mutation_rates(genome: &OrganismGenome) -> [f32; 8] {
         genome.mutation_rate_inter_bias,
         genome.mutation_rate_inter_update_rate,
         genome.mutation_rate_action_bias,
+        genome.mutation_rate_eligibility_decay_lambda,
+        genome.mutation_rate_synapse_prune_threshold,
     ]
 }
 
@@ -204,6 +206,7 @@ fn split_edge_operator_replaces_edge_and_adds_interneuron() {
         pre_neuron_id: NeuronId(0),
         post_neuron_id: NeuronId(2000),
         weight: 0.5,
+        eligibility: 0.0,
     }];
     genome.mutation_rate_split_edge = 1.0;
 
@@ -248,6 +251,7 @@ fn mutate_genome_repairs_legacy_wrong_sign_edges() {
         pre_neuron_id: NeuronId(1000),
         post_neuron_id: NeuronId(2000),
         weight: 0.4,
+        eligibility: 0.0,
     }];
     genome.mutation_rate_vision_distance = 0.0;
     genome.mutation_rate_weight = 0.0;
@@ -506,4 +510,46 @@ fn mutation_rate_self_adaptation_long_horizon_avoids_boundary_pileup() {
         mean_final_rate < 0.25,
         "exact_zero_count={exact_zero_count}, exact_one_count={exact_one_count}, near_zero_fraction={near_zero_fraction}, near_one_fraction={near_one_fraction}, mean_final_rate={mean_final_rate}"
     );
+}
+
+#[test]
+fn prune_disconnected_inter_neurons_removes_isolated_nodes_and_recompacts_ids() {
+    let mut genome = test_genome();
+    genome.num_neurons = 3;
+    genome.inter_biases = vec![0.1, 0.2, 0.3];
+    genome.inter_log_taus = vec![0.0, 0.1, 0.2];
+    genome.interneuron_types = vec![
+        InterNeuronType::Excitatory,
+        InterNeuronType::Inhibitory,
+        InterNeuronType::Excitatory,
+    ];
+    genome.edges = vec![
+        SynapseEdge {
+            pre_neuron_id: NeuronId(0),
+            post_neuron_id: NeuronId(1000),
+            weight: 0.5,
+            eligibility: 0.0,
+        },
+        SynapseEdge {
+            pre_neuron_id: NeuronId(1002),
+            post_neuron_id: NeuronId(2000),
+            weight: 0.5,
+            eligibility: 0.0,
+        },
+    ];
+
+    crate::genome::prune_disconnected_inter_neurons(&mut genome);
+
+    assert_eq!(genome.num_neurons, 2);
+    assert_eq!(genome.edges.len(), 2);
+    assert!(genome
+        .edges
+        .iter()
+        .any(|edge| edge.pre_neuron_id == NeuronId(0) && edge.post_neuron_id == NeuronId(1000)));
+    assert!(genome
+        .edges
+        .iter()
+        .any(|edge| edge.pre_neuron_id == NeuronId(1001) && edge.post_neuron_id == NeuronId(2000)));
+    assert_eq!(genome.inter_biases[0], 0.1);
+    assert_eq!(genome.inter_biases[1], 0.3);
 }

@@ -1,4 +1,6 @@
-use crate::brain::{action_index, evaluate_brain, BrainScratch, TurnChoice};
+use crate::brain::{
+    action_index, apply_runtime_plasticity, evaluate_brain, BrainScratch, TurnChoice,
+};
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right};
 use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 use crate::Simulation;
@@ -90,10 +92,11 @@ impl Simulation {
         let intents = self.build_intents(&snapshot);
         let synapse_ops = intents.iter().map(|intent| intent.synapse_ops).sum::<u64>();
 
-        let resolutions = self.resolve_moves(&snapshot, &intents);
         let mut spawn_requests = Vec::new();
-        let commit = self.commit_phase(&intents, &resolutions);
-        let reproductions = self.reproduction_phase(&intents, &mut spawn_requests);
+        let successful_reproduction_ids = self.reproduction_phase(&intents, &mut spawn_requests);
+        let reproductions = successful_reproduction_ids.len() as u64;
+        let resolutions = self.resolve_moves(&snapshot, &intents, &successful_reproduction_ids);
+        let commit = self.commit_phase(&intents, &resolutions, &successful_reproduction_ids);
         self.increment_age_for_survivors();
         let spawned = self.resolve_spawn_requests(&spawn_requests);
         self.prune_extinct_species();
@@ -148,6 +151,7 @@ impl Simulation {
     }
 
     fn build_intents(&mut self, snapshot: &TurnSnapshot) -> Vec<OrganismIntent> {
+        let max_organism_age = self.config.max_organism_age;
         if self.should_parallelize_intents(snapshot.organism_count) {
             let intent_threads = self.intent_parallelism();
             let world_width = snapshot.world_width;
@@ -161,6 +165,7 @@ impl Simulation {
                     .map_init(BrainScratch::new, |scratch, (idx, organism)| {
                         build_intent_for_organism(
                             organism,
+                            max_organism_age,
                             world_width,
                             occupancy,
                             organism_states[idx],
@@ -177,6 +182,7 @@ impl Simulation {
         for idx in 0..snapshot.organism_count {
             intents.push(build_intent_for_organism(
                 &mut self.organisms[idx],
+                max_organism_age,
                 snapshot.world_width,
                 &snapshot.occupancy,
                 snapshot.organism_states[idx],
@@ -191,6 +197,7 @@ impl Simulation {
         &self,
         snapshot: &TurnSnapshot,
         intents: &[OrganismIntent],
+        successful_reproduction_ids: &HashSet<OrganismId>,
     ) -> Vec<MoveResolution> {
         let w = snapshot.world_width as usize;
         let world_cells = w * w;
@@ -198,6 +205,9 @@ impl Simulation {
 
         for intent in intents {
             if !intent.wants_move {
+                continue;
+            }
+            if successful_reproduction_ids.contains(&intent.id) {
                 continue;
             }
             let Some(target) = intent.move_target else {
@@ -237,6 +247,7 @@ impl Simulation {
         &mut self,
         intents: &[OrganismIntent],
         resolutions: &[MoveResolution],
+        successful_reproduction_ids: &HashSet<OrganismId>,
     ) -> CommitResult {
         // intents[i] aligns with organisms[i] (both built in sorted ID order)
         let mut facing_updates = Vec::new();
@@ -244,6 +255,9 @@ impl Simulation {
         let action_energy_cost = self.config.move_action_energy_cost;
         for (idx, intent) in intents.iter().enumerate() {
             let organism = &mut self.organisms[idx];
+            if successful_reproduction_ids.contains(&organism.id) {
+                continue;
+            }
             if organism.facing != intent.facing_after_actions {
                 facing_updates.push(OrganismFacing {
                     id: organism.id,
@@ -281,6 +295,9 @@ impl Simulation {
         let mut predations = 0_u64;
         for (idx, intent) in intents.iter().enumerate() {
             if !intent.wants_consume {
+                continue;
+            }
+            if successful_reproduction_ids.contains(&intent.id) {
                 continue;
             }
 
@@ -380,9 +397,9 @@ impl Simulation {
         &mut self,
         intents: &[OrganismIntent],
         spawn_requests: &mut Vec<SpawnRequest>,
-    ) -> u64 {
+    ) -> HashSet<OrganismId> {
         let mut reserved_spawn_cells = HashSet::new();
-        let mut successful_reproductions = 0_u64;
+        let mut successful_reproduction_ids = HashSet::new();
         let world_width = self.config.world_width as i32;
         let reproduction_energy_cost = self.config.reproduction_energy_cost;
         let occupancy_snapshot = self.occupancy.clone();
@@ -436,10 +453,10 @@ impl Simulation {
             let organism = &mut self.organisms[org_idx];
             organism.energy -= reproduction_energy_cost;
             organism.reproductions_count = organism.reproductions_count.saturating_add(1);
-            successful_reproductions += 1;
+            successful_reproduction_ids.insert(organism_id);
         }
 
-        successful_reproductions
+        successful_reproduction_ids
     }
 
     fn lifecycle_phase(&mut self) -> (u64, Vec<RemovedEntityPosition>) {
@@ -516,6 +533,7 @@ fn intent_action_priority(action: IntentActionKind) -> u8 {
 
 fn build_intent_for_organism(
     organism: &mut OrganismState,
+    max_organism_age: u32,
     world_width: i32,
     occupancy: &[Option<Occupant>],
     snapshot_state: SnapshotOrganismState,
@@ -524,8 +542,9 @@ fn build_intent_for_organism(
 ) -> OrganismIntent {
     let vision_distance = organism.genome.vision_distance;
     let evaluation = evaluate_brain(organism, world_width, occupancy, vision_distance, scratch);
+    apply_runtime_plasticity(organism, max_organism_age);
 
-    let turn_choice = evaluation.resolved_actions.turn;
+    if turn_choice != TurnChoice::None || wants_move || wants_consume {
     let wants_move = evaluation.resolved_actions.wants_move;
     let wants_consume = evaluation.resolved_actions.wants_consume;
     let wants_reproduce = evaluation.resolved_actions.wants_reproduce;

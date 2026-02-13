@@ -1,5 +1,7 @@
 use crate::brain::express_genome;
-use crate::genome::{generate_seed_genome, genome_distance, mutate_genome};
+use crate::genome::{
+    generate_seed_genome, genome_distance, mutate_genome, prune_disconnected_inter_neurons,
+};
 use crate::grid::{opposite_direction, world_capacity};
 use crate::Simulation;
 use rand::seq::SliceRandom;
@@ -40,6 +42,7 @@ impl Simulation {
                         self.config.max_num_neurons,
                         &mut self.rng,
                     );
+                    prune_disconnected_inter_neurons(&mut child_genome);
 
                     let threshold = self.config.speciation_threshold;
                     let child_species_id = {

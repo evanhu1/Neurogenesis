@@ -1,6 +1,8 @@
 use super::support::*;
 use super::*;
-use crate::brain::{evaluate_brain, express_genome, BrainScratch};
+use crate::brain::{
+    action_index, apply_runtime_plasticity, evaluate_brain, express_genome, BrainScratch,
+};
 
 #[test]
 fn scan_ahead_returns_organism_with_distance_signal() {
@@ -297,6 +299,10 @@ fn turn_action_has_deadzone_around_zero() {
         genome: OrganismGenome {
             num_neurons: 0,
             vision_distance: 1,
+            hebb_eta_baseline: 0.0,
+            hebb_eta_gain: 0.0,
+            eligibility_decay_lambda: 0.9,
+            synapse_prune_threshold: 0.01,
             mutation_rate_vision_distance: 0.0,
             mutation_rate_weight: 0.0,
             mutation_rate_add_edge: 0.0,
@@ -305,6 +311,8 @@ fn turn_action_has_deadzone_around_zero() {
             mutation_rate_inter_bias: 0.0,
             mutation_rate_inter_update_rate: 0.0,
             mutation_rate_action_bias: 0.0,
+            mutation_rate_eligibility_decay_lambda: 0.0,
+            mutation_rate_synapse_prune_threshold: 0.0,
             inter_biases: vec![],
             inter_log_taus: vec![],
             interneuron_types: vec![],
@@ -343,6 +351,10 @@ fn self_recurrent_interneuron_uses_previous_activation_with_leaky_update() {
     let genome = OrganismGenome {
         num_neurons: 1,
         vision_distance: 1,
+        hebb_eta_baseline: 0.0,
+        hebb_eta_gain: 0.0,
+        eligibility_decay_lambda: 0.9,
+        synapse_prune_threshold: 0.01,
         mutation_rate_vision_distance: 0.0,
         mutation_rate_weight: 0.0,
         mutation_rate_add_edge: 0.0,
@@ -351,6 +363,8 @@ fn self_recurrent_interneuron_uses_previous_activation_with_leaky_update() {
         mutation_rate_inter_bias: 0.0,
         mutation_rate_inter_update_rate: 0.0,
         mutation_rate_action_bias: 0.0,
+        mutation_rate_eligibility_decay_lambda: 0.0,
+        mutation_rate_synapse_prune_threshold: 0.0,
         inter_biases: vec![0.0],
         inter_log_taus: vec![(1.0 / std::f32::consts::LN_2).ln()],
         interneuron_types: vec![InterNeuronType::Excitatory],
@@ -359,6 +373,7 @@ fn self_recurrent_interneuron_uses_previous_activation_with_leaky_update() {
             pre_neuron_id: NeuronId(1000),
             post_neuron_id: NeuronId(1000),
             weight: 2.0,
+            eligibility: 0.0,
         }],
     };
     let mut organism = OrganismState {
@@ -391,6 +406,10 @@ fn action_biases_drive_actions_without_incoming_edges() {
     let genome = OrganismGenome {
         num_neurons: 0,
         vision_distance: 1,
+        hebb_eta_baseline: 0.0,
+        hebb_eta_gain: 0.0,
+        eligibility_decay_lambda: 0.9,
+        synapse_prune_threshold: 0.01,
         mutation_rate_vision_distance: 0.0,
         mutation_rate_weight: 0.0,
         mutation_rate_add_edge: 0.0,
@@ -399,6 +418,8 @@ fn action_biases_drive_actions_without_incoming_edges() {
         mutation_rate_inter_bias: 0.0,
         mutation_rate_inter_update_rate: 0.0,
         mutation_rate_action_bias: 0.0,
+        mutation_rate_eligibility_decay_lambda: 0.0,
+        mutation_rate_synapse_prune_threshold: 0.0,
         inter_biases: vec![],
         inter_log_taus: vec![],
         interneuron_types: vec![],
@@ -426,4 +447,134 @@ fn action_biases_drive_actions_without_incoming_edges() {
 
     assert!(evaluation.resolved_actions.wants_reproduce);
     assert!(!evaluation.resolved_actions.wants_move);
+}
+
+#[test]
+fn oja_update_adjusts_weight_and_eligibility_for_active_synapse() {
+    let genome = OrganismGenome {
+        num_neurons: 1,
+        vision_distance: 1,
+        hebb_eta_baseline: 0.1,
+        hebb_eta_gain: 0.0,
+        eligibility_decay_lambda: 0.9,
+        synapse_prune_threshold: 0.0,
+        mutation_rate_vision_distance: 0.0,
+        mutation_rate_weight: 0.0,
+        mutation_rate_add_edge: 0.0,
+        mutation_rate_remove_edge: 0.0,
+        mutation_rate_split_edge: 0.0,
+        mutation_rate_inter_bias: 0.0,
+        mutation_rate_inter_update_rate: 0.0,
+        mutation_rate_action_bias: 0.0,
+        mutation_rate_eligibility_decay_lambda: 0.0,
+        mutation_rate_synapse_prune_threshold: 0.0,
+        inter_biases: vec![1.0],
+        inter_log_taus: vec![crate::genome::INTER_LOG_TAU_MIN],
+        interneuron_types: vec![InterNeuronType::Excitatory],
+        action_biases: vec![0.0; ActionType::ALL.len()],
+        edges: vec![SynapseEdge {
+            pre_neuron_id: NeuronId(1000),
+            post_neuron_id: NeuronId(2000),
+            weight: 1.0,
+            eligibility: 0.0,
+        }],
+    };
+    let mut organism = OrganismState {
+        id: OrganismId(0),
+        species_id: SpeciesId(0),
+        q: 1,
+        r: 1,
+        age_turns: 0,
+        facing: FacingDirection::East,
+        energy: 10.0,
+        consumptions_count: 0,
+        reproductions_count: 0,
+        brain: express_genome(&genome),
+        genome,
+    };
+
+    let mut occupancy = vec![None; 9];
+    occupancy[4] = Some(Occupant::Organism(organism.id));
+    let mut scratch = BrainScratch::new();
+    let vision_distance = organism.genome.vision_distance;
+    let _ = evaluate_brain(
+        &mut organism,
+        3,
+        &occupancy,
+        vision_distance,
+        &mut scratch,
+    );
+
+    let pre = organism.brain.inter[0].neuron.activation;
+    let post = organism.brain.action[action_index(ActionType::MoveForward)]
+        .neuron
+        .activation;
+    apply_runtime_plasticity(&mut organism, 500);
+
+    let edge = &organism.brain.inter[0].synapses[0];
+    let expected_eligibility = pre * post;
+    let expected_weight = 1.0 + 0.1 * post * (pre - post * 1.0);
+    assert!((edge.eligibility - expected_eligibility).abs() < 1e-5);
+    assert!((edge.weight - expected_weight).abs() < 1e-5);
+    assert!(edge.weight > 0.0);
+}
+
+#[test]
+fn synapse_pruning_runs_on_schedule_and_removes_low_eligibility_edges() {
+    let genome = OrganismGenome {
+        num_neurons: 0,
+        vision_distance: 1,
+        hebb_eta_baseline: 0.0,
+        hebb_eta_gain: 0.0,
+        eligibility_decay_lambda: 0.9,
+        synapse_prune_threshold: 0.1,
+        mutation_rate_vision_distance: 0.0,
+        mutation_rate_weight: 0.0,
+        mutation_rate_add_edge: 0.0,
+        mutation_rate_remove_edge: 0.0,
+        mutation_rate_split_edge: 0.0,
+        mutation_rate_inter_bias: 0.0,
+        mutation_rate_inter_update_rate: 0.0,
+        mutation_rate_action_bias: 0.0,
+        mutation_rate_eligibility_decay_lambda: 0.0,
+        mutation_rate_synapse_prune_threshold: 0.0,
+        inter_biases: vec![],
+        inter_log_taus: vec![],
+        interneuron_types: vec![],
+        action_biases: vec![0.0; ActionType::ALL.len()],
+        edges: vec![SynapseEdge {
+            pre_neuron_id: NeuronId(0),
+            post_neuron_id: NeuronId(2000),
+            weight: 1.0,
+            eligibility: 0.0,
+        }],
+    };
+    let mut organism = OrganismState {
+        id: OrganismId(0),
+        species_id: SpeciesId(0),
+        q: 1,
+        r: 1,
+        age_turns: 100,
+        facing: FacingDirection::East,
+        energy: 10.0,
+        consumptions_count: 0,
+        reproductions_count: 0,
+        brain: express_genome(&genome),
+        genome,
+    };
+    let mut occupancy = vec![None; 9];
+    occupancy[4] = Some(Occupant::Organism(organism.id));
+    let mut scratch = BrainScratch::new();
+    let vision_distance = organism.genome.vision_distance;
+    let _ = evaluate_brain(
+        &mut organism,
+        3,
+        &occupancy,
+        vision_distance,
+        &mut scratch,
+    );
+
+    apply_runtime_plasticity(&mut organism, 500);
+    assert!(organism.brain.sensory[0].synapses.is_empty());
+    assert_eq!(organism.brain.synapse_count, 0);
 }
