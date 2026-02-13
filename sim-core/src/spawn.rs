@@ -6,10 +6,18 @@ use crate::grid::{opposite_direction, world_capacity};
 use crate::Simulation;
 use rand::seq::SliceRandom;
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 use sim_types::{
     FacingDirection, FoodId, FoodState, Occupant, OrganismGenome, OrganismId, OrganismState,
     SpeciesId,
 };
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct FoodRegrowthEvent {
+    pub(crate) due_turn: u64,
+    pub(crate) tile_idx: usize,
+    pub(crate) generation: u32,
+}
 
 #[derive(Clone)]
 pub(crate) struct ReproductionSpawn {
@@ -148,39 +156,186 @@ impl Simulation {
         world_capacity(self.config.world_width) / self.config.food_coverage_divisor as usize
     }
 
-    pub(crate) fn replenish_food_supply(&mut self) -> Vec<FoodState> {
+    pub(crate) fn initialize_food_ecology(&mut self) {
+        let capacity = world_capacity(self.config.world_width);
+        self.food_fertility = build_fertility_map(self.config.world_width, self.seed, &self.config);
+        debug_assert_eq!(self.food_fertility.len(), capacity);
+        self.food_regrowth_generation = vec![0; capacity];
+        self.food_regrowth_queue.clear();
+    }
+
+    pub(crate) fn seed_initial_food_supply(&mut self) {
+        self.ensure_food_ecology_state();
         let target = self.target_food_count();
         if self.foods.len() >= target {
-            return Vec::new();
+            return;
         }
 
         let need = target - self.foods.len();
-        let capacity = world_capacity(self.config.world_width);
-        let width = self.config.world_width as usize;
-        let max_attempts = need * 16;
-        let mut spawned = Vec::with_capacity(need);
+        let max_attempts = need * 96;
+        let mut added = 0_usize;
         let mut attempts = 0;
 
-        while spawned.len() < need && attempts < max_attempts {
-            let cell_idx = self.rng.random_range(0..capacity);
-            if self.occupancy[cell_idx].is_some() {
+        while added < need && attempts < max_attempts {
+            let cell_idx = self.rng.random_range(0..self.food_fertility.len());
+            if self.occupancy[cell_idx].is_some() || !self.accept_fertility_sample(cell_idx) {
                 attempts += 1;
                 continue;
             }
-            let q = (cell_idx % width) as i32;
-            let r = (cell_idx / width) as i32;
-            let food = FoodState {
-                id: self.alloc_food_id(),
-                q,
-                r,
-                energy: self.config.food_energy,
+            if self.spawn_food_at_cell(cell_idx).is_some() {
+                added += 1;
+            }
+        }
+
+        if added < need {
+            let mut candidates: Vec<usize> = self
+                .occupancy
+                .iter()
+                .enumerate()
+                .filter_map(
+                    |(idx, occupant)| {
+                        if occupant.is_none() {
+                            Some(idx)
+                        } else {
+                            None
+                        }
+                    },
+                )
+                .collect();
+
+            candidates
+                .sort_unstable_by(|a, b| self.food_fertility[*b].cmp(&self.food_fertility[*a]));
+
+            for idx in candidates {
+                if added >= need {
+                    break;
+                }
+                if self.spawn_food_at_cell(idx).is_some() {
+                    added += 1;
+                }
+            }
+        }
+    }
+
+    pub(crate) fn bootstrap_food_regrowth_queue(&mut self) {
+        self.ensure_food_ecology_state();
+        for idx in 0..self.food_fertility.len() {
+            if matches!(self.occupancy[idx], Some(Occupant::Food(_))) {
+                continue;
+            }
+            let delay = self.regrowth_delay_for_tile(idx);
+            self.schedule_food_regrowth_with_delay(idx, delay);
+        }
+    }
+
+    pub(crate) fn mark_food_consumed(&mut self, tile_idx: usize) {
+        self.ensure_food_ecology_state();
+        let delay = self.regrowth_delay_for_tile(tile_idx);
+        self.schedule_food_regrowth_with_delay(tile_idx, delay);
+    }
+
+    pub(crate) fn replenish_food_supply(&mut self) -> Vec<FoodState> {
+        self.ensure_food_ecology_state();
+        let target = self.target_food_count();
+        let mut spawned = Vec::new();
+
+        while self.foods.len() < target {
+            let Some(next_event) = self.food_regrowth_queue.first().copied() else {
+                break;
             };
-            self.occupancy[cell_idx] = Some(Occupant::Food(food.id));
-            self.foods.push(food.clone());
-            spawned.push(food);
+            if next_event.due_turn > self.turn {
+                break;
+            }
+            let event = self
+                .food_regrowth_queue
+                .pop_first()
+                .expect("first event must still be present");
+            if self.food_regrowth_generation[event.tile_idx] != event.generation {
+                continue;
+            }
+            if self.occupancy[event.tile_idx].is_some() {
+                self.schedule_food_regrowth_with_delay(
+                    event.tile_idx,
+                    u64::from(self.config.food_regrowth_retry_cooldown_turns.max(1)),
+                );
+                continue;
+            }
+            if let Some(food) = self.spawn_food_at_cell(event.tile_idx) {
+                spawned.push(food);
+            }
         }
 
         spawned
+    }
+
+    fn ensure_food_ecology_state(&mut self) {
+        let capacity = world_capacity(self.config.world_width);
+        let valid_fertility = self.food_fertility.len() == capacity;
+        let valid_generations = self.food_regrowth_generation.len() == capacity;
+        if valid_fertility && valid_generations {
+            return;
+        }
+
+        self.initialize_food_ecology();
+        for idx in 0..capacity {
+            if matches!(self.occupancy[idx], Some(Occupant::Food(_))) {
+                continue;
+            }
+            let delay = self.regrowth_delay_for_tile(idx);
+            self.schedule_food_regrowth_with_delay(idx, delay);
+        }
+    }
+
+    fn spawn_food_at_cell(&mut self, cell_idx: usize) -> Option<FoodState> {
+        if self.occupancy[cell_idx].is_some() {
+            return None;
+        }
+        let width = self.config.world_width as usize;
+        let q = (cell_idx % width) as i32;
+        let r = (cell_idx / width) as i32;
+        let food = FoodState {
+            id: self.alloc_food_id(),
+            q,
+            r,
+            energy: self.config.food_energy,
+        };
+        self.occupancy[cell_idx] = Some(Occupant::Food(food.id));
+        self.foods.push(food.clone());
+        Some(food)
+    }
+
+    fn schedule_food_regrowth_with_delay(&mut self, tile_idx: usize, delay: u64) {
+        let generation = self.food_regrowth_generation[tile_idx].saturating_add(1);
+        self.food_regrowth_generation[tile_idx] = generation;
+        self.food_regrowth_queue.insert(FoodRegrowthEvent {
+            due_turn: self.turn.saturating_add(delay),
+            tile_idx,
+            generation,
+        });
+    }
+
+    fn regrowth_delay_for_tile(&mut self, tile_idx: usize) -> u64 {
+        let min_turns = self.config.food_regrowth_min_cooldown_turns;
+        let max_turns = self.config.food_regrowth_max_cooldown_turns;
+        let span = max_turns.saturating_sub(min_turns);
+        let fertility = self.fertility_value(tile_idx);
+        let cooldown = min_turns + (((1.0 - fertility) * span as f32).round() as u32).min(span);
+        let jitter = if self.config.food_regrowth_jitter_turns == 0 {
+            0
+        } else {
+            self.rng
+                .random_range(0..=self.config.food_regrowth_jitter_turns)
+        };
+        u64::from(cooldown.saturating_add(jitter))
+    }
+
+    fn accept_fertility_sample(&mut self, tile_idx: usize) -> bool {
+        let chance = self.fertility_value(tile_idx);
+        self.rng.random::<f32>() <= chance
+    }
+
+    fn fertility_value(&self, tile_idx: usize) -> f32 {
+        self.food_fertility[tile_idx] as f32 / u16::MAX as f32
     }
 
     fn empty_positions(&self) -> Vec<(i32, i32)> {
@@ -195,4 +350,100 @@ impl Simulation {
         }
         positions
     }
+}
+
+fn build_fertility_map(world_width: u32, seed: u64, config: &sim_types::WorldConfig) -> Vec<u16> {
+    let width = world_width as usize;
+    let mut fertility = Vec::with_capacity(width * width);
+    for r in 0..width {
+        for q in 0..width {
+            let x = q as f64 * config.food_fertility_noise_scale as f64;
+            let y = r as f64 * config.food_fertility_noise_scale as f64;
+            let value = fractal_perlin_2d(x, y, seed);
+            let normalized = ((value + 1.0) * 0.5).clamp(0.0, 1.0) as f32;
+            let shifted = config.food_fertility_floor
+                + (1.0 - config.food_fertility_floor)
+                    * normalized.powf(config.food_fertility_exponent);
+            let encoded = (shifted.clamp(0.0, 1.0) * u16::MAX as f32).round() as u16;
+            fertility.push(encoded);
+        }
+    }
+    fertility
+}
+
+fn fractal_perlin_2d(x: f64, y: f64, seed: u64) -> f64 {
+    const OCTAVES: usize = 4;
+    let mut amplitude = 1.0_f64;
+    let mut frequency = 1.0_f64;
+    let mut total = 0.0_f64;
+    let mut weight = 0.0_f64;
+
+    for octave in 0..OCTAVES {
+        let octave_seed =
+            seed.wrapping_add(0x9E37_79B9_7F4A_7C15_u64.wrapping_mul(octave as u64 + 1));
+        total += amplitude * perlin_2d(x * frequency, y * frequency, octave_seed);
+        weight += amplitude;
+        amplitude *= 0.5;
+        frequency *= 2.0;
+    }
+
+    if weight == 0.0 {
+        0.0
+    } else {
+        total / weight
+    }
+}
+
+fn perlin_2d(x: f64, y: f64, seed: u64) -> f64 {
+    let x0 = x.floor() as i64;
+    let y0 = y.floor() as i64;
+    let x1 = x0 + 1;
+    let y1 = y0 + 1;
+
+    let dx = x - x0 as f64;
+    let dy = y - y0 as f64;
+
+    let n00 = grad(hash_2d(x0, y0, seed), dx, dy);
+    let n10 = grad(hash_2d(x1, y0, seed), dx - 1.0, dy);
+    let n01 = grad(hash_2d(x0, y1, seed), dx, dy - 1.0);
+    let n11 = grad(hash_2d(x1, y1, seed), dx - 1.0, dy - 1.0);
+
+    let u = fade(dx);
+    let v = fade(dy);
+    let nx0 = lerp(n00, n10, u);
+    let nx1 = lerp(n01, n11, u);
+    lerp(nx0, nx1, v)
+}
+
+fn hash_2d(x: i64, y: i64, seed: u64) -> u64 {
+    let mut z = seed
+        ^ (x as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        ^ (y as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z ^= z >> 30;
+    z = z.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z ^= z >> 27;
+    z = z.wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^= z >> 31;
+    z
+}
+
+fn grad(hash: u64, x: f64, y: f64) -> f64 {
+    match (hash & 7) as u8 {
+        0 => x + y,
+        1 => x - y,
+        2 => -x + y,
+        3 => -x - y,
+        4 => x,
+        5 => -x,
+        6 => y,
+        _ => -y,
+    }
+}
+
+fn fade(t: f64) -> f64 {
+    t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
+}
+
+fn lerp(a: f64, b: f64, t: f64) -> f64 {
+    a + t * (b - a)
 }

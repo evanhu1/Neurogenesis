@@ -290,6 +290,7 @@ impl Simulation {
         self.rebuild_occupancy();
 
         let mut consumed_food = vec![false; food_count];
+        let mut consumed_food_cells = Vec::new();
         let mut removed_positions = Vec::new();
         let mut consumptions = 0_u64;
         let mut predations = 0_u64;
@@ -325,6 +326,7 @@ impl Simulation {
                     self.organisms[idx].consumptions_count =
                         self.organisms[idx].consumptions_count.saturating_add(1);
                     self.occupancy[target_idx] = None;
+                    consumed_food_cells.push(target_idx);
                     consumptions += 1;
                 }
                 Some(Occupant::Organism(prey_id)) => {
@@ -371,6 +373,9 @@ impl Simulation {
         self.foods = new_foods;
 
         self.rebuild_occupancy();
+        for tile_idx in consumed_food_cells {
+            self.mark_food_consumed(tile_idx);
+        }
         let food_spawned = self.replenish_food_supply();
 
         let moves = resolutions

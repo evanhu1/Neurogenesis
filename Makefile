@@ -1,4 +1,4 @@
-.PHONY: fmt lint test check perf-test web-install web-build
+.PHONY: fmt lint test check perf-test web-install web-build start
 
 fmt:
 	cargo fmt --all
@@ -20,3 +20,6 @@ web-install:
 
 web-build:
 	cd web-client && npm run build
+
+start:
+	cargo run -p sim-server --release

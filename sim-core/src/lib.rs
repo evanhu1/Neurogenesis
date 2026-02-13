@@ -1,3 +1,4 @@
+use crate::spawn::FoodRegrowthEvent;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use rayon::{ThreadPool, ThreadPoolBuilder};
@@ -6,7 +7,7 @@ use sim_types::{
     FoodId, FoodState, MetricsSnapshot, OccupancyCell, Occupant, OrganismGenome, OrganismId,
     OrganismState, SpeciesId, TickDelta, WorldConfig, WorldSnapshot,
 };
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
 use thiserror::Error;
 
@@ -42,6 +43,12 @@ pub struct Simulation {
     organisms: Vec<OrganismState>,
     foods: Vec<FoodState>,
     occupancy: Vec<Option<Occupant>>,
+    #[serde(default)]
+    food_fertility: Vec<u16>,
+    #[serde(default)]
+    food_regrowth_generation: Vec<u32>,
+    #[serde(default)]
+    food_regrowth_queue: BTreeSet<FoodRegrowthEvent>,
     metrics: MetricsSnapshot,
     #[serde(skip, default = "default_intent_parallelism")]
     intent_parallelism: usize,
@@ -111,13 +118,18 @@ impl Simulation {
             organisms: Vec::new(),
             foods: Vec::new(),
             occupancy: vec![None; capacity],
+            food_fertility: Vec::new(),
+            food_regrowth_generation: Vec::new(),
+            food_regrowth_queue: BTreeSet::new(),
             metrics: MetricsSnapshot::default(),
             intent_parallelism: default_intent_parallelism(),
             intent_parallel_min_organisms: default_intent_parallel_min_organisms(),
         };
 
         sim.spawn_initial_population();
-        sim.replenish_food_supply();
+        sim.initialize_food_ecology();
+        sim.seed_initial_food_supply();
+        sim.bootstrap_food_regrowth_queue();
         sim.refresh_population_metrics();
         Ok(sim)
     }
@@ -174,9 +186,14 @@ impl Simulation {
         self.organisms.clear();
         self.foods.clear();
         self.occupancy.fill(None);
+        self.food_fertility.clear();
+        self.food_regrowth_generation.clear();
+        self.food_regrowth_queue.clear();
         self.metrics = MetricsSnapshot::default();
         self.spawn_initial_population();
-        self.replenish_food_supply();
+        self.initialize_food_ecology();
+        self.seed_initial_food_supply();
+        self.bootstrap_food_regrowth_queue();
         self.refresh_population_metrics();
     }
 
@@ -437,6 +454,27 @@ fn validate_world_config(config: &WorldConfig) -> Result<(), SimError> {
     if config.food_coverage_divisor == 0 {
         return Err(SimError::InvalidConfig(
             "food_coverage_divisor must be greater than zero".to_owned(),
+        ));
+    }
+    if config.food_regrowth_min_cooldown_turns > config.food_regrowth_max_cooldown_turns {
+        return Err(SimError::InvalidConfig(
+            "food_regrowth_min_cooldown_turns must be <= food_regrowth_max_cooldown_turns"
+                .to_owned(),
+        ));
+    }
+    if config.food_fertility_noise_scale <= 0.0 {
+        return Err(SimError::InvalidConfig(
+            "food_fertility_noise_scale must be greater than zero".to_owned(),
+        ));
+    }
+    if config.food_fertility_exponent <= 0.0 {
+        return Err(SimError::InvalidConfig(
+            "food_fertility_exponent must be greater than zero".to_owned(),
+        ));
+    }
+    if !(0.0..=1.0).contains(&config.food_fertility_floor) {
+        return Err(SimError::InvalidConfig(
+            "food_fertility_floor must be in [0.0, 1.0]".to_owned(),
         ));
     }
     Ok(())

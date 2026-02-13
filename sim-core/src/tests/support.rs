@@ -66,6 +66,13 @@ pub(super) fn stable_test_config() -> WorldConfig {
         move_action_energy_cost: 1.0,
         turn_energy_cost: 1.0,
         food_coverage_divisor: 40,
+        food_regrowth_min_cooldown_turns: 3,
+        food_regrowth_max_cooldown_turns: 24,
+        food_regrowth_jitter_turns: 3,
+        food_regrowth_retry_cooldown_turns: 2,
+        food_fertility_noise_scale: 0.045,
+        food_fertility_exponent: 1.8,
+        food_fertility_floor: 0.04,
         max_organism_age: 500,
         max_num_neurons: 1,
         speciation_threshold: 50.0,
@@ -352,6 +359,9 @@ pub(super) fn configure_sim(sim: &mut Simulation, mut organisms: Vec<OrganismSta
         sim.occupancy[idx] = Some(Occupant::Organism(organism.id));
     }
     sim.turn = 0;
+    sim.food_fertility.clear();
+    sim.food_regrowth_generation.clear();
+    sim.food_regrowth_queue.clear();
     sim.metrics = MetricsSnapshot::default();
     sim.refresh_population_metrics();
 }

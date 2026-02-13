@@ -178,6 +178,20 @@ pub struct WorldConfig {
     pub move_action_energy_cost: f32,
     pub turn_energy_cost: f32,
     pub food_coverage_divisor: u32,
+    #[serde(default = "default_food_regrowth_min_cooldown_turns")]
+    pub food_regrowth_min_cooldown_turns: u32,
+    #[serde(default = "default_food_regrowth_max_cooldown_turns")]
+    pub food_regrowth_max_cooldown_turns: u32,
+    #[serde(default = "default_food_regrowth_jitter_turns")]
+    pub food_regrowth_jitter_turns: u32,
+    #[serde(default = "default_food_regrowth_retry_cooldown_turns")]
+    pub food_regrowth_retry_cooldown_turns: u32,
+    #[serde(default = "default_food_fertility_noise_scale")]
+    pub food_fertility_noise_scale: f32,
+    #[serde(default = "default_food_fertility_exponent")]
+    pub food_fertility_exponent: f32,
+    #[serde(default = "default_food_fertility_floor")]
+    pub food_fertility_floor: f32,
     pub max_organism_age: u32,
     pub max_num_neurons: u32,
     pub speciation_threshold: f32,
@@ -206,6 +220,34 @@ pub struct SynapseEdge {
 
 fn default_eligibility_decay_lambda() -> f32 {
     0.9
+}
+
+fn default_food_regrowth_min_cooldown_turns() -> u32 {
+    3
+}
+
+fn default_food_regrowth_max_cooldown_turns() -> u32 {
+    24
+}
+
+fn default_food_regrowth_jitter_turns() -> u32 {
+    3
+}
+
+fn default_food_regrowth_retry_cooldown_turns() -> u32 {
+    2
+}
+
+fn default_food_fertility_noise_scale() -> f32 {
+    0.045
+}
+
+fn default_food_fertility_exponent() -> f32 {
+    1.8
+}
+
+fn default_food_fertility_floor() -> f32 {
+    0.04
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

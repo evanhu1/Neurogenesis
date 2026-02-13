@@ -279,3 +279,51 @@ fn move_into_food_consumes_and_replenishes_food_supply() {
         .expect("predator should survive");
     assert_eq!(predator.energy, 15.0);
 }
+
+#[test]
+fn consumed_food_regrows_after_configured_cooldown() {
+    let mut cfg = test_config(5, 1);
+    cfg.food_coverage_divisor = 5;
+    cfg.food_regrowth_min_cooldown_turns = 2;
+    cfg.food_regrowth_max_cooldown_turns = 2;
+    cfg.food_regrowth_jitter_turns = 0;
+    cfg.food_regrowth_retry_cooldown_turns = 1;
+
+    let mut sim = Simulation::new(cfg, 102).expect("simulation should initialize");
+    configure_sim(
+        &mut sim,
+        vec![make_organism(
+            0,
+            1,
+            1,
+            FacingDirection::East,
+            false,
+            false,
+            false,
+            0.9,
+            10.0,
+        )],
+    );
+    enable_consume_action(&mut sim.organisms[0]);
+    let added = sim.add_food(make_food(0, 2, 1, 7.0));
+    assert!(added, "food setup should succeed");
+    sim.next_food_id = 1;
+
+    let first_delta = tick_once(&mut sim);
+    assert_eq!(first_delta.food_spawned.len(), 0);
+    assert!(
+        sim.foods.len() < (5_usize * 5) / sim.config.food_coverage_divisor as usize,
+        "regrowth should not refill immediately",
+    );
+
+    let second_delta = tick_once(&mut sim);
+    assert_eq!(second_delta.food_spawned.len(), 0);
+
+    let third_delta = tick_once(&mut sim);
+    assert!(
+        !third_delta.food_spawned.is_empty(),
+        "food should regrow once cooldown elapses",
+    );
+    let target_food = (5_usize * 5) / sim.config.food_coverage_divisor as usize;
+    assert_eq!(sim.foods.len(), target_food);
+}

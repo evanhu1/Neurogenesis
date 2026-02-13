@@ -139,6 +139,34 @@ fn initial_food_population_matches_coverage_divisor() {
 }
 
 #[test]
+fn initial_food_population_is_biased_toward_fertile_tiles() {
+    let cfg = test_config(40, 4);
+    let sim = Simulation::new(cfg, 56).expect("simulation should initialize");
+    assert!(!sim.foods.is_empty(), "test requires seeded food");
+
+    let world_avg = sim
+        .food_fertility
+        .iter()
+        .map(|value| *value as f64)
+        .sum::<f64>()
+        / sim.food_fertility.len() as f64;
+    let food_avg = sim
+        .foods
+        .iter()
+        .map(|food| {
+            let idx = sim.cell_index(food.q, food.r);
+            sim.food_fertility[idx] as f64
+        })
+        .sum::<f64>()
+        / sim.foods.len() as f64;
+
+    assert!(
+        food_avg > world_avg * 1.03,
+        "expected fertile-tile bias: food_avg={food_avg:.2}, world_avg={world_avg:.2}",
+    );
+}
+
+#[test]
 fn validate_state_accepts_fresh_simulation() {
     let sim = Simulation::new(stable_test_config(), 55).expect("simulation should initialize");
     sim.validate_state()
