@@ -603,10 +603,12 @@ async fn create_batch_run(
         runs.insert(run_id, batch_run.clone());
     }
 
+    let config = sim_types::WorldConfig::default();
+
     tokio::spawn(run_batch_simulations(
         state.clone(),
         batch_run,
-        req.config,
+        config,
         req.world_count,
         req.universe_seed,
         ticks_per_world,
@@ -670,7 +672,7 @@ async fn create_session(
     State(state): State<AppState>,
     Json(req): Json<CreateSessionRequest>,
 ) -> Result<Json<CreateSessionResponse>, AppError> {
-    let simulation = Simulation::new(req.config.clone(), req.seed)?;
+    let simulation = Simulation::new(sim_types::WorldConfig::default(), req.seed)?;
     let response = create_runtime_session(&state, simulation).await?;
     Ok(Json(response))
 }

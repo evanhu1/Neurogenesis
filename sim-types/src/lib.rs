@@ -167,7 +167,7 @@ pub struct SeedGenomeConfig {
     pub mutation_rate_synapse_prune_threshold: f32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct WorldConfig {
     pub world_width: u32,
     pub steps_per_second: u32,
@@ -177,7 +177,7 @@ pub struct WorldConfig {
     pub reproduction_energy_cost: f32,
     pub move_action_energy_cost: f32,
     pub turn_energy_cost: f32,
-    pub food_coverage_divisor: u32,
+    pub plant_target_coverage: f32,
     #[serde(default = "default_food_regrowth_min_cooldown_turns")]
     pub food_regrowth_min_cooldown_turns: u32,
     #[serde(default = "default_food_regrowth_max_cooldown_turns")]
@@ -198,6 +198,77 @@ pub struct WorldConfig {
     pub seed_genome_config: SeedGenomeConfig,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct WorldConfigDeserialize {
+    world_width: u32,
+    steps_per_second: u32,
+    num_organisms: u32,
+    starting_energy: f32,
+    food_energy: f32,
+    reproduction_energy_cost: f32,
+    move_action_energy_cost: f32,
+    turn_energy_cost: f32,
+    #[serde(default)]
+    plant_target_coverage: Option<f32>,
+    #[serde(default)]
+    food_coverage_divisor: Option<u32>,
+    #[serde(default = "default_food_regrowth_min_cooldown_turns")]
+    food_regrowth_min_cooldown_turns: u32,
+    #[serde(default = "default_food_regrowth_max_cooldown_turns")]
+    food_regrowth_max_cooldown_turns: u32,
+    #[serde(default = "default_food_regrowth_jitter_turns")]
+    food_regrowth_jitter_turns: u32,
+    #[serde(default = "default_food_regrowth_retry_cooldown_turns")]
+    food_regrowth_retry_cooldown_turns: u32,
+    #[serde(default = "default_food_fertility_noise_scale")]
+    food_fertility_noise_scale: f32,
+    #[serde(default = "default_food_fertility_exponent")]
+    food_fertility_exponent: f32,
+    #[serde(default = "default_food_fertility_floor")]
+    food_fertility_floor: f32,
+    max_organism_age: u32,
+    max_num_neurons: u32,
+    speciation_threshold: f32,
+    seed_genome_config: SeedGenomeConfig,
+}
+
+impl<'de> Deserialize<'de> for WorldConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = WorldConfigDeserialize::deserialize(deserializer)?;
+        let plant_target_coverage = match (raw.plant_target_coverage, raw.food_coverage_divisor) {
+            (Some(coverage), _) => coverage,
+            (None, Some(divisor)) if divisor > 0 => 1.0 / divisor as f32,
+            (None, Some(_)) => 0.0,
+            (None, None) => default_plant_target_coverage(),
+        };
+        Ok(Self {
+            world_width: raw.world_width,
+            steps_per_second: raw.steps_per_second,
+            num_organisms: raw.num_organisms,
+            starting_energy: raw.starting_energy,
+            food_energy: raw.food_energy,
+            reproduction_energy_cost: raw.reproduction_energy_cost,
+            move_action_energy_cost: raw.move_action_energy_cost,
+            turn_energy_cost: raw.turn_energy_cost,
+            plant_target_coverage,
+            food_regrowth_min_cooldown_turns: raw.food_regrowth_min_cooldown_turns,
+            food_regrowth_max_cooldown_turns: raw.food_regrowth_max_cooldown_turns,
+            food_regrowth_jitter_turns: raw.food_regrowth_jitter_turns,
+            food_regrowth_retry_cooldown_turns: raw.food_regrowth_retry_cooldown_turns,
+            food_fertility_noise_scale: raw.food_fertility_noise_scale,
+            food_fertility_exponent: raw.food_fertility_exponent,
+            food_fertility_floor: raw.food_fertility_floor,
+            max_organism_age: raw.max_organism_age,
+            max_num_neurons: raw.max_num_neurons,
+            speciation_threshold: raw.speciation_threshold,
+            seed_genome_config: raw.seed_genome_config,
+        })
+    }
+}
+
 impl Default for WorldConfig {
     fn default() -> Self {
         default_world_config()
@@ -205,8 +276,39 @@ impl Default for WorldConfig {
 }
 
 fn default_world_config() -> WorldConfig {
-    toml::from_str(include_str!("../../config/default.toml"))
-        .expect("default world config TOML must parse")
+    let mut value: toml::Value = toml::from_str(include_str!("../../config/default.toml"))
+        .expect("default world config TOML must parse");
+    let table = value
+        .as_table_mut()
+        .expect("default world config root must be a table");
+
+    let world_width = table
+        .get("world_width")
+        .and_then(toml::Value::as_integer)
+        .expect("default world config world_width must be an integer");
+    table
+        .entry("starting_energy")
+        .or_insert_with(|| toml::Value::Float(world_width as f64));
+
+    let starting_energy = table
+        .get("starting_energy")
+        .and_then(|value| match value {
+            toml::Value::Float(v) => Some(*v),
+            toml::Value::Integer(v) => Some(*v as f64),
+            _ => None,
+        })
+        .expect("default world config starting_energy must be numeric");
+    table
+        .entry("reproduction_energy_cost")
+        .or_insert_with(|| toml::Value::Float(starting_energy));
+
+    table
+        .entry("max_organism_age")
+        .or_insert_with(|| toml::Value::Integer(world_width.saturating_mul(4)));
+
+    value
+        .try_into()
+        .expect("default world config TOML must deserialize")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -248,6 +350,10 @@ fn default_food_fertility_exponent() -> f32 {
 
 fn default_food_fertility_floor() -> f32 {
     0.04
+}
+
+fn default_plant_target_coverage() -> f32 {
+    0.02
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -388,6 +494,7 @@ pub struct TickDelta {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn config_roundtrip() {
@@ -395,5 +502,20 @@ mod tests {
         let json = serde_json::to_string(&cfg).expect("serialize config");
         let parsed: WorldConfig = serde_json::from_str(&json).expect("deserialize config");
         assert_eq!(parsed, cfg);
+    }
+
+    #[test]
+    fn legacy_food_coverage_divisor_deserializes_to_plant_target_coverage() {
+        let cfg = WorldConfig::default();
+        let mut value = serde_json::to_value(&cfg).expect("serialize config to value");
+        let object = value
+            .as_object_mut()
+            .expect("world config JSON value must be an object");
+        object.remove("plant_target_coverage");
+        object.insert("food_coverage_divisor".to_owned(), json!(50));
+
+        let parsed: WorldConfig =
+            serde_json::from_value(value).expect("deserialize legacy world config");
+        assert!((parsed.plant_target_coverage - 0.02).abs() < f32::EPSILON);
     }
 }

@@ -262,7 +262,7 @@ fn move_into_food_consumes_and_replenishes_food_supply() {
         (delta.removed_positions[0].q, delta.removed_positions[0].r),
         (2, 1)
     );
-    let target_food = (5_usize * 5) / sim.config.food_coverage_divisor as usize;
+    let target_food = ((5_usize * 5) as f32 * sim.config.plant_target_coverage).floor() as usize;
     assert_eq!(delta.food_spawned.len(), target_food);
     assert_eq!(delta.metrics.consumptions_last_turn, 1);
     assert_eq!(delta.metrics.predations_last_turn, 0);
@@ -283,7 +283,7 @@ fn move_into_food_consumes_and_replenishes_food_supply() {
 #[test]
 fn consumed_food_regrows_after_configured_cooldown() {
     let mut cfg = test_config(5, 1);
-    cfg.food_coverage_divisor = 5;
+    cfg.plant_target_coverage = 0.2;
     cfg.food_regrowth_min_cooldown_turns = 2;
     cfg.food_regrowth_max_cooldown_turns = 2;
     cfg.food_regrowth_jitter_turns = 0;
@@ -312,7 +312,8 @@ fn consumed_food_regrows_after_configured_cooldown() {
     let first_delta = tick_once(&mut sim);
     assert_eq!(first_delta.food_spawned.len(), 0);
     assert!(
-        sim.foods.len() < (5_usize * 5) / sim.config.food_coverage_divisor as usize,
+        sim.foods.len()
+            < ((5_usize * 5) as f32 * sim.config.plant_target_coverage).floor() as usize,
         "regrowth should not refill immediately",
     );
 
@@ -324,6 +325,6 @@ fn consumed_food_regrows_after_configured_cooldown() {
         !third_delta.food_spawned.is_empty(),
         "food should regrow once cooldown elapses",
     );
-    let target_food = (5_usize * 5) / sim.config.food_coverage_divisor as usize;
+    let target_food = ((5_usize * 5) as f32 * sim.config.plant_target_coverage).floor() as usize;
     assert_eq!(sim.foods.len(), target_food);
 }

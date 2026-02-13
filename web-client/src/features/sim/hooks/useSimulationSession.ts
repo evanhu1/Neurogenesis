@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { applyTickDelta, findOrganism, unwrapId } from '../../../protocol';
-import { DEFAULT_CONFIG } from '../../../types';
 import type {
   ArchivedWorldSummary,
   BatchRunStatusResponse,
@@ -375,7 +374,6 @@ export function useSimulationSession(): SimulationSessionState {
     try {
       setErrorText(null);
       const payload = await request<CreateSessionResponse>('/v1/sessions', 'POST', {
-        config: DEFAULT_CONFIG,
         seed: Math.floor(Date.now() / 1000),
       });
       applyLoadedSession(payload.metadata, payload.snapshot);
@@ -469,23 +467,25 @@ export function useSimulationSession(): SimulationSessionState {
       const normalizedWorldCount = Math.max(1, Math.floor(worldCount));
       const normalizedTicksPerWorld = Math.max(1, Math.floor(ticksPerWorld));
       const normalizedUniverseSeed = nextRandomUniverseSeed();
-      const config = snapshot?.config ?? session?.config ?? DEFAULT_CONFIG;
 
       try {
         setErrorText(null);
-        const payload = await request<CreateBatchRunResponse>('/v1/world-runs', 'POST', {
-          config,
-          world_count: normalizedWorldCount,
-          ticks_per_world: normalizedTicksPerWorld,
-          universe_seed: normalizedUniverseSeed,
-        });
+        const payload = await request<CreateBatchRunResponse>(
+          '/v1/world-runs',
+          'POST',
+          {
+            world_count: normalizedWorldCount,
+            ticks_per_world: normalizedTicksPerWorld,
+            universe_seed: normalizedUniverseSeed,
+          },
+        );
         setBatchRunStatus(null);
         setActiveBatchRunId(payload.run_id);
       } catch (err) {
         setErrorText(err instanceof Error ? err.message : 'Failed to start world batch run');
       }
     },
-    [request, session, snapshot],
+    [request],
   );
 
   const restoreSession = useCallback(

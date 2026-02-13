@@ -153,7 +153,10 @@ impl Simulation {
     }
 
     fn target_food_count(&self) -> usize {
-        world_capacity(self.config.world_width) / self.config.food_coverage_divisor as usize
+        let capacity = world_capacity(self.config.world_width) as f64;
+        (capacity * f64::from(self.config.plant_target_coverage))
+            .floor()
+            .clamp(0.0, capacity) as usize
     }
 
     pub(crate) fn initialize_food_ecology(&mut self) {

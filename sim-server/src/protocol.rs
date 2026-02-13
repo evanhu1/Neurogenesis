@@ -17,7 +17,6 @@ pub struct SessionMetadata {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CreateSessionRequest {
-    pub config: WorldConfig,
     pub seed: u64,
 }
 
@@ -33,7 +32,6 @@ fn default_ticks_per_world() -> u64 {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CreateBatchRunRequest {
-    pub config: WorldConfig,
     pub world_count: u32,
     pub universe_seed: u64,
     #[serde(default = "default_ticks_per_world")]

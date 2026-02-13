@@ -451,9 +451,9 @@ fn validate_world_config(config: &WorldConfig) -> Result<(), SimError> {
             "max_num_neurons must be >= seed_genome_config.num_neurons".to_owned(),
         ));
     }
-    if config.food_coverage_divisor == 0 {
+    if !(0.0..=1.0).contains(&config.plant_target_coverage) {
         return Err(SimError::InvalidConfig(
-            "food_coverage_divisor must be greater than zero".to_owned(),
+            "plant_target_coverage must be in [0.0, 1.0]".to_owned(),
         ));
     }
     if config.food_regrowth_min_cooldown_turns > config.food_regrowth_max_cooldown_turns {

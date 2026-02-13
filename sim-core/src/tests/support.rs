@@ -65,7 +65,7 @@ pub(super) fn stable_test_config() -> WorldConfig {
         reproduction_energy_cost: 100.0,
         move_action_energy_cost: 1.0,
         turn_energy_cost: 1.0,
-        food_coverage_divisor: 40,
+        plant_target_coverage: 0.025,
         food_regrowth_min_cooldown_turns: 3,
         food_regrowth_max_cooldown_turns: 24,
         food_regrowth_jitter_turns: 3,

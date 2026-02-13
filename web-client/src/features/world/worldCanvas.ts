@@ -3,7 +3,7 @@ import { unwrapId } from '../../protocol';
 import { colorForSpeciesId } from '../../speciesColor';
 
 const SQRT_3 = Math.sqrt(3);
-const FOOD_COLOR = '#16a34a';
+const PLANT_COLOR = '#16a34a';
 const BASE_HEX_SIZE_AT_900PX = 8;
 const BASE_HEX_MIN_SIZE_PX = 6;
 const BASE_HEX_REFERENCE_CANVAS_PX = 900;
@@ -20,6 +20,11 @@ export type WorldViewport = {
   zoom: number;
   panX: number;
   panY: number;
+};
+
+export type RenderVisibility = {
+  organisms: boolean;
+  plants: boolean;
 };
 
 function toWorldSpace(
@@ -168,6 +173,7 @@ export function renderWorld(
   viewport: WorldViewport,
   deadFlashCells: Array<{ q: number; r: number }> | null,
   bornFlashCells: Array<{ q: number; r: number }> | null,
+  visibility: RenderVisibility = { organisms: true, plants: true },
 ) {
   const width = canvas.width;
   const height = canvas.height;
@@ -213,47 +219,51 @@ export function renderWorld(
     }
   }
 
-  const foods = Array.isArray(snapshot.foods) ? snapshot.foods : [];
-  for (const food of foods) {
-    const center = hexCenter(layout, food.q, food.r);
-    ctx.beginPath();
-    ctx.arc(center.x, center.y, Math.max(2.5, layout.size * 0.24), 0, Math.PI * 2);
-    ctx.fillStyle = FOOD_COLOR;
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(15, 23, 42, 0.35)';
-    ctx.lineWidth = Math.max(0.5, layout.size * 0.03);
-    ctx.stroke();
+  if (visibility.plants) {
+    const plants = Array.isArray(snapshot.foods) ? snapshot.foods : [];
+    for (const plant of plants) {
+      const center = hexCenter(layout, plant.q, plant.r);
+      const side = Math.max(5, layout.size * 0.72);
+      const halfSide = side / 2;
+      ctx.fillStyle = PLANT_COLOR;
+      ctx.fillRect(center.x - halfSide, center.y - halfSide, side, side);
+      ctx.strokeStyle = 'rgba(15, 23, 42, 0.35)';
+      ctx.lineWidth = Math.max(0.7, layout.size * 0.05);
+      ctx.strokeRect(center.x - halfSide, center.y - halfSide, side, side);
+    }
   }
 
-  for (const org of snapshot.organisms) {
-    const id = unwrapId(org.id);
-    const speciesId = unwrapId(org.species_id);
-    const center = hexCenter(layout, org.q, org.r);
+  if (visibility.organisms) {
+    for (const org of snapshot.organisms) {
+      const id = unwrapId(org.id);
+      const speciesId = unwrapId(org.species_id);
+      const center = hexCenter(layout, org.q, org.r);
 
-    ctx.beginPath();
-    ctx.arc(center.x, center.y, Math.max(3, layout.size * 0.5), 0, Math.PI * 2);
-    ctx.fillStyle = colorForSpeciesId(String(speciesId));
-    ctx.fill();
-    if (id === focusedOrganismId) {
-      ctx.lineWidth = Math.max(1.2, layout.size * 0.12);
-      ctx.strokeStyle = '#0b1730';
+      ctx.beginPath();
+      ctx.arc(center.x, center.y, Math.max(3, layout.size * 0.5), 0, Math.PI * 2);
+      ctx.fillStyle = colorForSpeciesId(String(speciesId));
+      ctx.fill();
+      if (id === focusedOrganismId) {
+        ctx.lineWidth = Math.max(1.2, layout.size * 0.12);
+        ctx.strokeStyle = '#0b1730';
+        ctx.stroke();
+      }
+
+      const [dq, dr] = facingDelta(org.facing);
+      const neighbor = hexCenter(layout, org.q + dq, org.r + dr);
+      const vx = neighbor.x - center.x;
+      const vy = neighbor.y - center.y;
+      const norm = Math.hypot(vx, vy) || 1;
+      const ux = vx / norm;
+      const uy = vy / norm;
+
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = Math.max(1.2, layout.size * 0.08);
+      ctx.beginPath();
+      ctx.moveTo(center.x, center.y);
+      ctx.lineTo(center.x + ux * layout.size * 0.45, center.y + uy * layout.size * 0.45);
       ctx.stroke();
     }
-
-    const [dq, dr] = facingDelta(org.facing);
-    const neighbor = hexCenter(layout, org.q + dq, org.r + dr);
-    const vx = neighbor.x - center.x;
-    const vy = neighbor.y - center.y;
-    const norm = Math.hypot(vx, vy) || 1;
-    const ux = vx / norm;
-    const uy = vy / norm;
-
-    ctx.strokeStyle = '#0f172a';
-    ctx.lineWidth = Math.max(1.2, layout.size * 0.08);
-    ctx.beginPath();
-    ctx.moveTo(center.x, center.y);
-    ctx.lineTo(center.x + ux * layout.size * 0.45, center.y + uy * layout.size * 0.45);
-    ctx.stroke();
   }
 
   ctx.restore();

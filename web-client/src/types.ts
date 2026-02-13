@@ -1,5 +1,3 @@
-import defaultConfigToml from '../../config/default.toml?raw';
-
 export type OrganismId = { 0: number } | number;
 export type SpeciesId = { 0: number } | number;
 export type FoodId = { 0: number } | number;
@@ -32,7 +30,14 @@ export type WorldConfig = {
   reproduction_energy_cost: number;
   move_action_energy_cost: number;
   turn_energy_cost: number;
-  food_coverage_divisor: number;
+  plant_target_coverage: number;
+  food_regrowth_min_cooldown_turns: number;
+  food_regrowth_max_cooldown_turns: number;
+  food_regrowth_jitter_turns: number;
+  food_regrowth_retry_cooldown_turns: number;
+  food_fertility_noise_scale: number;
+  food_fertility_exponent: number;
+  food_fertility_floor: number;
   max_organism_age: number;
   max_num_neurons: number;
   speciation_threshold: number;
@@ -277,100 +282,3 @@ export type ServerEvent = {
   type: 'StateSnapshot' | 'TickDelta' | 'StepProgress' | 'FocusBrain' | 'Metrics' | 'Error';
   data: unknown;
 };
-
-function parseRequiredNumber(map: Record<string, number>, key: string): number {
-  const value = map[key];
-  if (typeof value !== 'number' || Number.isNaN(value)) {
-    throw new Error(`default config is missing numeric key: ${key}`);
-  }
-  return value;
-}
-
-function parseNumberWithDefault(map: Record<string, number>, key: string, fallback: number): number {
-  const value = map[key];
-  if (typeof value !== 'number' || Number.isNaN(value)) {
-    return fallback;
-  }
-  return value;
-}
-
-function parseDefaultConfigToml(tomlText: string): WorldConfig {
-  const worldLevel: Record<string, number> = {};
-  const seedGenomeLevel: Record<string, number> = {};
-  let section = '';
-
-  for (const rawLine of tomlText.split('\n')) {
-    const line = rawLine.split('#')[0].trim();
-    if (!line) continue;
-    if (line.startsWith('[') && line.endsWith(']')) {
-      section = line.slice(1, -1).trim();
-      continue;
-    }
-
-    const eqIdx = line.indexOf('=');
-    if (eqIdx === -1) continue;
-
-    const key = line.slice(0, eqIdx).trim();
-    const valueRaw = line.slice(eqIdx + 1).trim();
-    const value = Number(valueRaw);
-    if (Number.isNaN(value)) {
-      continue;
-    }
-
-    if (section === 'seed_genome_config') {
-      seedGenomeLevel[key] = value;
-    } else {
-      worldLevel[key] = value;
-    }
-  }
-  const genomeSource = Object.keys(seedGenomeLevel).length > 0 ? seedGenomeLevel : worldLevel;
-
-  return {
-    world_width: parseRequiredNumber(worldLevel, 'world_width'),
-    steps_per_second: parseRequiredNumber(worldLevel, 'steps_per_second'),
-    num_organisms: parseRequiredNumber(worldLevel, 'num_organisms'),
-    starting_energy: parseRequiredNumber(worldLevel, 'starting_energy'),
-    food_energy: parseRequiredNumber(worldLevel, 'food_energy'),
-    reproduction_energy_cost: parseRequiredNumber(worldLevel, 'reproduction_energy_cost'),
-    move_action_energy_cost: parseRequiredNumber(worldLevel, 'move_action_energy_cost'),
-    turn_energy_cost: parseRequiredNumber(worldLevel, 'turn_energy_cost'),
-    food_coverage_divisor: parseRequiredNumber(worldLevel, 'food_coverage_divisor'),
-    max_organism_age: parseRequiredNumber(worldLevel, 'max_organism_age'),
-    max_num_neurons: parseRequiredNumber(worldLevel, 'max_num_neurons'),
-    speciation_threshold: parseNumberWithDefault(worldLevel, 'speciation_threshold', 50.0),
-    seed_genome_config: {
-      num_neurons: parseRequiredNumber(genomeSource, 'num_neurons'),
-      num_synapses: parseRequiredNumber(genomeSource, 'num_synapses'),
-      vision_distance: parseNumberWithDefault(genomeSource, 'vision_distance', 2),
-      hebb_eta_baseline: parseNumberWithDefault(genomeSource, 'hebb_eta_baseline', 0.0),
-      hebb_eta_gain: parseNumberWithDefault(genomeSource, 'hebb_eta_gain', 0.0),
-      eligibility_decay_lambda: parseNumberWithDefault(genomeSource, 'eligibility_decay_lambda', 0.9),
-      synapse_prune_threshold: parseNumberWithDefault(genomeSource, 'synapse_prune_threshold', 0.01),
-      mutation_rate_vision_distance: parseRequiredNumber(
-        genomeSource,
-        'mutation_rate_vision_distance',
-      ),
-      mutation_rate_add_edge: parseRequiredNumber(genomeSource, 'mutation_rate_add_edge'),
-      mutation_rate_remove_edge: parseRequiredNumber(genomeSource, 'mutation_rate_remove_edge'),
-      mutation_rate_split_edge: parseRequiredNumber(genomeSource, 'mutation_rate_split_edge'),
-      mutation_rate_inter_bias: parseRequiredNumber(genomeSource, 'mutation_rate_inter_bias'),
-      mutation_rate_inter_update_rate: parseRequiredNumber(
-        genomeSource,
-        'mutation_rate_inter_update_rate',
-      ),
-      mutation_rate_action_bias: parseRequiredNumber(genomeSource, 'mutation_rate_action_bias'),
-      mutation_rate_eligibility_decay_lambda: parseNumberWithDefault(
-        genomeSource,
-        'mutation_rate_eligibility_decay_lambda',
-        0.0,
-      ),
-      mutation_rate_synapse_prune_threshold: parseNumberWithDefault(
-        genomeSource,
-        'mutation_rate_synapse_prune_threshold',
-        0.0,
-      ),
-    },
-  };
-}
-
-export const DEFAULT_CONFIG: WorldConfig = parseDefaultConfigToml(defaultConfigToml);

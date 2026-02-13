@@ -41,7 +41,7 @@ rotation. `MoveForward` uses post-turn facing.
 
 `WorldConfig` fields: `world_width`, `steps_per_second`, `num_organisms`,
 `starting_energy`, `food_energy`, `reproduction_energy_cost`,
-`move_action_energy_cost`, `turn_energy_cost`, `food_coverage_divisor`,
+`move_action_energy_cost`, `turn_energy_cost`, `plant_target_coverage`,
 `max_organism_age`, `max_num_neurons`, `speciation_threshold`,
 `seed_genome_config`.
 
@@ -68,7 +68,7 @@ Phases execute in this order each tick:
    Vacated target (occupant also moving) = move in. Cycles resolve naturally.
 5. **Commit** — atomically apply facing, moves, energy costs, consumption kills,
    energy transfers. Rebuild occupancy. Replenish food to
-   `capacity / food_coverage_divisor`.
+   `floor(capacity * plant_target_coverage)`.
 6. **Reproduction** — organisms with `Reproduce` active and sufficient energy
    queue a spawn request at the hex behind them (opposite facing). Cell must be
    unoccupied. Conflicts resolved by ID order. Energy deducted on success.
