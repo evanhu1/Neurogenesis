@@ -121,7 +121,7 @@ fn starvation_does_not_spawn_replacements() {
 }
 
 #[test]
-fn move_energy_cost_applies_only_to_successful_moves() {
+fn move_energy_cost_applies_to_attempted_moves() {
     let cfg = test_config(5, 2);
     let mut sim = Simulation::new(cfg, 74).expect("simulation should initialize");
     configure_sim(
@@ -164,7 +164,7 @@ fn move_energy_cost_applies_only_to_successful_moves() {
         .find(|organism| organism.id == OrganismId(1))
         .expect("loser should survive");
     assert_eq!(winner.energy, 8.0);
-    assert_eq!(loser.energy, 9.0);
+    assert_eq!(loser.energy, 8.0);
 }
 
 #[test]

@@ -308,7 +308,7 @@ fn turn_action_has_deadzone_around_zero() {
             inter_biases: vec![],
             inter_log_taus: vec![],
             interneuron_types: vec![],
-            action_biases: vec![0.0, 0.05, 0.0],
+            action_biases: vec![0.0, 0.05, 0.0, 0.0],
             edges: vec![],
         },
         brain: BrainState {
@@ -402,7 +402,7 @@ fn action_biases_drive_actions_without_incoming_edges() {
         inter_biases: vec![],
         inter_log_taus: vec![],
         interneuron_types: vec![],
-        action_biases: vec![5.0, 0.0, 6.0],
+        action_biases: vec![5.0, 0.0, 0.0, 6.0],
         edges: vec![],
     };
     let mut organism = OrganismState {

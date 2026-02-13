@@ -129,6 +129,11 @@ fn forced_brain(
             post_neuron_id: NeuronId(2002),
             weight: -8.0,
         },
+        SynapseEdge {
+            pre_neuron_id: NeuronId(1000),
+            post_neuron_id: NeuronId(2003),
+            weight: -8.0,
+        },
     ];
     let inter = vec![InterNeuronState {
         neuron: NeuronState {
@@ -145,7 +150,8 @@ fn forced_brain(
     let mut action = vec![
         make_action_neuron(2000, ActionType::MoveForward, 0.0),
         make_action_neuron(2001, ActionType::Turn, 0.0),
-        make_action_neuron(2002, ActionType::Reproduce, 0.0),
+        make_action_neuron(2002, ActionType::Consume, 0.0),
+        make_action_neuron(2003, ActionType::Reproduce, 0.0),
     ];
     for action_neuron in &mut action {
         action_neuron.neuron.parent_ids = vec![inter_id];
@@ -155,7 +161,7 @@ fn forced_brain(
         sensory,
         inter,
         action,
-        synapse_count: 3,
+        synapse_count: 4,
     }
 }
 
@@ -200,7 +206,7 @@ pub(super) fn enable_reproduce_action(organism: &mut OrganismState) {
     let inter_id = organism.brain.inter[0].neuron.neuron_id;
     let mut found = false;
     for synapse in &mut organism.brain.inter[0].synapses {
-        if synapse.post_neuron_id == NeuronId(2002) {
+        if synapse.post_neuron_id == NeuronId(2003) {
             synapse.weight = 8.0;
             found = true;
             break;
@@ -208,6 +214,37 @@ pub(super) fn enable_reproduce_action(organism: &mut OrganismState) {
     }
     if !found {
         let inter_id = organism.brain.inter[0].neuron.neuron_id;
+        organism.brain.inter[0].synapses.push(SynapseEdge {
+            pre_neuron_id: inter_id,
+            post_neuron_id: NeuronId(2003),
+            weight: 8.0,
+        });
+        organism.brain.inter[0]
+            .synapses
+            .sort_by(|a, b| a.post_neuron_id.cmp(&b.post_neuron_id));
+        organism.brain.synapse_count = organism.brain.synapse_count.saturating_add(1);
+    }
+    if let Some(action) = organism
+        .brain
+        .action
+        .iter_mut()
+        .find(|action| action.action_type == ActionType::Reproduce)
+    {
+        action.neuron.parent_ids = vec![inter_id];
+    }
+}
+
+pub(super) fn enable_consume_action(organism: &mut OrganismState) {
+    let inter_id = organism.brain.inter[0].neuron.neuron_id;
+    let mut found = false;
+    for synapse in &mut organism.brain.inter[0].synapses {
+        if synapse.post_neuron_id == NeuronId(2002) {
+            synapse.weight = 8.0;
+            found = true;
+            break;
+        }
+    }
+    if !found {
         organism.brain.inter[0].synapses.push(SynapseEdge {
             pre_neuron_id: inter_id,
             post_neuron_id: NeuronId(2002),
@@ -222,7 +259,7 @@ pub(super) fn enable_reproduce_action(organism: &mut OrganismState) {
         .brain
         .action
         .iter_mut()
-        .find(|action| action.action_type == ActionType::Reproduce)
+        .find(|action| action.action_type == ActionType::Consume)
     {
         action.neuron.parent_ids = vec![inter_id];
     }

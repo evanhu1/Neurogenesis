@@ -4,7 +4,7 @@ use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 use crate::Simulation;
 use rayon::prelude::*;
 use sim_types::{
-    ActionType, EntityId, FacingDirection, FoodId, FoodState, Occupant, OrganismFacing, OrganismId,
+    ActionType, EntityId, FacingDirection, FoodState, Occupant, OrganismFacing, OrganismId,
     OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId, TickDelta,
 };
 use std::cmp::Ordering;
@@ -26,15 +26,34 @@ struct TurnSnapshot {
     organism_states: Vec<SnapshotOrganismState>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IntentActionKind {
+    Turn,
+    Move,
+    Consume,
+}
+
+#[derive(Clone, Copy)]
+struct RankedIntentAction {
+    kind: IntentActionKind,
+    strength: f32,
+}
+
 #[derive(Clone, Copy)]
 struct OrganismIntent {
     id: OrganismId,
     from: (i32, i32),
-    facing_after_turn: FacingDirection,
+    facing_before_actions: FacingDirection,
+    facing_after_actions: FacingDirection,
+    turn_choice: TurnChoice,
     wants_move: bool,
+    wants_consume: bool,
     wants_reproduce: bool,
     move_target: Option<(i32, i32)>,
     move_confidence: f32,
+    ordered_actions: [IntentActionKind; 3],
+    ordered_action_count: u8,
+    action_cost_count: u8,
     synapse_ops: u64,
 }
 
@@ -46,19 +65,11 @@ struct MoveCandidate {
     confidence: f32,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum MoveResolutionKind {
-    MoveOnly,
-    ConsumeOrganism { consumed_organism: OrganismId },
-    ConsumeFood { consumed_food: FoodId },
-}
-
 #[derive(Clone, Copy)]
 struct MoveResolution {
     actor: OrganismId,
     from: (i32, i32),
     to: (i32, i32),
-    kind: MoveResolutionKind,
 }
 
 #[derive(Default)]
@@ -69,6 +80,7 @@ struct CommitResult {
     food_spawned: Vec<FoodState>,
     consumptions: u64,
     predations: u64,
+    actions_applied: u64,
 }
 
 impl Simulation {
@@ -90,7 +102,7 @@ impl Simulation {
         self.turn = self.turn.saturating_add(1);
         self.metrics.turns = self.turn;
         self.metrics.synapse_ops_last_turn = synapse_ops;
-        self.metrics.actions_applied_last_turn = commit.moves.len() as u64 + reproductions;
+        self.metrics.actions_applied_last_turn = commit.actions_applied + reproductions;
         self.metrics.consumptions_last_turn = commit.consumptions;
         self.metrics.predations_last_turn = commit.predations;
         self.metrics.total_consumptions += commit.consumptions;
@@ -192,6 +204,9 @@ impl Simulation {
                 continue;
             };
             let cell_idx = target.1 as usize * w + target.0 as usize;
+            if snapshot.occupancy[cell_idx].is_some() {
+                continue;
+            }
             let candidate = MoveCandidate {
                 actor: intent.id,
                 from: intent.from,
@@ -208,38 +223,14 @@ impl Simulation {
         let mut winners: Vec<MoveCandidate> = best_by_cell.into_iter().flatten().collect();
         winners.sort_by_key(|w| w.actor);
 
-        // Track which cells have a winner moving FROM them
-        let mut moving_from = vec![false; world_cells];
-        for winner in &winners {
-            let from_idx = winner.from.1 as usize * w + winner.from.0 as usize;
-            moving_from[from_idx] = true;
-        }
-
-        let mut resolutions = Vec::with_capacity(winners.len());
-        for winner in winners {
-            let target_idx = winner.target.1 as usize * w + winner.target.0 as usize;
-            let kind = match snapshot.occupancy[target_idx] {
-                Some(Occupant::Organism(_)) if moving_from[target_idx] => {
-                    // Target cell's occupant is itself moving away
-                    MoveResolutionKind::MoveOnly
-                }
-                Some(Occupant::Organism(occupant)) => MoveResolutionKind::ConsumeOrganism {
-                    consumed_organism: occupant,
-                },
-                Some(Occupant::Food(food_id)) => MoveResolutionKind::ConsumeFood {
-                    consumed_food: food_id,
-                },
-                None => MoveResolutionKind::MoveOnly,
-            };
-            resolutions.push(MoveResolution {
+        winners
+            .into_iter()
+            .map(|winner| MoveResolution {
                 actor: winner.actor,
                 from: winner.from,
                 to: winner.target,
-                kind,
-            });
-        }
-
-        resolutions
+            })
+            .collect()
     }
 
     fn commit_phase(
@@ -249,84 +240,110 @@ impl Simulation {
     ) -> CommitResult {
         // intents[i] aligns with organisms[i] (both built in sorted ID order)
         let mut facing_updates = Vec::new();
+        let mut actions_applied = 0_u64;
+        let action_energy_cost = self.config.move_action_energy_cost;
         for (idx, intent) in intents.iter().enumerate() {
             let organism = &mut self.organisms[idx];
-            if organism.facing != intent.facing_after_turn {
+            if organism.facing != intent.facing_after_actions {
                 facing_updates.push(OrganismFacing {
                     id: organism.id,
-                    facing: intent.facing_after_turn,
+                    facing: intent.facing_after_actions,
                 });
             }
-            organism.facing = intent.facing_after_turn;
+            organism.facing = intent.facing_after_actions;
+            let action_count = u64::from(intent.action_cost_count);
+            actions_applied += action_count;
+            if action_count > 0 {
+                organism.energy -= action_energy_cost * intent.action_cost_count as f32;
+            }
         }
 
         let org_count = self.organisms.len();
         let food_count = self.foods.len();
         let mut move_to: Vec<Option<(i32, i32)>> = vec![None; org_count];
-        let mut consumed_org = vec![false; org_count];
-        let mut consumed_food = vec![false; food_count];
-        let mut consumed_energy = vec![0.0_f32; org_count];
-        let mut removed_positions = Vec::new();
-        let mut consumptions = 0_u64;
-        let mut predations = 0_u64;
-
         for resolution in resolutions {
             let actor_idx = self.organism_index(resolution.actor);
             move_to[actor_idx] = Some(resolution.to);
-            match resolution.kind {
-                MoveResolutionKind::ConsumeOrganism { consumed_organism } => {
-                    let victim_idx = self.organism_index(consumed_organism);
-                    if !consumed_org[victim_idx] {
-                        consumed_org[victim_idx] = true;
-                        let victim = &self.organisms[victim_idx];
-                        removed_positions.push(RemovedEntityPosition {
-                            entity_id: EntityId::Organism(consumed_organism),
-                            q: victim.q,
-                            r: victim.r,
-                        });
-                        consumed_energy[actor_idx] += self.config.food_energy * 2.0;
-                    }
-                    consumptions += 1;
-                    predations += 1;
-                }
-                MoveResolutionKind::ConsumeFood {
-                    consumed_food: food_id,
-                } => {
-                    let food_idx = self.food_index(food_id);
-                    if !consumed_food[food_idx] {
-                        consumed_food[food_idx] = true;
-                        let food = &self.foods[food_idx];
-                        removed_positions.push(RemovedEntityPosition {
-                            entity_id: EntityId::Food(food_id),
-                            q: food.q,
-                            r: food.r,
-                        });
-                        consumed_energy[actor_idx] += food.energy;
-                    }
-                    consumptions += 1;
-                }
-                MoveResolutionKind::MoveOnly => {}
-            }
         }
 
-        let move_energy_cost = self.config.move_action_energy_cost;
-        let mut new_organisms = Vec::with_capacity(org_count);
-        for (idx, mut organism) in self.organisms.drain(..).enumerate() {
-            if consumed_org[idx] {
-                continue;
-            }
+        for (idx, organism) in self.organisms.iter_mut().enumerate() {
             if let Some((next_q, next_r)) = move_to[idx] {
                 organism.q = next_q;
                 organism.r = next_r;
-                organism.energy -= move_energy_cost;
             }
-            if consumed_energy[idx] > 0.0 {
-                organism.energy += consumed_energy[idx];
-                organism.consumptions_count = organism.consumptions_count.saturating_add(1);
-            }
-            new_organisms.push(organism);
         }
-        self.organisms = new_organisms;
+
+        self.rebuild_occupancy();
+
+        let mut consumed_food = vec![false; food_count];
+        let mut removed_positions = Vec::new();
+        let mut consumptions = 0_u64;
+        let mut predations = 0_u64;
+        for (idx, intent) in intents.iter().enumerate() {
+            if !intent.wants_consume {
+                continue;
+            }
+
+            let Some((target_q, target_r)) = consume_target_for_intent(intent, move_to[idx]) else {
+                continue;
+            };
+            let Some(target_idx) = self.cell_index(target_q, target_r) else {
+                continue;
+            };
+
+            match self.occupancy[target_idx] {
+                Some(Occupant::Food(food_id)) => {
+                    let food_idx = self.food_index(food_id);
+                    if consumed_food[food_idx] {
+                        continue;
+                    }
+                    consumed_food[food_idx] = true;
+                    let food = &self.foods[food_idx];
+                    removed_positions.push(RemovedEntityPosition {
+                        entity_id: EntityId::Food(food_id),
+                        q: food.q,
+                        r: food.r,
+                    });
+                    self.organisms[idx].energy += food.energy;
+                    self.organisms[idx].consumptions_count =
+                        self.organisms[idx].consumptions_count.saturating_add(1);
+                    self.occupancy[target_idx] = None;
+                    consumptions += 1;
+                }
+                Some(Occupant::Organism(prey_id)) => {
+                    let prey_idx = self.organism_index(prey_id);
+                    let drain = self.organisms[prey_idx]
+                        .energy
+                        .min(self.config.food_energy)
+                        .max(0.0);
+                    if drain <= 0.0 {
+                        continue;
+                    }
+
+                    if idx < prey_idx {
+                        let (left, right) = self.organisms.split_at_mut(prey_idx);
+                        let predator = &mut left[idx];
+                        let prey = &mut right[0];
+                        prey.energy -= drain;
+                        predator.energy += drain;
+                        predator.consumptions_count = predator.consumptions_count.saturating_add(1);
+                    } else if idx > prey_idx {
+                        let (left, right) = self.organisms.split_at_mut(idx);
+                        let prey = &mut left[prey_idx];
+                        let predator = &mut right[0];
+                        prey.energy -= drain;
+                        predator.energy += drain;
+                        predator.consumptions_count = predator.consumptions_count.saturating_add(1);
+                    } else {
+                        continue;
+                    }
+
+                    consumptions += 1;
+                    predations += 1;
+                }
+                None => {}
+            }
+        }
 
         let mut new_foods = Vec::with_capacity(food_count);
         for (idx, food) in self.foods.drain(..).enumerate() {
@@ -338,6 +355,7 @@ impl Simulation {
 
         self.rebuild_occupancy();
         let food_spawned = self.replenish_food_supply();
+
         let moves = resolutions
             .iter()
             .map(|resolution| OrganismMove {
@@ -354,6 +372,7 @@ impl Simulation {
             food_spawned,
             consumptions,
             predations,
+            actions_applied,
         }
     }
 
@@ -369,8 +388,7 @@ impl Simulation {
         let occupancy_snapshot = self.occupancy.clone();
 
         // Merge-iterate: both intents and organisms are sorted by ID.
-        // Some organisms may have been consumed in commit_phase, so organisms
-        // is a subset. Advance intent_idx to find matching intents.
+        // Advance intent_idx to find matching intents.
         let mut intent_idx = 0;
         for org_idx in 0..self.organisms.len() {
             let organism_id = self.organisms[org_idx].id;
@@ -488,6 +506,14 @@ fn compare_move_candidates(a: &MoveCandidate, b: &MoveCandidate) -> Ordering {
         .then_with(|| b.actor.cmp(&a.actor))
 }
 
+fn intent_action_priority(action: IntentActionKind) -> u8 {
+    match action {
+        IntentActionKind::Turn => 0,
+        IntentActionKind::Move => 1,
+        IntentActionKind::Consume => 2,
+    }
+}
+
 fn build_intent_for_organism(
     organism: &mut OrganismState,
     world_width: i32,
@@ -499,29 +525,134 @@ fn build_intent_for_organism(
     let vision_distance = organism.genome.vision_distance;
     let evaluation = evaluate_brain(organism, world_width, occupancy, vision_distance, scratch);
 
-    let facing_after_turn =
-        facing_after_turn(snapshot_state.facing, evaluation.resolved_actions.turn);
+    let turn_choice = evaluation.resolved_actions.turn;
     let wants_move = evaluation.resolved_actions.wants_move;
+    let wants_consume = evaluation.resolved_actions.wants_consume;
     let wants_reproduce = evaluation.resolved_actions.wants_reproduce;
     let move_confidence = evaluation.action_activations[action_index(ActionType::MoveForward)];
-    let move_target = if wants_move {
-        let target = hex_neighbor((snapshot_state.q, snapshot_state.r), facing_after_turn);
-        (target.0 >= 0 && target.1 >= 0 && target.0 < world_width && target.1 < world_width)
-            .then_some(target)
-    } else {
-        None
-    };
+    let turn_strength = evaluation.action_activations[action_index(ActionType::Turn)].abs();
+    let consume_strength = evaluation.action_activations[action_index(ActionType::Consume)];
+
+    let mut ordered_actions = [IntentActionKind::Turn; 3];
+    let mut ordered_action_count = 0_usize;
+    let mut move_target = None;
+
+    if !wants_reproduce {
+        let mut ranked_actions = [
+            RankedIntentAction {
+                kind: IntentActionKind::Turn,
+                strength: 0.0,
+            },
+            RankedIntentAction {
+                kind: IntentActionKind::Move,
+                strength: 0.0,
+            },
+            RankedIntentAction {
+                kind: IntentActionKind::Consume,
+                strength: 0.0,
+            },
+        ];
+
+        if turn_choice != TurnChoice::None {
+            ranked_actions[ordered_action_count] = RankedIntentAction {
+                kind: IntentActionKind::Turn,
+                strength: turn_strength,
+            };
+            ordered_action_count += 1;
+        }
+        if wants_move {
+            ranked_actions[ordered_action_count] = RankedIntentAction {
+                kind: IntentActionKind::Move,
+                strength: move_confidence,
+            };
+            ordered_action_count += 1;
+        }
+        if wants_consume {
+            ranked_actions[ordered_action_count] = RankedIntentAction {
+                kind: IntentActionKind::Consume,
+                strength: consume_strength,
+            };
+            ordered_action_count += 1;
+        }
+
+        ranked_actions[..ordered_action_count].sort_by(|a, b| {
+            b.strength
+                .total_cmp(&a.strength)
+                .then_with(|| intent_action_priority(a.kind).cmp(&intent_action_priority(b.kind)))
+        });
+
+        for idx in 0..ordered_action_count {
+            ordered_actions[idx] = ranked_actions[idx].kind;
+        }
+
+        let mut virtual_facing = snapshot_state.facing;
+        for action in &ordered_actions[..ordered_action_count] {
+            match action {
+                IntentActionKind::Turn => {
+                    virtual_facing = facing_after_turn(virtual_facing, turn_choice);
+                }
+                IntentActionKind::Move => {
+                    let target = hex_neighbor((snapshot_state.q, snapshot_state.r), virtual_facing);
+                    move_target = (target.0 >= 0
+                        && target.1 >= 0
+                        && target.0 < world_width
+                        && target.1 < world_width)
+                        .then_some(target);
+                    break;
+                }
+                IntentActionKind::Consume => {}
+            }
+        }
+    }
+
+    let facing_after_actions = facing_after_turn(snapshot_state.facing, turn_choice);
 
     OrganismIntent {
         id: organism_id,
         from: (snapshot_state.q, snapshot_state.r),
-        facing_after_turn,
+        facing_before_actions: snapshot_state.facing,
+        facing_after_actions,
+        turn_choice,
         wants_move,
+        wants_consume,
         wants_reproduce,
         move_target,
         move_confidence,
+        ordered_actions,
+        ordered_action_count: ordered_action_count as u8,
+        action_cost_count: ordered_action_count as u8,
         synapse_ops: evaluation.synapse_ops,
     }
+}
+
+fn consume_target_for_intent(
+    intent: &OrganismIntent,
+    move_to: Option<(i32, i32)>,
+) -> Option<(i32, i32)> {
+    if !intent.wants_consume {
+        return None;
+    }
+
+    let mut current_pos = intent.from;
+    let mut current_facing = intent.facing_before_actions;
+
+    for action in &intent.ordered_actions[..intent.ordered_action_count as usize] {
+        match action {
+            IntentActionKind::Turn => {
+                current_facing = facing_after_turn(current_facing, intent.turn_choice);
+            }
+            IntentActionKind::Move => {
+                if let Some(to) = move_to {
+                    current_pos = to;
+                }
+            }
+            IntentActionKind::Consume => {
+                return Some(hex_neighbor(current_pos, current_facing));
+            }
+        }
+    }
+
+    None
 }
 
 fn occupancy_snapshot_cell(

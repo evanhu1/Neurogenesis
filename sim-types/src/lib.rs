@@ -17,12 +17,14 @@ pub struct FoodId(pub u64);
 pub enum ActionType {
     MoveForward,
     Turn,
+    Consume,
     Reproduce,
 }
 impl ActionType {
-    pub const ALL: [ActionType; 3] = [
+    pub const ALL: [ActionType; 4] = [
         ActionType::MoveForward,
         ActionType::Turn,
+        ActionType::Consume,
         ActionType::Reproduce,
     ];
 }

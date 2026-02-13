@@ -31,6 +31,7 @@ pub(crate) enum TurnChoice {
 pub(crate) struct ResolvedActions {
     pub(crate) turn: TurnChoice,
     pub(crate) wants_move: bool,
+    pub(crate) wants_consume: bool,
     pub(crate) wants_reproduce: bool,
 }
 
@@ -222,7 +223,8 @@ pub(crate) fn action_index(action: ActionType) -> usize {
     match action {
         ActionType::MoveForward => 0,
         ActionType::Turn => 1,
-        ActionType::Reproduce => 2,
+        ActionType::Consume => 2,
+        ActionType::Reproduce => 3,
     }
 }
 
@@ -393,6 +395,12 @@ pub fn derive_active_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
                 .neuron
                 .neuron_id,
         );
+    } else if resolved.wants_consume {
+        active.push(
+            brain.action[action_index(ActionType::Consume)]
+                .neuron
+                .neuron_id,
+        );
     }
 
     active
@@ -401,6 +409,7 @@ pub fn derive_active_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
 fn resolve_actions(activations: [f32; ACTION_COUNT]) -> ResolvedActions {
     let move_activation = activations[action_index(ActionType::MoveForward)];
     let turn_signal = activations[action_index(ActionType::Turn)];
+    let consume_activation = activations[action_index(ActionType::Consume)];
     let reproduce_activation = activations[action_index(ActionType::Reproduce)];
 
     let turn = if turn_signal > TURN_ACTION_DEADZONE {
@@ -412,11 +421,13 @@ fn resolve_actions(activations: [f32; ACTION_COUNT]) -> ResolvedActions {
     };
 
     let wants_move = move_activation > ACTION_ACTIVATION_THRESHOLD;
+    let wants_consume = consume_activation > ACTION_ACTIVATION_THRESHOLD;
     let wants_reproduce = reproduce_activation > ACTION_ACTIVATION_THRESHOLD;
     if wants_reproduce {
         return ResolvedActions {
             turn: TurnChoice::None,
             wants_move: false,
+            wants_consume: false,
             wants_reproduce: true,
         };
     }
@@ -424,6 +435,7 @@ fn resolve_actions(activations: [f32; ACTION_COUNT]) -> ResolvedActions {
     ResolvedActions {
         turn,
         wants_move,
+        wants_consume,
         wants_reproduce: false,
     }
 }
