@@ -285,6 +285,29 @@ fn reproduce_blocks_move_and_turn() {
 }
 
 #[test]
+fn reproduce_failure_allows_move_and_turn() {
+    let mut cfg = test_config(7, 1);
+    cfg.reproduction_energy_cost = 20.0;
+    let mut sim = Simulation::new(cfg, 1076).expect("simulation should initialize");
+    let mut organism = make_organism(0, 3, 3, FacingDirection::East, true, true, false, 0.8, 10.0);
+    enable_reproduce_action(&mut organism);
+    configure_sim(&mut sim, vec![organism]);
+
+    let delta = tick_once(&mut sim);
+    assert_eq!(delta.metrics.reproductions_last_turn, 0);
+    assert_eq!(delta.moves.len(), 1);
+    assert_eq!(delta.moves[0].id, OrganismId(0));
+    assert_eq!(delta.moves[0].to, (4, 2));
+
+    let organism = sim
+        .organisms
+        .iter()
+        .find(|organism| organism.id == OrganismId(0))
+        .expect("organism should remain alive");
+    assert_eq!(organism.facing, FacingDirection::NorthEast);
+}
+
+#[test]
 fn turn_action_has_deadzone_around_zero() {
     let mut organism = OrganismState {
         id: OrganismId(0),
@@ -304,7 +327,6 @@ fn turn_action_has_deadzone_around_zero() {
             eligibility_decay_lambda: 0.9,
             synapse_prune_threshold: 0.01,
             mutation_rate_vision_distance: 0.0,
-            mutation_rate_weight: 0.0,
             mutation_rate_add_edge: 0.0,
             mutation_rate_remove_edge: 0.0,
             mutation_rate_split_edge: 0.0,
@@ -356,7 +378,6 @@ fn self_recurrent_interneuron_uses_previous_activation_with_leaky_update() {
         eligibility_decay_lambda: 0.9,
         synapse_prune_threshold: 0.01,
         mutation_rate_vision_distance: 0.0,
-        mutation_rate_weight: 0.0,
         mutation_rate_add_edge: 0.0,
         mutation_rate_remove_edge: 0.0,
         mutation_rate_split_edge: 0.0,
@@ -411,7 +432,6 @@ fn action_biases_drive_actions_without_incoming_edges() {
         eligibility_decay_lambda: 0.9,
         synapse_prune_threshold: 0.01,
         mutation_rate_vision_distance: 0.0,
-        mutation_rate_weight: 0.0,
         mutation_rate_add_edge: 0.0,
         mutation_rate_remove_edge: 0.0,
         mutation_rate_split_edge: 0.0,
@@ -446,7 +466,7 @@ fn action_biases_drive_actions_without_incoming_edges() {
     let evaluation = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
 
     assert!(evaluation.resolved_actions.wants_reproduce);
-    assert!(!evaluation.resolved_actions.wants_move);
+    assert!(evaluation.resolved_actions.wants_move);
 }
 
 #[test]
@@ -459,7 +479,6 @@ fn oja_update_adjusts_weight_and_eligibility_for_active_synapse() {
         eligibility_decay_lambda: 0.9,
         synapse_prune_threshold: 0.0,
         mutation_rate_vision_distance: 0.0,
-        mutation_rate_weight: 0.0,
         mutation_rate_add_edge: 0.0,
         mutation_rate_remove_edge: 0.0,
         mutation_rate_split_edge: 0.0,
@@ -497,13 +516,7 @@ fn oja_update_adjusts_weight_and_eligibility_for_active_synapse() {
     occupancy[4] = Some(Occupant::Organism(organism.id));
     let mut scratch = BrainScratch::new();
     let vision_distance = organism.genome.vision_distance;
-    let _ = evaluate_brain(
-        &mut organism,
-        3,
-        &occupancy,
-        vision_distance,
-        &mut scratch,
-    );
+    let _ = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
 
     let pre = organism.brain.inter[0].neuron.activation;
     let post = organism.brain.action[action_index(ActionType::MoveForward)]
@@ -529,7 +542,6 @@ fn synapse_pruning_runs_on_schedule_and_removes_low_eligibility_edges() {
         eligibility_decay_lambda: 0.9,
         synapse_prune_threshold: 0.1,
         mutation_rate_vision_distance: 0.0,
-        mutation_rate_weight: 0.0,
         mutation_rate_add_edge: 0.0,
         mutation_rate_remove_edge: 0.0,
         mutation_rate_split_edge: 0.0,
@@ -566,13 +578,7 @@ fn synapse_pruning_runs_on_schedule_and_removes_low_eligibility_edges() {
     occupancy[4] = Some(Occupant::Organism(organism.id));
     let mut scratch = BrainScratch::new();
     let vision_distance = organism.genome.vision_distance;
-    let _ = evaluate_brain(
-        &mut organism,
-        3,
-        &occupancy,
-        vision_distance,
-        &mut scratch,
-    );
+    let _ = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
 
     apply_runtime_plasticity(&mut organism, 500);
     assert!(organism.brain.sensory[0].synapses.is_empty());

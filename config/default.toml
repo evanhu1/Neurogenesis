@@ -13,14 +13,13 @@ speciation_threshold = 20.0
 
 [seed_genome_config]
 num_neurons = 10
-num_synapses = 40
+num_synapses = 100
 vision_distance = 10
 hebb_eta_baseline = 0.001
 hebb_eta_gain = 0.0
 eligibility_decay_lambda = 0.9
-synapse_prune_threshold = 0.01
+synapse_prune_threshold = 0.05
 mutation_rate_vision_distance = 0.04
-mutation_rate_weight = 0.25
 mutation_rate_add_edge = 0.03
 mutation_rate_remove_edge = 0.05
 mutation_rate_split_edge = 0.02

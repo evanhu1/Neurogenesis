@@ -87,7 +87,6 @@ export function InspectorPanel({
         label: 'Vision Distance',
         value: genome.mutation_rate_vision_distance,
       },
-      { key: 'mutation_rate_weight', label: 'Weight', value: genome.mutation_rate_weight },
       { key: 'mutation_rate_add_edge', label: 'Add Edge', value: genome.mutation_rate_add_edge },
       {
         key: 'mutation_rate_remove_edge',

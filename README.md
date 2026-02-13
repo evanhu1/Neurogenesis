@@ -46,8 +46,7 @@ rotation. `MoveForward` uses post-turn facing.
 `seed_genome_config`.
 
 `SeedGenomeConfig` fields: `num_neurons`, `num_synapses`, `vision_distance`,
-`mutation_rate_vision_distance`, `mutation_rate_weight`,
-`mutation_rate_add_edge`, `mutation_rate_remove_edge`,
+`mutation_rate_vision_distance`, `mutation_rate_add_edge`, `mutation_rate_remove_edge`,
 `mutation_rate_split_edge`, `mutation_rate_inter_bias`,
 `mutation_rate_inter_update_rate`, `mutation_rate_action_bias`.
 

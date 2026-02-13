@@ -544,7 +544,7 @@ fn build_intent_for_organism(
     let evaluation = evaluate_brain(organism, world_width, occupancy, vision_distance, scratch);
     apply_runtime_plasticity(organism, max_organism_age);
 
-    if turn_choice != TurnChoice::None || wants_move || wants_consume {
+    let turn_choice = evaluation.resolved_actions.turn;
     let wants_move = evaluation.resolved_actions.wants_move;
     let wants_consume = evaluation.resolved_actions.wants_consume;
     let wants_reproduce = evaluation.resolved_actions.wants_reproduce;
@@ -556,7 +556,7 @@ fn build_intent_for_organism(
     let mut ordered_action_count = 0_usize;
     let mut move_target = None;
 
-    if !wants_reproduce {
+    if turn_choice != TurnChoice::None || wants_move || wants_consume {
         let mut ranked_actions = [
             RankedIntentAction {
                 kind: IntentActionKind::Turn,

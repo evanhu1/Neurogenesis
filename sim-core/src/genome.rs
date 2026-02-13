@@ -26,11 +26,8 @@ const MUTATION_RATE_ADAPTATION_TAU: f32 = 0.25;
 const MUTATION_RATE_MIN: f32 = 1.0e-4;
 const MUTATION_RATE_MAX: f32 = 1.0 - MUTATION_RATE_MIN;
 
-const WEIGHT_PERTURBATION_STDDEV: f32 = 0.3;
 const BIAS_PERTURBATION_STDDEV: f32 = 0.15;
 const INTER_LOG_TAU_PERTURBATION_STDDEV: f32 = 0.05;
-const ETA_BASELINE_PERTURBATION_STDDEV: f32 = 0.01;
-const ETA_GAIN_PERTURBATION_STDDEV: f32 = 0.05;
 const ELIGIBILITY_DECAY_LAMBDA_PERTURBATION_STDDEV: f32 = 0.05;
 const SYNAPSE_PRUNE_THRESHOLD_PERTURBATION_STDDEV: f32 = 0.02;
 pub(crate) const INTER_TAU_MIN: f32 = 0.1;
@@ -88,7 +85,6 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
             DEFAULT_SYNAPSE_PRUNE_THRESHOLD
         },
         mutation_rate_vision_distance: config.mutation_rate_vision_distance,
-        mutation_rate_weight: config.mutation_rate_weight,
         mutation_rate_add_edge: config.mutation_rate_add_edge,
         mutation_rate_remove_edge: config.mutation_rate_remove_edge,
         mutation_rate_split_edge: config.mutation_rate_split_edge,
@@ -232,10 +228,9 @@ fn random_edge<R: Rng + ?Sized>(
     None
 }
 
-fn mutation_rate_genes_mut(genome: &mut OrganismGenome) -> [&mut f32; 10] {
+fn mutation_rate_genes_mut(genome: &mut OrganismGenome) -> [&mut f32; 9] {
     [
         &mut genome.mutation_rate_vision_distance,
-        &mut genome.mutation_rate_weight,
         &mut genome.mutation_rate_add_edge,
         &mut genome.mutation_rate_remove_edge,
         &mut genome.mutation_rate_split_edge,
@@ -247,10 +242,9 @@ fn mutation_rate_genes_mut(genome: &mut OrganismGenome) -> [&mut f32; 10] {
     ]
 }
 
-fn mutation_rate_genes(genome: &OrganismGenome) -> [f32; 10] {
+fn mutation_rate_genes(genome: &OrganismGenome) -> [f32; 9] {
     [
         genome.mutation_rate_vision_distance,
-        genome.mutation_rate_weight,
         genome.mutation_rate_add_edge,
         genome.mutation_rate_remove_edge,
         genome.mutation_rate_split_edge,
@@ -381,26 +375,6 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
     align_genome_vectors(genome, world_max_num_neurons, rng);
     mutate_mutation_rate_genes(genome, rng);
 
-    if rng.random::<f32>() < genome.mutation_rate_weight {
-        genome.hebb_eta_baseline = perturb_clamped(
-            genome.hebb_eta_baseline,
-            ETA_BASELINE_PERTURBATION_STDDEV,
-            ETA_BASELINE_MIN,
-            ETA_BASELINE_MAX,
-            rng,
-        );
-    }
-
-    if rng.random::<f32>() < genome.mutation_rate_weight {
-        genome.hebb_eta_gain = perturb_clamped(
-            genome.hebb_eta_gain,
-            ETA_GAIN_PERTURBATION_STDDEV,
-            ETA_GAIN_MIN,
-            ETA_GAIN_MAX,
-            rng,
-        );
-    }
-
     if rng.random::<f32>() < genome.mutation_rate_vision_distance {
         genome.vision_distance = step_u32(
             genome.vision_distance,
@@ -408,19 +382,6 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
             MAX_MUTATED_VISION_DISTANCE,
             rng,
         );
-    }
-
-    if rng.random::<f32>() < genome.mutation_rate_weight && !genome.edges.is_empty() {
-        let idx = rng.random_range(0..genome.edges.len());
-        let edge = &mut genome.edges[idx];
-        if let Some(required_sign) = source_weight_sign(
-            edge.pre_neuron_id,
-            genome.num_neurons,
-            &genome.interneuron_types,
-        ) {
-            let mutated = edge.weight + normal_sample(rng) * WEIGHT_PERTURBATION_STDDEV;
-            edge.weight = clamp_signed_weight(mutated, required_sign);
-        }
     }
 
     if rng.random::<f32>() < genome.mutation_rate_add_edge {
@@ -719,7 +680,6 @@ pub(crate) fn validate_seed_genome_config(config: &SeedGenomeConfig) -> Result<(
         "mutation_rate_vision_distance",
         config.mutation_rate_vision_distance,
     )?;
-    validate_rate("mutation_rate_weight", config.mutation_rate_weight)?;
     validate_rate("mutation_rate_add_edge", config.mutation_rate_add_edge)?;
     validate_rate(
         "mutation_rate_remove_edge",

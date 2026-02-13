@@ -64,7 +64,6 @@ Runtime invariant assertions in genome expression (`debug_assert!`):
 - Graph genes: sorted `edges` (`SynapseEdge`)
 - Per-operator mutation-rate genes:
   - `mutation_rate_vision_distance`
-  - `mutation_rate_weight`
   - `mutation_rate_add_edge`
   - `mutation_rate_remove_edge`
   - `mutation_rate_split_edge`

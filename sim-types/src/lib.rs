@@ -110,8 +110,6 @@ pub struct OrganismGenome {
     #[serde(default)]
     pub mutation_rate_vision_distance: f32,
     #[serde(default)]
-    pub mutation_rate_weight: f32,
-    #[serde(default)]
     pub mutation_rate_add_edge: f32,
     #[serde(default)]
     pub mutation_rate_remove_edge: f32,
@@ -150,8 +148,6 @@ pub struct SeedGenomeConfig {
     pub synapse_prune_threshold: f32,
     #[serde(default)]
     pub mutation_rate_vision_distance: f32,
-    #[serde(default)]
-    pub mutation_rate_weight: f32,
     #[serde(default)]
     pub mutation_rate_add_edge: f32,
     #[serde(default)]

@@ -32,7 +32,6 @@ fn stable_perf_config() -> WorldConfig {
             eligibility_decay_lambda: 0.9,
             synapse_prune_threshold: 0.01,
             mutation_rate_vision_distance: 0.04,
-            mutation_rate_weight: 0.25,
             mutation_rate_add_edge: 0.03,
             mutation_rate_remove_edge: 0.02,
             mutation_rate_split_edge: 0.005,

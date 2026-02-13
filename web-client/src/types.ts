@@ -13,7 +13,6 @@ export type SeedGenomeConfig = {
   eligibility_decay_lambda: number;
   synapse_prune_threshold: number;
   mutation_rate_vision_distance: number;
-  mutation_rate_weight: number;
   mutation_rate_add_edge: number;
   mutation_rate_remove_edge: number;
   mutation_rate_split_edge: number;
@@ -48,7 +47,6 @@ export type OrganismGenome = {
   eligibility_decay_lambda: number;
   synapse_prune_threshold: number;
   mutation_rate_vision_distance: number;
-  mutation_rate_weight: number;
   mutation_rate_add_edge: number;
   mutation_rate_remove_edge: number;
   mutation_rate_split_edge: number;
@@ -352,7 +350,6 @@ function parseDefaultConfigToml(tomlText: string): WorldConfig {
         genomeSource,
         'mutation_rate_vision_distance',
       ),
-      mutation_rate_weight: parseRequiredNumber(genomeSource, 'mutation_rate_weight'),
       mutation_rate_add_edge: parseRequiredNumber(genomeSource, 'mutation_rate_add_edge'),
       mutation_rate_remove_edge: parseRequiredNumber(genomeSource, 'mutation_rate_remove_edge'),
       mutation_rate_split_edge: parseRequiredNumber(genomeSource, 'mutation_rate_split_edge'),

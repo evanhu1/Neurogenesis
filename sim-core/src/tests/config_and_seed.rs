@@ -5,10 +5,9 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use std::cmp::Ordering;
 
-fn mutation_rates(genome: &OrganismGenome) -> [f32; 10] {
+fn mutation_rates(genome: &OrganismGenome) -> [f32; 9] {
     [
         genome.mutation_rate_vision_distance,
-        genome.mutation_rate_weight,
         genome.mutation_rate_add_edge,
         genome.mutation_rate_remove_edge,
         genome.mutation_rate_split_edge,
@@ -95,9 +94,9 @@ fn config_validation_rejects_zero_world_width() {
 #[test]
 fn config_validation_rejects_mutation_rate_out_of_range() {
     let mut cfg = stable_test_config();
-    cfg.seed_genome_config.mutation_rate_weight = 1.5;
+    cfg.seed_genome_config.mutation_rate_add_edge = 1.5;
     let err = Simulation::new(cfg, 1).expect_err("expected invalid config error");
-    assert!(err.to_string().contains("mutation_rate_weight"));
+    assert!(err.to_string().contains("mutation_rate_add_edge"));
 }
 
 #[test]
@@ -254,7 +253,6 @@ fn mutate_genome_repairs_legacy_wrong_sign_edges() {
         eligibility: 0.0,
     }];
     genome.mutation_rate_vision_distance = 0.0;
-    genome.mutation_rate_weight = 0.0;
     genome.mutation_rate_add_edge = 0.0;
     genome.mutation_rate_remove_edge = 0.0;
     genome.mutation_rate_split_edge = 0.0;
@@ -296,7 +294,6 @@ fn sensory_edges_remain_positive_through_mutation() {
     cfg.seed_genome_config.num_neurons = 5;
     cfg.max_num_neurons = 8;
     cfg.seed_genome_config.num_synapses = 30;
-    cfg.seed_genome_config.mutation_rate_weight = 1.0;
     cfg.seed_genome_config.mutation_rate_add_edge = 1.0;
     cfg.seed_genome_config.mutation_rate_split_edge = 1.0;
 
@@ -320,7 +317,6 @@ fn dale_law_signs_hold_for_all_interneuron_outgoing_edges() {
     cfg.seed_genome_config.num_neurons = 6;
     cfg.max_num_neurons = 10;
     cfg.seed_genome_config.num_synapses = 40;
-    cfg.seed_genome_config.mutation_rate_weight = 1.0;
     cfg.seed_genome_config.mutation_rate_add_edge = 1.0;
     cfg.seed_genome_config.mutation_rate_split_edge = 1.0;
 
@@ -355,7 +351,6 @@ fn mutation_rate_self_adaptation_stays_bounded_and_changes_rates() {
     cfg.max_num_neurons = 8;
     cfg.seed_genome_config.num_synapses = 10;
     cfg.seed_genome_config.mutation_rate_vision_distance = 0.2;
-    cfg.seed_genome_config.mutation_rate_weight = 0.3;
     cfg.seed_genome_config.mutation_rate_add_edge = 0.2;
     cfg.seed_genome_config.mutation_rate_remove_edge = 0.2;
     cfg.seed_genome_config.mutation_rate_split_edge = 0.1;
@@ -387,7 +382,6 @@ fn mutation_rate_self_adaptation_stays_bounded_and_changes_rates() {
 fn mutation_rate_self_adaptation_recovers_from_hard_boundaries() {
     let mut genome = test_genome();
     genome.mutation_rate_vision_distance = 0.0;
-    genome.mutation_rate_weight = 1.0;
     genome.mutation_rate_add_edge = 0.0;
     genome.mutation_rate_remove_edge = 1.0;
     genome.mutation_rate_split_edge = 0.0;
@@ -410,7 +404,6 @@ fn mutation_rate_self_adaptation_long_horizon_stays_inside_open_interval() {
     cfg.max_num_neurons = 8;
     cfg.seed_genome_config.num_synapses = 10;
     cfg.seed_genome_config.mutation_rate_vision_distance = 0.25;
-    cfg.seed_genome_config.mutation_rate_weight = 0.25;
     cfg.seed_genome_config.mutation_rate_add_edge = 0.25;
     cfg.seed_genome_config.mutation_rate_remove_edge = 0.25;
     cfg.seed_genome_config.mutation_rate_split_edge = 0.25;
@@ -437,7 +430,6 @@ fn mutation_rate_self_adaptation_long_horizon_avoids_boundary_pileup() {
     cfg.max_num_neurons = 8;
     cfg.seed_genome_config.num_synapses = 10;
     cfg.seed_genome_config.mutation_rate_vision_distance = 0.25;
-    cfg.seed_genome_config.mutation_rate_weight = 0.25;
     cfg.seed_genome_config.mutation_rate_add_edge = 0.25;
     cfg.seed_genome_config.mutation_rate_remove_edge = 0.25;
     cfg.seed_genome_config.mutation_rate_split_edge = 0.25;
