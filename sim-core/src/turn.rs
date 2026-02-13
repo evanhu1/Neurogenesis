@@ -1,7 +1,7 @@
 use crate::brain::{
     action_index, apply_runtime_plasticity, evaluate_brain, BrainScratch, TurnChoice,
 };
-use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right};
+use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right, wrap_position};
 use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 use crate::Simulation;
 use rayon::prelude::*;
@@ -301,12 +301,12 @@ impl Simulation {
                 continue;
             }
 
-            let Some((target_q, target_r)) = consume_target_for_intent(intent, move_to[idx]) else {
+            let Some((target_q, target_r)) =
+                consume_target_for_intent(intent, move_to[idx], self.config.world_width as i32)
+            else {
                 continue;
             };
-            let Some(target_idx) = self.cell_index(target_q, target_r) else {
-                continue;
-            };
+            let target_idx = self.cell_index(target_q, target_r);
 
             match self.occupancy[target_idx] {
                 Some(Occupant::Food(food_id)) => {
@@ -430,10 +430,7 @@ impl Simulation {
             let parent_species_id = self.organisms[org_idx].species_id;
             let parent_genome = self.organisms[org_idx].genome.clone();
 
-            let Some((q, r)) = reproduction_target(world_width, parent_q, parent_r, parent_facing)
-            else {
-                continue;
-            };
+            let (q, r) = reproduction_target(world_width, parent_q, parent_r, parent_facing);
             if occupancy_snapshot_cell(&occupancy_snapshot, world_width, q, r).is_some()
                 || reserved_spawn_cells.contains(&(q, r))
             {
@@ -611,12 +608,12 @@ fn build_intent_for_organism(
                     virtual_facing = facing_after_turn(virtual_facing, turn_choice);
                 }
                 IntentActionKind::Move => {
-                    let target = hex_neighbor((snapshot_state.q, snapshot_state.r), virtual_facing);
-                    move_target = (target.0 >= 0
-                        && target.1 >= 0
-                        && target.0 < world_width
-                        && target.1 < world_width)
-                        .then_some(target);
+                    let target = hex_neighbor(
+                        (snapshot_state.q, snapshot_state.r),
+                        virtual_facing,
+                        world_width,
+                    );
+                    move_target = Some(target);
                     break;
                 }
                 IntentActionKind::Consume => {}
@@ -647,6 +644,7 @@ fn build_intent_for_organism(
 fn consume_target_for_intent(
     intent: &OrganismIntent,
     move_to: Option<(i32, i32)>,
+    world_width: i32,
 ) -> Option<(i32, i32)> {
     if !intent.wants_consume {
         return None;
@@ -666,7 +664,7 @@ fn consume_target_for_intent(
                 }
             }
             IntentActionKind::Consume => {
-                return Some(hex_neighbor(current_pos, current_facing));
+                return Some(hex_neighbor(current_pos, current_facing, world_width));
             }
         }
     }
@@ -680,9 +678,7 @@ fn occupancy_snapshot_cell(
     q: i32,
     r: i32,
 ) -> Option<Occupant> {
-    if q < 0 || r < 0 || q >= world_width || r >= world_width {
-        return None;
-    }
+    let (q, r) = wrap_position((q, r), world_width);
     let idx = r as usize * world_width as usize + q as usize;
     occupancy[idx]
 }
@@ -692,10 +688,9 @@ fn reproduction_target(
     parent_q: i32,
     parent_r: i32,
     parent_facing: FacingDirection,
-) -> Option<(i32, i32)> {
+) -> (i32, i32) {
     let opposite_facing = opposite_direction(parent_facing);
-    let (q, r) = hex_neighbor((parent_q, parent_r), opposite_facing);
-    (q >= 0 && r >= 0 && q < world_width && r < world_width).then_some((q, r))
+    hex_neighbor((parent_q, parent_r), opposite_facing, world_width)
 }
 
 pub(crate) fn facing_after_turn(

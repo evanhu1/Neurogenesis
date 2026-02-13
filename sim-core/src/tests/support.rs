@@ -166,9 +166,12 @@ fn forced_brain(
         make_action_neuron(2001, ActionType::Turn, 0.0),
         make_action_neuron(2002, ActionType::Consume, 0.0),
         make_action_neuron(2003, ActionType::Reproduce, 0.0),
+        make_action_neuron(2004, ActionType::Dopamine, 0.0),
     ];
     for action_neuron in &mut action {
-        action_neuron.neuron.parent_ids = vec![inter_id];
+        if action_neuron.action_type != ActionType::Dopamine {
+            action_neuron.neuron.parent_ids = vec![inter_id];
+        }
     }
 
     BrainState {
@@ -293,6 +296,7 @@ pub(super) fn reproduction_request_from_parent(
     let (q, r) = crate::grid::hex_neighbor(
         (parent.q, parent.r),
         crate::grid::opposite_direction(parent.facing),
+        sim.config.world_width as i32,
     );
     SpawnRequest {
         kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
@@ -340,9 +344,7 @@ pub(super) fn configure_sim(sim: &mut Simulation, mut organisms: Vec<OrganismSta
         .map_or(0, |max_id| max_id + 1);
     sim.occupancy = vec![None; crate::grid::world_capacity(sim.config.world_width)];
     for organism in &sim.organisms {
-        let idx = sim
-            .cell_index(organism.q, organism.r)
-            .expect("test organism should be in bounds");
+        let idx = sim.cell_index(organism.q, organism.r);
         assert!(
             sim.occupancy[idx].is_none(),
             "test setup should not overlap"
@@ -374,16 +376,12 @@ pub(super) fn assert_no_overlap(sim: &Simulation) {
             seen.insert((organism.q, organism.r)),
             "organisms should not overlap",
         );
-        let idx = sim
-            .cell_index(organism.q, organism.r)
-            .expect("organism should remain in bounds");
+        let idx = sim.cell_index(organism.q, organism.r);
         assert_eq!(sim.occupancy[idx], Some(Occupant::Organism(organism.id)));
     }
     for food in &sim.foods {
         assert!(seen.insert((food.q, food.r)), "entities should not overlap",);
-        let idx = sim
-            .cell_index(food.q, food.r)
-            .expect("food should remain in bounds");
+        let idx = sim.cell_index(food.q, food.r);
         assert_eq!(sim.occupancy[idx], Some(Occupant::Food(food.id)));
     }
     assert_eq!(

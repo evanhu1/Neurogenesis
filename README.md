@@ -71,8 +71,7 @@ Phases execute in this order each tick:
    `capacity / food_coverage_divisor`.
 6. **Reproduction** — organisms with `Reproduce` active and sufficient energy
    queue a spawn request at the hex behind them (opposite facing). Cell must be
-   in-bounds and unoccupied. Conflicts resolved by ID order. Energy deducted on
-   success.
+   unoccupied. Conflicts resolved by ID order. Energy deducted on success.
 7. **Age** — increment `age_turns` for all survivors.
 8. **Spawn** — process spawn queue in order. Offspring get mutated genome,
    opposite facing, `starting_energy`. Species assigned by genome distance.
@@ -84,14 +83,15 @@ ordering is the universal tie-breaker.
 
 ## Brain
 
-Four sensory neurons:
+Three sensory neurons:
 
-- `Look(Food)`, `Look(Organism)`, `Look(OutOfBounds)` — scan forward up to
-  `vision_distance` hexes. Signal = `(max_dist - dist + 1) / max_dist` for the
-  closest matching entity (with occlusion), or `0.0` if none found.
+- `Look(Food)`, `Look(Organism)` — scan forward up to `vision_distance` hexes
+  on a toroidal (wraparound) hex grid. Signal = `(max_dist - dist + 1) /
+  max_dist` for the closest matching entity (with occlusion), or `0.0` if none
+  found.
 - `Energy` — `ln(1 + energy) / ln(101)` with negative energy clamped to `0`.
 
-Neuron IDs: sensory `0..4`, inter `1000..1000+n`, action `2000..2003`.
+Neuron IDs: sensory `0..3`, inter `1000..1000+n`, action `2000..2003`.
 
 Evaluation order: sensory→inter, inter→inter (previous tick activations), then
 sensory→action and inter→action. Inter uses per-neuron leaky integration:

@@ -5,7 +5,8 @@ simulation engine, including turn-runner behavior.
 
 ## World
 
-- Grid: bounded axial hex coordinates `(q, r)` with `0 <= q,r < world_width`.
+- Grid: toroidal axial hex coordinates; neighbor steps wrap modulo
+  `world_width` on both axes.
 - Occupancy: dense `Vec<Option<Occupant>>` indexed by `r * world_width + q`.
 - One entity per cell (`Organism(OrganismId)` or `Food(FoodId)`).
 
@@ -31,8 +32,7 @@ results.
 ## Brain Model
 
 - Neuron IDs:
-  - Sensory: `0..4` (`Look(Food)`, `Look(Organism)`, `Look(OutOfBounds)`,
-    `Energy`)
+  - Sensory: `0..3` (`Look(Food)`, `Look(Organism)`, `Energy`)
   - Inter: `1000..1000+n`
   - Action: `2000..2003` (`MoveForward`, `Turn`, `Reproduce`)
 - Interneurons include `interneuron_type`: `Excitatory` or `Inhibitory`.

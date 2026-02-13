@@ -1,7 +1,9 @@
 use crate::brain::{ACTION_COUNT, ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT};
 use crate::SimError;
 use rand::Rng;
-use sim_types::{InterNeuronType, NeuronId, OrganismGenome, SeedGenomeConfig, SynapseEdge};
+use sim_types::{
+    ActionType, InterNeuronType, NeuronId, OrganismGenome, SeedGenomeConfig, SynapseEdge,
+};
 
 const MIN_MUTATED_VISION_DISTANCE: u32 = 1;
 const MAX_MUTATED_VISION_DISTANCE: u32 = 32;
@@ -50,8 +52,15 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     let interneuron_types: Vec<InterNeuronType> = (0..world_max_num_neurons)
         .map(|_| sample_interneuron_type(rng))
         .collect();
-    let action_biases: Vec<f32> = (0..ACTION_COUNT)
-        .map(|_| sample_initial_bias(rng))
+    let action_biases: Vec<f32> = ActionType::ALL
+        .into_iter()
+        .map(|action_type| {
+            if matches!(action_type, ActionType::Dopamine) {
+                0.0
+            } else {
+                sample_initial_bias(rng)
+            }
+        })
         .collect();
 
     let mut edges = Vec::new();

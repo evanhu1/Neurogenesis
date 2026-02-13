@@ -306,7 +306,7 @@ fn sensory_edges_remain_positive_through_mutation() {
         assert!(genome
             .edges
             .iter()
-            .filter(|edge| edge.pre_neuron_id.0 < 4)
+            .filter(|edge| edge.pre_neuron_id.0 < crate::brain::SENSORY_COUNT)
             .all(|edge| edge.weight > 0.0));
     }
 }

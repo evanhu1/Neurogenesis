@@ -19,13 +19,15 @@ pub enum ActionType {
     Turn,
     Consume,
     Reproduce,
+    Dopamine,
 }
 impl ActionType {
-    pub const ALL: [ActionType; 4] = [
+    pub const ALL: [ActionType; 5] = [
         ActionType::MoveForward,
         ActionType::Turn,
         ActionType::Consume,
         ActionType::Reproduce,
+        ActionType::Dopamine,
     ];
 }
 
@@ -73,7 +75,6 @@ impl Default for InterNeuronType {
 pub enum EntityType {
     Food,
     Organism,
-    OutOfBounds,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -91,8 +92,8 @@ pub enum SensoryReceptor {
 }
 
 impl SensoryReceptor {
-    /// Number of look-based sensory neurons (Food, Organism, OutOfBounds).
-    pub const LOOK_NEURON_COUNT: u32 = 3;
+    /// Number of look-based sensory neurons (Food, Organism).
+    pub const LOOK_NEURON_COUNT: u32 = 2;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

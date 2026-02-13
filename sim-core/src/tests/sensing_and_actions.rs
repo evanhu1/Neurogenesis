@@ -17,7 +17,7 @@ fn scan_ahead_returns_organism_with_distance_signal() {
 
     sim.occupancy.fill(None);
     for org in &sim.organisms {
-        let idx = sim.cell_index(org.q, org.r).expect("in-bounds test setup");
+        let idx = sim.cell_index(org.q, org.r);
         sim.occupancy[idx] = Some(Occupant::Organism(org.id));
     }
 
@@ -36,23 +36,25 @@ fn scan_ahead_returns_organism_with_distance_signal() {
 }
 
 #[test]
-fn scan_ahead_returns_oob_at_boundary() {
+fn scan_ahead_wraps_across_boundary() {
     let cfg = test_config(5, 2);
     let mut sim = Simulation::new(cfg, 7).expect("simulation should initialize");
 
     sim.organisms[0].q = 2;
     sim.organisms[0].r = 2;
     sim.organisms[0].facing = FacingDirection::East;
+    // Wrap sequence from (2,2) East in width 5:
+    // d1 -> (3,2), d2 -> (4,2), d3 -> (0,2)
     sim.organisms[1].q = 0;
-    sim.organisms[1].r = 0;
+    sim.organisms[1].r = 2;
 
     sim.occupancy.fill(None);
     for org in &sim.organisms {
-        let idx = sim.cell_index(org.q, org.r).expect("in-bounds test setup");
+        let idx = sim.cell_index(org.q, org.r);
         sim.occupancy[idx] = Some(Occupant::Organism(org.id));
     }
 
-    // vision_distance=3, OOB at distance 3 → signal = (3 - 3 + 1)/3 = 1/3
+    // vision_distance=3, wrapped organism at distance 3 -> signal = (3 - 3 + 1)/3 = 1/3
     let result = scan_ahead(
         (2, 2),
         FacingDirection::East,
@@ -61,8 +63,8 @@ fn scan_ahead_returns_oob_at_boundary() {
         &sim.occupancy,
         3,
     );
-    let result = result.expect("should detect out of bounds");
-    assert_eq!(result.target, EntityType::OutOfBounds);
+    let result = result.expect("should detect wrapped organism");
+    assert_eq!(result.target, EntityType::Organism);
     assert!((result.signal - 1.0 / 3.0).abs() < f32::EPSILON);
 }
 
@@ -79,7 +81,7 @@ fn scan_ahead_returns_none_for_empty_path() {
 
     sim.occupancy.fill(None);
     for org in &sim.organisms {
-        let idx = sim.cell_index(org.q, org.r).expect("in-bounds test setup");
+        let idx = sim.cell_index(org.q, org.r);
         sim.occupancy[idx] = Some(Occupant::Organism(org.id));
     }
 
@@ -338,7 +340,7 @@ fn turn_action_has_deadzone_around_zero() {
             inter_biases: vec![],
             inter_log_taus: vec![],
             interneuron_types: vec![],
-            action_biases: vec![0.0, 0.05, 0.0, 0.0],
+            action_biases: vec![0.0, 0.05, 0.0, 0.0, 0.0],
             edges: vec![],
         },
         brain: BrainState {
@@ -443,7 +445,7 @@ fn action_biases_drive_actions_without_incoming_edges() {
         inter_biases: vec![],
         inter_log_taus: vec![],
         interneuron_types: vec![],
-        action_biases: vec![5.0, 0.0, 0.0, 6.0],
+        action_biases: vec![5.0, 0.0, 0.0, 6.0, 0.0],
         edges: vec![],
     };
     let mut organism = OrganismState {
@@ -533,7 +535,7 @@ fn oja_update_adjusts_weight_and_eligibility_for_active_synapse() {
 }
 
 #[test]
-fn synapse_pruning_runs_on_schedule_and_removes_low_eligibility_edges() {
+fn synapse_pruning_requires_weight_and_eligibility_below_threshold() {
     let genome = OrganismGenome {
         num_neurons: 0,
         vision_distance: 1,
@@ -557,7 +559,55 @@ fn synapse_pruning_runs_on_schedule_and_removes_low_eligibility_edges() {
         edges: vec![SynapseEdge {
             pre_neuron_id: NeuronId(0),
             post_neuron_id: NeuronId(2000),
-            weight: 1.0,
+            weight: 0.05,
+            eligibility: 1.0,
+        }],
+    };
+    let mut organism = OrganismState {
+        id: OrganismId(0),
+        species_id: SpeciesId(0),
+        q: 1,
+        r: 1,
+        age_turns: 100,
+        facing: FacingDirection::East,
+        energy: 10.0,
+        consumptions_count: 0,
+        reproductions_count: 0,
+        brain: express_genome(&genome),
+        genome,
+    };
+
+    apply_runtime_plasticity(&mut organism, 500);
+    assert_eq!(organism.brain.sensory[0].synapses.len(), 1);
+    assert_eq!(organism.brain.synapse_count, 1);
+}
+
+#[test]
+fn synapse_pruning_runs_on_schedule_and_removes_edges_when_both_are_low() {
+    let genome = OrganismGenome {
+        num_neurons: 0,
+        vision_distance: 1,
+        hebb_eta_baseline: 0.0,
+        hebb_eta_gain: 0.0,
+        eligibility_decay_lambda: 0.9,
+        synapse_prune_threshold: 0.1,
+        mutation_rate_vision_distance: 0.0,
+        mutation_rate_add_edge: 0.0,
+        mutation_rate_remove_edge: 0.0,
+        mutation_rate_split_edge: 0.0,
+        mutation_rate_inter_bias: 0.0,
+        mutation_rate_inter_update_rate: 0.0,
+        mutation_rate_action_bias: 0.0,
+        mutation_rate_eligibility_decay_lambda: 0.0,
+        mutation_rate_synapse_prune_threshold: 0.0,
+        inter_biases: vec![],
+        inter_log_taus: vec![],
+        interneuron_types: vec![],
+        action_biases: vec![0.0; ActionType::ALL.len()],
+        edges: vec![SynapseEdge {
+            pre_neuron_id: NeuronId(0),
+            post_neuron_id: NeuronId(2000),
+            weight: 0.05,
             eligibility: 0.0,
         }],
     };
@@ -574,13 +624,91 @@ fn synapse_pruning_runs_on_schedule_and_removes_low_eligibility_edges() {
         brain: express_genome(&genome),
         genome,
     };
+
+    apply_runtime_plasticity(&mut organism, 500);
+    assert!(organism.brain.sensory[0].synapses.is_empty());
+    assert_eq!(organism.brain.synapse_count, 0);
+}
+
+fn run_single_oja_step_with_dopamine_bias(dopamine_bias: f32) -> (f32, f32, f32, f32) {
+    let mut action_biases = vec![0.0; ActionType::ALL.len()];
+    action_biases[action_index(ActionType::Dopamine)] = dopamine_bias;
+
+    let genome = OrganismGenome {
+        num_neurons: 1,
+        vision_distance: 1,
+        hebb_eta_baseline: 0.0,
+        hebb_eta_gain: 0.2,
+        eligibility_decay_lambda: 0.9,
+        synapse_prune_threshold: 0.0,
+        mutation_rate_vision_distance: 0.0,
+        mutation_rate_add_edge: 0.0,
+        mutation_rate_remove_edge: 0.0,
+        mutation_rate_split_edge: 0.0,
+        mutation_rate_inter_bias: 0.0,
+        mutation_rate_inter_update_rate: 0.0,
+        mutation_rate_action_bias: 0.0,
+        mutation_rate_eligibility_decay_lambda: 0.0,
+        mutation_rate_synapse_prune_threshold: 0.0,
+        inter_biases: vec![1.0],
+        inter_log_taus: vec![crate::genome::INTER_LOG_TAU_MIN],
+        interneuron_types: vec![InterNeuronType::Excitatory],
+        action_biases,
+        edges: vec![SynapseEdge {
+            pre_neuron_id: NeuronId(1000),
+            post_neuron_id: NeuronId(2000),
+            weight: 1.0,
+            eligibility: 0.0,
+        }],
+    };
+
+    let mut organism = OrganismState {
+        id: OrganismId(0),
+        species_id: SpeciesId(0),
+        q: 1,
+        r: 1,
+        age_turns: 0,
+        facing: FacingDirection::East,
+        energy: 10.0,
+        consumptions_count: 0,
+        reproductions_count: 0,
+        brain: express_genome(&genome),
+        genome,
+    };
+
     let mut occupancy = vec![None; 9];
     occupancy[4] = Some(Occupant::Organism(organism.id));
     let mut scratch = BrainScratch::new();
     let vision_distance = organism.genome.vision_distance;
     let _ = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
 
+    let dopamine_signal = organism.brain.action[action_index(ActionType::Dopamine)]
+        .neuron
+        .activation;
+    let weight_before = organism.brain.inter[0].synapses[0].weight;
     apply_runtime_plasticity(&mut organism, 500);
-    assert!(organism.brain.sensory[0].synapses.is_empty());
-    assert_eq!(organism.brain.synapse_count, 0);
+
+    let edge = &organism.brain.inter[0].synapses[0];
+    (
+        weight_before,
+        edge.weight,
+        edge.eligibility,
+        dopamine_signal,
+    )
+}
+
+#[test]
+fn dopamine_neuron_negative_signal_de_reinforces_oja_weight_update() {
+    let (weight_before, positive_weight_after, positive_eligibility, positive_dopamine_signal) =
+        run_single_oja_step_with_dopamine_bias(2.0);
+    let (_, negative_weight_after, negative_eligibility, negative_dopamine_signal) =
+        run_single_oja_step_with_dopamine_bias(-2.0);
+
+    assert!(positive_dopamine_signal > 0.9);
+    assert!(negative_dopamine_signal < -0.9);
+
+    assert!(positive_weight_after > weight_before);
+    assert!(negative_weight_after < weight_before);
+
+    assert!((positive_eligibility - negative_eligibility).abs() < 1e-6);
 }

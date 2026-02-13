@@ -30,16 +30,28 @@ pub(crate) fn rotate_right(direction: FacingDirection) -> FacingDirection {
     }
 }
 
-pub(crate) fn hex_neighbor(position: (i32, i32), facing: FacingDirection) -> (i32, i32) {
+pub(crate) fn wrap_position(position: (i32, i32), world_width: i32) -> (i32, i32) {
+    (
+        position.0.rem_euclid(world_width),
+        position.1.rem_euclid(world_width),
+    )
+}
+
+pub(crate) fn hex_neighbor(
+    position: (i32, i32),
+    facing: FacingDirection,
+    world_width: i32,
+) -> (i32, i32) {
     let (q, r) = position;
-    match facing {
+    let neighbor = match facing {
         FacingDirection::East => (q + 1, r),
         FacingDirection::NorthEast => (q + 1, r - 1),
         FacingDirection::NorthWest => (q, r - 1),
         FacingDirection::West => (q - 1, r),
         FacingDirection::SouthWest => (q - 1, r + 1),
         FacingDirection::SouthEast => (q, r + 1),
-    }
+    };
+    wrap_position(neighbor, world_width)
 }
 
 pub(crate) fn opposite_direction(direction: FacingDirection) -> FacingDirection {
@@ -70,9 +82,13 @@ impl Simulation {
                 "occupancy vector count should match total entity count",
             );
             for organism in &self.organisms {
-                let idx = self
-                    .cell_index(organism.q, organism.r)
-                    .expect("organism position must remain in bounds");
+                let expected = self.wrap_position(organism.q, organism.r);
+                debug_assert_eq!(
+                    (organism.q, organism.r),
+                    expected,
+                    "organism position must remain canonical",
+                );
+                let idx = self.cell_index(organism.q, organism.r);
                 debug_assert_eq!(
                     self.occupancy[idx],
                     Some(Occupant::Organism(organism.id)),
@@ -80,9 +96,13 @@ impl Simulation {
                 );
             }
             for food in &self.foods {
-                let idx = self
-                    .cell_index(food.q, food.r)
-                    .expect("food position must remain in bounds");
+                let expected = self.wrap_position(food.q, food.r);
+                debug_assert_eq!(
+                    (food.q, food.r),
+                    expected,
+                    "food position must remain canonical",
+                );
+                let idx = self.cell_index(food.q, food.r);
                 debug_assert_eq!(
                     self.occupancy[idx],
                     Some(Occupant::Food(food.id)),
@@ -92,28 +112,30 @@ impl Simulation {
         }
     }
 
-    pub(crate) fn add_organism(&mut self, organism: OrganismState) -> bool {
-        let Some(cell_idx) = self.cell_index(organism.q, organism.r) else {
-            return false;
-        };
+    pub(crate) fn add_organism(&mut self, mut organism: OrganismState) -> bool {
+        let (q, r) = self.wrap_position(organism.q, organism.r);
+        let cell_idx = self.cell_index(q, r);
         if self.occupancy[cell_idx].is_some() {
             return false;
         }
 
+        organism.q = q;
+        organism.r = r;
         self.occupancy[cell_idx] = Some(Occupant::Organism(organism.id));
         self.organisms.push(organism);
         true
     }
 
     #[cfg(test)]
-    pub(crate) fn add_food(&mut self, food: FoodState) -> bool {
-        let Some(cell_idx) = self.cell_index(food.q, food.r) else {
-            return false;
-        };
+    pub(crate) fn add_food(&mut self, mut food: FoodState) -> bool {
+        let (q, r) = self.wrap_position(food.q, food.r);
+        let cell_idx = self.cell_index(q, r);
         if self.occupancy[cell_idx].is_some() {
             return false;
         }
 
+        food.q = q;
+        food.r = r;
         self.occupancy[cell_idx] = Some(Occupant::Food(food.id));
         self.foods.push(food);
         true
@@ -121,37 +143,39 @@ impl Simulation {
 
     pub(crate) fn rebuild_occupancy(&mut self) {
         self.occupancy.fill(None);
-        for organism in &self.organisms {
-            let idx = self
-                .cell_index(organism.q, organism.r)
-                .expect("organism must remain in bounds");
+        let width_i32 = self.config.world_width as i32;
+        let width = self.config.world_width as usize;
+        for organism in &mut self.organisms {
+            let (q, r) = wrap_position((organism.q, organism.r), width_i32);
+            organism.q = q;
+            organism.r = r;
+            let idx = r as usize * width + q as usize;
             debug_assert!(self.occupancy[idx].is_none());
             self.occupancy[idx] = Some(Occupant::Organism(organism.id));
         }
-        for food in &self.foods {
-            let idx = self
-                .cell_index(food.q, food.r)
-                .expect("food must remain in bounds");
+        for food in &mut self.foods {
+            let (q, r) = wrap_position((food.q, food.r), width_i32);
+            food.q = q;
+            food.r = r;
+            let idx = r as usize * width + q as usize;
             debug_assert!(self.occupancy[idx].is_none());
             self.occupancy[idx] = Some(Occupant::Food(food.id));
         }
     }
 
     pub(crate) fn occupant_at(&self, q: i32, r: i32) -> Option<Occupant> {
-        let idx = self.cell_index(q, r)?;
+        let idx = self.cell_index(q, r);
         self.occupancy[idx]
     }
 
-    pub(crate) fn in_bounds(&self, q: i32, r: i32) -> bool {
+    pub(crate) fn wrap_position(&self, q: i32, r: i32) -> (i32, i32) {
         let width = self.config.world_width as i32;
-        q >= 0 && r >= 0 && q < width && r < width
+        wrap_position((q, r), width)
     }
 
-    pub(crate) fn cell_index(&self, q: i32, r: i32) -> Option<usize> {
-        if !self.in_bounds(q, r) {
-            return None;
-        }
+    pub(crate) fn cell_index(&self, q: i32, r: i32) -> usize {
+        let (q, r) = self.wrap_position(q, r);
         let width = self.config.world_width as usize;
-        Some(r as usize * width + q as usize)
+        r as usize * width + q as usize
     }
 }

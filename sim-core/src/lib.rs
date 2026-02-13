@@ -252,7 +252,7 @@ impl Simulation {
         for organism in &self.organisms {
             if organism.q < 0 || organism.r < 0 || organism.q >= width || organism.r >= width {
                 return Err(SimError::InvalidState(format!(
-                    "organism {:?} is out of bounds at ({}, {})",
+                    "organism {:?} uses non-canonical coordinates ({}, {})",
                     organism.id, organism.q, organism.r
                 )));
             }
@@ -269,7 +269,7 @@ impl Simulation {
         for food in &self.foods {
             if food.q < 0 || food.r < 0 || food.q >= width || food.r >= width {
                 return Err(SimError::InvalidState(format!(
-                    "food {:?} is out of bounds at ({}, {})",
+                    "food {:?} uses non-canonical coordinates ({}, {})",
                     food.id, food.q, food.r
                 )));
             }

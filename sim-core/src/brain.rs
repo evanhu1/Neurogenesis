@@ -13,12 +13,11 @@ fn sigmoid(x: f32) -> f32 {
 const ACTION_ACTIVATION_THRESHOLD: f32 = 0.5;
 const TURN_ACTION_DEADZONE: f32 = 0.3;
 const DEFAULT_BIAS: f32 = 0.0;
-const NEUROMODULATOR_SIGNAL: f32 = 0.0;
 const OJA_WEIGHT_CLAMP_ENABLED: bool = true;
 const OJA_WEIGHT_MAGNITUDE_MIN: f32 = 0.001;
 const OJA_WEIGHT_MAGNITUDE_MAX: f32 = 4.0;
 const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
-const SYNAPSE_PRUNE_LIFESPAN_PERCENT: u64 = 20;
+const SYNAPSE_PRUNE_LIFESPAN_PERCENT: u64 = 10;
 pub(crate) const SENSORY_COUNT: u32 = SensoryReceptor::LOOK_NEURON_COUNT + 1;
 pub(crate) const ACTION_COUNT: usize = ActionType::ALL.len();
 pub(crate) const ACTION_COUNT_U32: u32 = ACTION_COUNT as u32;
@@ -78,13 +77,7 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
                 look_target: EntityType::Organism,
             },
         ),
-        make_sensory_neuron(
-            2,
-            SensoryReceptor::Look {
-                look_target: EntityType::OutOfBounds,
-            },
-        ),
-        make_sensory_neuron(3, SensoryReceptor::Energy),
+        make_sensory_neuron(2, SensoryReceptor::Energy),
     ];
 
     let mut inter = Vec::with_capacity(genome.num_neurons as usize);
@@ -120,10 +113,10 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
     }
 
     // Valid neuron IDs for this brain
-    let sensory_max = sensory.len() as u32; // 0..4
+    let sensory_max = sensory.len() as u32; // 0..3
     let inter_count = genome.num_neurons as usize;
     let inter_max = INTER_ID_BASE + genome.num_neurons; // 1000..1000+n
-    let action_max = ACTION_ID_BASE + ACTION_COUNT_U32; // 2000..2004
+    let action_max = ACTION_ID_BASE + ACTION_COUNT_U32; // 2000..2005
 
     let is_valid_pre = |id: NeuronId| -> bool {
         id.0 < sensory_max || (id.0 >= INTER_ID_BASE && id.0 < inter_max)
@@ -231,6 +224,7 @@ pub(crate) fn action_index(action: ActionType) -> usize {
         ActionType::Turn => 1,
         ActionType::Consume => 2,
         ActionType::Reproduce => 3,
+        ActionType::Dopamine => 4,
     }
 }
 
@@ -353,7 +347,7 @@ pub(crate) fn evaluate_brain(
 
     for (idx, action) in brain.action.iter_mut().enumerate() {
         action.neuron.activation = match action.action_type {
-            ActionType::Turn => action_inputs[idx].tanh(),
+            ActionType::Turn | ActionType::Dopamine => action_inputs[idx].tanh(),
             _ => sigmoid(action_inputs[idx]),
         };
         result.action_activations[action_index(action.action_type)] = action.neuron.activation;
@@ -368,11 +362,8 @@ pub(crate) fn apply_runtime_plasticity(
     organism: &mut sim_types::OrganismState,
     max_organism_age: u32,
 ) {
-    let eta = (organism.genome.hebb_eta_baseline
-        + organism.genome.hebb_eta_gain * NEUROMODULATOR_SIGNAL)
-        .max(0.0);
     let lambda = organism.genome.eligibility_decay_lambda.clamp(0.0, 1.0);
-    let prune_threshold = organism.genome.synapse_prune_threshold.max(0.0);
+    let weight_prune_threshold = organism.genome.synapse_prune_threshold.max(0.0);
     let should_prune = should_prune_synapses(organism.age_turns, max_organism_age);
 
     let brain = &mut organism.brain;
@@ -382,7 +373,9 @@ pub(crate) fn apply_runtime_plasticity(
         .map(|inter| inter.neuron.activation)
         .collect();
     let action_activations: [f32; ACTION_COUNT] =
-        std::array::from_fn(|idx| brain.action[idx].neuron.activation);
+        std::array::from_fn(|idx| brain.action.get(idx).map_or(0.0, |n| n.neuron.activation));
+    let dopamine_signal = action_activations[action_index(ActionType::Dopamine)].clamp(-1.0, 1.0);
+    let eta = organism.genome.hebb_eta_baseline + organism.genome.hebb_eta_gain * dopamine_signal;
 
     for sensory in &mut brain.sensory {
         tune_synapses(
@@ -413,7 +406,7 @@ pub(crate) fn apply_runtime_plasticity(
     }
 
     if should_prune {
-        prune_low_eligibility_synapses(brain, prune_threshold);
+        prune_low_weight_synapses(brain, weight_prune_threshold);
     }
 }
 
@@ -478,21 +471,21 @@ fn constrain_weight(weight: f32, required_sign: f32) -> f32 {
     }
 }
 
-fn prune_low_eligibility_synapses(brain: &mut BrainState, threshold: f32) {
+fn prune_low_weight_synapses(brain: &mut BrainState, threshold: f32) {
     let mut pruned_any = false;
 
     for sensory in &mut brain.sensory {
         let before = sensory.synapses.len();
-        sensory
-            .synapses
-            .retain(|synapse| synapse.eligibility.abs() >= threshold);
+        sensory.synapses.retain(|synapse| {
+            synapse.weight.abs() >= threshold || synapse.eligibility.abs() >= threshold
+        });
         pruned_any |= sensory.synapses.len() != before;
     }
     for inter in &mut brain.inter {
         let before = inter.synapses.len();
-        inter
-            .synapses
-            .retain(|synapse| synapse.eligibility.abs() >= threshold);
+        inter.synapses.retain(|synapse| {
+            synapse.weight.abs() >= threshold || synapse.eligibility.abs() >= threshold
+        });
         pruned_any |= inter.synapses.len() != before;
     }
 
@@ -580,7 +573,7 @@ pub fn derive_active_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
     }
 
     let action_activations: [f32; ACTION_COUNT] =
-        std::array::from_fn(|i| brain.action[i].neuron.activation);
+        std::array::from_fn(|i| brain.action.get(i).map_or(0.0, |n| n.neuron.activation));
 
     let resolved = resolve_actions(action_activations);
     if resolved.wants_move {
@@ -687,14 +680,7 @@ pub(crate) fn scan_ahead(
     let max_dist = vision_distance.max(1);
     let mut current = position;
     for d in 1..=max_dist {
-        current = hex_neighbor(current, facing);
-        if current.0 < 0 || current.1 < 0 || current.0 >= world_width || current.1 >= world_width {
-            let signal = (max_dist - d + 1) as f32 / max_dist as f32;
-            return Some(ScanResult {
-                target: EntityType::OutOfBounds,
-                signal,
-            });
-        }
+        current = hex_neighbor(current, facing, world_width);
         let idx = current.1 as usize * world_width as usize + current.0 as usize;
         match occupancy[idx] {
             Some(Occupant::Organism(id)) if id == organism_id => {}

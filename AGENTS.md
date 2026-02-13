@@ -45,9 +45,10 @@
 
 ### World
 
-Bounded axial hex grid `(q, r)`, `0 <= q,r < world_width`. Occupancy is a
-dense `Vec<Option<Occupant>>` (`Organism(OrganismId)` or `Food(FoodId)`),
-indexed by `r * world_width + q`. At most one entity per cell.
+Toroidal axial hex grid `(q, r)` with wraparound modulo `world_width` on both
+axes. Occupancy is a dense `Vec<Option<Occupant>>` (`Organism(OrganismId)` or
+`Food(FoodId)`), indexed by `r * world_width + q`. At most one entity per
+cell.
 
 ### Turn Pipeline (execution order)
 
@@ -64,10 +65,10 @@ indexed by `r * world_width + q`. At most one entity per cell.
 
 ### Brain
 
-4 sensory neurons (Look Food/Organism/OutOfBounds + Energy), inter neurons
-at IDs `1000..1000+n`, action neurons at `2000..2004`. Evaluation:
-sensory→inter, inter→inter (prev tick), then →action. Inter=tanh,
-action=sigmoid, fires at `> 0.5`.
+3 sensory neurons (Look Food/Organism + Energy), inter neurons at IDs
+`1000..1000+n`, action neurons at `2000..2004`. Evaluation: sensory→inter,
+inter→inter (prev tick), then →action. Inter=tanh, action=sigmoid, fires at
+`> 0.5`.
 
 ### Genome
 
