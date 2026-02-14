@@ -447,12 +447,6 @@ fn validate_world_config(config: &WorldConfig) -> Result<(), SimError> {
             "plant_growth_speed must be greater than zero".to_owned(),
         ));
     }
-    if config.food_regrowth_min_cooldown_turns > config.food_regrowth_max_cooldown_turns {
-        return Err(SimError::InvalidConfig(
-            "food_regrowth_min_cooldown_turns must be <= food_regrowth_max_cooldown_turns"
-                .to_owned(),
-        ));
-    }
     if config.food_fertility_noise_scale <= 0.0 {
         return Err(SimError::InvalidConfig(
             "food_fertility_noise_scale must be greater than zero".to_owned(),

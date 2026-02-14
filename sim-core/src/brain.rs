@@ -646,7 +646,8 @@ pub fn derive_active_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
                 .neuron
                 .neuron_id,
         );
-    } else if resolved.wants_consume {
+    }
+    if resolved.wants_consume {
         active.push(
             brain.action[action_index(ActionType::Consume)]
                 .neuron

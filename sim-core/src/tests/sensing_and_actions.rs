@@ -263,7 +263,7 @@ fn move_and_turn_can_be_composed_in_same_turn() {
 }
 
 #[test]
-fn reproduce_blocks_move_and_turn() {
+fn reproduce_blocks_move_but_allows_turn() {
     let mut cfg = test_config(7, 1);
     cfg.reproduction_energy_cost = 5.0;
     let mut sim = Simulation::new(cfg, 76).expect("simulation should initialize");
@@ -283,7 +283,8 @@ fn reproduce_blocks_move_and_turn() {
         .find(|organism| organism.id == OrganismId(0))
         .expect("organism should remain alive");
     assert_eq!((organism.q, organism.r), (3, 3));
-    assert_eq!(organism.facing, FacingDirection::East);
+    // Turn still applies even when reproduction succeeds
+    assert_eq!(organism.facing, FacingDirection::NorthEast);
 }
 
 #[test]

@@ -341,9 +341,6 @@ impl Simulation {
         for (idx, intent) in intents.iter().enumerate() {
             debug_assert_eq!(intent.idx, idx);
             let organism = &mut self.organisms[idx];
-            if successful_reproduction[idx] {
-                continue;
-            }
             if organism.facing != intent.facing_after_actions {
                 facing_updates.push(OrganismFacing {
                     id: organism.id,
@@ -734,7 +731,7 @@ fn build_intent_for_organism(
         move_confidence,
         ordered_actions,
         ordered_action_count: ordered_action_count as u8,
-        action_cost_count: ordered_action_count as u8,
+        action_cost_count: ordered_action_count as u8 + wants_reproduce as u8,
         synapse_ops: evaluation.synapse_ops,
     }
 }

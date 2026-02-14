@@ -171,12 +171,8 @@ pub struct WorldConfig {
     pub move_action_energy_cost: f32,
     pub turn_energy_cost: f32,
     pub plant_growth_speed: f32,
-    #[serde(default = "default_food_regrowth_min_cooldown_turns")]
-    pub food_regrowth_min_cooldown_turns: u32,
-    #[serde(default = "default_food_regrowth_max_cooldown_turns")]
-    pub food_regrowth_max_cooldown_turns: u32,
-    #[serde(default = "default_food_regrowth_jitter_turns")]
-    pub food_regrowth_jitter_turns: u32,
+    #[serde(default = "default_food_regrowth_interval")]
+    pub food_regrowth_interval: u32,
     #[serde(default = "default_food_fertility_noise_scale")]
     pub food_fertility_noise_scale: f32,
     #[serde(default = "default_food_fertility_exponent")]
@@ -205,12 +201,8 @@ struct WorldConfigDeserialize {
     _legacy_plant_target_coverage: Option<f32>,
     #[serde(default)]
     _legacy_food_coverage_divisor: Option<u32>,
-    #[serde(default = "default_food_regrowth_min_cooldown_turns")]
-    food_regrowth_min_cooldown_turns: u32,
-    #[serde(default = "default_food_regrowth_max_cooldown_turns")]
-    food_regrowth_max_cooldown_turns: u32,
-    #[serde(default = "default_food_regrowth_jitter_turns")]
-    food_regrowth_jitter_turns: u32,
+    #[serde(default = "default_food_regrowth_interval")]
+    food_regrowth_interval: u32,
     #[serde(default = "default_food_fertility_noise_scale")]
     food_fertility_noise_scale: f32,
     #[serde(default = "default_food_fertility_exponent")]
@@ -242,9 +234,7 @@ impl<'de> Deserialize<'de> for WorldConfig {
             move_action_energy_cost: raw.move_action_energy_cost,
             turn_energy_cost: raw.turn_energy_cost,
             plant_growth_speed,
-            food_regrowth_min_cooldown_turns: raw.food_regrowth_min_cooldown_turns,
-            food_regrowth_max_cooldown_turns: raw.food_regrowth_max_cooldown_turns,
-            food_regrowth_jitter_turns: raw.food_regrowth_jitter_turns,
+            food_regrowth_interval: raw.food_regrowth_interval,
             food_fertility_noise_scale: raw.food_fertility_noise_scale,
             food_fertility_exponent: raw.food_fertility_exponent,
             food_fertility_floor: raw.food_fertility_floor,
@@ -315,16 +305,8 @@ fn default_age_of_maturity() -> u32 {
     0
 }
 
-fn default_food_regrowth_min_cooldown_turns() -> u32 {
-    3
-}
-
-fn default_food_regrowth_max_cooldown_turns() -> u32 {
-    24
-}
-
-fn default_food_regrowth_jitter_turns() -> u32 {
-    3
+fn default_food_regrowth_interval() -> u32 {
+    10
 }
 
 fn default_food_fertility_noise_scale() -> f32 {

@@ -258,19 +258,9 @@ impl Simulation {
         });
     }
 
-    fn regrowth_delay_for_tile(&mut self, tile_idx: usize) -> u64 {
-        let min_turns = self.config.food_regrowth_min_cooldown_turns;
-        let max_turns = self.config.food_regrowth_max_cooldown_turns;
-        let span = max_turns.saturating_sub(min_turns);
-        let fertility = self.fertility_value(tile_idx);
-        let cooldown = min_turns + (((1.0 - fertility) * span as f32).round() as u32).min(span);
-        let jitter = if self.config.food_regrowth_jitter_turns == 0 {
-            0
-        } else {
-            self.rng
-                .random_range(0..=self.config.food_regrowth_jitter_turns)
-        };
-        let base_delay = cooldown.saturating_add(jitter);
+    fn regrowth_delay_for_tile(&mut self, _tile_idx: usize) -> u64 {
+        let interval = self.config.food_regrowth_interval.max(1);
+        let base_delay = self.rng.random_range(1..=interval);
         (f64::from(base_delay) / f64::from(self.config.plant_growth_speed)).ceil() as u64
     }
 

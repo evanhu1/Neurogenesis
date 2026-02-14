@@ -230,9 +230,7 @@ fn contested_occupied_target_where_occupant_remains_uses_consume_path() {
 fn move_into_food_consumes_and_schedules_regrowth() {
     let mut cfg = test_config(5, 1);
     cfg.food_energy = 7.0;
-    cfg.food_regrowth_min_cooldown_turns = 2;
-    cfg.food_regrowth_max_cooldown_turns = 2;
-    cfg.food_regrowth_jitter_turns = 0;
+    cfg.food_regrowth_interval = 2;
     cfg.plant_growth_speed = 1.0;
     let mut sim = Simulation::new(cfg, 101).expect("simulation should initialize");
     configure_sim(
@@ -286,9 +284,7 @@ fn move_into_food_consumes_and_schedules_regrowth() {
 #[test]
 fn food_regrows_naturally_based_on_fertility_schedule() {
     let mut cfg = test_config(5, 1);
-    cfg.food_regrowth_min_cooldown_turns = 2;
-    cfg.food_regrowth_max_cooldown_turns = 2;
-    cfg.food_regrowth_jitter_turns = 0;
+    cfg.food_regrowth_interval = 5;
     cfg.plant_growth_speed = 1.0;
     cfg.food_fertility_floor = 1.0;
 
@@ -307,25 +303,19 @@ fn food_regrows_naturally_based_on_fertility_schedule() {
             10.0,
         )],
     );
-    enable_consume_action(&mut sim.organisms[0]);
-    let added = sim.add_food(make_food(0, 2, 1, 7.0));
-    assert!(added, "food setup should succeed");
-    sim.next_food_id = 1;
 
-    let first_delta = tick_once(&mut sim);
-    assert_eq!(first_delta.food_spawned.len(), 0);
+    // No initial food — verify tiles grow food on their own via the
+    // perpetual regrowth cycle without any consumption trigger.
+    assert!(sim.foods.is_empty());
+
+    let mut total_spawned = 0;
+    for _ in 0..10 {
+        let delta = tick_once(&mut sim);
+        total_spawned += delta.food_spawned.len();
+    }
     assert!(
-        sim.foods.is_empty(),
-        "regrowth should not fire immediately"
-    );
-
-    let second_delta = tick_once(&mut sim);
-    assert_eq!(second_delta.food_spawned.len(), 0);
-
-    let third_delta = tick_once(&mut sim);
-    assert!(
-        !third_delta.food_spawned.is_empty(),
-        "food should regrow once fertility schedule fires",
+        total_spawned > 0,
+        "food should regrow on empty tiles via the fertility schedule",
     );
     assert!(!sim.foods.is_empty());
 }

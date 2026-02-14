@@ -129,7 +129,8 @@ fn reproduce_action_requires_enough_energy() {
         .find(|organism| organism.id == OrganismId(0))
         .expect("parent should remain alive");
     assert_eq!(parent_after.reproductions_count, 0);
-    assert_eq!(parent_after.energy, 4.0);
+    // 5.0 - 1.0 (turn upkeep) - 1.0 (reproduce action cost) = 3.0
+    assert_eq!(parent_after.energy, 3.0);
 }
 
 #[test]
@@ -175,7 +176,8 @@ fn reproduce_action_fails_when_spawn_cell_blocked() {
         .find(|organism| organism.id == OrganismId(0))
         .expect("parent should remain alive");
     assert_eq!(parent_after.reproductions_count, 0);
-    assert_eq!(parent_after.energy, 29.0);
+    // 30.0 - 1.0 (turn upkeep) - 1.0 (reproduce action cost) = 28.0
+    assert_eq!(parent_after.energy, 28.0);
 }
 
 #[test]
@@ -208,7 +210,8 @@ fn reproduce_action_succeeds_when_energy_and_space_allow_it() {
         .find(|organism| organism.id == OrganismId(0))
         .expect("parent should remain alive");
     assert_eq!(parent_after.reproductions_count, 1);
-    assert_eq!(parent_after.energy, 9.0);
+    // 30.0 - 1.0 (turn upkeep) - 20.0 (reproduction) - 1.0 (reproduce action cost) = 8.0
+    assert_eq!(parent_after.energy, 8.0);
 }
 
 #[test]
@@ -243,7 +246,8 @@ fn reproduce_action_requires_parent_to_reach_age_of_maturity() {
         .expect("parent should remain alive");
     assert_eq!(parent_after.age_turns, 2);
     assert_eq!(parent_after.reproductions_count, 0);
-    assert_eq!(parent_after.energy, 29.0);
+    // 30.0 - 1.0 (turn upkeep) - 1.0 (reproduce action cost) = 28.0
+    assert_eq!(parent_after.energy, 28.0);
 }
 
 #[test]
@@ -273,7 +277,8 @@ fn reproduce_action_fails_when_turn_upkeep_leaves_insufficient_energy() {
         .find(|organism| organism.id == OrganismId(0))
         .expect("parent should remain alive");
     assert_eq!(parent_after.reproductions_count, 0);
-    assert_eq!(parent_after.energy, 99.0);
+    // 100.0 - 1.0 (turn upkeep) - 1.0 (reproduce action cost) = 98.0
+    assert_eq!(parent_after.energy, 98.0);
 }
 
 #[test]

@@ -33,9 +33,7 @@ export type WorldConfig = {
   move_action_energy_cost: number;
   turn_energy_cost: number;
   plant_growth_speed: number;
-  food_regrowth_min_cooldown_turns: number;
-  food_regrowth_max_cooldown_turns: number;
-  food_regrowth_jitter_turns: number;
+  food_regrowth_interval: number;
   food_fertility_noise_scale: number;
   food_fertility_exponent: number;
   food_fertility_floor: number;
