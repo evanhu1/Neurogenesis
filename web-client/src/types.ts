@@ -36,7 +36,6 @@ export type WorldConfig = {
   food_regrowth_min_cooldown_turns: number;
   food_regrowth_max_cooldown_turns: number;
   food_regrowth_jitter_turns: number;
-  food_regrowth_retry_cooldown_turns: number;
   food_fertility_noise_scale: number;
   food_fertility_exponent: number;
   food_fertility_floor: number;

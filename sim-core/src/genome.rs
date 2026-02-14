@@ -1,9 +1,11 @@
 use crate::brain::{ACTION_COUNT, ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT};
 use crate::SimError;
 use rand::Rng;
+use rand_distr::{Distribution, StandardNormal};
 use sim_types::{
     ActionType, InterNeuronType, NeuronId, OrganismGenome, SeedGenomeConfig, SynapseEdge,
 };
+use std::collections::HashSet;
 
 const MIN_MUTATED_VISION_DISTANCE: u32 = 1;
 const MAX_MUTATED_VISION_DISTANCE: u32 = 32;
@@ -38,6 +40,8 @@ pub(crate) const INTER_LOG_TAU_MIN: f32 = -2.302_585_1;
 pub(crate) const INTER_LOG_TAU_MAX: f32 = 2.995_732_3;
 pub(crate) const DEFAULT_INTER_LOG_TAU: f32 = 0.0;
 
+type EdgePair = (NeuronId, NeuronId);
+
 pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     config: &SeedGenomeConfig,
     world_max_num_neurons: u32,
@@ -64,8 +68,10 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         .collect();
 
     let mut edges = Vec::new();
+    let mut edge_keys = HashSet::new();
     for _ in 0..config.num_synapses {
-        if let Some(edge) = random_edge(config.num_neurons, &interneuron_types, &edges, rng) {
+        if let Some(edge) = random_edge(config.num_neurons, &interneuron_types, &edge_keys, rng) {
+            edge_keys.insert((edge.pre_neuron_id, edge.post_neuron_id));
             edges.push(edge);
         }
     }
@@ -98,7 +104,7 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     }
 }
 
-fn edge_key(e: &SynapseEdge) -> (NeuronId, NeuronId) {
+fn edge_key(e: &SynapseEdge) -> EdgePair {
     (e.pre_neuron_id, e.post_neuron_id)
 }
 
@@ -155,7 +161,7 @@ fn clamp_signed_weight(weight: f32, required_sign: f32) -> f32 {
 }
 
 fn sample_log_normal_magnitude<R: Rng + ?Sized>(rng: &mut R) -> f32 {
-    let z = normal_sample(rng);
+    let z = standard_normal(rng);
     (SYNAPSE_WEIGHT_LOG_NORMAL_MU + SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA * z)
         .exp()
         .clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX)
@@ -173,7 +179,7 @@ fn sample_signed_lognormal_weight<R: Rng + ?Sized>(required_sign: f32, rng: &mut
 fn random_edge<R: Rng + ?Sized>(
     num_neurons: u32,
     inter_types: &[InterNeuronType],
-    existing: &[SynapseEdge],
+    existing: &HashSet<EdgePair>,
     rng: &mut R,
 ) -> Option<SynapseEdge> {
     // Pre neurons: sensory (0..SENSORY_COUNT) + enabled inter (INTER_ID_BASE..INTER_ID_BASE+num_neurons)
@@ -206,10 +212,7 @@ fn random_edge<R: Rng + ?Sized>(
             continue;
         }
 
-        let is_dup = existing
-            .iter()
-            .any(|e| e.pre_neuron_id == pre && e.post_neuron_id == post);
-        if is_dup {
+        if existing.contains(&(pre, post)) {
             continue;
         }
 
@@ -225,23 +228,8 @@ fn random_edge<R: Rng + ?Sized>(
     None
 }
 
-fn mutation_rate_genes_mut(genome: &mut OrganismGenome) -> [&mut f32; 10] {
-    [
-        &mut genome.mutation_rate_age_of_maturity,
-        &mut genome.mutation_rate_vision_distance,
-        &mut genome.mutation_rate_add_edge,
-        &mut genome.mutation_rate_remove_edge,
-        &mut genome.mutation_rate_split_edge,
-        &mut genome.mutation_rate_inter_bias,
-        &mut genome.mutation_rate_inter_update_rate,
-        &mut genome.mutation_rate_action_bias,
-        &mut genome.mutation_rate_eligibility_decay_lambda,
-        &mut genome.mutation_rate_synapse_prune_threshold,
-    ]
-}
-
-fn mutation_rate_genes(genome: &OrganismGenome) -> [f32; 10] {
-    [
+fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
+    let mut rates = [
         genome.mutation_rate_age_of_maturity,
         genome.mutation_rate_vision_distance,
         genome.mutation_rate_add_edge,
@@ -252,18 +240,24 @@ fn mutation_rate_genes(genome: &OrganismGenome) -> [f32; 10] {
         genome.mutation_rate_action_bias,
         genome.mutation_rate_eligibility_decay_lambda,
         genome.mutation_rate_synapse_prune_threshold,
-    ]
-}
-
-fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
-    let mut rates = mutation_rate_genes_mut(genome);
-    let shared_normal = normal_sample(rng) * MUTATION_RATE_ADAPTATION_TAU;
+    ];
+    let shared_normal = standard_normal(rng) * MUTATION_RATE_ADAPTATION_TAU;
 
     for rate in &mut rates {
-        let gene_normal = normal_sample(rng) * MUTATION_RATE_ADAPTATION_TAU;
-        let adapted = **rate * (shared_normal + gene_normal).exp();
-        **rate = adapted.clamp(MUTATION_RATE_MIN, MUTATION_RATE_MAX);
+        let gene_normal = standard_normal(rng) * MUTATION_RATE_ADAPTATION_TAU;
+        let adapted = *rate * (shared_normal + gene_normal).exp();
+        *rate = adapted.clamp(MUTATION_RATE_MIN, MUTATION_RATE_MAX);
     }
+    genome.mutation_rate_age_of_maturity = rates[0];
+    genome.mutation_rate_vision_distance = rates[1];
+    genome.mutation_rate_add_edge = rates[2];
+    genome.mutation_rate_remove_edge = rates[3];
+    genome.mutation_rate_split_edge = rates[4];
+    genome.mutation_rate_inter_bias = rates[5];
+    genome.mutation_rate_inter_update_rate = rates[6];
+    genome.mutation_rate_action_bias = rates[7];
+    genome.mutation_rate_eligibility_decay_lambda = rates[8];
+    genome.mutation_rate_synapse_prune_threshold = rates[9];
 }
 
 fn align_genome_vectors<R: Rng + ?Sized>(
@@ -299,6 +293,7 @@ fn align_genome_vectors<R: Rng + ?Sized>(
 
 fn mutate_split_edge<R: Rng + ?Sized>(
     genome: &mut OrganismGenome,
+    edge_keys: &mut HashSet<EdgePair>,
     world_max_num_neurons: u32,
     rng: &mut R,
 ) {
@@ -308,12 +303,14 @@ fn mutate_split_edge<R: Rng + ?Sized>(
 
     let split_idx = rng.random_range(0..genome.edges.len());
     let split_edge = genome.edges.swap_remove(split_idx);
+    edge_keys.remove(&edge_key(&split_edge));
 
     let new_idx = genome.num_neurons as usize;
     if new_idx >= genome.inter_biases.len()
         || new_idx >= genome.inter_log_taus.len()
         || new_idx >= genome.interneuron_types.len()
     {
+        edge_keys.insert(edge_key(&split_edge));
         genome.edges.push(split_edge);
         return;
     }
@@ -350,8 +347,12 @@ fn mutate_split_edge<R: Rng + ?Sized>(
         eligibility: 0.0,
     };
 
-    genome.edges.push(edge_to_new);
-    genome.edges.push(edge_from_new);
+    if edge_keys.insert(edge_key(&edge_to_new)) {
+        genome.edges.push(edge_to_new);
+    }
+    if edge_keys.insert(edge_key(&edge_from_new)) {
+        genome.edges.push(edge_from_new);
+    }
 }
 
 fn normalize_edge_signs(genome: &mut OrganismGenome) {
@@ -373,6 +374,7 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
 ) {
     align_genome_vectors(genome, world_max_num_neurons, rng);
     mutate_mutation_rate_genes(genome, rng);
+    let mut edge_keys: HashSet<EdgePair> = genome.edges.iter().map(edge_key).collect();
 
     if rng.random::<f32>() < genome.mutation_rate_age_of_maturity {
         genome.age_of_maturity = step_u32(
@@ -396,20 +398,22 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
         if let Some(edge) = random_edge(
             genome.num_neurons,
             &genome.interneuron_types,
-            &genome.edges,
+            &edge_keys,
             rng,
         ) {
+            edge_keys.insert(edge_key(&edge));
             genome.edges.push(edge);
         }
     }
 
     if rng.random::<f32>() < genome.mutation_rate_remove_edge && !genome.edges.is_empty() {
         let idx = rng.random_range(0..genome.edges.len());
-        genome.edges.swap_remove(idx);
+        let removed = genome.edges.swap_remove(idx);
+        edge_keys.remove(&edge_key(&removed));
     }
 
     if rng.random::<f32>() < genome.mutation_rate_split_edge {
-        mutate_split_edge(genome, world_max_num_neurons, rng);
+        mutate_split_edge(genome, &mut edge_keys, world_max_num_neurons, rng);
     }
 
     if rng.random::<f32>() < genome.mutation_rate_inter_bias && genome.num_neurons > 0 {
@@ -603,14 +607,12 @@ fn perturb_clamped<R: Rng + ?Sized>(
     max: f32,
     rng: &mut R,
 ) -> f32 {
-    let normal = normal_sample(rng);
+    let normal = standard_normal(rng);
     (value + normal * stddev).clamp(min, max)
 }
 
-fn normal_sample<R: Rng + ?Sized>(rng: &mut R) -> f32 {
-    let u1: f32 = rng.random::<f32>().max(f32::EPSILON);
-    let u2: f32 = rng.random::<f32>();
-    (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos()
+fn standard_normal<R: Rng + ?Sized>(rng: &mut R) -> f32 {
+    StandardNormal.sample(rng)
 }
 
 /// L1 genome distance: scalar traits + mutation-rate genes + vectors.
@@ -623,8 +625,30 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
         + (a.eligibility_decay_lambda - b.eligibility_decay_lambda).abs()
         + (a.synapse_prune_threshold - b.synapse_prune_threshold).abs();
 
-    let a_rates = mutation_rate_genes(a);
-    let b_rates = mutation_rate_genes(b);
+    let a_rates = [
+        a.mutation_rate_age_of_maturity,
+        a.mutation_rate_vision_distance,
+        a.mutation_rate_add_edge,
+        a.mutation_rate_remove_edge,
+        a.mutation_rate_split_edge,
+        a.mutation_rate_inter_bias,
+        a.mutation_rate_inter_update_rate,
+        a.mutation_rate_action_bias,
+        a.mutation_rate_eligibility_decay_lambda,
+        a.mutation_rate_synapse_prune_threshold,
+    ];
+    let b_rates = [
+        b.mutation_rate_age_of_maturity,
+        b.mutation_rate_vision_distance,
+        b.mutation_rate_add_edge,
+        b.mutation_rate_remove_edge,
+        b.mutation_rate_split_edge,
+        b.mutation_rate_inter_bias,
+        b.mutation_rate_inter_update_rate,
+        b.mutation_rate_action_bias,
+        b.mutation_rate_eligibility_decay_lambda,
+        b.mutation_rate_synapse_prune_threshold,
+    ];
     for i in 0..a_rates.len() {
         dist += (a_rates[i] - b_rates[i]).abs();
     }

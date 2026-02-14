@@ -177,8 +177,6 @@ pub struct WorldConfig {
     pub food_regrowth_max_cooldown_turns: u32,
     #[serde(default = "default_food_regrowth_jitter_turns")]
     pub food_regrowth_jitter_turns: u32,
-    #[serde(default = "default_food_regrowth_retry_cooldown_turns")]
-    pub food_regrowth_retry_cooldown_turns: u32,
     #[serde(default = "default_food_fertility_noise_scale")]
     pub food_fertility_noise_scale: f32,
     #[serde(default = "default_food_fertility_exponent")]
@@ -213,8 +211,6 @@ struct WorldConfigDeserialize {
     food_regrowth_max_cooldown_turns: u32,
     #[serde(default = "default_food_regrowth_jitter_turns")]
     food_regrowth_jitter_turns: u32,
-    #[serde(default = "default_food_regrowth_retry_cooldown_turns")]
-    food_regrowth_retry_cooldown_turns: u32,
     #[serde(default = "default_food_fertility_noise_scale")]
     food_fertility_noise_scale: f32,
     #[serde(default = "default_food_fertility_exponent")]
@@ -249,7 +245,6 @@ impl<'de> Deserialize<'de> for WorldConfig {
             food_regrowth_min_cooldown_turns: raw.food_regrowth_min_cooldown_turns,
             food_regrowth_max_cooldown_turns: raw.food_regrowth_max_cooldown_turns,
             food_regrowth_jitter_turns: raw.food_regrowth_jitter_turns,
-            food_regrowth_retry_cooldown_turns: raw.food_regrowth_retry_cooldown_turns,
             food_fertility_noise_scale: raw.food_fertility_noise_scale,
             food_fertility_exponent: raw.food_fertility_exponent,
             food_fertility_floor: raw.food_fertility_floor,
@@ -330,10 +325,6 @@ fn default_food_regrowth_max_cooldown_turns() -> u32 {
 
 fn default_food_regrowth_jitter_turns() -> u32 {
     3
-}
-
-fn default_food_regrowth_retry_cooldown_turns() -> u32 {
-    2
 }
 
 fn default_food_fertility_noise_scale() -> f32 {

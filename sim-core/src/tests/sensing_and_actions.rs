@@ -535,7 +535,7 @@ fn oja_update_adjusts_weight_and_eligibility_for_active_synapse() {
     let dopamine = organism.brain.action[action_index(ActionType::Dopamine)]
         .neuron
         .activation;
-    apply_runtime_plasticity(&mut organism);
+    apply_runtime_plasticity(&mut organism, &mut scratch);
 
     let eta = 0.2 * dopamine;
     let edge = &organism.brain.inter[0].synapses[0];
@@ -591,7 +591,8 @@ fn synapse_pruning_requires_weight_and_eligibility_below_threshold() {
         genome,
     };
 
-    apply_runtime_plasticity(&mut organism);
+    let mut scratch = BrainScratch::new();
+    apply_runtime_plasticity(&mut organism, &mut scratch);
     assert_eq!(organism.brain.sensory[0].synapses.len(), 1);
     assert_eq!(organism.brain.synapse_count, 1);
 }
@@ -641,7 +642,8 @@ fn synapse_pruning_runs_on_schedule_and_removes_edges_when_both_are_low() {
         genome,
     };
 
-    apply_runtime_plasticity(&mut organism);
+    let mut scratch = BrainScratch::new();
+    apply_runtime_plasticity(&mut organism, &mut scratch);
     assert!(organism.brain.sensory[0].synapses.is_empty());
     assert_eq!(organism.brain.synapse_count, 0);
 }
@@ -691,7 +693,8 @@ fn synapse_pruning_waits_until_age_of_maturity() {
         genome,
     };
 
-    apply_runtime_plasticity(&mut organism);
+    let mut scratch = BrainScratch::new();
+    apply_runtime_plasticity(&mut organism, &mut scratch);
     assert_eq!(organism.brain.sensory[0].synapses.len(), 1);
     assert_eq!(organism.brain.synapse_count, 1);
 }
@@ -754,7 +757,7 @@ fn run_single_oja_step_with_dopamine_bias(dopamine_bias: f32) -> (f32, f32, f32,
         .neuron
         .activation;
     let weight_before = organism.brain.inter[0].synapses[0].weight;
-    apply_runtime_plasticity(&mut organism);
+    apply_runtime_plasticity(&mut organism, &mut scratch);
 
     let edge = &organism.brain.inter[0].synapses[0];
     (
@@ -779,4 +782,238 @@ fn dopamine_neuron_negative_signal_de_reinforces_oja_weight_update() {
     assert!(negative_weight_after < weight_before);
 
     assert!((positive_eligibility - negative_eligibility).abs() < 1e-6);
+}
+
+fn make_runtime_learning_organism(
+    id: u64,
+    hebb_eta_gain: f32,
+    initial_weight: f32,
+) -> OrganismState {
+    let mut action_biases = vec![0.0; ActionType::ALL.len()];
+    action_biases[action_index(ActionType::MoveForward)] = -0.7;
+    action_biases[action_index(ActionType::Dopamine)] = 2.0;
+
+    let genome = OrganismGenome {
+        num_neurons: 1,
+        vision_distance: 1,
+        age_of_maturity: 1_000,
+        hebb_eta_baseline: 0.0,
+        hebb_eta_gain,
+        eligibility_decay_lambda: 0.9,
+        synapse_prune_threshold: 0.0,
+        mutation_rate_age_of_maturity: 0.0,
+        mutation_rate_vision_distance: 0.0,
+        mutation_rate_add_edge: 0.0,
+        mutation_rate_remove_edge: 0.0,
+        mutation_rate_split_edge: 0.0,
+        mutation_rate_inter_bias: 0.0,
+        mutation_rate_inter_update_rate: 0.0,
+        mutation_rate_action_bias: 0.0,
+        mutation_rate_eligibility_decay_lambda: 0.0,
+        mutation_rate_synapse_prune_threshold: 0.0,
+        inter_biases: vec![1.0],
+        inter_log_taus: vec![crate::genome::INTER_LOG_TAU_MIN],
+        interneuron_types: vec![InterNeuronType::Excitatory],
+        action_biases,
+        edges: vec![SynapseEdge {
+            pre_neuron_id: NeuronId(1000),
+            post_neuron_id: NeuronId(2000),
+            weight: initial_weight,
+            eligibility: 0.0,
+        }],
+    };
+
+    OrganismState {
+        id: OrganismId(id),
+        species_id: SpeciesId(0),
+        q: 1,
+        r: 1,
+        age_turns: 0,
+        facing: FacingDirection::East,
+        energy: 10.0,
+        consumptions_count: 0,
+        reproductions_count: 0,
+        brain: express_genome(&genome),
+        genome,
+    }
+}
+
+#[test]
+fn hebbian_runtime_plasticity_changes_behavior_within_lifetime() {
+    const WORLD_WIDTH: i32 = 3;
+    const INITIAL_WEIGHT: f32 = 0.2;
+    const TRAINING_STEPS: usize = 8;
+
+    let mut learner = make_runtime_learning_organism(0, 0.8, INITIAL_WEIGHT);
+    let mut control = make_runtime_learning_organism(1, 0.0, INITIAL_WEIGHT);
+
+    let occupancy = vec![None; (WORLD_WIDTH * WORLD_WIDTH) as usize];
+    let mut learner_scratch = BrainScratch::new();
+    let mut control_scratch = BrainScratch::new();
+
+    let learner_vision = learner.genome.vision_distance;
+    let learner_baseline = evaluate_brain(
+        &mut learner,
+        WORLD_WIDTH,
+        &occupancy,
+        learner_vision,
+        &mut learner_scratch,
+    );
+    let control_vision = control.genome.vision_distance;
+    let control_baseline = evaluate_brain(
+        &mut control,
+        WORLD_WIDTH,
+        &occupancy,
+        control_vision,
+        &mut control_scratch,
+    );
+    let baseline_learner_move =
+        learner_baseline.action_activations[action_index(ActionType::MoveForward)];
+    let baseline_control_move =
+        control_baseline.action_activations[action_index(ActionType::MoveForward)];
+    assert!(baseline_learner_move < 0.5);
+    assert!((baseline_learner_move - baseline_control_move).abs() < 1e-6);
+
+    for _ in 0..TRAINING_STEPS {
+        let learner_vision = learner.genome.vision_distance;
+        let _ = evaluate_brain(
+            &mut learner,
+            WORLD_WIDTH,
+            &occupancy,
+            learner_vision,
+            &mut learner_scratch,
+        );
+        apply_runtime_plasticity(&mut learner, &mut learner_scratch);
+
+        let control_vision = control.genome.vision_distance;
+        let _ = evaluate_brain(
+            &mut control,
+            WORLD_WIDTH,
+            &occupancy,
+            control_vision,
+            &mut control_scratch,
+        );
+        apply_runtime_plasticity(&mut control, &mut control_scratch);
+    }
+
+    let learner_vision = learner.genome.vision_distance;
+    let learner_probe = evaluate_brain(
+        &mut learner,
+        WORLD_WIDTH,
+        &occupancy,
+        learner_vision,
+        &mut learner_scratch,
+    );
+    let control_vision = control.genome.vision_distance;
+    let control_probe = evaluate_brain(
+        &mut control,
+        WORLD_WIDTH,
+        &occupancy,
+        control_vision,
+        &mut control_scratch,
+    );
+    let learner_move = learner_probe.action_activations[action_index(ActionType::MoveForward)];
+    let control_move = control_probe.action_activations[action_index(ActionType::MoveForward)];
+
+    assert!(learner_probe.resolved_actions.wants_move);
+    assert!(!control_probe.resolved_actions.wants_move);
+    assert!(learner_move > control_move + 0.1);
+
+    let learner_weight = learner.brain.inter[0].synapses[0].weight;
+    let control_weight = control.brain.inter[0].synapses[0].weight;
+    assert!(learner_weight > INITIAL_WEIGHT);
+    assert!((control_weight - INITIAL_WEIGHT).abs() < 1e-6);
+    assert!((learner.genome.edges[0].weight - INITIAL_WEIGHT).abs() < 1e-6);
+}
+
+#[test]
+fn oja_update_reduces_uncorrelated_synapse_toward_minimum_strength() {
+    const WORLD_WIDTH: i32 = 3;
+    const INITIAL_WEIGHT: f32 = 1.5;
+    const TRAINING_STEPS: usize = 16;
+
+    let mut action_biases = vec![0.0; ActionType::ALL.len()];
+    action_biases[action_index(ActionType::MoveForward)] = 1.0;
+    action_biases[action_index(ActionType::Dopamine)] = 2.0;
+
+    let genome = OrganismGenome {
+        num_neurons: 0,
+        vision_distance: 1,
+        age_of_maturity: 1_000,
+        hebb_eta_baseline: 0.0,
+        hebb_eta_gain: 1.0,
+        eligibility_decay_lambda: 0.9,
+        synapse_prune_threshold: 0.0,
+        mutation_rate_age_of_maturity: 0.0,
+        mutation_rate_vision_distance: 0.0,
+        mutation_rate_add_edge: 0.0,
+        mutation_rate_remove_edge: 0.0,
+        mutation_rate_split_edge: 0.0,
+        mutation_rate_inter_bias: 0.0,
+        mutation_rate_inter_update_rate: 0.0,
+        mutation_rate_action_bias: 0.0,
+        mutation_rate_eligibility_decay_lambda: 0.0,
+        mutation_rate_synapse_prune_threshold: 0.0,
+        inter_biases: vec![],
+        inter_log_taus: vec![],
+        interneuron_types: vec![],
+        action_biases,
+        edges: vec![SynapseEdge {
+            pre_neuron_id: NeuronId(0),
+            post_neuron_id: NeuronId(2000),
+            weight: INITIAL_WEIGHT,
+            eligibility: 0.0,
+        }],
+    };
+
+    let mut organism = OrganismState {
+        id: OrganismId(0),
+        species_id: SpeciesId(0),
+        q: 1,
+        r: 1,
+        age_turns: 0,
+        facing: FacingDirection::East,
+        energy: 10.0,
+        consumptions_count: 0,
+        reproductions_count: 0,
+        brain: express_genome(&genome),
+        genome,
+    };
+
+    let occupancy = vec![None; (WORLD_WIDTH * WORLD_WIDTH) as usize];
+    let mut scratch = BrainScratch::new();
+
+    // With empty occupancy, LookFood stays ~0 while MoveForward remains active via bias.
+    let vision_distance = organism.genome.vision_distance;
+    let baseline = evaluate_brain(
+        &mut organism,
+        WORLD_WIDTH,
+        &occupancy,
+        vision_distance,
+        &mut scratch,
+    );
+    assert!(organism.brain.sensory[0].neuron.activation.abs() < 1e-6);
+    assert!(baseline.action_activations[action_index(ActionType::MoveForward)] > 0.5);
+
+    let mut previous = organism.brain.sensory[0].synapses[0].weight;
+    for _ in 0..TRAINING_STEPS {
+        let vision_distance = organism.genome.vision_distance;
+        let _ = evaluate_brain(
+            &mut organism,
+            WORLD_WIDTH,
+            &occupancy,
+            vision_distance,
+            &mut scratch,
+        );
+        apply_runtime_plasticity(&mut organism, &mut scratch);
+
+        let current = organism.brain.sensory[0].synapses[0].weight;
+        assert!(current <= previous + 1e-6);
+        previous = current;
+    }
+
+    let final_weight = organism.brain.sensory[0].synapses[0].weight;
+    // The implementation clamps magnitude to a positive floor, so "zero" means near this minimum.
+    assert!(final_weight <= 0.002);
+    assert!(final_weight < INITIAL_WEIGHT * 0.01);
 }

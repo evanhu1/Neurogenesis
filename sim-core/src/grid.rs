@@ -141,28 +141,6 @@ impl Simulation {
         true
     }
 
-    pub(crate) fn rebuild_occupancy(&mut self) {
-        self.occupancy.fill(None);
-        let width_i32 = self.config.world_width as i32;
-        let width = self.config.world_width as usize;
-        for organism in &mut self.organisms {
-            let (q, r) = wrap_position((organism.q, organism.r), width_i32);
-            organism.q = q;
-            organism.r = r;
-            let idx = r as usize * width + q as usize;
-            debug_assert!(self.occupancy[idx].is_none());
-            self.occupancy[idx] = Some(Occupant::Organism(organism.id));
-        }
-        for food in &mut self.foods {
-            let (q, r) = wrap_position((food.q, food.r), width_i32);
-            food.q = q;
-            food.r = r;
-            let idx = r as usize * width + q as usize;
-            debug_assert!(self.occupancy[idx].is_none());
-            self.occupancy[idx] = Some(Occupant::Food(food.id));
-        }
-    }
-
     pub(crate) fn occupant_at(&self, q: i32, r: i32) -> Option<Occupant> {
         let idx = self.cell_index(q, r);
         self.occupancy[idx]

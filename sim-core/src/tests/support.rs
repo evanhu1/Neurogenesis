@@ -71,7 +71,6 @@ pub(super) fn stable_test_config() -> WorldConfig {
         food_regrowth_min_cooldown_turns: 3,
         food_regrowth_max_cooldown_turns: 24,
         food_regrowth_jitter_turns: 3,
-        food_regrowth_retry_cooldown_turns: 2,
         food_fertility_noise_scale: 0.045,
         food_fertility_exponent: 1.8,
         food_fertility_floor: 0.04,

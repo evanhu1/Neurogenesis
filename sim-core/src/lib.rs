@@ -4,8 +4,8 @@ use rand_chacha::ChaCha8Rng;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use serde::{Deserialize, Serialize};
 use sim_types::{
-    FoodId, FoodState, MetricsSnapshot, OccupancyCell, Occupant, OrganismGenome, OrganismId,
-    OrganismState, SpeciesId, TickDelta, WorldConfig, WorldSnapshot,
+    FoodState, MetricsSnapshot, OccupancyCell, Occupant, OrganismGenome, OrganismId, OrganismState,
+    SpeciesId, TickDelta, WorldConfig, WorldSnapshot,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -15,6 +15,7 @@ mod brain;
 pub(crate) mod genome;
 mod grid;
 #[cfg(feature = "profiling")]
+#[path = "../profiling/profiling.rs"]
 pub mod profiling;
 mod spawn;
 mod turn;
@@ -375,18 +376,6 @@ impl Simulation {
         }
 
         Ok(())
-    }
-
-    pub(crate) fn organism_index(&self, id: OrganismId) -> usize {
-        self.organisms
-            .binary_search_by_key(&id, |o| o.id)
-            .expect("organism must exist")
-    }
-
-    pub(crate) fn food_index(&self, id: FoodId) -> usize {
-        self.foods
-            .binary_search_by_key(&id, |f| f.id)
-            .expect("food must exist")
     }
 
     pub(crate) fn alloc_species_id(&mut self) -> SpeciesId {

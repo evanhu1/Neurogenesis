@@ -7,7 +7,7 @@ const PLANT_COLOR = '#16a34a';
 const BASE_HEX_SIZE_AT_900PX = 8;
 const BASE_HEX_MIN_SIZE_PX = 6;
 const BASE_HEX_REFERENCE_CANVAS_PX = 900;
-const GRID_SHADE_BY_COLOR_CLASS = ['#cfd6e2', '#dbe2ec', '#e6ebf3'] as const;
+const EARTH_COLOR = '#d4c4a8';
 
 type HexLayout = {
   size: number;
@@ -137,9 +137,7 @@ function drawVisibleGrid(
     for (let q = qStart; q <= qEnd; q += 1) {
       const center = hexCenter(layout, q, r);
       traceHex(ctx, center.x, center.y, size);
-      // Proper 3-coloring for axial hex coordinates: no adjacent cells share a shade.
-      const colorClass = ((q - r) % 3 + 3) % 3;
-      ctx.fillStyle = GRID_SHADE_BY_COLOR_CLASS[colorClass];
+      ctx.fillStyle = EARTH_COLOR;
       ctx.fill();
       ctx.strokeStyle = '#8a94a8';
       ctx.lineWidth = 0.4;
@@ -203,13 +201,12 @@ export function renderWorld(
     const plants = Array.isArray(snapshot.foods) ? snapshot.foods : [];
     for (const plant of plants) {
       const center = hexCenter(layout, plant.q, plant.r);
-      const side = Math.max(5, layout.size * 0.72);
-      const halfSide = side / 2;
+      traceHex(ctx, center.x, center.y, layout.size);
       ctx.fillStyle = PLANT_COLOR;
-      ctx.fillRect(center.x - halfSide, center.y - halfSide, side, side);
-      ctx.strokeStyle = 'rgba(15, 23, 42, 0.35)';
-      ctx.lineWidth = Math.max(0.7, layout.size * 0.05);
-      ctx.strokeRect(center.x - halfSide, center.y - halfSide, side, side);
+      ctx.fill();
+      ctx.strokeStyle = '#8a94a8';
+      ctx.lineWidth = 0.4;
+      ctx.stroke();
     }
   }
 
@@ -219,16 +216,7 @@ export function renderWorld(
       const speciesId = unwrapId(org.species_id);
       const center = hexCenter(layout, org.q, org.r);
 
-      ctx.beginPath();
-      ctx.arc(center.x, center.y, Math.max(3, layout.size * 0.5), 0, Math.PI * 2);
-      ctx.fillStyle = colorForSpeciesId(String(speciesId));
-      ctx.fill();
-      if (id === focusedOrganismId) {
-        ctx.lineWidth = Math.max(1.2, layout.size * 0.12);
-        ctx.strokeStyle = '#0b1730';
-        ctx.stroke();
-      }
-
+      const radius = Math.max(3, layout.size * 0.6);
       const [dq, dr] = facingDelta(org.facing);
       const neighbor = hexCenter(layout, org.q + dq, org.r + dr);
       const vx = neighbor.x - center.x;
@@ -237,11 +225,23 @@ export function renderWorld(
       const ux = vx / norm;
       const uy = vy / norm;
 
-      ctx.strokeStyle = '#0f172a';
-      ctx.lineWidth = Math.max(1.2, layout.size * 0.08);
+      // Triangle pointing in facing direction
+      const tipX = center.x + ux * radius;
+      const tipY = center.y + uy * radius;
+      const backX = center.x - ux * radius * 0.7;
+      const backY = center.y - uy * radius * 0.7;
+      const perpX = -uy * radius * 0.65;
+      const perpY = ux * radius * 0.65;
+
       ctx.beginPath();
-      ctx.moveTo(center.x, center.y);
-      ctx.lineTo(center.x + ux * layout.size * 0.45, center.y + uy * layout.size * 0.45);
+      ctx.moveTo(tipX, tipY);
+      ctx.lineTo(backX + perpX, backY + perpY);
+      ctx.lineTo(backX - perpX, backY - perpY);
+      ctx.closePath();
+      ctx.fillStyle = colorForSpeciesId(String(speciesId));
+      ctx.fill();
+      ctx.lineWidth = id === focusedOrganismId ? Math.max(1.5, layout.size * 0.14) : Math.max(0.8, layout.size * 0.06);
+      ctx.strokeStyle = id === focusedOrganismId ? '#0b1730' : 'rgba(15, 23, 42, 0.6)';
       ctx.stroke();
     }
   }

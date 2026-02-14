@@ -54,6 +54,8 @@ pub(crate) struct BrainEvaluation {
 pub(crate) struct BrainScratch {
     inter_inputs: Vec<f32>,
     prev_inter: Vec<f32>,
+    inter_activations: Vec<f32>,
+    action_activations: [f32; ACTION_COUNT],
 }
 
 impl BrainScratch {
@@ -61,6 +63,8 @@ impl BrainScratch {
         Self {
             inter_inputs: Vec::new(),
             prev_inter: Vec::new(),
+            inter_activations: Vec::new(),
+            action_activations: [0.0; ACTION_COUNT],
         }
     }
 }
@@ -308,7 +312,12 @@ pub(crate) fn evaluate_brain(
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::InterSetup, stage_started.elapsed());
 
-    // Accumulate sensory → inter
+    let mut action_inputs = [0.0f32; ACTION_COUNT];
+    for (idx, action) in brain.action.iter().enumerate() {
+        action_inputs[idx] = action.neuron.bias;
+    }
+
+    // Accumulate sensory → inter.
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     for sensory in &brain.sensory {
@@ -320,7 +329,7 @@ pub(crate) fn evaluate_brain(
         );
     }
 
-    // Accumulate inter → inter (using previous tick's activations)
+    // Recurrent inter → inter uses previous tick's inter activations.
     for (i, inter) in brain.inter.iter().enumerate() {
         result.synapse_ops += accumulate_weighted_inputs(
             &inter.synapses,
@@ -343,15 +352,9 @@ pub(crate) fn evaluate_brain(
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::InterActivation, stage_started.elapsed());
 
-    // Accumulate into action neurons (fixed-size array, no allocation).
-    // Start with per-action bias terms.
+    // Inter → action uses this tick's freshly updated inter activations.
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
-    let mut action_inputs = [0.0f32; ACTION_COUNT];
-    for (idx, action) in brain.action.iter().enumerate() {
-        action_inputs[idx] = action.neuron.bias;
-    }
-
     for sensory in &brain.sensory {
         result.synapse_ops += accumulate_weighted_inputs(
             &sensory.synapses,
@@ -389,7 +392,10 @@ pub(crate) fn evaluate_brain(
     result
 }
 
-pub(crate) fn apply_runtime_plasticity(organism: &mut sim_types::OrganismState) {
+pub(crate) fn apply_runtime_plasticity(
+    organism: &mut sim_types::OrganismState,
+    scratch: &mut BrainScratch,
+) {
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     let lambda = organism.genome.eligibility_decay_lambda.clamp(0.0, 1.0);
@@ -397,14 +403,15 @@ pub(crate) fn apply_runtime_plasticity(organism: &mut sim_types::OrganismState) 
     let should_prune = should_prune_synapses(organism.age_turns, organism.genome.age_of_maturity);
 
     let brain = &mut organism.brain;
-    let inter_activations: Vec<f32> = brain
-        .inter
-        .iter()
-        .map(|inter| inter.neuron.activation)
-        .collect();
-    let action_activations: [f32; ACTION_COUNT] =
-        std::array::from_fn(|idx| brain.action.get(idx).map_or(0.0, |n| n.neuron.activation));
-    let dopamine_signal = action_activations[action_index(ActionType::Dopamine)].clamp(-1.0, 1.0);
+    scratch.inter_activations.clear();
+    scratch
+        .inter_activations
+        .extend(brain.inter.iter().map(|inter| inter.neuron.activation));
+    for (idx, action) in brain.action.iter().enumerate() {
+        scratch.action_activations[idx] = action.neuron.activation;
+    }
+    let dopamine_signal =
+        scratch.action_activations[action_index(ActionType::Dopamine)].clamp(-1.0, 1.0);
     // let eta = organism.genome.hebb_eta_baseline + organism.genome.hebb_eta_gain * dopamine_signal;
     let eta = organism.genome.hebb_eta_gain * dopamine_signal; // Experimenting with removing the baseline
     #[cfg(feature = "profiling")]
@@ -419,8 +426,8 @@ pub(crate) fn apply_runtime_plasticity(organism: &mut sim_types::OrganismState) 
             1.0,
             eta,
             lambda,
-            &inter_activations,
-            &action_activations,
+            &scratch.inter_activations,
+            &scratch.action_activations,
         );
     }
     #[cfg(feature = "profiling")]
@@ -439,8 +446,8 @@ pub(crate) fn apply_runtime_plasticity(organism: &mut sim_types::OrganismState) 
             required_sign,
             eta,
             lambda,
-            &inter_activations,
-            &action_activations,
+            &scratch.inter_activations,
+            &scratch.action_activations,
         );
     }
     #[cfg(feature = "profiling")]

@@ -15,6 +15,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 rayon.workspace = true
+rand_distr.workspace = true
 sim-types = { path = "../sim-types" }
 
 [dev-dependencies]
@@ -24,3 +25,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [[bench]]
 name = "turn_throughput"
 harness = false
+
+[[example]]
+name = "profile_turn_path"
+path = "profiling/profile_turn_path.rs"

@@ -289,7 +289,6 @@ fn consumed_food_regrows_after_configured_cooldown() {
     cfg.food_regrowth_min_cooldown_turns = 2;
     cfg.food_regrowth_max_cooldown_turns = 2;
     cfg.food_regrowth_jitter_turns = 0;
-    cfg.food_regrowth_retry_cooldown_turns = 1;
     cfg.plant_growth_speed = 1.0;
 
     let mut sim = Simulation::new(cfg, 102).expect("simulation should initialize");
