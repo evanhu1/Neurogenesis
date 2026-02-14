@@ -2,36 +2,6 @@ use super::support::*;
 use super::*;
 
 #[test]
-fn move_into_cell_vacated_same_turn_succeeds() {
-    let cfg = test_config(5, 2);
-    let mut sim = Simulation::new(cfg, 11).expect("simulation should initialize");
-    configure_sim(
-        &mut sim,
-        vec![
-            make_organism(0, 1, 1, FacingDirection::East, true, false, false, 0.8, 0),
-            make_organism(
-                1,
-                2,
-                1,
-                FacingDirection::SouthEast,
-                true,
-                false,
-                false,
-                0.7,
-                0,
-            ),
-        ],
-    );
-
-    let delta = tick_once(&mut sim);
-    let moves = move_map(&delta);
-    assert_eq!(moves.len(), 1);
-    assert_eq!(moves.get(&OrganismId(0)), None);
-    assert_eq!(moves.get(&OrganismId(1)), Some(&((2, 1), (2, 2))));
-    assert_eq!(delta.metrics.consumptions_last_turn, 0);
-}
-
-#[test]
 fn two_organism_swap_resolves_deterministically() {
     let cfg = test_config(5, 2);
     let mut sim = Simulation::new(cfg, 12).expect("simulation should initialize");

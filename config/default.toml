@@ -13,9 +13,9 @@ max_num_neurons = 50
 speciation_threshold = 20.0
 
 [seed_genome_config]
-num_neurons = 10
+num_neurons = 20
 num_synapses = 100
-spatial_prior_sigma = 3.5
+spatial_prior_sigma = 2.0
 vision_distance = 10
 age_of_maturity = 50
 hebb_eta_baseline = 0.001

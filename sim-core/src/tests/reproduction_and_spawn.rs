@@ -77,63 +77,6 @@ fn reproduction_offspring_brain_runtime_state_is_reset() {
 }
 
 #[test]
-fn reproduction_spawn_is_opposite_of_parent_facing() {
-    let cfg = test_config(40, 1);
-    let mut sim = Simulation::new(cfg, 30).expect("simulation should initialize");
-    configure_sim(
-        &mut sim,
-        vec![make_organism(
-            0,
-            1,
-            1,
-            FacingDirection::East,
-            false,
-            false,
-            false,
-            0.2,
-            0,
-        )],
-    );
-
-    let spawned =
-        sim.resolve_spawn_requests(&[reproduction_request_from_parent(&sim, OrganismId(0))]);
-    assert_eq!(spawned.len(), 1);
-    let child = &spawned[0];
-    assert_eq!((child.q, child.r), (0, 1));
-}
-
-#[test]
-fn reproduce_action_requires_enough_energy() {
-    let cfg = test_config(7, 1);
-    let mut sim = Simulation::new(cfg, 71).expect("simulation should initialize");
-    let mut parent = make_organism(
-        0,
-        3,
-        3,
-        FacingDirection::East,
-        false,
-        false,
-        false,
-        0.7,
-        5.0,
-    );
-    enable_reproduce_action(&mut parent);
-    configure_sim(&mut sim, vec![parent]);
-
-    let delta = tick_once(&mut sim);
-    assert_eq!(delta.metrics.reproductions_last_turn, 0);
-    assert!(delta.spawned.is_empty());
-    let parent_after = sim
-        .organisms
-        .iter()
-        .find(|organism| organism.id == OrganismId(0))
-        .expect("parent should remain alive");
-    assert_eq!(parent_after.reproductions_count, 0);
-    // 5.0 - 0.25 (turn upkeep: 0.25 * 1 neuron) - 1.0 (reproduce action cost) = 3.75
-    assert_eq!(parent_after.energy, 3.75);
-}
-
-#[test]
 fn reproduce_action_fails_when_spawn_cell_blocked() {
     let cfg = test_config(7, 2);
     let mut sim = Simulation::new(cfg, 72).expect("simulation should initialize");

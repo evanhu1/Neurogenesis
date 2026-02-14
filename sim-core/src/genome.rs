@@ -507,7 +507,8 @@ fn validate_rate(name: &str, rate: f32) -> Result<(), SimError> {
 fn max_possible_synapses(num_neurons: u32) -> u32 {
     let pre_count = u64::from(SENSORY_COUNT + num_neurons);
     let post_count = u64::from(num_neurons + ACTION_COUNT_U32);
-    let max = pre_count.saturating_mul(post_count);
+    let all_pairs = pre_count.saturating_mul(post_count);
+    let max = all_pairs.saturating_sub(u64::from(num_neurons));
     max.min(u64::from(u32::MAX)) as u32
 }
 

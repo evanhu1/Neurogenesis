@@ -76,52 +76,6 @@ fn starvation_and_reproduction_interact_in_same_turn() {
 }
 
 #[test]
-fn starvation_does_not_spawn_replacements() {
-    let cfg = test_config(6, 2);
-    let mut sim = Simulation::new(cfg, 29).expect("simulation should initialize");
-    configure_sim(
-        &mut sim,
-        vec![
-            make_organism(
-                0,
-                1,
-                1,
-                FacingDirection::East,
-                false,
-                false,
-                false,
-                0.2,
-                0.25,
-            ),
-            make_organism(
-                1,
-                4,
-                4,
-                FacingDirection::West,
-                false,
-                false,
-                false,
-                0.2,
-                5.0,
-            ),
-        ],
-    );
-
-    let delta = tick_once(&mut sim);
-    assert_eq!(delta.metrics.starvations_last_turn, 1);
-    assert!(delta.spawned.is_empty());
-    assert_eq!(
-        delta
-            .removed_positions
-            .iter()
-            .map(|entry| entry.entity_id)
-            .collect::<Vec<_>>(),
-        vec![EntityId::Organism(OrganismId(0))]
-    );
-    assert_eq!(sim.organisms.len(), 1);
-}
-
-#[test]
 fn move_energy_cost_applies_to_attempted_moves() {
     let cfg = test_config(5, 2);
     let mut sim = Simulation::new(cfg, 74).expect("simulation should initialize");

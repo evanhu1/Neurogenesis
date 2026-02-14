@@ -25,7 +25,7 @@ const HEBB_WEIGHT_CLAMP_ENABLED: bool = true;
 const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
 const SYNAPSE_WEIGHT_LOG_NORMAL_MU: f32 = -0.5;
 const SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA: f32 = 0.8;
-const SPATIAL_PRIOR_LONG_RANGE_FLOOR: f32 = 0.12;
+const SPATIAL_PRIOR_LONG_RANGE_FLOOR: f32 = 0.05;
 pub(crate) const SENSORY_COUNT: u32 = SensoryReceptor::LOOK_NEURON_COUNT + 1;
 pub(crate) const ACTION_COUNT: usize = ActionType::ALL.len();
 pub(crate) const ACTION_COUNT_U32: u32 = ACTION_COUNT as u32;
@@ -255,7 +255,8 @@ fn wire_birth_synapses_spatial<R: Rng + ?Sized>(
     }
 
     let max_pairs = pre_count.saturating_mul(post_count);
-    let target = (genome.num_synapses as usize).min(max_pairs);
+    let max_allowed_pairs = max_pairs.saturating_sub(inter_len);
+    let target = (genome.num_synapses as usize).min(max_allowed_pairs);
     let sigma = genome.spatial_prior_sigma.max(0.01);
     if target == 0 {
         return;
@@ -271,6 +272,9 @@ fn wire_birth_synapses_spatial<R: Rng + ?Sized>(
         }
         let pre_idx = rng.random_range(0..pre_count);
         let post_idx = rng.random_range(0..post_count);
+        if pre_idx >= sensory_len && post_idx < inter_len && (pre_idx - sensory_len) == post_idx {
+            continue;
+        }
         let key = pre_idx * post_count + post_idx;
         if selected[key] {
             continue;
@@ -308,6 +312,9 @@ fn wire_birth_synapses_spatial<R: Rng + ?Sized>(
     while selected_count < target {
         let pre_idx = rng.random_range(0..pre_count);
         let post_idx = rng.random_range(0..post_count);
+        if pre_idx >= sensory_len && post_idx < inter_len && (pre_idx - sensory_len) == post_idx {
+            continue;
+        }
         let key = pre_idx * post_count + post_idx;
         if selected[key] {
             continue;

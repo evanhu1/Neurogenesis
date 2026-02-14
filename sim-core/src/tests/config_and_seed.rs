@@ -109,7 +109,8 @@ fn seed_num_synapses_is_clamped_to_possible_pairs() {
     let genome =
         crate::genome::generate_seed_genome(&cfg.seed_genome_config, cfg.max_num_neurons, &mut rng);
 
-    let max_pairs = (crate::brain::SENSORY_COUNT + genome.num_neurons)
+    let all_pairs = (crate::brain::SENSORY_COUNT + genome.num_neurons)
         * (genome.num_neurons + crate::brain::ACTION_COUNT_U32);
+    let max_pairs = all_pairs.saturating_sub(genome.num_neurons);
     assert_eq!(genome.num_synapses, max_pairs);
 }
