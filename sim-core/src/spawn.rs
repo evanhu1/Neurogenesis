@@ -177,18 +177,9 @@ impl Simulation {
     pub(crate) fn bootstrap_food_regrowth_queue(&mut self) {
         self.ensure_food_ecology_state();
         for idx in 0..self.food_fertility.len() {
-            if matches!(self.occupancy[idx], Some(Occupant::Food(_))) {
-                continue;
-            }
             let delay = self.regrowth_delay_for_tile(idx);
             self.schedule_food_regrowth_with_delay(idx, delay);
         }
-    }
-
-    pub(crate) fn mark_food_consumed(&mut self, tile_idx: usize) {
-        self.ensure_food_ecology_state();
-        let delay = self.regrowth_delay_for_tile(tile_idx);
-        self.schedule_food_regrowth_with_delay(tile_idx, delay);
     }
 
     pub(crate) fn replenish_food_supply(&mut self) -> Vec<FoodState> {
@@ -209,17 +200,15 @@ impl Simulation {
             if self.food_regrowth_generation[event.tile_idx] != event.generation {
                 continue;
             }
-            if self.occupancy[event.tile_idx].is_some() {
-                continue;
-            }
-            if self.accept_fertility_sample(event.tile_idx) {
+            if self.occupancy[event.tile_idx].is_none()
+                && self.accept_fertility_sample(event.tile_idx)
+            {
                 if let Some(food) = self.spawn_food_at_cell(event.tile_idx) {
                     spawned.push(food);
                 }
-            } else {
-                let delay = self.regrowth_delay_for_tile(event.tile_idx);
-                self.schedule_food_regrowth_with_delay(event.tile_idx, delay);
             }
+            let delay = self.regrowth_delay_for_tile(event.tile_idx);
+            self.schedule_food_regrowth_with_delay(event.tile_idx, delay);
         }
 
         spawned
@@ -235,9 +224,6 @@ impl Simulation {
 
         self.initialize_food_ecology();
         for idx in 0..capacity {
-            if matches!(self.occupancy[idx], Some(Occupant::Food(_))) {
-                continue;
-            }
             let delay = self.regrowth_delay_for_tile(idx);
             self.schedule_food_regrowth_with_delay(idx, delay);
         }
@@ -331,7 +317,7 @@ fn build_fertility_map(world_width: u32, seed: u64, config: &sim_types::WorldCon
 }
 
 fn fractal_perlin_2d(x: f64, y: f64, seed: u64) -> f64 {
-    const OCTAVES: usize = 4;
+    const OCTAVES: usize = 1;
     let mut amplitude = 1.0_f64;
     let mut frequency = 1.0_f64;
     let mut total = 0.0_f64;

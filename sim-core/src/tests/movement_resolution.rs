@@ -284,12 +284,13 @@ fn move_into_food_consumes_and_schedules_regrowth() {
 }
 
 #[test]
-fn consumed_food_regrows_after_configured_cooldown() {
+fn food_regrows_naturally_based_on_fertility_schedule() {
     let mut cfg = test_config(5, 1);
     cfg.food_regrowth_min_cooldown_turns = 2;
     cfg.food_regrowth_max_cooldown_turns = 2;
     cfg.food_regrowth_jitter_turns = 0;
     cfg.plant_growth_speed = 1.0;
+    cfg.food_fertility_floor = 1.0;
 
     let mut sim = Simulation::new(cfg, 102).expect("simulation should initialize");
     configure_sim(
@@ -315,7 +316,7 @@ fn consumed_food_regrows_after_configured_cooldown() {
     assert_eq!(first_delta.food_spawned.len(), 0);
     assert!(
         sim.foods.is_empty(),
-        "regrowth should not refill immediately"
+        "regrowth should not fire immediately"
     );
 
     let second_delta = tick_once(&mut sim);
@@ -324,7 +325,7 @@ fn consumed_food_regrows_after_configured_cooldown() {
     let third_delta = tick_once(&mut sim);
     assert!(
         !third_delta.food_spawned.is_empty(),
-        "food should regrow once cooldown elapses",
+        "food should regrow once fertility schedule fires",
     );
     assert!(!sim.foods.is_empty());
 }
