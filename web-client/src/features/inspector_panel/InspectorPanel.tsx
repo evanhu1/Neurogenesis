@@ -92,16 +92,15 @@ export function InspectorPanel({
         label: 'Vision Distance',
         value: genome.mutation_rate_vision_distance,
       },
-      { key: 'mutation_rate_add_edge', label: 'Add Edge', value: genome.mutation_rate_add_edge },
       {
-        key: 'mutation_rate_remove_edge',
-        label: 'Remove Edge',
-        value: genome.mutation_rate_remove_edge,
+        key: 'mutation_rate_num_synapses',
+        label: 'Num Synapses',
+        value: genome.mutation_rate_num_synapses,
       },
       {
-        key: 'mutation_rate_split_edge',
-        label: 'Split Edge',
-        value: genome.mutation_rate_split_edge,
+        key: 'mutation_rate_neuron_location',
+        label: 'Neuron Location',
+        value: genome.mutation_rate_neuron_location,
       },
       {
         key: 'mutation_rate_inter_bias',
@@ -150,9 +149,9 @@ export function InspectorPanel({
       ] satisfies StatItem[],
       genomeStats: [
         { label: 'Genome Neurons', value: String(genome.num_neurons) },
+        { label: 'Genome Synapses', value: String(genome.num_synapses) },
         { label: 'Vision Distance', value: String(genome.vision_distance) },
         { label: 'Age Maturity', value: String(genome.age_of_maturity) },
-        { label: 'Genome Edges', value: String(genome.edges.length) },
         { label: 'Inter Bias Genes', value: String(genome.inter_biases.length) },
         { label: 'Inter Tau Genes', value: String(genome.inter_log_taus.length) },
         { label: 'Action Bias Genes', value: String(genome.action_biases.length) },

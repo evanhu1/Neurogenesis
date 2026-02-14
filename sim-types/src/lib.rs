@@ -71,6 +71,12 @@ impl Default for InterNeuronType {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct BrainLocation {
+    pub x: f32,
+    pub y: f32,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum EntityType {
     Food,
@@ -99,6 +105,8 @@ impl SensoryReceptor {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OrganismGenome {
     pub num_neurons: u32,
+    pub num_synapses: u32,
+    pub spatial_prior_sigma: f32,
     pub vision_distance: u32,
     #[serde(default = "default_age_of_maturity")]
     pub age_of_maturity: u32,
@@ -115,11 +123,7 @@ pub struct OrganismGenome {
     #[serde(default)]
     pub mutation_rate_vision_distance: f32,
     #[serde(default)]
-    pub mutation_rate_add_edge: f32,
-    #[serde(default)]
-    pub mutation_rate_remove_edge: f32,
-    #[serde(default)]
-    pub mutation_rate_split_edge: f32,
+    pub mutation_rate_num_synapses: f32,
     #[serde(default)]
     pub mutation_rate_inter_bias: f32,
     #[serde(default)]
@@ -130,18 +134,23 @@ pub struct OrganismGenome {
     pub mutation_rate_eligibility_decay_lambda: f32,
     #[serde(default)]
     pub mutation_rate_synapse_prune_threshold: f32,
+    #[serde(default)]
+    pub mutation_rate_neuron_location: f32,
     pub inter_biases: Vec<f32>,
     pub inter_log_taus: Vec<f32>,
     #[serde(default)]
     pub interneuron_types: Vec<InterNeuronType>,
     pub action_biases: Vec<f32>,
-    pub edges: Vec<SynapseEdge>,
+    pub sensory_locations: Vec<BrainLocation>,
+    pub inter_locations: Vec<BrainLocation>,
+    pub action_locations: Vec<BrainLocation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SeedGenomeConfig {
     pub num_neurons: u32,
     pub num_synapses: u32,
+    pub spatial_prior_sigma: f32,
     pub vision_distance: u32,
     pub age_of_maturity: u32,
     pub hebb_eta_baseline: f32,
@@ -150,14 +159,13 @@ pub struct SeedGenomeConfig {
     pub synapse_prune_threshold: f32,
     pub mutation_rate_age_of_maturity: f32,
     pub mutation_rate_vision_distance: f32,
-    pub mutation_rate_add_edge: f32,
-    pub mutation_rate_remove_edge: f32,
-    pub mutation_rate_split_edge: f32,
+    pub mutation_rate_num_synapses: f32,
     pub mutation_rate_inter_bias: f32,
     pub mutation_rate_inter_update_rate: f32,
     pub mutation_rate_action_bias: f32,
     pub mutation_rate_eligibility_decay_lambda: f32,
     pub mutation_rate_synapse_prune_threshold: f32,
+    pub mutation_rate_neuron_location: f32,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -339,6 +347,8 @@ pub struct NeuronState {
     pub neuron_id: NeuronId,
     pub neuron_type: NeuronType,
     pub bias: f32,
+    pub x: f32,
+    pub y: f32,
     pub activation: f32,
     pub parent_ids: Vec<NeuronId>,
 }

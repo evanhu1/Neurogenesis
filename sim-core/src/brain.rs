@@ -1,13 +1,15 @@
 use crate::genome::{
-    inter_alpha_from_log_tau, DEFAULT_INTER_LOG_TAU, SYNAPSE_STRENGTH_MAX, SYNAPSE_STRENGTH_MIN,
+    inter_alpha_from_log_tau, BRAIN_SPACE_MAX, BRAIN_SPACE_MIN, DEFAULT_INTER_LOG_TAU,
+    SYNAPSE_STRENGTH_MAX, SYNAPSE_STRENGTH_MIN,
 };
 use crate::grid::hex_neighbor;
 #[cfg(feature = "profiling")]
 use crate::profiling::{self, BrainStage};
+use rand::Rng;
 use sim_types::{
-    ActionNeuronState, ActionType, BrainState, EntityType, InterNeuronState, InterNeuronType,
-    NeuronId, NeuronState, NeuronType, Occupant, OrganismGenome, OrganismId, SensoryNeuronState,
-    SensoryReceptor, SynapseEdge,
+    ActionNeuronState, ActionType, BrainLocation, BrainState, EntityType, InterNeuronState,
+    InterNeuronType, NeuronId, NeuronState, NeuronType, Occupant, OrganismGenome, OrganismId,
+    SensoryNeuronState, SensoryReceptor, SynapseEdge,
 };
 #[cfg(feature = "profiling")]
 use std::time::Instant;
@@ -21,6 +23,9 @@ const TURN_ACTION_DEADZONE: f32 = 0.3;
 const DEFAULT_BIAS: f32 = 0.0;
 const HEBB_WEIGHT_CLAMP_ENABLED: bool = true;
 const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
+const SYNAPSE_WEIGHT_LOG_NORMAL_MU: f32 = -0.5;
+const SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA: f32 = 0.8;
+const SPATIAL_PRIOR_LONG_RANGE_FLOOR: f32 = 0.12;
 pub(crate) const SENSORY_COUNT: u32 = SensoryReceptor::LOOK_NEURON_COUNT + 1;
 pub(crate) const ACTION_COUNT: usize = ActionType::ALL.len();
 pub(crate) const ACTION_COUNT_U32: u32 = ACTION_COUNT as u32;
@@ -75,40 +80,52 @@ impl BrainScratch {
     }
 }
 
-/// Build a BrainState deterministically from a genome.
-pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
+/// Build a BrainState from inherited neuron genes and spatially sampled birth synapses.
+pub(crate) fn express_genome<R: Rng + ?Sized>(genome: &OrganismGenome, rng: &mut R) -> BrainState {
     let mut sensory = vec![
         make_sensory_neuron(
             0,
             SensoryReceptor::Look {
                 look_target: EntityType::Food,
             },
+            location_or_default(&genome.sensory_locations, 0),
         ),
         make_sensory_neuron(
             1,
             SensoryReceptor::Look {
                 look_target: EntityType::Organism,
             },
+            location_or_default(&genome.sensory_locations, 1),
         ),
-        make_sensory_neuron(2, SensoryReceptor::Energy),
+        make_sensory_neuron(
+            2,
+            SensoryReceptor::Energy,
+            location_or_default(&genome.sensory_locations, 2),
+        ),
     ];
 
     let mut inter = Vec::with_capacity(genome.num_neurons as usize);
     for i in 0..genome.num_neurons {
-        let bias = genome.inter_biases.get(i as usize).copied().unwrap_or(0.0);
+        let idx = i as usize;
+        let bias = genome.inter_biases.get(idx).copied().unwrap_or(0.0);
         let log_tau = genome
             .inter_log_taus
-            .get(i as usize)
+            .get(idx)
             .copied()
             .unwrap_or(DEFAULT_INTER_LOG_TAU);
         let alpha = inter_alpha_from_log_tau(log_tau);
         let interneuron_type = genome
             .interneuron_types
-            .get(i as usize)
+            .get(idx)
             .copied()
             .unwrap_or(InterNeuronType::Excitatory);
         inter.push(InterNeuronState {
-            neuron: make_neuron(NeuronId(INTER_ID_BASE + i), NeuronType::Inter, bias),
+            neuron: make_neuron(
+                NeuronId(INTER_ID_BASE + i),
+                NeuronType::Inter,
+                bias,
+                location_or_default(&genome.inter_locations, idx),
+            ),
             interneuron_type,
             alpha,
             synapses: Vec::new(),
@@ -122,113 +139,20 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
             ACTION_ID_BASE + idx as u32,
             action_type,
             bias,
+            location_or_default(&genome.action_locations, idx),
         ));
     }
 
-    // Valid neuron IDs for this brain
-    let sensory_max = sensory.len() as u32; // 0..3
-    let inter_count = genome.num_neurons as usize;
-    let inter_max = INTER_ID_BASE + genome.num_neurons; // 1000..1000+n
-    let action_max = ACTION_ID_BASE + ACTION_COUNT_U32; // 2000..2005
+    wire_birth_synapses_spatial(genome, &mut sensory, &mut inter, &action, rng);
 
-    let is_valid_pre = |id: NeuronId| -> bool {
-        id.0 < sensory_max || (id.0 >= INTER_ID_BASE && id.0 < inter_max)
-    };
-    let is_valid_post = |id: NeuronId| -> bool {
-        (id.0 >= INTER_ID_BASE && id.0 < inter_max) || (id.0 >= ACTION_ID_BASE && id.0 < action_max)
-    };
-
-    // Parent ID tracking: Vec-indexed instead of HashMap
-    let mut inter_parent_ids: Vec<Vec<NeuronId>> = vec![Vec::new(); inter_count];
-    let mut action_parent_ids: Vec<Vec<NeuronId>> = vec![Vec::new(); ACTION_COUNT];
-
-    // Edges are sorted by (pre, post) — use adjacent-duplicate detection
-    let mut prev_key: Option<(NeuronId, NeuronId)> = None;
-
-    for edge in &genome.edges {
-        let key = (edge.pre_neuron_id, edge.post_neuron_id);
-        if prev_key == Some(key) {
-            continue;
-        }
-        prev_key = Some(key);
-
-        if !is_valid_pre(edge.pre_neuron_id) || !is_valid_post(edge.post_neuron_id) {
-            continue;
-        }
-
-        if edge.pre_neuron_id.0 < sensory_max {
-            debug_assert!(
-                edge.weight > 0.0,
-                "sensory outgoing synapse must be positive"
-            );
-        } else if edge.pre_neuron_id.0 >= INTER_ID_BASE && edge.pre_neuron_id.0 < inter_max {
-            let idx = (edge.pre_neuron_id.0 - INTER_ID_BASE) as usize;
-            let required_positive =
-                matches!(inter[idx].interneuron_type, InterNeuronType::Excitatory);
-            if required_positive {
-                debug_assert!(
-                    edge.weight > 0.0,
-                    "excitatory interneuron outgoing synapse must be positive"
-                );
-            } else {
-                debug_assert!(
-                    edge.weight < 0.0,
-                    "inhibitory interneuron outgoing synapse must be negative"
-                );
-            }
-        }
-
-        // Add to the correct pre-neuron's synapse list
-        if edge.pre_neuron_id.0 < sensory_max {
-            sensory[edge.pre_neuron_id.0 as usize]
-                .synapses
-                .push(edge.clone());
-        } else if edge.pre_neuron_id.0 >= INTER_ID_BASE && edge.pre_neuron_id.0 < inter_max {
-            let idx = (edge.pre_neuron_id.0 - INTER_ID_BASE) as usize;
-            inter[idx].synapses.push(edge.clone());
-        }
-
-        // Track parent relationships
-        if edge.post_neuron_id.0 >= INTER_ID_BASE && edge.post_neuron_id.0 < inter_max {
-            let idx = (edge.post_neuron_id.0 - INTER_ID_BASE) as usize;
-            inter_parent_ids[idx].push(edge.pre_neuron_id);
-        } else if edge.post_neuron_id.0 >= ACTION_ID_BASE && edge.post_neuron_id.0 < action_max {
-            let idx = (edge.post_neuron_id.0 - ACTION_ID_BASE) as usize;
-            action_parent_ids[idx].push(edge.pre_neuron_id);
-        }
-    }
-
-    // Sort synapse lists by post_neuron_id
-    for s in &mut sensory {
-        s.synapses.sort_by_key(|e| e.post_neuron_id);
-    }
-    for i in &mut inter {
-        i.synapses.sort_by_key(|e| e.post_neuron_id);
-    }
-
-    // Assign parent_ids to inter and action neurons (take instead of clone)
-    for (idx, i) in inter.iter_mut().enumerate() {
-        let parents = &mut inter_parent_ids[idx];
-        parents.sort();
-        parents.dedup();
-        i.neuron.parent_ids = std::mem::take(parents);
-    }
-    for (idx, a) in action.iter_mut().enumerate() {
-        let parents = &mut action_parent_ids[idx];
-        parents.sort();
-        parents.dedup();
-        a.neuron.parent_ids = std::mem::take(parents);
-    }
-
-    let synapse_count = sensory.iter().map(|s| s.synapses.len()).sum::<usize>()
-        + inter.iter().map(|i| i.synapses.len()).sum::<usize>();
-
-    BrainState {
+    let mut brain = BrainState {
         sensory,
         inter,
         action,
-        synapse_count: synapse_count as u32,
-    }
+        synapse_count: 0,
+    };
+    refresh_parent_ids_and_synapse_count(&mut brain);
+    brain
 }
 
 pub(crate) fn action_index(action: ActionType) -> usize {
@@ -241,27 +165,216 @@ pub(crate) fn action_index(action: ActionType) -> usize {
     }
 }
 
-fn make_neuron(id: NeuronId, neuron_type: NeuronType, bias: f32) -> NeuronState {
+fn location_or_default(locations: &[BrainLocation], index: usize) -> BrainLocation {
+    locations.get(index).copied().unwrap_or(BrainLocation {
+        x: 0.5 * (BRAIN_SPACE_MIN + BRAIN_SPACE_MAX),
+        y: 0.5 * (BRAIN_SPACE_MIN + BRAIN_SPACE_MAX),
+    })
+}
+
+fn connection_probability(pre: &NeuronState, post: &NeuronState, sigma: f32) -> f32 {
+    let dx = pre.x - post.x;
+    let dy = pre.y - post.y;
+    let distance_sq = dx * dx + dy * dy;
+    let sigma_sq = sigma * sigma;
+    let local_bias = (-0.5 * distance_sq / sigma_sq).exp();
+    (SPATIAL_PRIOR_LONG_RANGE_FLOOR + (1.0 - SPATIAL_PRIOR_LONG_RANGE_FLOOR) * local_bias)
+        .clamp(0.0, 1.0)
+}
+
+fn sample_signed_lognormal_weight<R: Rng + ?Sized>(required_sign: f32, rng: &mut R) -> f32 {
+    let z: f32 = rng.sample(rand_distr::StandardNormal);
+    let magnitude = (SYNAPSE_WEIGHT_LOG_NORMAL_MU + SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA * z)
+        .exp()
+        .clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX);
+    if required_sign.is_sign_negative() {
+        -magnitude
+    } else {
+        magnitude
+    }
+}
+
+fn add_synapse<R: Rng + ?Sized>(
+    pre_idx: usize,
+    post_idx: usize,
+    sensory_len: usize,
+    inter_len: usize,
+    sensory: &mut [SensoryNeuronState],
+    inter: &mut [InterNeuronState],
+    action: &[ActionNeuronState],
+    rng: &mut R,
+) {
+    let (pre_id, pre_sign) = if pre_idx < sensory_len {
+        let pre = &sensory[pre_idx].neuron;
+        (pre.neuron_id, 1.0_f32)
+    } else {
+        let inter_idx = pre_idx - sensory_len;
+        let pre = &inter[inter_idx];
+        let sign = match pre.interneuron_type {
+            InterNeuronType::Excitatory => 1.0,
+            InterNeuronType::Inhibitory => -1.0,
+        };
+        (pre.neuron.neuron_id, sign)
+    };
+
+    let post_id = if post_idx < inter_len {
+        inter[post_idx].neuron.neuron_id
+    } else {
+        action[post_idx - inter_len].neuron.neuron_id
+    };
+
+    let weight = sample_signed_lognormal_weight(pre_sign, rng);
+    let edge = SynapseEdge {
+        pre_neuron_id: pre_id,
+        post_neuron_id: post_id,
+        weight,
+        eligibility: 0.0,
+    };
+
+    if pre_idx < sensory_len {
+        sensory[pre_idx].synapses.push(edge);
+    } else {
+        inter[pre_idx - sensory_len].synapses.push(edge);
+    }
+}
+
+fn wire_birth_synapses_spatial<R: Rng + ?Sized>(
+    genome: &OrganismGenome,
+    sensory: &mut [SensoryNeuronState],
+    inter: &mut [InterNeuronState],
+    action: &[ActionNeuronState],
+    rng: &mut R,
+) {
+    let sensory_len = sensory.len();
+    let inter_len = inter.len();
+    let action_len = action.len();
+    let pre_count = sensory_len + inter_len;
+    let post_count = inter_len + action_len;
+    if pre_count == 0 || post_count == 0 {
+        return;
+    }
+
+    let max_pairs = pre_count.saturating_mul(post_count);
+    let target = (genome.num_synapses as usize).min(max_pairs);
+    let sigma = genome.spatial_prior_sigma.max(0.01);
+    if target == 0 {
+        return;
+    }
+
+    let mut selected = vec![false; max_pairs];
+    let mut selected_count = 0usize;
+    let max_attempts = target.saturating_mul(40).saturating_add(1024);
+
+    for _ in 0..max_attempts {
+        if selected_count >= target {
+            break;
+        }
+        let pre_idx = rng.random_range(0..pre_count);
+        let post_idx = rng.random_range(0..post_count);
+        let key = pre_idx * post_count + post_idx;
+        if selected[key] {
+            continue;
+        }
+
+        let pre_neuron = if pre_idx < sensory_len {
+            &sensory[pre_idx].neuron
+        } else {
+            &inter[pre_idx - sensory_len].neuron
+        };
+        let post_neuron = if post_idx < inter_len {
+            &inter[post_idx].neuron
+        } else {
+            &action[post_idx - inter_len].neuron
+        };
+
+        if rng.random::<f32>() > connection_probability(pre_neuron, post_neuron, sigma) {
+            continue;
+        }
+
+        selected[key] = true;
+        selected_count += 1;
+        add_synapse(
+            pre_idx,
+            post_idx,
+            sensory_len,
+            inter_len,
+            sensory,
+            inter,
+            action,
+            rng,
+        );
+    }
+
+    while selected_count < target {
+        let pre_idx = rng.random_range(0..pre_count);
+        let post_idx = rng.random_range(0..post_count);
+        let key = pre_idx * post_count + post_idx;
+        if selected[key] {
+            continue;
+        }
+        selected[key] = true;
+        selected_count += 1;
+        add_synapse(
+            pre_idx,
+            post_idx,
+            sensory_len,
+            inter_len,
+            sensory,
+            inter,
+            action,
+            rng,
+        );
+    }
+
+    for sensory_neuron in sensory.iter_mut() {
+        sensory_neuron
+            .synapses
+            .sort_by_key(|edge| edge.post_neuron_id);
+    }
+    for inter_neuron in inter.iter_mut() {
+        inter_neuron
+            .synapses
+            .sort_by_key(|edge| edge.post_neuron_id);
+    }
+}
+
+fn make_neuron(
+    id: NeuronId,
+    neuron_type: NeuronType,
+    bias: f32,
+    location: BrainLocation,
+) -> NeuronState {
     NeuronState {
         neuron_id: id,
         neuron_type,
         bias,
+        x: location.x,
+        y: location.y,
         activation: 0.0,
         parent_ids: Vec::new(),
     }
 }
 
-pub(crate) fn make_sensory_neuron(id: u32, receptor: SensoryReceptor) -> SensoryNeuronState {
+pub(crate) fn make_sensory_neuron(
+    id: u32,
+    receptor: SensoryReceptor,
+    location: BrainLocation,
+) -> SensoryNeuronState {
     SensoryNeuronState {
-        neuron: make_neuron(NeuronId(id), NeuronType::Sensory, DEFAULT_BIAS),
+        neuron: make_neuron(NeuronId(id), NeuronType::Sensory, DEFAULT_BIAS, location),
         receptor,
         synapses: Vec::new(),
     }
 }
 
-pub(crate) fn make_action_neuron(id: u32, action_type: ActionType, bias: f32) -> ActionNeuronState {
+pub(crate) fn make_action_neuron(
+    id: u32,
+    action_type: ActionType,
+    bias: f32,
+    location: BrainLocation,
+) -> ActionNeuronState {
     ActionNeuronState {
-        neuron: make_neuron(NeuronId(id), NeuronType::Action, bias),
+        neuron: make_neuron(NeuronId(id), NeuronType::Action, bias, location),
         action_type,
     }
 }

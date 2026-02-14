@@ -70,7 +70,7 @@ impl Simulation {
                         }
                     };
 
-                    let brain = express_genome(&child_genome);
+                    let brain = express_genome(&child_genome, &mut self.rng);
                     OrganismState {
                         id: self.alloc_organism_id(),
                         species_id: child_species_id,
@@ -108,7 +108,7 @@ impl Simulation {
             let id = self.alloc_organism_id();
             let genome =
                 generate_seed_genome(&seed_config, self.config.max_num_neurons, &mut self.rng);
-            let brain = express_genome(&genome);
+            let brain = express_genome(&genome, &mut self.rng);
 
             // Seed genomes are independently random — each gets its own species.
             // Species assignment via genome distance only matters for mutation-derived offspring.

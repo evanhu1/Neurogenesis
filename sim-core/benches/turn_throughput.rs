@@ -23,6 +23,7 @@ fn stable_perf_config() -> WorldConfig {
         seed_genome_config: sim_types::SeedGenomeConfig {
             num_neurons: 20,
             num_synapses: 80,
+            spatial_prior_sigma: 3.5,
             vision_distance: 10,
             age_of_maturity: 0,
             hebb_eta_baseline: 0.0,
@@ -31,14 +32,13 @@ fn stable_perf_config() -> WorldConfig {
             synapse_prune_threshold: 0.01,
             mutation_rate_age_of_maturity: 0.05,
             mutation_rate_vision_distance: 0.04,
-            mutation_rate_add_edge: 0.03,
-            mutation_rate_remove_edge: 0.02,
-            mutation_rate_split_edge: 0.005,
+            mutation_rate_num_synapses: 0.03,
             mutation_rate_inter_bias: 0.2,
             mutation_rate_inter_update_rate: 0.12,
             mutation_rate_action_bias: 0.2,
             mutation_rate_eligibility_decay_lambda: 0.05,
             mutation_rate_synapse_prune_threshold: 0.05,
+            mutation_rate_neuron_location: 0.02,
         },
     }
 }

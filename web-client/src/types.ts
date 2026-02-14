@@ -5,6 +5,7 @@ export type FoodId = { 0: number } | number;
 export type SeedGenomeConfig = {
   num_neurons: number;
   num_synapses: number;
+  spatial_prior_sigma: number;
   vision_distance: number;
   age_of_maturity: number;
   hebb_eta_baseline: number;
@@ -13,14 +14,13 @@ export type SeedGenomeConfig = {
   synapse_prune_threshold: number;
   mutation_rate_age_of_maturity: number;
   mutation_rate_vision_distance: number;
-  mutation_rate_add_edge: number;
-  mutation_rate_remove_edge: number;
-  mutation_rate_split_edge: number;
+  mutation_rate_num_synapses: number;
   mutation_rate_inter_bias: number;
   mutation_rate_inter_update_rate: number;
   mutation_rate_action_bias: number;
   mutation_rate_eligibility_decay_lambda: number;
   mutation_rate_synapse_prune_threshold: number;
+  mutation_rate_neuron_location: number;
 };
 
 export type WorldConfig = {
@@ -45,6 +45,8 @@ export type WorldConfig = {
 
 export type OrganismGenome = {
   num_neurons: number;
+  num_synapses: number;
+  spatial_prior_sigma: number;
   vision_distance: number;
   age_of_maturity: number;
   hebb_eta_baseline: number;
@@ -53,19 +55,25 @@ export type OrganismGenome = {
   synapse_prune_threshold: number;
   mutation_rate_age_of_maturity: number;
   mutation_rate_vision_distance: number;
-  mutation_rate_add_edge: number;
-  mutation_rate_remove_edge: number;
-  mutation_rate_split_edge: number;
+  mutation_rate_num_synapses: number;
   mutation_rate_inter_bias: number;
   mutation_rate_inter_update_rate: number;
   mutation_rate_action_bias: number;
   mutation_rate_eligibility_decay_lambda: number;
   mutation_rate_synapse_prune_threshold: number;
+  mutation_rate_neuron_location: number;
   inter_biases: number[];
   inter_log_taus: number[];
   interneuron_types: InterNeuronType[];
   action_biases: number[];
-  edges: SynapseEdge[];
+  sensory_locations: BrainLocation[];
+  inter_locations: BrainLocation[];
+  action_locations: BrainLocation[];
+};
+
+export type BrainLocation = {
+  x: number;
+  y: number;
 };
 
 export type InterNeuronType = 'Excitatory' | 'Inhibitory';
@@ -80,6 +88,8 @@ export type NeuronState = {
   neuron_id: number | { 0: number };
   neuron_type: 'Sensory' | 'Inter' | 'Action' | string;
   bias: number;
+  x: number;
+  y: number;
   activation: number;
   parent_ids: Array<number | { 0: number }>;
 };

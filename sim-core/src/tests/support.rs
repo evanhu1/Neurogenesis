@@ -1,6 +1,5 @@
 use super::*;
 use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
-use std::cmp::Ordering;
 
 pub(super) trait IntoEnergy {
     fn into_energy(self) -> f32;
@@ -31,8 +30,11 @@ impl IntoEnergy for f64 {
 }
 
 pub(super) fn test_genome() -> OrganismGenome {
+    let default_loc = BrainLocation { x: 5.0, y: 5.0 };
     OrganismGenome {
         num_neurons: 1,
+        num_synapses: 0,
+        spatial_prior_sigma: 3.5,
         vision_distance: 2,
         age_of_maturity: 0,
         hebb_eta_baseline: 0.0,
@@ -41,19 +43,20 @@ pub(super) fn test_genome() -> OrganismGenome {
         synapse_prune_threshold: 0.01,
         mutation_rate_age_of_maturity: 0.0,
         mutation_rate_vision_distance: 0.0,
-        mutation_rate_add_edge: 0.0,
-        mutation_rate_remove_edge: 0.0,
-        mutation_rate_split_edge: 0.0,
+        mutation_rate_num_synapses: 0.0,
         mutation_rate_inter_bias: 0.0,
         mutation_rate_inter_update_rate: 0.0,
         mutation_rate_action_bias: 0.0,
         mutation_rate_eligibility_decay_lambda: 0.0,
         mutation_rate_synapse_prune_threshold: 0.0,
+        mutation_rate_neuron_location: 0.0,
         inter_biases: vec![0.0],
         inter_log_taus: vec![0.0],
         interneuron_types: vec![InterNeuronType::Excitatory],
         action_biases: vec![0.0; ActionType::ALL.len()],
-        edges: vec![],
+        sensory_locations: vec![default_loc; 3],
+        inter_locations: vec![default_loc],
+        action_locations: vec![default_loc; ActionType::ALL.len()],
     }
 }
 
@@ -78,6 +81,7 @@ pub(super) fn stable_test_config() -> WorldConfig {
         seed_genome_config: SeedGenomeConfig {
             num_neurons: 1,
             num_synapses: 0,
+            spatial_prior_sigma: 3.5,
             vision_distance: 2,
             age_of_maturity: 0,
             hebb_eta_baseline: 0.0,
@@ -86,14 +90,13 @@ pub(super) fn stable_test_config() -> WorldConfig {
             synapse_prune_threshold: 0.01,
             mutation_rate_age_of_maturity: 0.0,
             mutation_rate_vision_distance: 0.0,
-            mutation_rate_add_edge: 0.0,
-            mutation_rate_remove_edge: 0.0,
-            mutation_rate_split_edge: 0.0,
+            mutation_rate_num_synapses: 0.0,
             mutation_rate_inter_bias: 0.0,
             mutation_rate_inter_update_rate: 0.0,
             mutation_rate_action_bias: 0.0,
             mutation_rate_eligibility_decay_lambda: 0.0,
             mutation_rate_synapse_prune_threshold: 0.0,
+            mutation_rate_neuron_location: 0.0,
         },
     }
 }
@@ -103,12 +106,6 @@ pub(super) fn test_config(world_width: u32, num_organisms: u32) -> WorldConfig {
     config.world_width = world_width;
     config.num_organisms = num_organisms;
     config
-}
-
-pub(super) fn compare_snapshots(a: &WorldSnapshot, b: &WorldSnapshot) -> Ordering {
-    let snapshot_a = serde_json::to_string(a).expect("serialize snapshot A");
-    let snapshot_b = serde_json::to_string(b).expect("serialize snapshot B");
-    snapshot_a.cmp(&snapshot_b)
 }
 
 fn forced_brain(
@@ -122,6 +119,7 @@ fn forced_brain(
         SensoryReceptor::Look {
             look_target: EntityType::Food,
         },
+        BrainLocation { x: 0.0, y: 0.0 },
     )];
     let inter_id = NeuronId(1000);
     let inter_bias = 1.0;
@@ -162,6 +160,8 @@ fn forced_brain(
             neuron_id: inter_id,
             neuron_type: NeuronType::Inter,
             bias: inter_bias,
+            x: 1.0,
+            y: 1.0,
             activation: confidence,
             parent_ids: Vec::new(),
         },
@@ -170,11 +170,36 @@ fn forced_brain(
         synapses: inter_synapses,
     }];
     let mut action = vec![
-        make_action_neuron(2000, ActionType::MoveForward, 0.0),
-        make_action_neuron(2001, ActionType::Turn, 0.0),
-        make_action_neuron(2002, ActionType::Consume, 0.0),
-        make_action_neuron(2003, ActionType::Reproduce, 0.0),
-        make_action_neuron(2004, ActionType::Dopamine, 0.0),
+        make_action_neuron(
+            2000,
+            ActionType::MoveForward,
+            0.0,
+            BrainLocation { x: 2.0, y: 0.0 },
+        ),
+        make_action_neuron(
+            2001,
+            ActionType::Turn,
+            0.0,
+            BrainLocation { x: 2.0, y: 1.0 },
+        ),
+        make_action_neuron(
+            2002,
+            ActionType::Consume,
+            0.0,
+            BrainLocation { x: 2.0, y: 2.0 },
+        ),
+        make_action_neuron(
+            2003,
+            ActionType::Reproduce,
+            0.0,
+            BrainLocation { x: 2.0, y: 3.0 },
+        ),
+        make_action_neuron(
+            2004,
+            ActionType::Dopamine,
+            0.0,
+            BrainLocation { x: 2.0, y: 4.0 },
+        ),
     ];
     for action_neuron in &mut action {
         if action_neuron.action_type != ActionType::Dopamine {

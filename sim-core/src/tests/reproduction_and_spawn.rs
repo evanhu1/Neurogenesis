@@ -286,8 +286,8 @@ fn reproduction_can_create_new_species_via_genome_distance() {
     let mut cfg = test_config(7, 1);
     cfg.reproduction_energy_cost = 20.0;
     // High mutation pressure ensures child genome diverges from parent
-    cfg.seed_genome_config.mutation_rate_add_edge = 1.0;
-    cfg.seed_genome_config.mutation_rate_split_edge = 1.0;
+    cfg.seed_genome_config.mutation_rate_num_synapses = 1.0;
+    cfg.seed_genome_config.mutation_rate_neuron_location = 1.0;
     // Very low threshold so even a small mutation creates a new species
     cfg.speciation_threshold = 0.001;
     let mut sim = Simulation::new(cfg, 88).expect("simulation should initialize");
@@ -304,8 +304,8 @@ fn reproduction_can_create_new_species_via_genome_distance() {
         30.0,
     );
     // Give parent a genome with high mutation pressure so child will diverge
-    parent.genome.mutation_rate_add_edge = 1.0;
-    parent.genome.mutation_rate_split_edge = 1.0;
+    parent.genome.mutation_rate_num_synapses = 1.0;
+    parent.genome.mutation_rate_neuron_location = 1.0;
     enable_reproduce_action(&mut parent);
     configure_sim(&mut sim, vec![parent]);
 
