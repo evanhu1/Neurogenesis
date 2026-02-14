@@ -74,7 +74,6 @@ export type SynapseEdge = {
   pre_neuron_id: number | { 0: number };
   post_neuron_id: number | { 0: number };
   weight: number;
-  eligibility: number;
 };
 
 export type NeuronState = {

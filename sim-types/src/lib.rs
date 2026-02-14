@@ -298,7 +298,7 @@ pub struct SynapseEdge {
     pub pre_neuron_id: NeuronId,
     pub post_neuron_id: NeuronId,
     pub weight: f32,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub eligibility: f32,
 }
 
