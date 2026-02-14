@@ -10,6 +10,47 @@ fn loc(x: f32, y: f32) -> BrainLocation {
     BrainLocation { x, y }
 }
 
+fn post_location(brain: &BrainState, post_id: NeuronId) -> (f32, f32) {
+    if let Some(inter) = brain.inter.iter().find(|n| n.neuron.neuron_id == post_id) {
+        return (inter.neuron.x, inter.neuron.y);
+    }
+    if let Some(action) = brain.action.iter().find(|n| n.neuron.neuron_id == post_id) {
+        return (action.neuron.x, action.neuron.y);
+    }
+    panic!("missing post neuron for synapse target {:?}", post_id);
+}
+
+fn mean_synapse_distance(brain: &BrainState) -> f32 {
+    let mut total = 0.0;
+    let mut count = 0usize;
+
+    for sensory in &brain.sensory {
+        let pre_x = sensory.neuron.x;
+        let pre_y = sensory.neuron.y;
+        for edge in &sensory.synapses {
+            let (post_x, post_y) = post_location(brain, edge.post_neuron_id);
+            total += ((pre_x - post_x).powi(2) + (pre_y - post_y).powi(2)).sqrt();
+            count += 1;
+        }
+    }
+
+    for inter in &brain.inter {
+        let pre_x = inter.neuron.x;
+        let pre_y = inter.neuron.y;
+        for edge in &inter.synapses {
+            let (post_x, post_y) = post_location(brain, edge.post_neuron_id);
+            total += ((pre_x - post_x).powi(2) + (pre_y - post_y).powi(2)).sqrt();
+            count += 1;
+        }
+    }
+
+    if count == 0 {
+        0.0
+    } else {
+        total / count as f32
+    }
+}
+
 #[test]
 fn express_genome_samples_fixed_synapse_count_deterministically_for_seed() {
     let mut genome = test_genome();
@@ -43,6 +84,45 @@ fn express_genome_samples_fixed_synapse_count_deterministically_for_seed() {
     assert_eq!(brain_a.sensory[0].neuron.y, 0.0);
     assert_eq!(brain_a.action[4].neuron.x, 8.0);
     assert_eq!(brain_a.action[4].neuron.y, 5.0);
+}
+
+#[test]
+fn express_genome_spatial_prior_prefers_local_connections() {
+    let mut genome_template = test_genome();
+    genome_template.num_neurons = 12;
+    genome_template.num_synapses = 40;
+    genome_template.inter_biases = vec![0.0; 12];
+    genome_template.inter_log_taus = vec![0.0; 12];
+    genome_template.interneuron_types = vec![InterNeuronType::Excitatory; 12];
+    genome_template.sensory_locations = vec![loc(0.0, 0.0), loc(0.0, 2.0), loc(0.0, 4.0)];
+    genome_template.inter_locations = (0..12).map(|i| loc(1.0 + i as f32 * 0.7, 5.0)).collect();
+    genome_template.action_locations = (0..ActionType::ALL.len())
+        .map(|i| loc(1.0 + i as f32 * 0.7, 9.0))
+        .collect();
+
+    let mut local_distance_sum = 0.0;
+    let mut global_distance_sum = 0.0;
+    for seed in 0..32_u64 {
+        let mut local_genome = genome_template.clone();
+        local_genome.spatial_prior_sigma = 0.25;
+        let mut global_genome = genome_template.clone();
+        global_genome.spatial_prior_sigma = 100.0;
+
+        let mut local_rng = ChaCha8Rng::seed_from_u64(10_000 + seed);
+        let mut global_rng = ChaCha8Rng::seed_from_u64(10_000 + seed);
+        let local_brain = express_genome(&local_genome, &mut local_rng);
+        let global_brain = express_genome(&global_genome, &mut global_rng);
+
+        local_distance_sum += mean_synapse_distance(&local_brain);
+        global_distance_sum += mean_synapse_distance(&global_brain);
+    }
+
+    let local_mean_distance = local_distance_sum / 32.0;
+    let global_mean_distance = global_distance_sum / 32.0;
+    assert!(
+        local_mean_distance + 0.05 < global_mean_distance,
+        "expected stronger local prior to shorten connections; local_mean={local_mean_distance:.3}, global_mean={global_mean_distance:.3}"
+    );
 }
 
 #[test]

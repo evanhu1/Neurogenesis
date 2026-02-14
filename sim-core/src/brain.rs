@@ -182,6 +182,12 @@ fn connection_probability(pre: &NeuronState, post: &NeuronState, sigma: f32) -> 
         .clamp(0.0, 1.0)
 }
 
+fn weighted_without_replacement_priority<R: Rng + ?Sized>(weight: f32, rng: &mut R) -> f32 {
+    let clamped_weight = weight.max(f32::MIN_POSITIVE);
+    let u = rng.random::<f32>().max(f32::MIN_POSITIVE);
+    -u.ln() / clamped_weight
+}
+
 fn sample_signed_lognormal_weight<R: Rng + ?Sized>(required_sign: f32, rng: &mut R) -> f32 {
     let z: f32 = rng.sample(rand_distr::StandardNormal);
     let magnitude = (SYNAPSE_WEIGHT_LOG_NORMAL_MU + SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA * z)
@@ -262,65 +268,38 @@ fn wire_birth_synapses_spatial<R: Rng + ?Sized>(
         return;
     }
 
-    let mut selected = vec![false; max_pairs];
-    let mut selected_count = 0usize;
-    let max_attempts = target.saturating_mul(40).saturating_add(1024);
-
-    for _ in 0..max_attempts {
-        if selected_count >= target {
-            break;
-        }
-        let pre_idx = rng.random_range(0..pre_count);
-        let post_idx = rng.random_range(0..post_count);
-        if pre_idx >= sensory_len && post_idx < inter_len && (pre_idx - sensory_len) == post_idx {
-            continue;
-        }
-        let key = pre_idx * post_count + post_idx;
-        if selected[key] {
-            continue;
-        }
-
+    let mut weighted_candidates = Vec::with_capacity(max_allowed_pairs);
+    for pre_idx in 0..pre_count {
         let pre_neuron = if pre_idx < sensory_len {
             &sensory[pre_idx].neuron
         } else {
             &inter[pre_idx - sensory_len].neuron
         };
-        let post_neuron = if post_idx < inter_len {
-            &inter[post_idx].neuron
-        } else {
-            &action[post_idx - inter_len].neuron
-        };
 
-        if rng.random::<f32>() > connection_probability(pre_neuron, post_neuron, sigma) {
-            continue;
+        for post_idx in 0..post_count {
+            if pre_idx >= sensory_len && post_idx < inter_len && (pre_idx - sensory_len) == post_idx
+            {
+                continue;
+            }
+
+            let post_neuron = if post_idx < inter_len {
+                &inter[post_idx].neuron
+            } else {
+                &action[post_idx - inter_len].neuron
+            };
+            let weight = connection_probability(pre_neuron, post_neuron, sigma);
+            let priority = weighted_without_replacement_priority(weight, rng);
+            weighted_candidates.push((priority, pre_idx, post_idx));
         }
-
-        selected[key] = true;
-        selected_count += 1;
-        add_synapse(
-            pre_idx,
-            post_idx,
-            sensory_len,
-            inter_len,
-            sensory,
-            inter,
-            action,
-            rng,
-        );
     }
 
-    while selected_count < target {
-        let pre_idx = rng.random_range(0..pre_count);
-        let post_idx = rng.random_range(0..post_count);
-        if pre_idx >= sensory_len && post_idx < inter_len && (pre_idx - sensory_len) == post_idx {
-            continue;
-        }
-        let key = pre_idx * post_count + post_idx;
-        if selected[key] {
-            continue;
-        }
-        selected[key] = true;
-        selected_count += 1;
+    weighted_candidates.sort_unstable_by(|a, b| {
+        a.0.total_cmp(&b.0)
+            .then_with(|| a.1.cmp(&b.1))
+            .then_with(|| a.2.cmp(&b.2))
+    });
+
+    for &(_, pre_idx, post_idx) in weighted_candidates.iter().take(target) {
         add_synapse(
             pre_idx,
             post_idx,

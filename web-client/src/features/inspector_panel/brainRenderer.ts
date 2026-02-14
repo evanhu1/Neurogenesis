@@ -3,9 +3,13 @@ import { unwrapId } from '../../protocol';
 
 export type BrainTransform = { x: number; y: number; scale: number };
 
-const LAYER_GAP = 160;
-const NEURON_GAP = 65;
+const GEOMETRY_DOMAIN_MIN = 0;
+const GEOMETRY_DOMAIN_MAX = 10;
+const GEOMETRY_RENDER_SCALE = 70;
+const GEOMETRY_RENDER_OFFSET = (GEOMETRY_DOMAIN_MIN + GEOMETRY_DOMAIN_MAX) * 0.5 * GEOMETRY_RENDER_SCALE;
 const NODE_RADIUS = 10;
+const OVERLAP_MIN_DISTANCE = NODE_RADIUS * 2.2;
+const OVERLAP_RELAX_ITERS = 6;
 const DEFAULT_ZOOM_INSET = 1.1;
 
 type BrainNode = {
@@ -14,6 +18,8 @@ type BrainNode = {
   label?: string;
   activation: number;
   bias: number;
+  gx: number;
+  gy: number;
   alpha?: number;
   interneuronType?: 'Excitatory' | 'Inhibitory';
   isActive: boolean;
@@ -30,57 +36,53 @@ export function computeBrainLayout(
   brain: BrainState,
   activeNeuronIds: Set<number> | null,
 ): BrainLayout {
-  const layers: BrainNode[][] = [];
+  const nodes: BrainNode[] = [];
 
-  layers.push(
-    brain.sensory.map((neuron) => {
-      const nid = unwrapId(neuron.neuron.neuron_id);
-      return {
-        id: nid,
-        type: 'sensory',
-        label:
-          neuron.receptor_type === 'Look'
-            ? `Vision: ${neuron.look_target ?? 'Look'}`
-            : neuron.receptor_type,
-        activation: neuron.neuron.activation,
-        bias: neuron.neuron.bias,
-        isActive: activeNeuronIds?.has(nid) ?? false,
-      };
-    }),
-  );
+  brain.sensory.forEach((neuron, sensoryIdx) => {
+    const nid = unwrapId(neuron.neuron.neuron_id);
+    nodes.push({
+      id: nid,
+      type: 'sensory',
+      label:
+        neuron.receptor_type === 'Look'
+          ? `Vision: ${neuron.look_target ?? 'Look'}`
+          : neuron.receptor_type,
+      activation: neuron.neuron.activation,
+      bias: neuron.neuron.bias,
+      gx: finiteOr(neuron.neuron.x, sensoryIdx),
+      gy: finiteOr(neuron.neuron.y, sensoryIdx * 0.9),
+      isActive: activeNeuronIds?.has(nid) ?? false,
+    });
+  });
 
-  const interColumns = Math.max(1, Math.ceil(brain.inter.length / 8));
-  for (let col = 0; col < interColumns; col++) {
-    const start = col * 8;
-    layers.push(
-      brain.inter.slice(start, start + 8).map((neuron) => {
-        const nid = unwrapId(neuron.neuron.neuron_id);
-        return {
-          id: nid,
-          type: 'inter',
-          activation: neuron.neuron.activation,
-          bias: neuron.neuron.bias,
-          alpha: neuron.alpha,
-          interneuronType: neuron.interneuron_type,
-          isActive: activeNeuronIds?.has(nid) ?? false,
-        };
-      }),
-    );
-  }
+  brain.inter.forEach((neuron, interIdx) => {
+    const nid = unwrapId(neuron.neuron.neuron_id);
+    nodes.push({
+      id: nid,
+      type: 'inter',
+      activation: neuron.neuron.activation,
+      bias: neuron.neuron.bias,
+      gx: finiteOr(neuron.neuron.x, 3.5 + (interIdx % 6) * 0.7),
+      gy: finiteOr(neuron.neuron.y, 1 + Math.floor(interIdx / 6) * 0.9),
+      alpha: neuron.alpha,
+      interneuronType: neuron.interneuron_type,
+      isActive: activeNeuronIds?.has(nid) ?? false,
+    });
+  });
 
-  layers.push(
-    brain.action.map((neuron) => {
-      const nid = unwrapId(neuron.neuron.neuron_id);
-      return {
-        id: nid,
-        type: 'action',
-        label: neuron.action_type,
-        activation: neuron.neuron.activation,
-        bias: neuron.neuron.bias,
-        isActive: activeNeuronIds?.has(nid) ?? false,
-      };
-    }),
-  );
+  brain.action.forEach((neuron, actionIdx) => {
+    const nid = unwrapId(neuron.neuron.neuron_id);
+    nodes.push({
+      id: nid,
+      type: 'action',
+      label: neuron.action_type,
+      activation: neuron.neuron.activation,
+      bias: neuron.neuron.bias,
+      gx: finiteOr(neuron.neuron.x, 8.5),
+      gy: finiteOr(neuron.neuron.y, actionIdx * 1.2 + 2),
+      isActive: activeNeuronIds?.has(nid) ?? false,
+    });
+  });
 
   const positions = new Map<number, BrainNodePos>();
   let minX = Infinity,
@@ -88,18 +90,22 @@ export function computeBrainLayout(
     maxX = -Infinity,
     maxY = -Infinity;
 
-  for (let li = 0; li < layers.length; li++) {
-    const layer = layers[li];
-    for (let ni = 0; ni < layer.length; ni++) {
-      const node = layer[ni];
-      const x = li * LAYER_GAP;
-      const y = (ni - (layer.length - 1) / 2) * NEURON_GAP;
-      positions.set(node.id, { ...node, x, y });
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
-    }
+  const rawPositions = nodes
+    .map((node) => ({
+      ...node,
+      x: node.gx * GEOMETRY_RENDER_SCALE - GEOMETRY_RENDER_OFFSET,
+      y: node.gy * GEOMETRY_RENDER_SCALE - GEOMETRY_RENDER_OFFSET,
+    }))
+    .sort((a, b) => a.id - b.id);
+
+  relaxOverlaps(rawPositions);
+
+  for (const node of rawPositions) {
+    positions.set(node.id, node);
+    minX = Math.min(minX, node.x);
+    minY = Math.min(minY, node.y);
+    maxX = Math.max(maxX, node.x);
+    maxY = Math.max(maxY, node.y);
   }
 
   // Pad for node radius + labels to the right
@@ -113,6 +119,52 @@ export function computeBrainLayout(
       maxY: maxY + pad,
     },
   };
+}
+
+function finiteOr(value: number, fallback: number): number {
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function relaxOverlaps(nodes: BrainNodePos[]) {
+  if (nodes.length < 2) return;
+
+  const minDist = OVERLAP_MIN_DISTANCE;
+  const minDistSq = minDist * minDist;
+
+  for (let iter = 0; iter < OVERLAP_RELAX_ITERS; iter++) {
+    let movedAny = false;
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i];
+        const b = nodes[j];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        let distSq = dx * dx + dy * dy;
+        if (distSq >= minDistSq) continue;
+
+        let ux = dx;
+        let uy = dy;
+        if (distSq < 1.0e-6) {
+          const angle = (((a.id * 73856093) ^ (b.id * 19349663)) >>> 0) % 360;
+          const radians = (angle * Math.PI) / 180;
+          ux = Math.cos(radians);
+          uy = Math.sin(radians);
+          distSq = 1;
+        }
+
+        const dist = Math.sqrt(distSq);
+        const nx = ux / dist;
+        const ny = uy / dist;
+        const push = (minDist - dist) * 0.5;
+        a.x -= nx * push;
+        a.y -= ny * push;
+        b.x += nx * push;
+        b.y += ny * push;
+        movedAny = true;
+      }
+    }
+    if (!movedAny) break;
+  }
 }
 
 export function zoomToFitBrain(
