@@ -483,8 +483,8 @@ fn oja_update_adjusts_weight_and_eligibility_for_active_synapse() {
         num_neurons: 1,
         vision_distance: 1,
         age_of_maturity: 0,
-        hebb_eta_baseline: 0.1,
-        hebb_eta_gain: 0.0,
+        hebb_eta_baseline: 0.0,
+        hebb_eta_gain: 0.2,
         eligibility_decay_lambda: 0.9,
         synapse_prune_threshold: 0.0,
         mutation_rate_age_of_maturity: 0.0,
@@ -532,11 +532,15 @@ fn oja_update_adjusts_weight_and_eligibility_for_active_synapse() {
     let post = organism.brain.action[action_index(ActionType::MoveForward)]
         .neuron
         .activation;
+    let dopamine = organism.brain.action[action_index(ActionType::Dopamine)]
+        .neuron
+        .activation;
     apply_runtime_plasticity(&mut organism);
 
+    let eta = 0.2 * dopamine;
     let edge = &organism.brain.inter[0].synapses[0];
     let expected_eligibility = pre * post;
-    let expected_weight = 1.0 + 0.1 * post * (pre - post * 1.0);
+    let expected_weight = 1.0 + eta * post * (pre - post * 1.0);
     assert!((edge.eligibility - expected_eligibility).abs() < 1e-5);
     assert!((edge.weight - expected_weight).abs() < 1e-5);
     assert!(edge.weight > 0.0);

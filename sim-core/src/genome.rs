@@ -20,8 +20,6 @@ const ELIGIBILITY_DECAY_LAMBDA_MIN: f32 = 0.0;
 const ELIGIBILITY_DECAY_LAMBDA_MAX: f32 = 1.0;
 const SYNAPSE_PRUNE_THRESHOLD_MIN: f32 = 0.0;
 const SYNAPSE_PRUNE_THRESHOLD_MAX: f32 = 1.0;
-const DEFAULT_ELIGIBILITY_DECAY_LAMBDA: f32 = 0.9;
-const DEFAULT_SYNAPSE_PRUNE_THRESHOLD: f32 = 0.01;
 
 const SYNAPSE_WEIGHT_LOG_NORMAL_MU: f32 = -0.5;
 const SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA: f32 = 0.8;
@@ -77,27 +75,11 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     OrganismGenome {
         num_neurons: config.num_neurons.min(world_max_num_neurons),
         vision_distance: config.vision_distance,
-        age_of_maturity: config
-            .age_of_maturity
-            .clamp(MIN_MUTATED_AGE_OF_MATURITY, MAX_MUTATED_AGE_OF_MATURITY),
-        hebb_eta_baseline: config
-            .hebb_eta_baseline
-            .clamp(ETA_BASELINE_MIN, ETA_BASELINE_MAX),
-        hebb_eta_gain: config.hebb_eta_gain.clamp(ETA_GAIN_MIN, ETA_GAIN_MAX),
-        eligibility_decay_lambda: if config.eligibility_decay_lambda.is_finite() {
-            config
-                .eligibility_decay_lambda
-                .clamp(ELIGIBILITY_DECAY_LAMBDA_MIN, ELIGIBILITY_DECAY_LAMBDA_MAX)
-        } else {
-            DEFAULT_ELIGIBILITY_DECAY_LAMBDA
-        },
-        synapse_prune_threshold: if config.synapse_prune_threshold.is_finite() {
-            config
-                .synapse_prune_threshold
-                .clamp(SYNAPSE_PRUNE_THRESHOLD_MIN, SYNAPSE_PRUNE_THRESHOLD_MAX)
-        } else {
-            DEFAULT_SYNAPSE_PRUNE_THRESHOLD
-        },
+        age_of_maturity: config.age_of_maturity,
+        hebb_eta_baseline: config.hebb_eta_baseline,
+        hebb_eta_gain: config.hebb_eta_gain,
+        eligibility_decay_lambda: config.eligibility_decay_lambda,
+        synapse_prune_threshold: config.synapse_prune_threshold,
         mutation_rate_age_of_maturity: config.mutation_rate_age_of_maturity,
         mutation_rate_vision_distance: config.mutation_rate_vision_distance,
         mutation_rate_add_edge: config.mutation_rate_add_edge,

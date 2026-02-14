@@ -143,35 +143,20 @@ pub struct SeedGenomeConfig {
     pub num_neurons: u32,
     pub num_synapses: u32,
     pub vision_distance: u32,
-    #[serde(default = "default_age_of_maturity")]
     pub age_of_maturity: u32,
-    #[serde(default)]
     pub hebb_eta_baseline: f32,
-    #[serde(default)]
     pub hebb_eta_gain: f32,
-    #[serde(default = "default_eligibility_decay_lambda")]
     pub eligibility_decay_lambda: f32,
-    #[serde(default)]
     pub synapse_prune_threshold: f32,
-    #[serde(default)]
     pub mutation_rate_age_of_maturity: f32,
-    #[serde(default)]
     pub mutation_rate_vision_distance: f32,
-    #[serde(default)]
     pub mutation_rate_add_edge: f32,
-    #[serde(default)]
     pub mutation_rate_remove_edge: f32,
-    #[serde(default)]
     pub mutation_rate_split_edge: f32,
-    #[serde(default)]
     pub mutation_rate_inter_bias: f32,
-    #[serde(default)]
     pub mutation_rate_inter_update_rate: f32,
-    #[serde(default)]
     pub mutation_rate_action_bias: f32,
-    #[serde(default)]
     pub mutation_rate_eligibility_decay_lambda: f32,
-    #[serde(default)]
     pub mutation_rate_synapse_prune_threshold: f32,
 }
 

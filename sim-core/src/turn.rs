@@ -4,6 +4,8 @@ use crate::brain::{
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right, wrap_position};
 use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 use crate::Simulation;
+#[cfg(feature = "profiling")]
+use crate::{profiling, profiling::TurnPhase};
 use rayon::prelude::*;
 use sim_types::{
     ActionType, EntityId, FacingDirection, FoodState, Occupant, OrganismFacing, OrganismId,
@@ -11,6 +13,8 @@ use sim_types::{
 };
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
+#[cfg(feature = "profiling")]
+use std::time::Instant;
 
 #[derive(Clone, Copy)]
 struct SnapshotOrganismState {
@@ -87,21 +91,75 @@ struct CommitResult {
 
 impl Simulation {
     pub(crate) fn tick(&mut self) -> TickDelta {
+        #[cfg(feature = "profiling")]
+        let tick_started = Instant::now();
+
+        #[cfg(feature = "profiling")]
+        let phase_started = Instant::now();
         let (starvations, starved_removed_positions) = self.lifecycle_phase();
+        #[cfg(feature = "profiling")]
+        profiling::record_turn_phase(TurnPhase::Lifecycle, phase_started.elapsed());
+
+        #[cfg(feature = "profiling")]
+        let phase_started = Instant::now();
         let snapshot = self.build_turn_snapshot();
+        #[cfg(feature = "profiling")]
+        profiling::record_turn_phase(TurnPhase::Snapshot, phase_started.elapsed());
+
+        #[cfg(feature = "profiling")]
+        let phase_started = Instant::now();
         let intents = self.build_intents(&snapshot);
+        #[cfg(feature = "profiling")]
+        profiling::record_turn_phase(TurnPhase::Intents, phase_started.elapsed());
+
         let synapse_ops = intents.iter().map(|intent| intent.synapse_ops).sum::<u64>();
 
         let mut spawn_requests = Vec::new();
+        #[cfg(feature = "profiling")]
+        let phase_started = Instant::now();
         let successful_reproduction_ids = self.reproduction_phase(&intents, &mut spawn_requests);
-        let reproductions = successful_reproduction_ids.len() as u64;
-        let resolutions = self.resolve_moves(&snapshot, &intents, &successful_reproduction_ids);
-        let commit = self.commit_phase(&intents, &resolutions, &successful_reproduction_ids);
-        self.increment_age_for_survivors();
-        let spawned = self.resolve_spawn_requests(&spawn_requests);
-        self.prune_extinct_species();
-        self.debug_assert_consistent_state();
+        #[cfg(feature = "profiling")]
+        profiling::record_turn_phase(TurnPhase::Reproduction, phase_started.elapsed());
 
+        let reproductions = successful_reproduction_ids.len() as u64;
+        #[cfg(feature = "profiling")]
+        let phase_started = Instant::now();
+        let resolutions = self.resolve_moves(&snapshot, &intents, &successful_reproduction_ids);
+        #[cfg(feature = "profiling")]
+        profiling::record_turn_phase(TurnPhase::MoveResolution, phase_started.elapsed());
+
+        #[cfg(feature = "profiling")]
+        let phase_started = Instant::now();
+        let commit = self.commit_phase(&intents, &resolutions, &successful_reproduction_ids);
+        #[cfg(feature = "profiling")]
+        profiling::record_turn_phase(TurnPhase::Commit, phase_started.elapsed());
+
+        #[cfg(feature = "profiling")]
+        let phase_started = Instant::now();
+        self.increment_age_for_survivors();
+        #[cfg(feature = "profiling")]
+        profiling::record_turn_phase(TurnPhase::Age, phase_started.elapsed());
+
+        #[cfg(feature = "profiling")]
+        let phase_started = Instant::now();
+        let spawned = self.resolve_spawn_requests(&spawn_requests);
+        #[cfg(feature = "profiling")]
+        profiling::record_turn_phase(TurnPhase::Spawn, phase_started.elapsed());
+
+        #[cfg(feature = "profiling")]
+        let phase_started = Instant::now();
+        self.prune_extinct_species();
+        #[cfg(feature = "profiling")]
+        profiling::record_turn_phase(TurnPhase::PruneSpecies, phase_started.elapsed());
+
+        #[cfg(feature = "profiling")]
+        let phase_started = Instant::now();
+        self.debug_assert_consistent_state();
+        #[cfg(feature = "profiling")]
+        profiling::record_turn_phase(TurnPhase::ConsistencyCheck, phase_started.elapsed());
+
+        #[cfg(feature = "profiling")]
+        let phase_started = Instant::now();
         self.turn = self.turn.saturating_add(1);
         self.metrics.turns = self.turn;
         self.metrics.synapse_ops_last_turn = synapse_ops;
@@ -115,6 +173,11 @@ impl Simulation {
 
         let mut removed_positions = commit.removed_positions;
         removed_positions.extend(starved_removed_positions);
+        #[cfg(feature = "profiling")]
+        profiling::record_turn_phase(TurnPhase::MetricsAndDelta, phase_started.elapsed());
+
+        #[cfg(feature = "profiling")]
+        profiling::record_tick_total(tick_started.elapsed());
 
         TickDelta {
             turn: self.turn,
@@ -543,8 +606,17 @@ fn build_intent_for_organism(
     scratch: &mut BrainScratch,
 ) -> OrganismIntent {
     let vision_distance = organism.genome.vision_distance;
+    #[cfg(feature = "profiling")]
+    let brain_eval_started = Instant::now();
     let evaluation = evaluate_brain(organism, world_width, occupancy, vision_distance, scratch);
+    #[cfg(feature = "profiling")]
+    profiling::record_brain_eval_total(brain_eval_started.elapsed());
+
+    #[cfg(feature = "profiling")]
+    let plasticity_started = Instant::now();
     apply_runtime_plasticity(organism);
+    #[cfg(feature = "profiling")]
+    profiling::record_brain_plasticity_total(plasticity_started.elapsed());
 
     let turn_choice = evaluation.resolved_actions.turn;
     let wants_move = evaluation.resolved_actions.wants_move;

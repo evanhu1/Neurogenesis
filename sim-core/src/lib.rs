@@ -14,6 +14,8 @@ use thiserror::Error;
 mod brain;
 pub(crate) mod genome;
 mod grid;
+#[cfg(feature = "profiling")]
+pub mod profiling;
 mod spawn;
 mod turn;
 

@@ -1,10 +1,16 @@
-use crate::genome::{inter_alpha_from_log_tau, DEFAULT_INTER_LOG_TAU, SYNAPSE_STRENGTH_MAX, SYNAPSE_STRENGTH_MIN};
+use crate::genome::{
+    inter_alpha_from_log_tau, DEFAULT_INTER_LOG_TAU, SYNAPSE_STRENGTH_MAX, SYNAPSE_STRENGTH_MIN,
+};
 use crate::grid::hex_neighbor;
+#[cfg(feature = "profiling")]
+use crate::profiling::{self, BrainStage};
 use sim_types::{
     ActionNeuronState, ActionType, BrainState, EntityType, InterNeuronState, InterNeuronType,
     NeuronId, NeuronState, NeuronType, Occupant, OrganismGenome, OrganismId, SensoryNeuronState,
     SensoryReceptor, SynapseEdge,
 };
+#[cfg(feature = "profiling")]
+use std::time::Instant;
 
 fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
@@ -259,6 +265,8 @@ pub(crate) fn evaluate_brain(
 ) -> BrainEvaluation {
     let mut result = BrainEvaluation::default();
 
+    #[cfg(feature = "profiling")]
+    let stage_started = Instant::now();
     let scan = scan_ahead(
         (organism.q, organism.r),
         organism.facing,
@@ -267,7 +275,11 @@ pub(crate) fn evaluate_brain(
         occupancy,
         vision_distance,
     );
+    #[cfg(feature = "profiling")]
+    profiling::record_brain_stage(BrainStage::ScanAhead, stage_started.elapsed());
 
+    #[cfg(feature = "profiling")]
+    let stage_started = Instant::now();
     for sensory in &mut organism.brain.sensory {
         sensory.neuron.activation = match &sensory.receptor {
             SensoryReceptor::Look { look_target } => match &scan {
@@ -277,10 +289,14 @@ pub(crate) fn evaluate_brain(
             SensoryReceptor::Energy => energy_sensor_value(organism.energy),
         };
     }
+    #[cfg(feature = "profiling")]
+    profiling::record_brain_stage(BrainStage::SensoryEncoding, stage_started.elapsed());
 
     let brain = &mut organism.brain;
 
     // Reuse scratch buffers: clear + fill avoids reallocation after first organism
+    #[cfg(feature = "profiling")]
+    let stage_started = Instant::now();
     scratch.inter_inputs.clear();
     scratch
         .inter_inputs
@@ -289,8 +305,12 @@ pub(crate) fn evaluate_brain(
     scratch
         .prev_inter
         .extend(brain.inter.iter().map(|n| n.neuron.activation));
+    #[cfg(feature = "profiling")]
+    profiling::record_brain_stage(BrainStage::InterSetup, stage_started.elapsed());
 
     // Accumulate sensory → inter
+    #[cfg(feature = "profiling")]
+    let stage_started = Instant::now();
     for sensory in &brain.sensory {
         result.synapse_ops += accumulate_weighted_inputs(
             &sensory.synapses,
@@ -309,16 +329,24 @@ pub(crate) fn evaluate_brain(
             &mut scratch.inter_inputs,
         );
     }
+    #[cfg(feature = "profiling")]
+    profiling::record_brain_stage(BrainStage::InterAccumulation, stage_started.elapsed());
 
+    #[cfg(feature = "profiling")]
+    let stage_started = Instant::now();
     for (idx, neuron) in brain.inter.iter_mut().enumerate() {
         let alpha = neuron.alpha;
         let previous = scratch.prev_inter[idx];
         let target = scratch.inter_inputs[idx].tanh();
         neuron.neuron.activation = (1.0 - alpha) * previous + alpha * target;
     }
+    #[cfg(feature = "profiling")]
+    profiling::record_brain_stage(BrainStage::InterActivation, stage_started.elapsed());
 
     // Accumulate into action neurons (fixed-size array, no allocation).
     // Start with per-action bias terms.
+    #[cfg(feature = "profiling")]
+    let stage_started = Instant::now();
     let mut action_inputs = [0.0f32; ACTION_COUNT];
     for (idx, action) in brain.action.iter().enumerate() {
         action_inputs[idx] = action.neuron.bias;
@@ -341,7 +369,11 @@ pub(crate) fn evaluate_brain(
             &mut action_inputs,
         );
     }
+    #[cfg(feature = "profiling")]
+    profiling::record_brain_stage(BrainStage::ActionAccumulation, stage_started.elapsed());
 
+    #[cfg(feature = "profiling")]
+    let stage_started = Instant::now();
     for (idx, action) in brain.action.iter_mut().enumerate() {
         action.neuron.activation = match action.action_type {
             ActionType::Turn | ActionType::Dopamine => action_inputs[idx].tanh(),
@@ -351,11 +383,15 @@ pub(crate) fn evaluate_brain(
     }
 
     result.resolved_actions = resolve_actions(result.action_activations);
+    #[cfg(feature = "profiling")]
+    profiling::record_brain_stage(BrainStage::ActionActivationResolve, stage_started.elapsed());
 
     result
 }
 
 pub(crate) fn apply_runtime_plasticity(organism: &mut sim_types::OrganismState) {
+    #[cfg(feature = "profiling")]
+    let stage_started = Instant::now();
     let lambda = organism.genome.eligibility_decay_lambda.clamp(0.0, 1.0);
     let weight_prune_threshold = organism.genome.synapse_prune_threshold.max(0.0);
     let should_prune = should_prune_synapses(organism.age_turns, organism.genome.age_of_maturity);
@@ -371,7 +407,11 @@ pub(crate) fn apply_runtime_plasticity(organism: &mut sim_types::OrganismState) 
     let dopamine_signal = action_activations[action_index(ActionType::Dopamine)].clamp(-1.0, 1.0);
     // let eta = organism.genome.hebb_eta_baseline + organism.genome.hebb_eta_gain * dopamine_signal;
     let eta = organism.genome.hebb_eta_gain * dopamine_signal; // Experimenting with removing the baseline
+    #[cfg(feature = "profiling")]
+    profiling::record_brain_stage(BrainStage::PlasticitySetup, stage_started.elapsed());
 
+    #[cfg(feature = "profiling")]
+    let stage_started = Instant::now();
     for sensory in &mut brain.sensory {
         tune_synapses(
             &mut sensory.synapses,
@@ -383,7 +423,11 @@ pub(crate) fn apply_runtime_plasticity(organism: &mut sim_types::OrganismState) 
             &action_activations,
         );
     }
+    #[cfg(feature = "profiling")]
+    profiling::record_brain_stage(BrainStage::PlasticitySensoryTuning, stage_started.elapsed());
 
+    #[cfg(feature = "profiling")]
+    let stage_started = Instant::now();
     for inter in &mut brain.inter {
         let required_sign = match inter.interneuron_type {
             InterNeuronType::Excitatory => 1.0,
@@ -399,9 +443,15 @@ pub(crate) fn apply_runtime_plasticity(organism: &mut sim_types::OrganismState) 
             &action_activations,
         );
     }
+    #[cfg(feature = "profiling")]
+    profiling::record_brain_stage(BrainStage::PlasticityInterTuning, stage_started.elapsed());
 
     if should_prune {
+        #[cfg(feature = "profiling")]
+        let stage_started = Instant::now();
         prune_low_weight_synapses(brain, weight_prune_threshold);
+        #[cfg(feature = "profiling")]
+        profiling::record_brain_stage(BrainStage::PlasticityPrune, stage_started.elapsed());
     }
 }
 
