@@ -540,8 +540,9 @@ fn oja_update_adjusts_weight_and_eligibility_for_active_synapse() {
 
     let eta = 0.2 * dopamine;
     let edge = &organism.brain.inter[0].synapses[0];
-    let expected_eligibility = pre * post;
-    let expected_weight = 1.0 + eta * post * (pre - post * 1.0);
+    let oja_gradient = post * (pre - post * 1.0);
+    let expected_eligibility = oja_gradient;
+    let expected_weight = 1.0 + eta * expected_eligibility;
     assert!((edge.eligibility - expected_eligibility).abs() < 1e-5);
     assert!((edge.weight - expected_weight).abs() < 1e-5);
     assert!(edge.weight > 0.0);
@@ -729,7 +730,7 @@ fn run_single_oja_step_with_dopamine_bias(dopamine_bias: f32) -> (f32, f32, f32,
         edges: vec![SynapseEdge {
             pre_neuron_id: NeuronId(1000),
             post_neuron_id: NeuronId(2000),
-            weight: 1.0,
+            weight: 0.5,
             eligibility: 0.0,
         }],
     };

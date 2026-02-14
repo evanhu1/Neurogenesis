@@ -19,13 +19,19 @@ fn sigmoid(x: f32) -> f32 {
 const ACTION_ACTIVATION_THRESHOLD: f32 = 0.5;
 const TURN_ACTION_DEADZONE: f32 = 0.3;
 const DEFAULT_BIAS: f32 = 0.0;
-const OJA_WEIGHT_CLAMP_ENABLED: bool = true;
+const HEBB_WEIGHT_CLAMP_ENABLED: bool = true;
 const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
 pub(crate) const SENSORY_COUNT: u32 = SensoryReceptor::LOOK_NEURON_COUNT + 1;
 pub(crate) const ACTION_COUNT: usize = ActionType::ALL.len();
 pub(crate) const ACTION_COUNT_U32: u32 = ACTION_COUNT as u32;
 pub(crate) const INTER_ID_BASE: u32 = 1000;
 pub(crate) const ACTION_ID_BASE: u32 = 2000;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PostLayer {
+    Inter,
+    Action,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub(crate) enum TurnChoice {
@@ -412,8 +418,7 @@ pub(crate) fn apply_runtime_plasticity(
     }
     let dopamine_signal =
         scratch.action_activations[action_index(ActionType::Dopamine)].clamp(-1.0, 1.0);
-    // let eta = organism.genome.hebb_eta_baseline + organism.genome.hebb_eta_gain * dopamine_signal;
-    let eta = organism.genome.hebb_eta_gain * dopamine_signal; // Experimenting with removing the baseline
+    let eta = organism.genome.hebb_eta_baseline + organism.genome.hebb_eta_gain * dopamine_signal;
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::PlasticitySetup, stage_started.elapsed());
 
@@ -476,46 +481,77 @@ fn tune_synapses(
     inter_activations: &[f32],
     action_activations: &[f32; ACTION_COUNT],
 ) {
+    // Generalized Hebbian (Sanger) update is applied per post layer.
+    let mut active_layer: Option<PostLayer> = None;
+    let mut projected_output_sum = 0.0f32; // Σ_{k<j} y_k * w_k
+
     for edge in edges {
-        let post_activation =
-            match post_activation(edge.post_neuron_id, inter_activations, action_activations) {
-                Some(value) => value,
-                None => continue,
-            };
-        edge.eligibility = (1.0 - lambda) * edge.eligibility + (pre_activation * post_activation);
-        let updated_weight =
-            edge.weight + eta * post_activation * (pre_activation - post_activation * edge.weight);
+        let (layer, post_activation) = match post_layer_and_activation(
+            edge.post_neuron_id,
+            inter_activations,
+            action_activations,
+        ) {
+            Some(value) => value,
+            None => continue,
+        };
+
+        if active_layer != Some(layer) {
+            active_layer = Some(layer);
+            projected_output_sum = 0.0;
+        }
+
+        let post_projection = post_activation * edge.weight;
+        let gha_gradient =
+            post_activation * (pre_activation - projected_output_sum - post_projection);
+        edge.eligibility = (1.0 - lambda) * edge.eligibility + gha_gradient;
+        let updated_weight = edge.weight + eta * edge.eligibility;
         edge.weight = constrain_weight(updated_weight, required_sign);
+        projected_output_sum += post_projection;
     }
 }
 
-fn post_activation(
+fn post_layer_and_activation(
     neuron_id: NeuronId,
     inter_activations: &[f32],
     action_activations: &[f32; ACTION_COUNT],
-) -> Option<f32> {
+) -> Option<(PostLayer, f32)> {
     if neuron_id.0 >= ACTION_ID_BASE {
         let action_idx = (neuron_id.0 - ACTION_ID_BASE) as usize;
-        return action_activations.get(action_idx).copied();
+        return action_activations
+            .get(action_idx)
+            .copied()
+            .map(|activation| (PostLayer::Action, activation));
     }
     if neuron_id.0 >= INTER_ID_BASE {
         let inter_idx = (neuron_id.0 - INTER_ID_BASE) as usize;
-        return inter_activations.get(inter_idx).copied();
+        return inter_activations
+            .get(inter_idx)
+            .copied()
+            .map(|activation| (PostLayer::Inter, activation));
     }
     None
 }
 
 fn constrain_weight(weight: f32, required_sign: f32) -> f32 {
-    let magnitude = if OJA_WEIGHT_CLAMP_ENABLED {
-        weight
-            .abs()
-            .clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX)
-    } else {
-        weight.abs().max(SYNAPSE_STRENGTH_MIN)
-    };
     if required_sign.is_sign_negative() {
+        if weight >= 0.0 {
+            return -SYNAPSE_STRENGTH_MIN;
+        }
+        let magnitude = if HEBB_WEIGHT_CLAMP_ENABLED {
+            (-weight).clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX)
+        } else {
+            (-weight).max(SYNAPSE_STRENGTH_MIN)
+        };
         -magnitude
     } else {
+        if weight <= 0.0 {
+            return SYNAPSE_STRENGTH_MIN;
+        }
+        let magnitude = if HEBB_WEIGHT_CLAMP_ENABLED {
+            weight.clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX)
+        } else {
+            weight.max(SYNAPSE_STRENGTH_MIN)
+        };
         magnitude
     }
 }
