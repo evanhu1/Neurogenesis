@@ -52,7 +52,7 @@ cell.
 
 ### Turn Pipeline (execution order)
 
-1. **Lifecycle** — deduct `turn_energy_cost`, remove dead/old organisms.
+1. **Lifecycle** — deduct `neuron_metabolism_cost * (enabled interneuron count)`, remove dead/old organisms.
 2. **Snapshot** — freeze occupancy + organism state, stable ID ordering.
 3. **Intent** — evaluate brains, produce per-organism intents. Apply runtime
    plasticity (Hebbian learning, eligibility traces, synapse pruning).

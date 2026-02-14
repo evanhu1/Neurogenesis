@@ -11,7 +11,7 @@ fn stable_perf_config() -> WorldConfig {
         food_energy: 50.0,
         reproduction_energy_cost: 1_000_000_000.0,
         move_action_energy_cost: 0.0,
-        turn_energy_cost: 0.0,
+        neuron_metabolism_cost: 0.0,
         plant_growth_speed: 1.0,
         food_regrowth_interval: 10,
         food_fertility_noise_scale: 0.045,

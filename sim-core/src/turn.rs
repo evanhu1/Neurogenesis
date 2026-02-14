@@ -546,7 +546,10 @@ impl Simulation {
         let mut starved_positions = Vec::new();
 
         for (idx, organism) in self.organisms.iter_mut().enumerate() {
-            organism.energy -= self.config.turn_energy_cost;
+            // Genome `num_neurons` tracks enabled interneurons only.
+            let interneuron_count = organism.genome.num_neurons as f32;
+            let metabolism_energy_cost = self.config.neuron_metabolism_cost * interneuron_count;
+            organism.energy -= metabolism_energy_cost;
             if organism.energy <= 0.0 || organism.age_turns >= max_age {
                 dead[idx] = true;
                 let cell_idx = organism.r as usize * world_width + organism.q as usize;

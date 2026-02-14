@@ -33,7 +33,7 @@ fn starvation_and_reproduction_interact_in_same_turn() {
                 false,
                 false,
                 0.2,
-                1.0,
+                0.25,
             ),
             make_organism(
                 3,
@@ -71,8 +71,8 @@ fn starvation_and_reproduction_interact_in_same_turn() {
         .expect("reproducer should survive");
     assert_eq!(reproducer.consumptions_count, 0);
     assert_eq!(reproducer.reproductions_count, 1);
-    // 6.0 - 1.0 (turn upkeep) - 5.0 (reproduction) - 2.0 (move + reproduce action costs) = -2.0
-    assert_eq!(reproducer.energy, -2.0);
+    // 6.0 - 0.25 (turn upkeep: 0.25 * 1 neuron) - 5.0 (reproduction) - 2.0 (move + reproduce action costs) = -1.25
+    assert_eq!(reproducer.energy, -1.25);
 }
 
 #[test]
@@ -91,7 +91,7 @@ fn starvation_does_not_spawn_replacements() {
                 false,
                 false,
                 0.2,
-                1.0,
+                0.25,
             ),
             make_organism(
                 1,
@@ -164,8 +164,8 @@ fn move_energy_cost_applies_to_attempted_moves() {
         .iter()
         .find(|organism| organism.id == OrganismId(1))
         .expect("loser should survive");
-    assert_eq!(winner.energy, 8.0);
-    assert_eq!(loser.energy, 8.0);
+    assert_eq!(winner.energy, 8.75);
+    assert_eq!(loser.energy, 8.75);
 }
 
 #[test]

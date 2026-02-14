@@ -170,10 +170,13 @@ fn multi_node_cycle_resolves_without_conflict() {
 #[test]
 fn contested_occupied_target_where_occupant_remains_uses_consume_path() {
     let cfg = test_config(5, 3);
-    let expected_energy = 6.0 - cfg.turn_energy_cost - (cfg.move_action_energy_cost * 2.0) + 2.0;
-    let mut sim = Simulation::new(cfg, 17).expect("simulation should initialize");
     let mut predator = make_organism(0, 1, 1, FacingDirection::East, true, false, false, 0.9, 6.0);
     enable_consume_action(&mut predator);
+    let predator_metabolism = cfg.neuron_metabolism_cost * predator.genome.num_neurons as f32;
+    let prey_energy_after_metabolism = 3.0 - cfg.neuron_metabolism_cost;
+    let expected_energy = 6.0 - predator_metabolism - (cfg.move_action_energy_cost * 2.0)
+        + prey_energy_after_metabolism;
+    let mut sim = Simulation::new(cfg, 17).expect("simulation should initialize");
     configure_sim(
         &mut sim,
         vec![
@@ -278,7 +281,7 @@ fn move_into_food_consumes_and_schedules_regrowth() {
         .iter()
         .find(|organism| organism.id == OrganismId(0))
         .expect("predator should survive");
-    assert_eq!(predator.energy, 15.0);
+    assert_eq!(predator.energy, 15.75);
 }
 
 #[test]

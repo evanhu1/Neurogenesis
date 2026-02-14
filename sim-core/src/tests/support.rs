@@ -66,7 +66,7 @@ pub(super) fn stable_test_config() -> WorldConfig {
         food_energy: 50.0,
         reproduction_energy_cost: 100.0,
         move_action_energy_cost: 1.0,
-        turn_energy_cost: 1.0,
+        neuron_metabolism_cost: 0.25,
         plant_growth_speed: 1.0,
         food_regrowth_interval: 10,
         food_fertility_noise_scale: 0.045,

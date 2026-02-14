@@ -47,7 +47,7 @@ configure either the World, or set default values for the first Species Genome.
 
 Phases execute in this order each tick:
 
-1. **Lifecycle** — deduct `turn_energy_cost` from all organisms. Remove any with
+1. **Lifecycle** — deduct `neuron_metabolism_cost * (enabled interneuron count)` from all organisms. Remove any with
    `energy <= 0` or `age_turns >= max_organism_age`. Rebuild occupancy.
 2. **Snapshot** — freeze occupancy and organism state. Stable ordering by ID.
 3. **Intent** — evaluate each brain against the frozen snapshot. Produce per-

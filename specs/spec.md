@@ -14,7 +14,7 @@ simulation engine, including turn-runner behavior.
 
 Each tick executes in strict order:
 
-1. Lifecycle: subtract `turn_energy_cost`, remove starved/aged organisms.
+1. Lifecycle: subtract `neuron_metabolism_cost * (enabled interneuron count)`, remove starved/aged organisms.
 2. Snapshot: freeze occupancy + organisms for intent evaluation.
 3. Intent: evaluate each organism brain.
 4. Move resolution: simultaneous resolution, winner is highest confidence,

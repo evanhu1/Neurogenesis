@@ -31,7 +31,7 @@ export type WorldConfig = {
   food_energy: number;
   reproduction_energy_cost: number;
   move_action_energy_cost: number;
-  turn_energy_cost: number;
+  neuron_metabolism_cost: number;
   plant_growth_speed: number;
   food_regrowth_interval: number;
   food_fertility_noise_scale: number;
