@@ -1,4 +1,4 @@
-use crate::genome::{inter_alpha_from_log_tau, DEFAULT_INTER_LOG_TAU};
+use crate::genome::{inter_alpha_from_log_tau, DEFAULT_INTER_LOG_TAU, SYNAPSE_STRENGTH_MAX, SYNAPSE_STRENGTH_MIN};
 use crate::grid::hex_neighbor;
 use sim_types::{
     ActionNeuronState, ActionType, BrainState, EntityType, InterNeuronState, InterNeuronType,
@@ -14,8 +14,6 @@ const ACTION_ACTIVATION_THRESHOLD: f32 = 0.5;
 const TURN_ACTION_DEADZONE: f32 = 0.3;
 const DEFAULT_BIAS: f32 = 0.0;
 const OJA_WEIGHT_CLAMP_ENABLED: bool = true;
-const OJA_WEIGHT_MAGNITUDE_MIN: f32 = 0.001;
-const OJA_WEIGHT_MAGNITUDE_MAX: f32 = 4.0;
 const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
 pub(crate) const SENSORY_COUNT: u32 = SensoryReceptor::LOOK_NEURON_COUNT + 1;
 pub(crate) const ACTION_COUNT: usize = ActionType::ALL.len();
@@ -371,7 +369,8 @@ pub(crate) fn apply_runtime_plasticity(organism: &mut sim_types::OrganismState) 
     let action_activations: [f32; ACTION_COUNT] =
         std::array::from_fn(|idx| brain.action.get(idx).map_or(0.0, |n| n.neuron.activation));
     let dopamine_signal = action_activations[action_index(ActionType::Dopamine)].clamp(-1.0, 1.0);
-    let eta = organism.genome.hebb_eta_baseline + organism.genome.hebb_eta_gain * dopamine_signal;
+    // let eta = organism.genome.hebb_eta_baseline + organism.genome.hebb_eta_gain * dopamine_signal;
+    let eta = organism.genome.hebb_eta_gain * dopamine_signal; // Experimenting with removing the baseline
 
     for sensory in &mut brain.sensory {
         tune_synapses(
@@ -453,9 +452,9 @@ fn constrain_weight(weight: f32, required_sign: f32) -> f32 {
     let magnitude = if OJA_WEIGHT_CLAMP_ENABLED {
         weight
             .abs()
-            .clamp(OJA_WEIGHT_MAGNITUDE_MIN, OJA_WEIGHT_MAGNITUDE_MAX)
+            .clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX)
     } else {
-        weight.abs().max(OJA_WEIGHT_MAGNITUDE_MIN)
+        weight.abs().max(SYNAPSE_STRENGTH_MIN)
     };
     if required_sign.is_sign_negative() {
         -magnitude

@@ -54,11 +54,13 @@ cell.
 
 1. **Lifecycle** — deduct `turn_energy_cost`, remove dead/old organisms.
 2. **Snapshot** — freeze occupancy + organism state, stable ID ordering.
-3. **Intent** — evaluate brains, produce per-organism intents.
-4. **Move resolution** — simultaneous resolution; highest confidence wins,
+3. **Intent** — evaluate brains, produce per-organism intents. Apply runtime
+   plasticity (Hebbian learning, eligibility traces, synapse pruning).
+4. **Reproduction** — queue spawn at hex behind (opposite facing). Requires
+   `age_turns >= age_of_maturity` and sufficient energy.
+5. **Move resolution** — simultaneous resolution; highest confidence wins,
    ties broken by lower ID. Supports consumption and cycles.
-5. **Commit** — apply moves, kills, energy transfers. Replenish food.
-6. **Reproduction** — queue spawn at hex behind (opposite facing).
+6. **Commit** — apply moves, kills, energy transfers. Replenish food.
 7. **Age** — increment `age_turns`.
 8. **Spawn** — process queue, mutate genome, assign species.
 9. **Metrics & delta** — prune extinct species, emit `TickDelta`.
@@ -66,15 +68,22 @@ cell.
 ### Brain
 
 3 sensory neurons (Look Food/Organism + Energy), inter neurons at IDs
-`1000..1000+n`, action neurons at `2000..2004`. Evaluation: sensory→inter,
-inter→inter (prev tick), then →action. Inter=tanh, action=sigmoid, fires at
-`> 0.5`.
+`1000..1000+n`, 5 action neurons at `2000..2005` (`MoveForward`, `Turn`,
+`Consume`, `Reproduce`, `Dopamine`). Evaluation: sensory→inter, inter→inter
+(prev tick), then →action. Inter=tanh with log-tau time constants,
+action=sigmoid, fires at `> 0.5`. Dopamine neuron modulates Hebbian
+learning rate. Oja's rule with eligibility traces applied after evaluation.
+Synapse pruning at maturity.
 
 ### Genome
 
-`OrganismGenome` has `num_neurons`, `max_num_neurons`, `vision_distance`,
-`mutation_rate`, `inter_biases`, `edges` (sorted). Mutations are each
-independently gated by `mutation_rate`. Species assigned by L1 genome
+`OrganismGenome` has `num_neurons`, `vision_distance`, `age_of_maturity`,
+`hebb_eta_baseline`, `hebb_eta_gain`, `eligibility_decay_lambda`,
+`synapse_prune_threshold`, `inter_biases`, `inter_log_taus`,
+`interneuron_types`, `action_biases`, `edges` (sorted, with per-edge
+`eligibility` trace), and per-operator mutation-rate genes. No weight
+mutation; weights are set at birth and modified by Hebbian learning.
+`max_num_neurons` is a world-level cap. Species assigned by L1 genome
 distance; exceeding `speciation_threshold` creates a new species.
 
 ### Delta Model
