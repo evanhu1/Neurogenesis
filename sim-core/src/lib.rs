@@ -402,11 +402,6 @@ fn validate_world_config(config: &WorldConfig) -> Result<(), SimError> {
             "num_organisms must be greater than zero".to_owned(),
         ));
     }
-    if config.starting_energy <= 0.0 {
-        return Err(SimError::InvalidConfig(
-            "starting_energy must be greater than zero".to_owned(),
-        ));
-    }
     if config.food_energy <= 0.0 {
         return Err(SimError::InvalidConfig(
             "food_energy must be greater than zero".to_owned(),
@@ -425,21 +420,6 @@ fn validate_world_config(config: &WorldConfig) -> Result<(), SimError> {
     if config.neuron_metabolism_cost < 0.0 {
         return Err(SimError::InvalidConfig(
             "neuron_metabolism_cost must be >= 0".to_owned(),
-        ));
-    }
-    if config.max_num_neurons == 0 {
-        return Err(SimError::InvalidConfig(
-            "max_num_neurons must be greater than zero".to_owned(),
-        ));
-    }
-    if config.max_num_neurons > 256 {
-        return Err(SimError::InvalidConfig(
-            "max_num_neurons must be <= 256".to_owned(),
-        ));
-    }
-    if config.max_num_neurons < config.seed_genome_config.num_neurons {
-        return Err(SimError::InvalidConfig(
-            "max_num_neurons must be >= seed_genome_config.num_neurons".to_owned(),
         ));
     }
     if !config.plant_growth_speed.is_finite() || config.plant_growth_speed <= 0.0 {

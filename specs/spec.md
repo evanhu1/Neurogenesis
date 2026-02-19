@@ -124,15 +124,7 @@ Each operator is independently gated by its own mutation-rate gene:
 Continuous perturbations use Gaussian noise; synapse creation uses log-normal
 magnitudes.
 
-`max_num_neurons` is a fixed world-level cap (`WorldConfig.max_num_neurons`) and
-is not a mutable genome gene.
-
 ## Config Validation
-
-`WorldConfig` validates:
-
-- `max_num_neurons in [1, 256]`.
-- `max_num_neurons >= seed_genome_config.num_neurons`.
 
 `SeedGenomeConfig` validates:
 

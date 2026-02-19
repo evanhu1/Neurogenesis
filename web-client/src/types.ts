@@ -7,6 +7,7 @@ export type SeedGenomeConfig = {
   num_synapses: number;
   spatial_prior_sigma: number;
   vision_distance: number;
+  starting_energy: number;
   age_of_maturity: number;
   hebb_eta_baseline: number;
   hebb_eta_gain: number;
@@ -27,7 +28,6 @@ export type WorldConfig = {
   world_width: number;
   steps_per_second: number;
   num_organisms: number;
-  starting_energy: number;
   food_energy: number;
   reproduction_energy_cost: number;
   move_action_energy_cost: number;
@@ -38,7 +38,6 @@ export type WorldConfig = {
   food_fertility_exponent: number;
   food_fertility_floor: number;
   max_organism_age: number;
-  max_num_neurons: number;
   speciation_threshold: number;
   seed_genome_config: SeedGenomeConfig;
 };
@@ -48,6 +47,7 @@ export type OrganismGenome = {
   num_synapses: number;
   spatial_prior_sigma: number;
   vision_distance: number;
+  starting_energy: number;
   age_of_maturity: number;
   hebb_eta_baseline: number;
   hebb_eta_gain: number;

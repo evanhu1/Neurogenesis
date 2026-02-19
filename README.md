@@ -67,7 +67,7 @@ Phases execute in this order each tick:
    energy transfers. Rebuild occupancy. Process due food regrowth events.
 7. **Age** — increment `age_turns` for all survivors.
 8. **Spawn** — process spawn queue in order. Offspring get mutated genome,
-   opposite facing, `starting_energy`. Species assigned by genome distance.
+   opposite facing, and genome `starting_energy`. Species assigned by genome distance.
 9. **Metrics & delta** — prune extinct species, increment turn counter, emit
    `TickDelta`.
 
@@ -158,7 +158,6 @@ Implemented operators:
 
 Weight mutation is not an evolutionary operator; weights are initialised at
 birth and modified only by Hebbian learning during the organism's lifetime.
-`max_num_neurons` is not a mutable genome gene; it is a global world-level cap.
 
 ## Food & Fertility
 

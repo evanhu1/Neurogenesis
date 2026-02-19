@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react
 import { computeBaseHexSize, computeWorldFitZoom, type WorldViewport } from '../worldCanvas';
 
 const BASE_MIN_WORLD_ZOOM = 0.65;
-const ABSOLUTE_MIN_WORLD_ZOOM = 0.05;
+const ABSOLUTE_MIN_WORLD_ZOOM = 0.2;
 const BASE_MAX_WORLD_ZOOM = 4;
 const ABSOLUTE_MAX_WORLD_ZOOM = 48;
+const START_FIT_MIN_WORLD_ZOOM = BASE_MIN_WORLD_ZOOM;
 const TARGET_HEX_RADIUS_PX = 48;
 const WORLD_ZOOM_STEP = 1.12;
 const FIT_WORLD_MARGIN = 0.95;
@@ -198,9 +199,9 @@ export function useWorldViewport() {
       if (!worldWidth || worldWidth <= 0) return;
       const fitZoom = computeWorldFitZoom(canvas.width, canvas.height, worldWidth);
       if (!Number.isFinite(fitZoom) || fitZoom <= 0) return;
-      const minWorldZoom = computeMinWorldZoom(canvas, worldWidth);
       const maxWorldZoom = computeMaxWorldZoom(canvas, worldWidth);
-      const nextZoom = Math.max(minWorldZoom, Math.min(maxWorldZoom, fitZoom));
+      // Prevent startup auto-fit from zooming too far out just to include the entire world.
+      const nextZoom = Math.max(START_FIT_MIN_WORLD_ZOOM, Math.min(maxWorldZoom, fitZoom));
 
       updateViewport((prev) => {
         if (prev.zoom === nextZoom && prev.panX === 0 && prev.panY === 0) return prev;

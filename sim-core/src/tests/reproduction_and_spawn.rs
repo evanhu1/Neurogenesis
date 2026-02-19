@@ -139,6 +139,7 @@ fn reproduce_action_succeeds_when_energy_and_space_allow_it() {
         0.7,
         30.0,
     );
+    let expected_child_energy = parent.genome.starting_energy;
     enable_reproduce_action(&mut parent);
     configure_sim(&mut sim, vec![parent]);
 
@@ -146,6 +147,7 @@ fn reproduce_action_succeeds_when_energy_and_space_allow_it() {
     assert_eq!(delta.metrics.reproductions_last_turn, 1);
     assert_eq!(delta.spawned.len(), 1);
     assert_eq!((delta.spawned[0].q, delta.spawned[0].r), (2, 3));
+    assert_eq!(delta.spawned[0].energy, expected_child_energy);
 
     let parent_after = sim
         .organisms

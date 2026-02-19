@@ -108,6 +108,8 @@ pub struct OrganismGenome {
     pub num_synapses: u32,
     pub spatial_prior_sigma: f32,
     pub vision_distance: u32,
+    #[serde(default = "default_starting_energy")]
+    pub starting_energy: f32,
     #[serde(default = "default_age_of_maturity")]
     pub age_of_maturity: u32,
     #[serde(default)]
@@ -152,6 +154,8 @@ pub struct SeedGenomeConfig {
     pub num_synapses: u32,
     pub spatial_prior_sigma: f32,
     pub vision_distance: u32,
+    #[serde(default = "default_starting_energy")]
+    pub starting_energy: f32,
     pub age_of_maturity: u32,
     pub hebb_eta_baseline: f32,
     pub hebb_eta_gain: f32,
@@ -173,7 +177,6 @@ pub struct WorldConfig {
     pub world_width: u32,
     pub steps_per_second: u32,
     pub num_organisms: u32,
-    pub starting_energy: f32,
     pub food_energy: f32,
     pub reproduction_energy_cost: f32,
     pub move_action_energy_cost: f32,
@@ -188,7 +191,6 @@ pub struct WorldConfig {
     #[serde(default = "default_food_fertility_floor")]
     pub food_fertility_floor: f32,
     pub max_organism_age: u32,
-    pub max_num_neurons: u32,
     pub speciation_threshold: f32,
     pub seed_genome_config: SeedGenomeConfig,
 }
@@ -198,7 +200,6 @@ struct WorldConfigDeserialize {
     world_width: u32,
     steps_per_second: u32,
     num_organisms: u32,
-    starting_energy: f32,
     food_energy: f32,
     reproduction_energy_cost: f32,
     move_action_energy_cost: f32,
@@ -219,7 +220,6 @@ struct WorldConfigDeserialize {
     #[serde(default = "default_food_fertility_floor")]
     food_fertility_floor: f32,
     max_organism_age: u32,
-    max_num_neurons: u32,
     speciation_threshold: f32,
     seed_genome_config: SeedGenomeConfig,
 }
@@ -238,7 +238,6 @@ impl<'de> Deserialize<'de> for WorldConfig {
             world_width: raw.world_width,
             steps_per_second: raw.steps_per_second,
             num_organisms: raw.num_organisms,
-            starting_energy: raw.starting_energy,
             food_energy: raw.food_energy,
             reproduction_energy_cost: raw.reproduction_energy_cost,
             move_action_energy_cost: raw.move_action_energy_cost,
@@ -249,7 +248,6 @@ impl<'de> Deserialize<'de> for WorldConfig {
             food_fertility_exponent: raw.food_fertility_exponent,
             food_fertility_floor: raw.food_fertility_floor,
             max_organism_age: raw.max_organism_age,
-            max_num_neurons: raw.max_num_neurons,
             speciation_threshold: raw.speciation_threshold,
             seed_genome_config: raw.seed_genome_config,
         })
@@ -273,25 +271,39 @@ fn default_world_config() -> WorldConfig {
         .get("world_width")
         .and_then(toml::Value::as_integer)
         .expect("default world config world_width must be an integer");
-    table
-        .entry("starting_energy")
-        .or_insert_with(|| toml::Value::Float(world_width as f64));
-
-    let starting_energy = table
+    let legacy_starting_energy = table
         .get("starting_energy")
         .and_then(|value| match value {
             toml::Value::Float(v) => Some(*v),
             toml::Value::Integer(v) => Some(*v as f64),
             _ => None,
         })
-        .expect("default world config starting_energy must be numeric");
+        .unwrap_or(world_width as f64);
+
+    let seed_genome_table = table
+        .entry("seed_genome_config")
+        .or_insert_with(|| toml::Value::Table(Default::default()))
+        .as_table_mut()
+        .expect("default world config seed_genome_config must be a table");
+    seed_genome_table
+        .entry("starting_energy")
+        .or_insert_with(|| toml::Value::Float(legacy_starting_energy));
+
+    let starting_energy = seed_genome_table
+        .get("starting_energy")
+        .and_then(|value| match value {
+            toml::Value::Float(v) => Some(*v),
+            toml::Value::Integer(v) => Some(*v as f64),
+            _ => None,
+        })
+        .expect("default seed_genome_config starting_energy must be numeric");
     table
         .entry("reproduction_energy_cost")
         .or_insert_with(|| toml::Value::Float(starting_energy));
 
     table
         .entry("max_organism_age")
-        .or_insert_with(|| toml::Value::Integer(world_width.saturating_mul(4)));
+        .or_insert_with(|| toml::Value::Integer(world_width.saturating_mul(10)));
     table
         .entry("neuron_metabolism_cost")
         .or_insert_with(|| toml::Value::Float(default_neuron_metabolism_cost() as f64));
@@ -316,6 +328,10 @@ fn default_eligibility_decay_lambda() -> f32 {
 
 fn default_age_of_maturity() -> u32 {
     0
+}
+
+fn default_starting_energy() -> f32 {
+    1.0
 }
 
 fn default_food_regrowth_interval() -> u32 {

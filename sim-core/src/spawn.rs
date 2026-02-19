@@ -47,11 +47,7 @@ impl Simulation {
             let organism = match &request.kind {
                 SpawnRequestKind::Reproduction(reproduction) => {
                     let mut child_genome = reproduction.parent_genome.clone();
-                    mutate_genome(
-                        &mut child_genome,
-                        self.config.max_num_neurons,
-                        &mut self.rng,
-                    );
+                    mutate_genome(&mut child_genome, &mut self.rng);
                     prune_disconnected_inter_neurons(&mut child_genome);
 
                     let threshold = self.config.speciation_threshold;
@@ -78,7 +74,7 @@ impl Simulation {
                         r: reproduction.r,
                         age_turns: 0,
                         facing: opposite_direction(reproduction.parent_facing),
-                        energy: self.config.starting_energy,
+                        energy: child_genome.starting_energy,
                         consumptions_count: 0,
                         reproductions_count: 0,
                         brain,
@@ -106,8 +102,7 @@ impl Simulation {
                 .pop()
                 .expect("initial population requires at least one unique cell per organism");
             let id = self.alloc_organism_id();
-            let genome =
-                generate_seed_genome(&seed_config, self.config.max_num_neurons, &mut self.rng);
+            let genome = generate_seed_genome(&seed_config, &mut self.rng);
             let brain = express_genome(&genome, &mut self.rng);
 
             // Seed genomes are independently random — each gets its own species.
@@ -123,7 +118,7 @@ impl Simulation {
                 r,
                 age_turns: 0,
                 facing,
-                energy: self.config.starting_energy,
+                energy: genome.starting_energy,
                 consumptions_count: 0,
                 reproductions_count: 0,
                 brain,

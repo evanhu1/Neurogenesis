@@ -40,21 +40,18 @@ pub(crate) const BRAIN_SPACE_MAX: f32 = 10.0;
 
 pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     config: &SeedGenomeConfig,
-    world_max_num_neurons: u32,
     rng: &mut R,
 ) -> OrganismGenome {
-    let clamped_num_neurons = config.num_neurons.min(world_max_num_neurons);
-    let max_synapses = max_possible_synapses(clamped_num_neurons);
-    let inter_biases: Vec<f32> = (0..world_max_num_neurons)
-        .map(|_| sample_initial_bias(rng))
-        .collect();
-    let inter_log_taus: Vec<f32> = (0..world_max_num_neurons)
+    let num_neurons = config.num_neurons;
+    let max_synapses = max_possible_synapses(num_neurons);
+    let inter_biases: Vec<f32> = (0..num_neurons).map(|_| sample_initial_bias(rng)).collect();
+    let inter_log_taus: Vec<f32> = (0..num_neurons)
         .map(|_| sample_uniform_log_tau(rng))
         .collect();
-    let interneuron_types: Vec<InterNeuronType> = (0..world_max_num_neurons)
+    let interneuron_types: Vec<InterNeuronType> = (0..num_neurons)
         .map(|_| sample_interneuron_type(rng))
         .collect();
-    let inter_locations: Vec<BrainLocation> = (0..world_max_num_neurons)
+    let inter_locations: Vec<BrainLocation> = (0..num_neurons)
         .map(|_| sample_uniform_location(rng))
         .collect();
     let action_biases: Vec<f32> = ActionType::ALL
@@ -75,10 +72,11 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         .collect();
 
     OrganismGenome {
-        num_neurons: clamped_num_neurons,
+        num_neurons,
         num_synapses: config.num_synapses.min(max_synapses),
         spatial_prior_sigma: config.spatial_prior_sigma.max(0.01),
         vision_distance: config.vision_distance,
+        starting_energy: config.starting_energy,
         age_of_maturity: config.age_of_maturity,
         hebb_eta_baseline: config.hebb_eta_baseline,
         hebb_eta_gain: config.hebb_eta_gain,
@@ -142,18 +140,13 @@ fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng:
     genome.mutation_rate_neuron_location = rates[8];
 }
 
-fn align_genome_vectors<R: Rng + ?Sized>(
-    genome: &mut OrganismGenome,
-    world_max_num_neurons: u32,
-    rng: &mut R,
-) {
-    genome.num_neurons = genome.num_neurons.min(world_max_num_neurons);
+fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
     genome.num_synapses = genome
         .num_synapses
         .min(max_possible_synapses(genome.num_neurons));
     genome.spatial_prior_sigma = genome.spatial_prior_sigma.max(0.01);
 
-    let target_inter_len = world_max_num_neurons as usize;
+    let target_inter_len = genome.num_neurons as usize;
 
     while genome.inter_biases.len() < target_inter_len {
         genome.inter_biases.push(sample_initial_bias(rng));
@@ -192,12 +185,8 @@ fn align_genome_vectors<R: Rng + ?Sized>(
     genome.action_locations.truncate(ACTION_COUNT);
 }
 
-pub(crate) fn mutate_genome<R: Rng + ?Sized>(
-    genome: &mut OrganismGenome,
-    world_max_num_neurons: u32,
-    rng: &mut R,
-) {
-    align_genome_vectors(genome, world_max_num_neurons, rng);
+pub(crate) fn mutate_genome<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
+    align_genome_vectors(genome, rng);
     mutate_mutation_rate_genes(genome, rng);
 
     if rng.random::<f32>() < genome.mutation_rate_age_of_maturity {
@@ -429,6 +418,7 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
         + (a.num_synapses as f32 - b.num_synapses as f32).abs()
         + (a.spatial_prior_sigma - b.spatial_prior_sigma).abs()
         + (a.vision_distance as f32 - b.vision_distance as f32).abs()
+        + (a.starting_energy - b.starting_energy).abs()
         + (a.age_of_maturity as f32 - b.age_of_maturity as f32).abs()
         + (a.hebb_eta_baseline - b.hebb_eta_baseline).abs()
         + (a.hebb_eta_gain - b.hebb_eta_gain).abs()
@@ -542,6 +532,11 @@ pub(crate) fn validate_seed_genome_config(config: &SeedGenomeConfig) -> Result<(
         return Err(SimError::InvalidConfig(format!(
             "age_of_maturity must be <= {MAX_MUTATED_AGE_OF_MATURITY}"
         )));
+    }
+    if !config.starting_energy.is_finite() || config.starting_energy <= 0.0 {
+        return Err(SimError::InvalidConfig(
+            "starting_energy must be greater than zero".to_owned(),
+        ));
     }
 
     validate_rate(

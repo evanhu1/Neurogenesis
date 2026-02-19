@@ -83,8 +83,8 @@ Synapse pruning at maturity.
 `interneuron_types`, `action_biases`, `edges` (sorted, with per-edge
 `eligibility` trace), and per-operator mutation-rate genes. No weight
 mutation; weights are set at birth and modified by Hebbian learning.
-`max_num_neurons` is a world-level cap. Species assigned by L1 genome
-distance; exceeding `speciation_threshold` creates a new species.
+Species assigned by L1 genome distance; exceeding
+`speciation_threshold` creates a new species.
 
 ### Delta Model
 

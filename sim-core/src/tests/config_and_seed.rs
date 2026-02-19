@@ -12,21 +12,27 @@ fn config_validation_rejects_out_of_range_num_synapse_mutation_rate() {
 }
 
 #[test]
+fn config_validation_rejects_non_positive_seed_starting_energy() {
+    let mut cfg = stable_test_config();
+    cfg.seed_genome_config.starting_energy = 0.0;
+    let err = Simulation::new(cfg, 1).expect_err("config should be rejected");
+    assert!(err.to_string().contains("starting_energy"));
+}
+
+#[test]
 fn seed_genome_initializes_spatial_vectors_within_brain_space() {
     let mut cfg = stable_test_config();
-    cfg.max_num_neurons = 6;
     cfg.seed_genome_config.num_neurons = 4;
     cfg.seed_genome_config.num_synapses = 12;
 
     let mut rng = ChaCha8Rng::seed_from_u64(99);
-    let genome =
-        crate::genome::generate_seed_genome(&cfg.seed_genome_config, cfg.max_num_neurons, &mut rng);
+    let genome = crate::genome::generate_seed_genome(&cfg.seed_genome_config, &mut rng);
 
     assert_eq!(genome.num_neurons, 4);
-    assert_eq!(genome.inter_biases.len(), 6);
-    assert_eq!(genome.inter_log_taus.len(), 6);
-    assert_eq!(genome.interneuron_types.len(), 6);
-    assert_eq!(genome.inter_locations.len(), 6);
+    assert_eq!(genome.inter_biases.len(), 4);
+    assert_eq!(genome.inter_log_taus.len(), 4);
+    assert_eq!(genome.interneuron_types.len(), 4);
+    assert_eq!(genome.inter_locations.len(), 4);
     assert_eq!(
         genome.sensory_locations.len(),
         crate::brain::SENSORY_COUNT as usize
@@ -60,7 +66,7 @@ fn mutate_genome_can_mutate_num_synapses_and_location_in_bounds() {
     let mut rng = ChaCha8Rng::seed_from_u64(7);
 
     for _ in 0..32 {
-        crate::genome::mutate_genome(&mut genome, 8, &mut rng);
+        crate::genome::mutate_genome(&mut genome, &mut rng);
     }
 
     assert!(genome.num_synapses > 0);
@@ -101,13 +107,11 @@ fn genome_distance_captures_geometry_and_synapse_traits() {
 #[test]
 fn seed_num_synapses_is_clamped_to_possible_pairs() {
     let mut cfg = stable_test_config();
-    cfg.max_num_neurons = 3;
     cfg.seed_genome_config.num_neurons = 3;
     cfg.seed_genome_config.num_synapses = 9_999;
 
     let mut rng = ChaCha8Rng::seed_from_u64(123);
-    let genome =
-        crate::genome::generate_seed_genome(&cfg.seed_genome_config, cfg.max_num_neurons, &mut rng);
+    let genome = crate::genome::generate_seed_genome(&cfg.seed_genome_config, &mut rng);
 
     let all_pairs = (crate::brain::SENSORY_COUNT + genome.num_neurons)
         * (genome.num_neurons + crate::brain::ACTION_COUNT_U32);
