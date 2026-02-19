@@ -71,8 +71,8 @@ fn starvation_and_reproduction_interact_in_same_turn() {
         .expect("reproducer should survive");
     assert_eq!(reproducer.consumptions_count, 0);
     assert_eq!(reproducer.reproductions_count, 1);
-    // 6.0 - 0.25 (turn upkeep: 0.25 * 1 neuron) - 5.0 (reproduction) - 2.0 (move + reproduce action costs) = -1.25
-    assert_eq!(reproducer.energy, -1.25);
+    // 6.0 - 0.25 (turn upkeep: 0.25 * 1 neuron) - 5.0 (reproduction) - 1.0 (single selected action cost) = -0.25
+    assert_eq!(reproducer.energy, -0.25);
 }
 
 #[test]

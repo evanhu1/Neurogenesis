@@ -15,19 +15,25 @@ pub struct FoodId(pub u64);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ActionType {
-    MoveForward,
-    Turn,
+    Idle,
+    TurnLeft,
+    TurnRight,
+    Forward,
+    TurnLeftForward,
+    TurnRightForward,
     Consume,
     Reproduce,
-    Dopamine,
 }
 impl ActionType {
-    pub const ALL: [ActionType; 5] = [
-        ActionType::MoveForward,
-        ActionType::Turn,
+    pub const ALL: [ActionType; 8] = [
+        ActionType::Idle,
+        ActionType::TurnLeft,
+        ActionType::TurnRight,
+        ActionType::Forward,
+        ActionType::TurnLeftForward,
+        ActionType::TurnRightForward,
         ActionType::Consume,
         ActionType::Reproduce,
-        ActionType::Dopamine,
     ];
 }
 

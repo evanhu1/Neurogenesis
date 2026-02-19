@@ -124,39 +124,37 @@ fn forced_brain(
         BrainLocation { x: 0.0, y: 0.0 },
     )];
     let inter_id = NeuronId(1000);
-    let inter_bias = 1.0;
-    let inter_synapses = vec![
-        SynapseEdge {
-            pre_neuron_id: NeuronId(1000),
-            post_neuron_id: NeuronId(2000),
-            weight: if wants_move { 8.0 } else { -8.0 },
-            eligibility: 0.0,
-        },
-        SynapseEdge {
-            pre_neuron_id: NeuronId(1000),
-            post_neuron_id: NeuronId(2001),
-            weight: if turn_left && !turn_right {
-                -8.0
-            } else if turn_right && !turn_left {
+    let inter_bias = confidence;
+    let preferred_action = if wants_move {
+        if turn_left && !turn_right {
+            ActionType::TurnLeftForward
+        } else if turn_right && !turn_left {
+            ActionType::TurnRightForward
+        } else {
+            ActionType::Forward
+        }
+    } else if turn_left && !turn_right {
+        ActionType::TurnLeft
+    } else if turn_right && !turn_left {
+        ActionType::TurnRight
+    } else {
+        ActionType::Idle
+    };
+    let inter_synapses: Vec<SynapseEdge> = ActionType::ALL
+        .into_iter()
+        .enumerate()
+        .map(|(idx, action_type)| SynapseEdge {
+            pre_neuron_id: inter_id,
+            post_neuron_id: NeuronId(2000 + idx as u32),
+            weight: if action_type == preferred_action {
                 8.0
             } else {
-                0.0
+                -8.0
             },
             eligibility: 0.0,
-        },
-        SynapseEdge {
-            pre_neuron_id: NeuronId(1000),
-            post_neuron_id: NeuronId(2002),
-            weight: -8.0,
-            eligibility: 0.0,
-        },
-        SynapseEdge {
-            pre_neuron_id: NeuronId(1000),
-            post_neuron_id: NeuronId(2003),
-            weight: -8.0,
-            eligibility: 0.0,
-        },
-    ];
+        })
+        .collect();
+    let synapse_count = inter_synapses.len() as u32;
     let inter = vec![InterNeuronState {
         neuron: NeuronState {
             neuron_id: inter_id,
@@ -174,46 +172,62 @@ fn forced_brain(
     let mut action = vec![
         make_action_neuron(
             2000,
-            ActionType::MoveForward,
+            ActionType::Idle,
             0.0,
             BrainLocation { x: 2.0, y: 0.0 },
         ),
         make_action_neuron(
             2001,
-            ActionType::Turn,
+            ActionType::TurnLeft,
             0.0,
             BrainLocation { x: 2.0, y: 1.0 },
         ),
         make_action_neuron(
             2002,
-            ActionType::Consume,
+            ActionType::TurnRight,
             0.0,
             BrainLocation { x: 2.0, y: 2.0 },
         ),
         make_action_neuron(
             2003,
-            ActionType::Reproduce,
+            ActionType::Forward,
             0.0,
             BrainLocation { x: 2.0, y: 3.0 },
         ),
         make_action_neuron(
             2004,
-            ActionType::Dopamine,
+            ActionType::TurnLeftForward,
             0.0,
             BrainLocation { x: 2.0, y: 4.0 },
         ),
+        make_action_neuron(
+            2005,
+            ActionType::TurnRightForward,
+            0.0,
+            BrainLocation { x: 2.0, y: 5.0 },
+        ),
+        make_action_neuron(
+            2006,
+            ActionType::Consume,
+            0.0,
+            BrainLocation { x: 2.0, y: 6.0 },
+        ),
+        make_action_neuron(
+            2007,
+            ActionType::Reproduce,
+            0.0,
+            BrainLocation { x: 2.0, y: 7.0 },
+        ),
     ];
     for action_neuron in &mut action {
-        if action_neuron.action_type != ActionType::Dopamine {
-            action_neuron.neuron.parent_ids = vec![inter_id];
-        }
+        action_neuron.neuron.parent_ids = vec![inter_id];
     }
 
     BrainState {
         sensory,
         inter,
         action,
-        synapse_count: 4,
+        synapse_count,
     }
 }
 
@@ -256,27 +270,40 @@ pub(super) fn make_food(id: u64, q: i32, r: i32, energy: impl IntoEnergy) -> Foo
 
 pub(super) fn enable_reproduce_action(organism: &mut OrganismState) {
     let inter_id = organism.brain.inter[0].neuron.neuron_id;
+    let reproduce_action_id =
+        NeuronId(2000 + crate::brain::action_index(ActionType::Reproduce) as u32);
+    let action_id_upper_bound = 2000 + ActionType::ALL.len() as u32;
     let mut found = false;
     for synapse in &mut organism.brain.inter[0].synapses {
-        if synapse.post_neuron_id == NeuronId(2003) {
+        if !(2000..action_id_upper_bound).contains(&synapse.post_neuron_id.0) {
+            continue;
+        }
+        if synapse.post_neuron_id == reproduce_action_id {
             synapse.weight = 8.0;
             found = true;
-            break;
+        } else {
+            synapse.weight = -8.0;
         }
     }
     if !found {
-        let inter_id = organism.brain.inter[0].neuron.neuron_id;
-        organism.brain.inter[0].synapses.push(SynapseEdge {
-            pre_neuron_id: inter_id,
-            post_neuron_id: NeuronId(2003),
-            weight: 8.0,
-            eligibility: 0.0,
-        });
-        organism.brain.inter[0]
-            .synapses
-            .sort_by(|a, b| a.post_neuron_id.cmp(&b.post_neuron_id));
-        organism.brain.synapse_count = organism.brain.synapse_count.saturating_add(1);
+        for action_type in ActionType::ALL {
+            let action_id = NeuronId(2000 + crate::brain::action_index(action_type) as u32);
+            organism.brain.inter[0].synapses.push(SynapseEdge {
+                pre_neuron_id: inter_id,
+                post_neuron_id: action_id,
+                weight: if action_type == ActionType::Reproduce {
+                    8.0
+                } else {
+                    -8.0
+                },
+                eligibility: 0.0,
+            });
+        }
     }
+    organism.brain.inter[0]
+        .synapses
+        .sort_by(|a, b| a.post_neuron_id.cmp(&b.post_neuron_id));
+    organism.brain.synapse_count = organism.brain.inter[0].synapses.len() as u32;
     if let Some(action) = organism
         .brain
         .action

@@ -133,13 +133,9 @@ fn express_genome_uses_stored_synapse_topology() {
     genome.interneuron_types = vec![InterNeuronType::Excitatory; 4];
     genome.inter_locations = (0..4).map(|i| loc(i as f32, 10.0 - i as f32)).collect();
     genome.sensory_locations = vec![loc(0.0, 0.0); SENSORY_COUNT as usize];
-    genome.action_locations = vec![
-        loc(8.0, 1.0),
-        loc(8.0, 2.0),
-        loc(8.0, 3.0),
-        loc(8.0, 4.0),
-        loc(8.0, 5.0),
-    ];
+    genome.action_locations = (0..ActionType::ALL.len())
+        .map(|i| loc(8.0, 1.0 + i as f32))
+        .collect();
     genome.edges = dense_edges(genome.num_neurons, &genome.interneuron_types, 20);
     genome.num_synapses = genome.edges.len() as u32;
 
@@ -156,8 +152,9 @@ fn express_genome_uses_stored_synapse_topology() {
 
     assert_eq!(brain_a.sensory[0].neuron.x, 0.0);
     assert_eq!(brain_a.sensory[0].neuron.y, 0.0);
-    assert_eq!(brain_a.action[4].neuron.x, 8.0);
-    assert_eq!(brain_a.action[4].neuron.y, 5.0);
+    let reproduce_idx = action_index(ActionType::Reproduce);
+    assert_eq!(brain_a.action[reproduce_idx].neuron.x, 8.0);
+    assert_eq!(brain_a.action[reproduce_idx].neuron.y, 8.0);
 }
 
 #[test]
@@ -260,7 +257,7 @@ fn action_biases_drive_actions_without_incoming_synapses() {
     let mut genome = test_genome();
     genome.num_neurons = 0;
     genome.num_synapses = 0;
-    genome.action_biases = vec![5.0, 0.0, 0.0, 6.0, 0.0];
+    genome.action_biases = vec![0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 6.0];
     genome.inter_biases.clear();
     genome.inter_log_taus.clear();
     genome.interneuron_types.clear();
@@ -287,9 +284,7 @@ fn action_biases_drive_actions_without_incoming_synapses() {
     let vision_distance = organism.genome.vision_distance;
     let eval = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
 
-    assert!(eval.resolved_actions.wants_move);
-    assert!(eval.resolved_actions.wants_reproduce);
-    assert!(!eval.resolved_actions.wants_consume);
+    assert_eq!(eval.resolved_actions.selected_action, ActionType::Reproduce);
 }
 
 #[test]
@@ -313,16 +308,19 @@ fn runtime_plasticity_updates_weights_and_preserves_sign() {
         weight: 0.2,
         eligibility: 0.0,
     });
-    let mut action = vec![
-        make_action_neuron(2000, ActionType::MoveForward, 0.0, loc(2.0, 1.0)),
-        make_action_neuron(2001, ActionType::Turn, 0.0, loc(2.0, 2.0)),
-        make_action_neuron(2002, ActionType::Consume, 0.0, loc(2.0, 3.0)),
-        make_action_neuron(2003, ActionType::Reproduce, 0.0, loc(2.0, 4.0)),
-        make_action_neuron(2004, ActionType::Dopamine, 0.0, loc(2.0, 5.0)),
-    ];
-    action[action_index(ActionType::MoveForward)]
-        .neuron
-        .parent_ids = vec![NeuronId(energy_id)];
+    let mut action: Vec<_> = ActionType::ALL
+        .into_iter()
+        .enumerate()
+        .map(|(idx, action_type)| {
+            make_action_neuron(
+                2000 + idx as u32,
+                action_type,
+                0.0,
+                loc(2.0, 1.0 + idx as f32),
+            )
+        })
+        .collect();
+    action[action_index(ActionType::Forward)].neuron.parent_ids = vec![NeuronId(energy_id)];
     let brain = BrainState {
         sensory,
         inter: vec![],

@@ -64,13 +64,7 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         .collect();
     let action_biases: Vec<f32> = ActionType::ALL
         .into_iter()
-        .map(|action_type| {
-            if matches!(action_type, ActionType::Dopamine) {
-                0.0
-            } else {
-                sample_initial_bias(rng)
-            }
-        })
+        .map(|_| sample_initial_bias(rng))
         .collect();
     let sensory_locations: Vec<BrainLocation> = (0..SENSORY_COUNT)
         .map(|_| sample_uniform_location(rng))

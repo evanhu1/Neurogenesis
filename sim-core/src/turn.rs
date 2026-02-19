@@ -1,6 +1,4 @@
-use crate::brain::{
-    action_index, apply_runtime_plasticity, evaluate_brain, BrainScratch, TurnChoice,
-};
+use crate::brain::{action_index, apply_runtime_plasticity, evaluate_brain, BrainScratch};
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right, wrap_position};
 use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 use crate::Simulation;
@@ -29,18 +27,6 @@ struct TurnSnapshot {
     organism_count: usize,
     organism_ids: Vec<OrganismId>,
     organism_states: Vec<SnapshotOrganismState>,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum IntentActionKind {
-    Turn,
-    Move,
-}
-
-#[derive(Clone, Copy)]
-struct RankedIntentAction {
-    kind: IntentActionKind,
-    strength: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -648,13 +634,6 @@ fn compare_move_candidates(a: &MoveCandidate, b: &MoveCandidate) -> Ordering {
         .then_with(|| b.actor_id.cmp(&a.actor_id))
 }
 
-fn intent_action_priority(action: IntentActionKind) -> u8 {
-    match action {
-        IntentActionKind::Turn => 0,
-        IntentActionKind::Move => 1,
-    }
-}
-
 fn build_intent_for_organism(
     idx: usize,
     organism: &mut OrganismState,
@@ -677,73 +656,15 @@ fn build_intent_for_organism(
     #[cfg(feature = "profiling")]
     profiling::record_brain_plasticity_total(plasticity_started.elapsed());
 
-    let turn_choice = evaluation.resolved_actions.turn;
-    let wants_move = evaluation.resolved_actions.wants_move;
-    let wants_reproduce = evaluation.resolved_actions.wants_reproduce;
-    let move_confidence = evaluation.action_activations[action_index(ActionType::MoveForward)];
-    let turn_strength = evaluation.action_activations[action_index(ActionType::Turn)].abs();
-
-    let mut ordered_actions = [IntentActionKind::Turn; 2];
-    let mut ordered_action_count = 0_usize;
-    let mut move_target = None;
-
-    if turn_choice != TurnChoice::None || wants_move {
-        let mut ranked_actions = [
-            RankedIntentAction {
-                kind: IntentActionKind::Turn,
-                strength: 0.0,
-            },
-            RankedIntentAction {
-                kind: IntentActionKind::Move,
-                strength: 0.0,
-            },
-        ];
-
-        if turn_choice != TurnChoice::None {
-            ranked_actions[ordered_action_count] = RankedIntentAction {
-                kind: IntentActionKind::Turn,
-                strength: turn_strength,
-            };
-            ordered_action_count += 1;
-        }
-        if wants_move {
-            ranked_actions[ordered_action_count] = RankedIntentAction {
-                kind: IntentActionKind::Move,
-                strength: move_confidence,
-            };
-            ordered_action_count += 1;
-        }
-
-        ranked_actions[..ordered_action_count].sort_by(|a, b| {
-            b.strength
-                .total_cmp(&a.strength)
-                .then_with(|| intent_action_priority(a.kind).cmp(&intent_action_priority(b.kind)))
-        });
-
-        for idx in 0..ordered_action_count {
-            ordered_actions[idx] = ranked_actions[idx].kind;
-        }
-
-        let mut virtual_facing = snapshot_state.facing;
-        for action in &ordered_actions[..ordered_action_count] {
-            match action {
-                IntentActionKind::Turn => {
-                    virtual_facing = facing_after_turn(virtual_facing, turn_choice);
-                }
-                IntentActionKind::Move => {
-                    let target = hex_neighbor(
-                        (snapshot_state.q, snapshot_state.r),
-                        virtual_facing,
-                        world_width,
-                    );
-                    move_target = Some(target);
-                    break;
-                }
-            }
-        }
-    }
-
-    let facing_after_actions = facing_after_turn(snapshot_state.facing, turn_choice);
+    let selected_action = evaluation.resolved_actions.selected_action;
+    let selected_action_activation = evaluation.action_activations[action_index(selected_action)];
+    let (facing_after_actions, wants_move, wants_reproduce, move_target) =
+        intent_from_selected_action(selected_action, snapshot_state, world_width);
+    let move_confidence = if wants_move {
+        selected_action_activation
+    } else {
+        0.0
+    };
 
     OrganismIntent {
         idx,
@@ -754,8 +675,49 @@ fn build_intent_for_organism(
         wants_reproduce,
         move_target,
         move_confidence,
-        action_cost_count: ordered_action_count as u8 + wants_reproduce as u8,
+        action_cost_count: u8::from(selected_action != ActionType::Idle),
         synapse_ops: evaluation.synapse_ops,
+    }
+}
+
+fn intent_from_selected_action(
+    selected_action: ActionType,
+    snapshot_state: SnapshotOrganismState,
+    world_width: i32,
+) -> (FacingDirection, bool, bool, Option<(i32, i32)>) {
+    let from = (snapshot_state.q, snapshot_state.r);
+    let current_facing = snapshot_state.facing;
+
+    match selected_action {
+        ActionType::Idle => (current_facing, false, false, None),
+        ActionType::TurnLeft => (rotate_left(current_facing), false, false, None),
+        ActionType::TurnRight => (rotate_right(current_facing), false, false, None),
+        ActionType::Forward => (
+            current_facing,
+            true,
+            false,
+            Some(hex_neighbor(from, current_facing, world_width)),
+        ),
+        ActionType::TurnLeftForward => {
+            let facing = rotate_left(current_facing);
+            (
+                facing,
+                true,
+                false,
+                Some(hex_neighbor(from, facing, world_width)),
+            )
+        }
+        ActionType::TurnRightForward => {
+            let facing = rotate_right(current_facing);
+            (
+                facing,
+                true,
+                false,
+                Some(hex_neighbor(from, facing, world_width)),
+            )
+        }
+        ActionType::Consume => (current_facing, false, false, None),
+        ActionType::Reproduce => (current_facing, false, true, None),
     }
 }
 
@@ -786,15 +748,4 @@ fn reproduction_target(
 ) -> (i32, i32) {
     let opposite_facing = opposite_direction(parent_facing);
     hex_neighbor((parent_q, parent_r), opposite_facing, world_width)
-}
-
-pub(crate) fn facing_after_turn(
-    current: FacingDirection,
-    turn_choice: TurnChoice,
-) -> FacingDirection {
-    match turn_choice {
-        TurnChoice::None => current,
-        TurnChoice::Left => rotate_left(current),
-        TurnChoice::Right => rotate_right(current),
-    }
 }

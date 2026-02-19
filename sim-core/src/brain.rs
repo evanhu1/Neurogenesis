@@ -18,8 +18,6 @@ fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
 }
 
-const ACTION_ACTIVATION_THRESHOLD: f32 = 0.5;
-const TURN_ACTION_DEADZONE: f32 = 0.3;
 const DEFAULT_BIAS: f32 = 0.0;
 const HEBB_WEIGHT_CLAMP_ENABLED: bool = true;
 const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
@@ -38,20 +36,17 @@ enum PostLayer {
     Action,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub(crate) enum TurnChoice {
-    #[default]
-    None,
-    Left,
-    Right,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ResolvedActions {
+    pub(crate) selected_action: ActionType,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub(crate) struct ResolvedActions {
-    pub(crate) turn: TurnChoice,
-    pub(crate) wants_move: bool,
-    pub(crate) wants_consume: bool,
-    pub(crate) wants_reproduce: bool,
+impl Default for ResolvedActions {
+    fn default() -> Self {
+        Self {
+            selected_action: ActionType::Idle,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -157,11 +152,14 @@ pub(crate) fn express_genome<R: Rng + ?Sized>(genome: &OrganismGenome, _rng: &mu
 
 pub(crate) fn action_index(action: ActionType) -> usize {
     match action {
-        ActionType::MoveForward => 0,
-        ActionType::Turn => 1,
-        ActionType::Consume => 2,
-        ActionType::Reproduce => 3,
-        ActionType::Dopamine => 4,
+        ActionType::Idle => 0,
+        ActionType::TurnLeft => 1,
+        ActionType::TurnRight => 2,
+        ActionType::Forward => 3,
+        ActionType::TurnLeftForward => 4,
+        ActionType::TurnRightForward => 5,
+        ActionType::Consume => 6,
+        ActionType::Reproduce => 7,
     }
 }
 
@@ -397,10 +395,7 @@ pub(crate) fn evaluate_brain(
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     for (idx, action) in brain.action.iter_mut().enumerate() {
-        action.neuron.activation = match action.action_type {
-            ActionType::Turn | ActionType::Dopamine => action_inputs[idx].tanh(),
-            _ => sigmoid(action_inputs[idx]),
-        };
+        action.neuron.activation = sigmoid(action_inputs[idx]);
         result.action_activations[action_index(action.action_type)] = action.neuron.activation;
     }
 
@@ -429,8 +424,10 @@ pub(crate) fn apply_runtime_plasticity(
     for (idx, action) in brain.action.iter().enumerate() {
         scratch.action_activations[idx] = action.neuron.activation;
     }
-    let dopamine_signal =
-        scratch.action_activations[action_index(ActionType::Dopamine)].clamp(-1.0, 1.0);
+    let resolved_actions = resolve_actions(scratch.action_activations);
+    let selected_activation =
+        scratch.action_activations[action_index(resolved_actions.selected_action)];
+    let dopamine_signal = (2.0 * selected_activation - 1.0).clamp(-1.0, 1.0);
     let eta = organism.genome.hebb_eta_baseline + organism.genome.hebb_eta_gain * dopamine_signal;
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::PlasticitySetup, stage_started.elapsed());
@@ -660,7 +657,7 @@ fn refresh_parent_ids_and_synapse_count(brain: &mut BrainState) {
 
 /// Derives the set of active neuron IDs from a brain's current activation state.
 /// Sensory/Inter neurons are active when activation > 0.0.
-/// Action neurons use policy-based resolution with ACTION_ACTIVATION_THRESHOLD.
+/// Action neurons use policy-based categorical argmax resolution.
 pub fn derive_active_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
     let mut active = Vec::new();
 
@@ -674,61 +671,27 @@ pub fn derive_active_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
         std::array::from_fn(|i| brain.action.get(i).map_or(0.0, |n| n.neuron.activation));
 
     let resolved = resolve_actions(action_activations);
-    if resolved.wants_move {
-        active.push(
-            brain.action[action_index(ActionType::MoveForward)]
-                .neuron
-                .neuron_id,
-        );
-    }
-    match resolved.turn {
-        TurnChoice::None => {}
-        TurnChoice::Left | TurnChoice::Right => active.push(
-            brain.action[action_index(ActionType::Turn)]
-                .neuron
-                .neuron_id,
-        ),
-    }
-    if resolved.wants_reproduce {
-        active.push(
-            brain.action[action_index(ActionType::Reproduce)]
-                .neuron
-                .neuron_id,
-        );
-    }
-    if resolved.wants_consume {
-        active.push(
-            brain.action[action_index(ActionType::Consume)]
-                .neuron
-                .neuron_id,
-        );
-    }
+    active.push(
+        brain.action[action_index(resolved.selected_action)]
+            .neuron
+            .neuron_id,
+    );
 
     active
 }
 
 fn resolve_actions(activations: [f32; ACTION_COUNT]) -> ResolvedActions {
-    let move_activation = activations[action_index(ActionType::MoveForward)];
-    let turn_signal = activations[action_index(ActionType::Turn)];
-    let consume_activation = activations[action_index(ActionType::Consume)];
-    let reproduce_activation = activations[action_index(ActionType::Reproduce)];
+    let mut best_idx = 0usize;
+    let mut best_activation = activations[0];
+    for (idx, activation) in activations.iter().copied().enumerate().skip(1) {
+        if activation > best_activation {
+            best_idx = idx;
+            best_activation = activation;
+        }
+    }
 
-    let turn = if turn_signal > TURN_ACTION_DEADZONE {
-        TurnChoice::Right
-    } else if turn_signal < -TURN_ACTION_DEADZONE {
-        TurnChoice::Left
-    } else {
-        TurnChoice::None
-    };
-
-    let wants_move = move_activation > ACTION_ACTIVATION_THRESHOLD;
-    let wants_consume = consume_activation > ACTION_ACTIVATION_THRESHOLD;
-    let wants_reproduce = reproduce_activation > ACTION_ACTIVATION_THRESHOLD;
     ResolvedActions {
-        turn,
-        wants_move,
-        wants_consume,
-        wants_reproduce,
+        selected_action: ActionType::ALL[best_idx],
     }
 }
 
