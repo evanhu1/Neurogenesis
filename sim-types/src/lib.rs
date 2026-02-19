@@ -146,6 +146,7 @@ pub struct OrganismGenome {
     pub sensory_locations: Vec<BrainLocation>,
     pub inter_locations: Vec<BrainLocation>,
     pub action_locations: Vec<BrainLocation>,
+    pub edges: Vec<SynapseEdge>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

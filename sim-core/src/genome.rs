@@ -1,8 +1,13 @@
-use crate::brain::{ACTION_COUNT, ACTION_COUNT_U32, SENSORY_COUNT};
+use crate::brain::{ACTION_COUNT, ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT};
 use crate::SimError;
 use rand::Rng;
 use rand_distr::{Distribution, StandardNormal};
-use sim_types::{ActionType, BrainLocation, InterNeuronType, OrganismGenome, SeedGenomeConfig};
+use sim_types::{
+    ActionType, BrainLocation, InterNeuronType, NeuronId, OrganismGenome, SeedGenomeConfig,
+    SynapseEdge,
+};
+use std::cmp::Ordering;
+use std::collections::HashSet;
 
 const MIN_MUTATED_VISION_DISTANCE: u32 = 1;
 const MAX_MUTATED_VISION_DISTANCE: u32 = 32;
@@ -37,6 +42,9 @@ pub(crate) const INTER_LOG_TAU_MAX: f32 = 2.995_732_3;
 pub(crate) const DEFAULT_INTER_LOG_TAU: f32 = 0.0;
 pub(crate) const BRAIN_SPACE_MIN: f32 = 0.0;
 pub(crate) const BRAIN_SPACE_MAX: f32 = 10.0;
+const SPATIAL_PRIOR_LONG_RANGE_FLOOR: f32 = 0.01;
+const SYNAPSE_WEIGHT_LOG_NORMAL_MU: f32 = -0.5;
+const SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA: f32 = 0.8;
 
 pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     config: &SeedGenomeConfig,
@@ -71,7 +79,7 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         .map(|_| sample_uniform_location(rng))
         .collect();
 
-    OrganismGenome {
+    let mut genome = OrganismGenome {
         num_neurons,
         num_synapses: config.num_synapses.min(max_synapses),
         spatial_prior_sigma: config.spatial_prior_sigma.max(0.01),
@@ -98,7 +106,10 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         sensory_locations,
         inter_locations,
         action_locations,
-    }
+        edges: Vec::new(),
+    };
+    sync_synapse_genes_to_target(&mut genome, rng);
+    genome
 }
 
 fn sample_interneuron_type<R: Rng + ?Sized>(rng: &mut R) -> InterNeuronType {
@@ -183,6 +194,8 @@ fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut 
         genome.action_locations.push(sample_uniform_location(rng));
     }
     genome.action_locations.truncate(ACTION_COUNT);
+
+    sanitize_synapse_genes(genome);
 }
 
 pub(crate) fn mutate_genome<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
@@ -268,6 +281,8 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &
     if rng.random::<f32>() < genome.mutation_rate_neuron_location {
         mutate_random_neuron_location(genome, rng);
     }
+
+    sync_synapse_genes_to_target(genome, rng);
 }
 
 fn mutate_random_neuron_location<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
@@ -305,6 +320,264 @@ fn mutate_random_neuron_location<R: Rng + ?Sized>(genome: &mut OrganismGenome, r
             BRAIN_SPACE_MAX,
             rng,
         );
+    }
+}
+
+fn sync_synapse_genes_to_target<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
+    sanitize_synapse_genes(genome);
+
+    let target = genome.num_synapses as usize;
+    if genome.edges.len() > target {
+        remove_random_synapse_genes(genome, genome.edges.len() - target, rng);
+    }
+    if genome.edges.len() < target {
+        add_synapse_genes_with_spatial_prior(genome, target - genome.edges.len(), rng);
+    }
+
+    sort_synapse_genes(&mut genome.edges);
+    genome.num_synapses = genome.edges.len() as u32;
+}
+
+fn sanitize_synapse_genes(genome: &mut OrganismGenome) {
+    let num_neurons = genome.num_neurons;
+    genome
+        .edges
+        .retain(|edge| is_valid_synapse_pair(edge.pre_neuron_id, edge.post_neuron_id, num_neurons));
+
+    for edge in &mut genome.edges {
+        let required_sign =
+            required_pre_sign(edge.pre_neuron_id, num_neurons, &genome.interneuron_types)
+                .unwrap_or(1.0);
+        edge.weight = constrain_weight_to_sign(edge.weight, required_sign);
+        edge.eligibility = 0.0;
+    }
+
+    sort_synapse_genes(&mut genome.edges);
+    genome.edges.dedup_by(|a, b| {
+        a.pre_neuron_id == b.pre_neuron_id && a.post_neuron_id == b.post_neuron_id
+    });
+}
+
+fn remove_random_synapse_genes<R: Rng + ?Sized>(
+    genome: &mut OrganismGenome,
+    remove_count: usize,
+    rng: &mut R,
+) {
+    let to_remove = remove_count.min(genome.edges.len());
+    for _ in 0..to_remove {
+        let idx = rng.random_range(0..genome.edges.len());
+        genome.edges.swap_remove(idx);
+    }
+}
+
+fn add_synapse_genes_with_spatial_prior<R: Rng + ?Sized>(
+    genome: &mut OrganismGenome,
+    add_count: usize,
+    rng: &mut R,
+) {
+    if add_count == 0 {
+        return;
+    }
+
+    let mut existing_pairs: HashSet<(u32, u32)> = HashSet::with_capacity(genome.edges.len());
+    for edge in &genome.edges {
+        existing_pairs.insert((edge.pre_neuron_id.0, edge.post_neuron_id.0));
+    }
+
+    let mut weighted_candidates: Vec<(f32, NeuronId, NeuronId)> = Vec::new();
+
+    let num_neurons = genome.num_neurons;
+    for sensory_idx in 0..SENSORY_COUNT {
+        let pre_id = NeuronId(sensory_idx);
+        for post_id in post_ids(num_neurons) {
+            if existing_pairs.contains(&(pre_id.0, post_id.0)) {
+                continue;
+            }
+            let probability = connection_probability(genome, pre_id, post_id);
+            let priority = weighted_without_replacement_priority(probability, rng);
+            weighted_candidates.push((priority, pre_id, post_id));
+        }
+    }
+
+    for inter_idx in 0..num_neurons {
+        let pre_id = NeuronId(INTER_ID_BASE + inter_idx);
+        for post_id in post_ids(num_neurons) {
+            if !is_valid_synapse_pair(pre_id, post_id, num_neurons) {
+                continue;
+            }
+            if existing_pairs.contains(&(pre_id.0, post_id.0)) {
+                continue;
+            }
+            let probability = connection_probability(genome, pre_id, post_id);
+            let priority = weighted_without_replacement_priority(probability, rng);
+            weighted_candidates.push((priority, pre_id, post_id));
+        }
+    }
+
+    weighted_candidates.sort_unstable_by(|a, b| {
+        a.0.total_cmp(&b.0)
+            .then_with(|| a.1.cmp(&b.1))
+            .then_with(|| a.2.cmp(&b.2))
+    });
+
+    for &(_, pre_id, post_id) in weighted_candidates.iter().take(add_count) {
+        let required_sign =
+            required_pre_sign(pre_id, num_neurons, &genome.interneuron_types).unwrap_or(1.0);
+        genome.edges.push(SynapseEdge {
+            pre_neuron_id: pre_id,
+            post_neuron_id: post_id,
+            weight: sample_signed_lognormal_weight(required_sign, rng),
+            eligibility: 0.0,
+        });
+    }
+}
+
+fn post_ids(num_neurons: u32) -> impl Iterator<Item = NeuronId> {
+    let inter = (0..num_neurons).map(|idx| NeuronId(INTER_ID_BASE + idx));
+    let actions = (0..ACTION_COUNT_U32).map(|idx| NeuronId(ACTION_ID_BASE + idx));
+    inter.chain(actions)
+}
+
+fn is_valid_synapse_pair(pre: NeuronId, post: NeuronId, num_neurons: u32) -> bool {
+    if !is_valid_pre_id(pre, num_neurons) || !is_valid_post_id(post, num_neurons) {
+        return false;
+    }
+
+    if is_inter_id(pre, num_neurons) && is_inter_id(post, num_neurons) && pre == post {
+        return false;
+    }
+
+    true
+}
+
+fn is_valid_pre_id(id: NeuronId, num_neurons: u32) -> bool {
+    id.0 < SENSORY_COUNT || is_inter_id(id, num_neurons)
+}
+
+fn is_valid_post_id(id: NeuronId, num_neurons: u32) -> bool {
+    is_inter_id(id, num_neurons)
+        || (ACTION_ID_BASE..ACTION_ID_BASE + ACTION_COUNT_U32).contains(&id.0)
+}
+
+fn is_inter_id(id: NeuronId, num_neurons: u32) -> bool {
+    (INTER_ID_BASE..INTER_ID_BASE + num_neurons).contains(&id.0)
+}
+
+fn required_pre_sign(
+    pre: NeuronId,
+    num_neurons: u32,
+    interneuron_types: &[InterNeuronType],
+) -> Option<f32> {
+    if pre.0 < SENSORY_COUNT {
+        return Some(1.0);
+    }
+    if is_inter_id(pre, num_neurons) {
+        let idx = (pre.0 - INTER_ID_BASE) as usize;
+        let inter_type = interneuron_types
+            .get(idx)
+            .copied()
+            .unwrap_or(InterNeuronType::Excitatory);
+        return Some(match inter_type {
+            InterNeuronType::Excitatory => 1.0,
+            InterNeuronType::Inhibitory => -1.0,
+        });
+    }
+    None
+}
+
+fn sort_synapse_genes(edges: &mut [SynapseEdge]) {
+    edges.sort_unstable_by(|a, b| {
+        synapse_key_cmp(a, b)
+            .then_with(|| a.weight.total_cmp(&b.weight))
+            .then_with(|| a.eligibility.total_cmp(&b.eligibility))
+    });
+}
+
+fn synapse_key_cmp(a: &SynapseEdge, b: &SynapseEdge) -> Ordering {
+    a.pre_neuron_id
+        .cmp(&b.pre_neuron_id)
+        .then_with(|| a.post_neuron_id.cmp(&b.post_neuron_id))
+}
+
+fn connection_probability(genome: &OrganismGenome, pre: NeuronId, post: NeuronId) -> f32 {
+    let pre_location = neuron_location_or_default(genome, pre);
+    let post_location = neuron_location_or_default(genome, post);
+    let dx = pre_location.x - post_location.x;
+    let dy = pre_location.y - post_location.y;
+    let distance_sq = dx * dx + dy * dy;
+    let sigma = genome.spatial_prior_sigma.max(0.01);
+    let sigma_sq = sigma * sigma;
+    let local_bias = (-0.5 * distance_sq / sigma_sq).exp();
+    (SPATIAL_PRIOR_LONG_RANGE_FLOOR + (1.0 - SPATIAL_PRIOR_LONG_RANGE_FLOOR) * local_bias)
+        .clamp(0.0, 1.0)
+}
+
+fn neuron_location_or_default(genome: &OrganismGenome, id: NeuronId) -> BrainLocation {
+    if id.0 < SENSORY_COUNT {
+        return genome
+            .sensory_locations
+            .get(id.0 as usize)
+            .copied()
+            .unwrap_or(default_brain_location());
+    }
+
+    if is_inter_id(id, genome.num_neurons) {
+        let idx = (id.0 - INTER_ID_BASE) as usize;
+        return genome
+            .inter_locations
+            .get(idx)
+            .copied()
+            .unwrap_or(default_brain_location());
+    }
+
+    if (ACTION_ID_BASE..ACTION_ID_BASE + ACTION_COUNT_U32).contains(&id.0) {
+        let idx = (id.0 - ACTION_ID_BASE) as usize;
+        return genome
+            .action_locations
+            .get(idx)
+            .copied()
+            .unwrap_or(default_brain_location());
+    }
+
+    default_brain_location()
+}
+
+fn default_brain_location() -> BrainLocation {
+    BrainLocation {
+        x: 0.5 * (BRAIN_SPACE_MIN + BRAIN_SPACE_MAX),
+        y: 0.5 * (BRAIN_SPACE_MIN + BRAIN_SPACE_MAX),
+    }
+}
+
+fn weighted_without_replacement_priority<R: Rng + ?Sized>(weight: f32, rng: &mut R) -> f32 {
+    let clamped_weight = weight.max(f32::MIN_POSITIVE);
+    let u = rng.random::<f32>().max(f32::MIN_POSITIVE);
+    -u.ln() / clamped_weight
+}
+
+fn sample_signed_lognormal_weight<R: Rng + ?Sized>(required_sign: f32, rng: &mut R) -> f32 {
+    let z = standard_normal(rng);
+    let magnitude = (SYNAPSE_WEIGHT_LOG_NORMAL_MU + SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA * z)
+        .exp()
+        .clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX);
+    if required_sign.is_sign_negative() {
+        -magnitude
+    } else {
+        magnitude
+    }
+}
+
+fn constrain_weight_to_sign(weight: f32, required_sign: f32) -> f32 {
+    if required_sign.is_sign_negative() {
+        if weight >= 0.0 {
+            return -SYNAPSE_STRENGTH_MIN;
+        }
+        -(-weight).clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX)
+    } else {
+        if weight <= 0.0 {
+            return SYNAPSE_STRENGTH_MIN;
+        }
+        weight.clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX)
     }
 }
 
@@ -412,7 +685,43 @@ fn centroid(locations: &[BrainLocation], len: usize) -> BrainLocation {
     }
 }
 
-/// L1 genome distance: scalar traits + mutation-rate genes + neuron types + brain geometry.
+fn synapse_gene_distance(a: &[SynapseEdge], b: &[SynapseEdge]) -> f32 {
+    let mut distance = 0.0;
+
+    let mut a_idx = 0usize;
+    let mut b_idx = 0usize;
+
+    while a_idx < a.len() && b_idx < b.len() {
+        match synapse_key_cmp(&a[a_idx], &b[b_idx]) {
+            Ordering::Equal => {
+                distance += (a[a_idx].weight - b[b_idx].weight).abs();
+                a_idx += 1;
+                b_idx += 1;
+            }
+            Ordering::Less => {
+                distance += 1.0 + a[a_idx].weight.abs();
+                a_idx += 1;
+            }
+            Ordering::Greater => {
+                distance += 1.0 + b[b_idx].weight.abs();
+                b_idx += 1;
+            }
+        }
+    }
+
+    while a_idx < a.len() {
+        distance += 1.0 + a[a_idx].weight.abs();
+        a_idx += 1;
+    }
+    while b_idx < b.len() {
+        distance += 1.0 + b[b_idx].weight.abs();
+        b_idx += 1;
+    }
+
+    distance
+}
+
+/// L1 genome distance: scalar traits + mutation-rate genes + topology + brain geometry.
 pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
     let mut dist = (a.num_neurons as f32 - b.num_neurons as f32).abs()
         + (a.num_synapses as f32 - b.num_synapses as f32).abs()
@@ -467,6 +776,8 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
             dist += 1.0;
         }
     }
+
+    dist += synapse_gene_distance(&a.edges, &b.edges);
 
     dist += average_location_distance(
         &a.sensory_locations,

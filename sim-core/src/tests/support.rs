@@ -58,6 +58,7 @@ pub(super) fn test_genome() -> OrganismGenome {
         sensory_locations: vec![default_loc; 3],
         inter_locations: vec![default_loc],
         action_locations: vec![default_loc; ActionType::ALL.len()],
+        edges: Vec::new(),
     }
 }
 

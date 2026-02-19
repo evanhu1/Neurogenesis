@@ -23,9 +23,6 @@ const TURN_ACTION_DEADZONE: f32 = 0.3;
 const DEFAULT_BIAS: f32 = 0.0;
 const HEBB_WEIGHT_CLAMP_ENABLED: bool = true;
 const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
-const SYNAPSE_WEIGHT_LOG_NORMAL_MU: f32 = -0.5;
-const SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA: f32 = 0.8;
-const SPATIAL_PRIOR_LONG_RANGE_FLOOR: f32 = 0.01;
 pub(crate) const SENSORY_COUNT: u32 = SensoryReceptor::LOOK_NEURON_COUNT + 1;
 pub(crate) const ACTION_COUNT: usize = ActionType::ALL.len();
 pub(crate) const ACTION_COUNT_U32: u32 = ACTION_COUNT as u32;
@@ -80,8 +77,8 @@ impl BrainScratch {
     }
 }
 
-/// Build a BrainState from inherited neuron genes and spatially sampled birth synapses.
-pub(crate) fn express_genome<R: Rng + ?Sized>(genome: &OrganismGenome, rng: &mut R) -> BrainState {
+/// Build a BrainState from inherited neuron genes and stored synapse topology.
+pub(crate) fn express_genome<R: Rng + ?Sized>(genome: &OrganismGenome, _rng: &mut R) -> BrainState {
     let mut sensory = vec![
         make_sensory_neuron(
             0,
@@ -143,7 +140,7 @@ pub(crate) fn express_genome<R: Rng + ?Sized>(genome: &OrganismGenome, rng: &mut
         ));
     }
 
-    wire_birth_synapses_spatial(genome, &mut sensory, &mut inter, &action, rng);
+    wire_birth_synapses_from_genome(genome, &mut sensory, &mut inter);
 
     let mut brain = BrainState {
         sensory,
@@ -172,155 +169,69 @@ fn location_or_default(locations: &[BrainLocation], index: usize) -> BrainLocati
     })
 }
 
-fn connection_probability(pre: &NeuronState, post: &NeuronState, sigma: f32) -> f32 {
-    let dx = pre.x - post.x;
-    let dy = pre.y - post.y;
-    let distance_sq = dx * dx + dy * dy;
-    let sigma_sq = sigma * sigma;
-    let local_bias = (-0.5 * distance_sq / sigma_sq).exp();
-    (SPATIAL_PRIOR_LONG_RANGE_FLOOR + (1.0 - SPATIAL_PRIOR_LONG_RANGE_FLOOR) * local_bias)
-        .clamp(0.0, 1.0)
-}
-
-fn weighted_without_replacement_priority<R: Rng + ?Sized>(weight: f32, rng: &mut R) -> f32 {
-    let clamped_weight = weight.max(f32::MIN_POSITIVE);
-    let u = rng.random::<f32>().max(f32::MIN_POSITIVE);
-    -u.ln() / clamped_weight
-}
-
-fn sample_signed_lognormal_weight<R: Rng + ?Sized>(required_sign: f32, rng: &mut R) -> f32 {
-    let z: f32 = rng.sample(rand_distr::StandardNormal);
-    let magnitude = (SYNAPSE_WEIGHT_LOG_NORMAL_MU + SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA * z)
-        .exp()
-        .clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX);
-    if required_sign.is_sign_negative() {
-        -magnitude
-    } else {
-        magnitude
-    }
-}
-
-fn add_synapse<R: Rng + ?Sized>(
-    pre_idx: usize,
-    post_idx: usize,
-    sensory_len: usize,
-    inter_len: usize,
-    sensory: &mut [SensoryNeuronState],
-    inter: &mut [InterNeuronState],
-    action: &[ActionNeuronState],
-    rng: &mut R,
-) {
-    let (pre_id, pre_sign) = if pre_idx < sensory_len {
-        let pre = &sensory[pre_idx].neuron;
-        (pre.neuron_id, 1.0_f32)
-    } else {
-        let inter_idx = pre_idx - sensory_len;
-        let pre = &inter[inter_idx];
-        let sign = match pre.interneuron_type {
-            InterNeuronType::Excitatory => 1.0,
-            InterNeuronType::Inhibitory => -1.0,
-        };
-        (pre.neuron.neuron_id, sign)
-    };
-
-    let post_id = if post_idx < inter_len {
-        inter[post_idx].neuron.neuron_id
-    } else {
-        action[post_idx - inter_len].neuron.neuron_id
-    };
-
-    let weight = sample_signed_lognormal_weight(pre_sign, rng);
-    let edge = SynapseEdge {
-        pre_neuron_id: pre_id,
-        post_neuron_id: post_id,
-        weight,
-        eligibility: 0.0,
-    };
-
-    if pre_idx < sensory_len {
-        sensory[pre_idx].synapses.push(edge);
-    } else {
-        inter[pre_idx - sensory_len].synapses.push(edge);
-    }
-}
-
-fn wire_birth_synapses_spatial<R: Rng + ?Sized>(
+fn wire_birth_synapses_from_genome(
     genome: &OrganismGenome,
     sensory: &mut [SensoryNeuronState],
     inter: &mut [InterNeuronState],
-    action: &[ActionNeuronState],
-    rng: &mut R,
 ) {
-    let sensory_len = sensory.len();
-    let inter_len = inter.len();
-    let action_len = action.len();
-    let pre_count = sensory_len + inter_len;
-    let post_count = inter_len + action_len;
-    if pre_count == 0 || post_count == 0 {
-        return;
-    }
+    let max_inter_id = INTER_ID_BASE + inter.len() as u32;
+    let max_action_id = ACTION_ID_BASE + ACTION_COUNT_U32;
 
-    let max_pairs = pre_count.saturating_mul(post_count);
-    let max_allowed_pairs = max_pairs.saturating_sub(inter_len);
-    let target = (genome.num_synapses as usize).min(max_allowed_pairs);
-    let sigma = genome.spatial_prior_sigma.max(0.01);
-    if target == 0 {
-        return;
-    }
-
-    let mut weighted_candidates = Vec::with_capacity(max_allowed_pairs);
-    for pre_idx in 0..pre_count {
-        let pre_neuron = if pre_idx < sensory_len {
-            &sensory[pre_idx].neuron
-        } else {
-            &inter[pre_idx - sensory_len].neuron
-        };
-
-        for post_idx in 0..post_count {
-            if pre_idx >= sensory_len && post_idx < inter_len && (pre_idx - sensory_len) == post_idx
-            {
-                continue;
-            }
-
-            let post_neuron = if post_idx < inter_len {
-                &inter[post_idx].neuron
-            } else {
-                &action[post_idx - inter_len].neuron
-            };
-            let weight = connection_probability(pre_neuron, post_neuron, sigma);
-            let priority = weighted_without_replacement_priority(weight, rng);
-            weighted_candidates.push((priority, pre_idx, post_idx));
+    for edge in &genome.edges {
+        let post_is_inter = (INTER_ID_BASE..max_inter_id).contains(&edge.post_neuron_id.0);
+        let post_is_action = (ACTION_ID_BASE..max_action_id).contains(&edge.post_neuron_id.0);
+        if !(post_is_inter || post_is_action) {
+            continue;
         }
-    }
 
-    weighted_candidates.sort_unstable_by(|a, b| {
-        a.0.total_cmp(&b.0)
-            .then_with(|| a.1.cmp(&b.1))
-            .then_with(|| a.2.cmp(&b.2))
-    });
+        if edge.pre_neuron_id.0 < SENSORY_COUNT {
+            let Some(pre) = sensory.get_mut(edge.pre_neuron_id.0 as usize) else {
+                continue;
+            };
+            pre.synapses.push(SynapseEdge {
+                pre_neuron_id: edge.pre_neuron_id,
+                post_neuron_id: edge.post_neuron_id,
+                weight: constrain_weight(edge.weight, 1.0),
+                eligibility: 0.0,
+            });
+            continue;
+        }
 
-    for &(_, pre_idx, post_idx) in weighted_candidates.iter().take(target) {
-        add_synapse(
-            pre_idx,
-            post_idx,
-            sensory_len,
-            inter_len,
-            sensory,
-            inter,
-            action,
-            rng,
-        );
+        if !(INTER_ID_BASE..max_inter_id).contains(&edge.pre_neuron_id.0) {
+            continue;
+        }
+        if edge.pre_neuron_id == edge.post_neuron_id {
+            continue;
+        }
+        let pre_idx = (edge.pre_neuron_id.0 - INTER_ID_BASE) as usize;
+        let Some(pre) = inter.get_mut(pre_idx) else {
+            continue;
+        };
+        let required_sign = match pre.interneuron_type {
+            InterNeuronType::Excitatory => 1.0,
+            InterNeuronType::Inhibitory => -1.0,
+        };
+        pre.synapses.push(SynapseEdge {
+            pre_neuron_id: edge.pre_neuron_id,
+            post_neuron_id: edge.post_neuron_id,
+            weight: constrain_weight(edge.weight, required_sign),
+            eligibility: 0.0,
+        });
     }
 
     for sensory_neuron in sensory.iter_mut() {
-        sensory_neuron
-            .synapses
-            .sort_by_key(|edge| edge.post_neuron_id);
+        sensory_neuron.synapses.sort_by(|a, b| {
+            a.post_neuron_id
+                .cmp(&b.post_neuron_id)
+                .then_with(|| a.weight.total_cmp(&b.weight))
+        });
     }
     for inter_neuron in inter.iter_mut() {
-        inter_neuron
-            .synapses
-            .sort_by_key(|edge| edge.post_neuron_id);
+        inter_neuron.synapses.sort_by(|a, b| {
+            a.post_neuron_id
+                .cmp(&b.post_neuron_id)
+                .then_with(|| a.weight.total_cmp(&b.weight))
+        });
     }
 }
 

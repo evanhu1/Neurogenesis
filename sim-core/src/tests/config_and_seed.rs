@@ -38,6 +38,7 @@ fn seed_genome_initializes_spatial_vectors_within_brain_space() {
         crate::brain::SENSORY_COUNT as usize
     );
     assert_eq!(genome.action_locations.len(), ActionType::ALL.len());
+    assert_eq!(genome.edges.len(), genome.num_synapses as usize);
 
     for location in genome
         .sensory_locations
@@ -70,6 +71,7 @@ fn mutate_genome_can_mutate_num_synapses_and_location_in_bounds() {
     }
 
     assert!(genome.num_synapses > 0);
+    assert_eq!(genome.edges.len(), genome.num_synapses as usize);
     assert_ne!(genome.sensory_locations[0], original_location);
 
     for location in genome
@@ -117,4 +119,5 @@ fn seed_num_synapses_is_clamped_to_possible_pairs() {
         * (genome.num_neurons + crate::brain::ACTION_COUNT_U32);
     let max_pairs = all_pairs.saturating_sub(genome.num_neurons);
     assert_eq!(genome.num_synapses, max_pairs);
+    assert_eq!(genome.edges.len(), max_pairs as usize);
 }

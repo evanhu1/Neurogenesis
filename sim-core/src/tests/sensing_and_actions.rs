@@ -2,6 +2,7 @@ use super::support::test_genome;
 use super::*;
 use crate::brain::{
     action_index, apply_runtime_plasticity, evaluate_brain, express_genome, BrainScratch,
+    ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT,
 };
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
@@ -51,15 +52,86 @@ fn mean_synapse_distance(brain: &BrainState) -> f32 {
     }
 }
 
+fn dense_edges(
+    num_neurons: u32,
+    inter_types: &[InterNeuronType],
+    target: usize,
+) -> Vec<SynapseEdge> {
+    let mut edges = Vec::new();
+
+    for pre_sensory in 0..SENSORY_COUNT {
+        for post_inter in 0..num_neurons {
+            edges.push(SynapseEdge {
+                pre_neuron_id: NeuronId(pre_sensory),
+                post_neuron_id: NeuronId(INTER_ID_BASE + post_inter),
+                weight: 0.25,
+                eligibility: 0.0,
+            });
+            if edges.len() == target {
+                return edges;
+            }
+        }
+        for post_action in 0..ACTION_COUNT_U32 {
+            edges.push(SynapseEdge {
+                pre_neuron_id: NeuronId(pre_sensory),
+                post_neuron_id: NeuronId(ACTION_ID_BASE + post_action),
+                weight: 0.25,
+                eligibility: 0.0,
+            });
+            if edges.len() == target {
+                return edges;
+            }
+        }
+    }
+
+    for pre_inter in 0..num_neurons {
+        let pre_id = NeuronId(INTER_ID_BASE + pre_inter);
+        let sign = match inter_types
+            .get(pre_inter as usize)
+            .copied()
+            .unwrap_or(InterNeuronType::Excitatory)
+        {
+            InterNeuronType::Excitatory => 1.0,
+            InterNeuronType::Inhibitory => -1.0,
+        };
+        for post_inter in 0..num_neurons {
+            if pre_inter == post_inter {
+                continue;
+            }
+            edges.push(SynapseEdge {
+                pre_neuron_id: pre_id,
+                post_neuron_id: NeuronId(INTER_ID_BASE + post_inter),
+                weight: 0.25 * sign,
+                eligibility: 0.0,
+            });
+            if edges.len() == target {
+                return edges;
+            }
+        }
+        for post_action in 0..ACTION_COUNT_U32 {
+            edges.push(SynapseEdge {
+                pre_neuron_id: pre_id,
+                post_neuron_id: NeuronId(ACTION_ID_BASE + post_action),
+                weight: 0.25 * sign,
+                eligibility: 0.0,
+            });
+            if edges.len() == target {
+                return edges;
+            }
+        }
+    }
+
+    edges
+}
+
 #[test]
-fn express_genome_samples_fixed_synapse_count_deterministically_for_seed() {
+fn express_genome_uses_stored_synapse_topology() {
     let mut genome = test_genome();
     genome.num_neurons = 4;
-    genome.num_synapses = 20;
-    genome.inter_biases = vec![0.1; 8];
-    genome.inter_log_taus = vec![0.0; 8];
-    genome.interneuron_types = vec![InterNeuronType::Excitatory; 8];
-    genome.inter_locations = (0..8).map(|i| loc(i as f32, 10.0 - i as f32)).collect();
+    genome.inter_biases = vec![0.1; 4];
+    genome.inter_log_taus = vec![0.0; 4];
+    genome.interneuron_types = vec![InterNeuronType::Excitatory; 4];
+    genome.inter_locations = (0..4).map(|i| loc(i as f32, 10.0 - i as f32)).collect();
     genome.sensory_locations = vec![loc(0.0, 0.0), loc(1.0, 0.0), loc(2.0, 0.0)];
     genome.action_locations = vec![
         loc(8.0, 1.0),
@@ -68,9 +140,11 @@ fn express_genome_samples_fixed_synapse_count_deterministically_for_seed() {
         loc(8.0, 4.0),
         loc(8.0, 5.0),
     ];
+    genome.edges = dense_edges(genome.num_neurons, &genome.interneuron_types, 20);
+    genome.num_synapses = genome.edges.len() as u32;
 
     let mut rng_a = ChaCha8Rng::seed_from_u64(11);
-    let mut rng_b = ChaCha8Rng::seed_from_u64(11);
+    let mut rng_b = ChaCha8Rng::seed_from_u64(19);
     let brain_a = express_genome(&genome, &mut rng_a);
     let brain_b = express_genome(&genome, &mut rng_b);
 
@@ -87,10 +161,10 @@ fn express_genome_samples_fixed_synapse_count_deterministically_for_seed() {
 }
 
 #[test]
-fn express_genome_spatial_prior_prefers_local_connections() {
+fn synapse_addition_uses_spatial_prior() {
     let mut genome_template = test_genome();
     genome_template.num_neurons = 12;
-    genome_template.num_synapses = 40;
+    genome_template.num_synapses = 8;
     genome_template.inter_biases = vec![0.0; 12];
     genome_template.inter_log_taus = vec![0.0; 12];
     genome_template.interneuron_types = vec![InterNeuronType::Excitatory; 12];
@@ -99,17 +173,26 @@ fn express_genome_spatial_prior_prefers_local_connections() {
     genome_template.action_locations = (0..ActionType::ALL.len())
         .map(|i| loc(1.0 + i as f32 * 0.7, 9.0))
         .collect();
+    genome_template.mutation_rate_num_synapses = 0.0;
+    genome_template.mutation_rate_neuron_location = 0.0;
 
     let mut local_distance_sum = 0.0;
     let mut global_distance_sum = 0.0;
     for seed in 0..32_u64 {
         let mut local_genome = genome_template.clone();
         local_genome.spatial_prior_sigma = 0.25;
+        local_genome.edges.clear();
         let mut global_genome = genome_template.clone();
         global_genome.spatial_prior_sigma = 100.0;
+        global_genome.edges.clear();
 
         let mut local_rng = ChaCha8Rng::seed_from_u64(10_000 + seed);
         let mut global_rng = ChaCha8Rng::seed_from_u64(10_000 + seed);
+        crate::genome::mutate_genome(&mut local_genome, &mut local_rng);
+        crate::genome::mutate_genome(&mut global_genome, &mut global_rng);
+        assert!(local_genome.num_synapses > 0);
+        assert!(global_genome.num_synapses > 0);
+
         let local_brain = express_genome(&local_genome, &mut local_rng);
         let global_brain = express_genome(&global_genome, &mut global_rng);
 
@@ -129,11 +212,37 @@ fn express_genome_spatial_prior_prefers_local_connections() {
 fn express_genome_respects_dale_signs_for_inter_outgoing_synapses() {
     let mut genome = test_genome();
     genome.num_neurons = 2;
-    genome.num_synapses = 200;
     genome.inter_biases = vec![0.0, 0.0];
     genome.inter_log_taus = vec![0.0, 0.0];
     genome.interneuron_types = vec![InterNeuronType::Excitatory, InterNeuronType::Inhibitory];
     genome.inter_locations = vec![loc(5.0, 5.0), loc(5.5, 5.5)];
+    genome.edges = vec![
+        SynapseEdge {
+            pre_neuron_id: NeuronId(INTER_ID_BASE),
+            post_neuron_id: NeuronId(ACTION_ID_BASE),
+            weight: 0.3,
+            eligibility: 0.0,
+        },
+        SynapseEdge {
+            pre_neuron_id: NeuronId(INTER_ID_BASE),
+            post_neuron_id: NeuronId(INTER_ID_BASE + 1),
+            weight: 0.2,
+            eligibility: 0.0,
+        },
+        SynapseEdge {
+            pre_neuron_id: NeuronId(INTER_ID_BASE + 1),
+            post_neuron_id: NeuronId(ACTION_ID_BASE + 1),
+            weight: 0.4,
+            eligibility: 0.0,
+        },
+        SynapseEdge {
+            pre_neuron_id: NeuronId(INTER_ID_BASE + 1),
+            post_neuron_id: NeuronId(INTER_ID_BASE),
+            weight: 0.4,
+            eligibility: 0.0,
+        },
+    ];
+    genome.num_synapses = genome.edges.len() as u32;
 
     let mut rng = ChaCha8Rng::seed_from_u64(1234);
     let brain = express_genome(&genome, &mut rng);

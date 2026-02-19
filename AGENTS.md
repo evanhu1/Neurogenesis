@@ -34,12 +34,13 @@
 - TypeScript: strict mode, `camelCase` vars/functions, `PascalCase` types.
 - Use Tailwind for frontend styling.
 - Keep field names aligned between Rust structs and `web-client/src/types.ts`.
+- DO NOT CARE ABOUT backwards compatibility
 
 ## Testing
 
 - Primary runner: `cargo test --workspace`.
-- Add deterministic tests for simulation behavior changes (fixed seeds,
-  snapshot assertions).
+- Add deterministic tests for simulation behavior changes (fixed seeds, snapshot
+  assertions).
 
 ## Architecture Context
 
@@ -47,19 +48,20 @@
 
 Toroidal axial hex grid `(q, r)` with wraparound modulo `world_width` on both
 axes. Occupancy is a dense `Vec<Option<Occupant>>` (`Organism(OrganismId)` or
-`Food(FoodId)`), indexed by `r * world_width + q`. At most one entity per
-cell.
+`Food(FoodId)`), indexed by `r * world_width + q`. At most one entity per cell.
 
 ### Turn Pipeline (execution order)
 
-1. **Lifecycle** — deduct `neuron_metabolism_cost * (enabled interneuron count)`, remove dead/old organisms.
+1. **Lifecycle** — deduct
+   `neuron_metabolism_cost * (enabled interneuron count)`, remove dead/old
+   organisms.
 2. **Snapshot** — freeze occupancy + organism state, stable ID ordering.
 3. **Intent** — evaluate brains, produce per-organism intents. Apply runtime
    plasticity (Hebbian learning, eligibility traces, synapse pruning).
 4. **Reproduction** — queue spawn at hex behind (opposite facing). Requires
    `age_turns >= age_of_maturity` and sufficient energy.
-5. **Move resolution** — simultaneous resolution; highest confidence wins,
-   ties broken by lower ID. Supports consumption and cycles.
+5. **Move resolution** — simultaneous resolution; highest confidence wins, ties
+   broken by lower ID. Supports consumption and cycles.
 6. **Commit** — apply moves, kills, energy transfers. Replenish food.
 7. **Age** — increment `age_turns`.
 8. **Spawn** — process queue, mutate genome, assign species.
@@ -71,9 +73,9 @@ cell.
 `1000..1000+n`, 5 action neurons at `2000..2005` (`MoveForward`, `Turn`,
 `Consume`, `Reproduce`, `Dopamine`). Evaluation: sensory→inter, inter→inter
 (prev tick), then →action. Inter=tanh with log-tau time constants,
-action=sigmoid, fires at `> 0.5`. Dopamine neuron modulates Hebbian
-learning rate. Oja's rule with eligibility traces applied after evaluation.
-Synapse pruning at maturity.
+action=sigmoid, fires at `> 0.5`. Dopamine neuron modulates Hebbian learning
+rate. Oja's rule with eligibility traces applied after evaluation. Synapse
+pruning at maturity.
 
 ### Genome
 
@@ -81,17 +83,16 @@ Synapse pruning at maturity.
 `hebb_eta_baseline`, `hebb_eta_gain`, `eligibility_decay_lambda`,
 `synapse_prune_threshold`, `inter_biases`, `inter_log_taus`,
 `interneuron_types`, `action_biases`, `edges` (sorted, with per-edge
-`eligibility` trace), and per-operator mutation-rate genes. No weight
-mutation; weights are set at birth and modified by Hebbian learning.
-Species assigned by L1 genome distance; exceeding
-`speciation_threshold` creates a new species.
+`eligibility` trace), and per-operator mutation-rate genes. No weight mutation;
+weights are set at birth and modified by Hebbian learning. Species assigned by
+L1 genome distance; exceeding `speciation_threshold` creates a new species.
 
 ### Delta Model
 
-`TickDelta` has unified `removed_positions: Vec<RemovedEntityPosition>`
-(each with `entity_id: EntityId` tagged `Organism` or `Food`). No separate
-food removal field. `food_spawned` for new food. Clients partition removals
-by entity type.
+`TickDelta` has unified `removed_positions: Vec<RemovedEntityPosition>` (each
+with `entity_id: EntityId` tagged `Organism` or `Food`). No separate food
+removal field. `food_spawned` for new food. Clients partition removals by entity
+type.
 
 ### Determinism
 
