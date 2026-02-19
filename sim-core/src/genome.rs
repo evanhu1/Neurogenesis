@@ -20,8 +20,8 @@ const ETA_BASELINE_MIN: f32 = 0.0;
 const ETA_BASELINE_MAX: f32 = 0.2;
 const ETA_GAIN_MIN: f32 = -1.0;
 const ETA_GAIN_MAX: f32 = 1.0;
-const ELIGIBILITY_DECAY_MIN: f32 = 0.0;
-const ELIGIBILITY_DECAY_MAX: f32 = 1.0;
+const ELIGIBILITY_RETENTION_MIN: f32 = 0.0;
+const ELIGIBILITY_RETENTION_MAX: f32 = 1.0;
 const SYNAPSE_PRUNE_THRESHOLD_MIN: f32 = 0.0;
 const SYNAPSE_PRUNE_THRESHOLD_MAX: f32 = 1.0;
 
@@ -32,7 +32,7 @@ const MUTATION_RATE_MAX: f32 = 1.0 - MUTATION_RATE_MIN;
 
 const BIAS_PERTURBATION_STDDEV: f32 = 0.15;
 const INTER_LOG_TAU_PERTURBATION_STDDEV: f32 = 0.05;
-const ELIGIBILITY_DECAY_PERTURBATION_STDDEV: f32 = 0.05;
+const ELIGIBILITY_RETENTION_PERTURBATION_STDDEV: f32 = 0.05;
 const SYNAPSE_PRUNE_THRESHOLD_PERTURBATION_STDDEV: f32 = 0.02;
 const LOCATION_PERTURBATION_STDDEV: f32 = 0.75;
 pub(crate) const INTER_TAU_MIN: f32 = 0.1;
@@ -82,7 +82,7 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         age_of_maturity: config.age_of_maturity,
         hebb_eta_baseline: config.hebb_eta_baseline,
         hebb_eta_gain: config.hebb_eta_gain,
-        eligibility_decay: config.eligibility_decay,
+        eligibility_retention: config.eligibility_retention,
         synapse_prune_threshold: config.synapse_prune_threshold,
         mutation_rate_age_of_maturity: config.mutation_rate_age_of_maturity,
         mutation_rate_vision_distance: config.mutation_rate_vision_distance,
@@ -90,7 +90,7 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         mutation_rate_inter_bias: config.mutation_rate_inter_bias,
         mutation_rate_inter_update_rate: config.mutation_rate_inter_update_rate,
         mutation_rate_action_bias: config.mutation_rate_action_bias,
-        mutation_rate_eligibility_decay: config.mutation_rate_eligibility_decay,
+        mutation_rate_eligibility_retention: config.mutation_rate_eligibility_retention,
         mutation_rate_synapse_prune_threshold: config.mutation_rate_synapse_prune_threshold,
         mutation_rate_neuron_location: config.mutation_rate_neuron_location,
         inter_biases,
@@ -122,7 +122,7 @@ fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng:
         genome.mutation_rate_inter_bias,
         genome.mutation_rate_inter_update_rate,
         genome.mutation_rate_action_bias,
-        genome.mutation_rate_eligibility_decay,
+        genome.mutation_rate_eligibility_retention,
         genome.mutation_rate_synapse_prune_threshold,
         genome.mutation_rate_neuron_location,
     ];
@@ -140,7 +140,7 @@ fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng:
     genome.mutation_rate_inter_bias = rates[3];
     genome.mutation_rate_inter_update_rate = rates[4];
     genome.mutation_rate_action_bias = rates[5];
-    genome.mutation_rate_eligibility_decay = rates[6];
+    genome.mutation_rate_eligibility_retention = rates[6];
     genome.mutation_rate_synapse_prune_threshold = rates[7];
     genome.mutation_rate_neuron_location = rates[8];
 }
@@ -252,12 +252,12 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &
         );
     }
 
-    if rng.random::<f32>() < genome.mutation_rate_eligibility_decay {
-        genome.eligibility_decay = perturb_clamped(
-            genome.eligibility_decay,
-            ELIGIBILITY_DECAY_PERTURBATION_STDDEV,
-            ELIGIBILITY_DECAY_MIN,
-            ELIGIBILITY_DECAY_MAX,
+    if rng.random::<f32>() < genome.mutation_rate_eligibility_retention {
+        genome.eligibility_retention = perturb_clamped(
+            genome.eligibility_retention,
+            ELIGIBILITY_RETENTION_PERTURBATION_STDDEV,
+            ELIGIBILITY_RETENTION_MIN,
+            ELIGIBILITY_RETENTION_MAX,
             rng,
         );
     }
@@ -725,7 +725,7 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
         + (a.age_of_maturity as f32 - b.age_of_maturity as f32).abs()
         + (a.hebb_eta_baseline - b.hebb_eta_baseline).abs()
         + (a.hebb_eta_gain - b.hebb_eta_gain).abs()
-        + (a.eligibility_decay - b.eligibility_decay).abs()
+        + (a.eligibility_retention - b.eligibility_retention).abs()
         + (a.synapse_prune_threshold - b.synapse_prune_threshold).abs();
 
     let a_rates = [
@@ -735,7 +735,7 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
         a.mutation_rate_inter_bias,
         a.mutation_rate_inter_update_rate,
         a.mutation_rate_action_bias,
-        a.mutation_rate_eligibility_decay,
+        a.mutation_rate_eligibility_retention,
         a.mutation_rate_synapse_prune_threshold,
         a.mutation_rate_neuron_location,
     ];
@@ -746,7 +746,7 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
         b.mutation_rate_inter_bias,
         b.mutation_rate_inter_update_rate,
         b.mutation_rate_action_bias,
-        b.mutation_rate_eligibility_decay,
+        b.mutation_rate_eligibility_retention,
         b.mutation_rate_synapse_prune_threshold,
         b.mutation_rate_neuron_location,
     ];
@@ -818,9 +818,11 @@ pub(crate) fn validate_seed_genome_config(config: &SeedGenomeConfig) -> Result<(
             "hebb_eta_gain must be within [{ETA_GAIN_MIN}, {ETA_GAIN_MAX}]"
         )));
     }
-    if !(ELIGIBILITY_DECAY_MIN..=ELIGIBILITY_DECAY_MAX).contains(&config.eligibility_decay) {
+    if !(ELIGIBILITY_RETENTION_MIN..=ELIGIBILITY_RETENTION_MAX)
+        .contains(&config.eligibility_retention)
+    {
         return Err(SimError::InvalidConfig(format!(
-            "eligibility_decay must be within [{ELIGIBILITY_DECAY_MIN}, {ELIGIBILITY_DECAY_MAX}]"
+            "eligibility_retention must be within [{ELIGIBILITY_RETENTION_MIN}, {ELIGIBILITY_RETENTION_MAX}]"
         )));
     }
     if !(SYNAPSE_PRUNE_THRESHOLD_MIN..=SYNAPSE_PRUNE_THRESHOLD_MAX)
@@ -864,8 +866,8 @@ pub(crate) fn validate_seed_genome_config(config: &SeedGenomeConfig) -> Result<(
         config.mutation_rate_action_bias,
     )?;
     validate_rate(
-        "mutation_rate_eligibility_decay",
-        config.mutation_rate_eligibility_decay,
+        "mutation_rate_eligibility_retention",
+        config.mutation_rate_eligibility_retention,
     )?;
     validate_rate(
         "mutation_rate_synapse_prune_threshold",

@@ -408,7 +408,7 @@ pub(crate) fn apply_runtime_plasticity(
 ) {
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
-    let eligibility_decay = organism.genome.eligibility_decay.clamp(0.0, 1.0);
+    let eligibility_retention = organism.genome.eligibility_retention.clamp(0.0, 1.0);
     let weight_prune_threshold = organism.genome.synapse_prune_threshold.max(0.0);
     let should_prune = should_prune_synapses(organism.age_turns, organism.genome.age_of_maturity);
     let is_mature = organism.age_turns >= u64::from(organism.genome.age_of_maturity);
@@ -437,7 +437,7 @@ pub(crate) fn apply_runtime_plasticity(
             1.0,
             eta,
             dopamine_signal,
-            eligibility_decay,
+            eligibility_retention,
             is_mature,
             &scratch.inter_activations,
             &scratch.action_activations,
@@ -459,7 +459,7 @@ pub(crate) fn apply_runtime_plasticity(
             required_sign,
             eta,
             dopamine_signal,
-            eligibility_decay,
+            eligibility_retention,
             is_mature,
             &scratch.inter_activations,
             &scratch.action_activations,
@@ -488,7 +488,7 @@ fn tune_synapses(
     required_sign: f32,
     eta: f32,
     dopamine_signal: f32,
-    eligibility_decay: f32,
+    eligibility_retention: f32,
     is_mature: bool,
     inter_activations: &[f32],
     action_activations: &[f32; ACTION_COUNT],
@@ -500,7 +500,8 @@ fn tune_synapses(
                 None => continue,
             };
 
-        edge.eligibility = eligibility_decay * edge.eligibility + pre_activation * post_activation;
+        edge.eligibility =
+            eligibility_retention * edge.eligibility + pre_activation * post_activation;
         if !is_mature {
             continue;
         }

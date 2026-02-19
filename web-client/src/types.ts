@@ -11,7 +11,7 @@ export type SeedGenomeConfig = {
   age_of_maturity: number;
   hebb_eta_baseline: number;
   hebb_eta_gain: number;
-  eligibility_decay: number;
+  eligibility_retention: number;
   synapse_prune_threshold: number;
   mutation_rate_age_of_maturity: number;
   mutation_rate_vision_distance: number;
@@ -19,7 +19,7 @@ export type SeedGenomeConfig = {
   mutation_rate_inter_bias: number;
   mutation_rate_inter_update_rate: number;
   mutation_rate_action_bias: number;
-  mutation_rate_eligibility_decay: number;
+  mutation_rate_eligibility_retention: number;
   mutation_rate_synapse_prune_threshold: number;
   mutation_rate_neuron_location: number;
 };
@@ -53,7 +53,7 @@ export type OrganismGenome = {
   age_of_maturity: number;
   hebb_eta_baseline: number;
   hebb_eta_gain: number;
-  eligibility_decay: number;
+  eligibility_retention: number;
   synapse_prune_threshold: number;
   mutation_rate_age_of_maturity: number;
   mutation_rate_vision_distance: number;
@@ -61,7 +61,7 @@ export type OrganismGenome = {
   mutation_rate_inter_bias: number;
   mutation_rate_inter_update_rate: number;
   mutation_rate_action_bias: number;
-  mutation_rate_eligibility_decay: number;
+  mutation_rate_eligibility_retention: number;
   mutation_rate_synapse_prune_threshold: number;
   mutation_rate_neuron_location: number;
   inter_biases: number[];

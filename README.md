@@ -115,7 +115,7 @@ After brain evaluation each tick, runtime plasticity is applied:
 
 1. **Eligibility trace update** — for every synapse:
    `e(t) = (1 - lambda) * e(t-1) + pre * post`, where `lambda` is the genome's
-   `eligibility_decay_lambda` and `pre * post` represents Hebbian coactivation
+   `eligibility_retention` and `pre * post` represents Hebbian coactivation
    "fire-together".
 2. **Weight update** — Oja's rule: `w += eta * post * (pre - post * w)` with
    Dale's-law sign preservation.
@@ -126,7 +126,7 @@ After brain evaluation each tick, runtime plasticity is applied:
 ## Genome & Mutation
 
 `OrganismGenome`: `num_neurons`, `vision_distance`, `age_of_maturity`,
-`hebb_eta_baseline`, `hebb_eta_gain`, `eligibility_decay_lambda`,
+`hebb_eta_baseline`, `hebb_eta_gain`, `eligibility_retention`,
 `synapse_prune_threshold`, `inter_biases` (vec), `inter_log_taus` (vec),
 `interneuron_types` (vec), `action_biases` (vec), `edges` (sorted `SynapseEdge`
 list with per-edge `eligibility` trace), and explicit per-operator mutation-rate
@@ -151,7 +151,7 @@ Implemented operators:
 - Inter log-tau perturbation: Gaussian additive (stddev `0.05`).
 - Action bias perturbation: Gaussian additive (stddev `0.15`), clamped
   `[-1.0, 1.0]`.
-- `eligibility_decay_lambda` perturbation: Gaussian additive (stddev `0.05`),
+- `eligibility_retention` perturbation: Gaussian additive (stddev `0.05`),
   clamped `[0.0, 1.0]`.
 - `synapse_prune_threshold` perturbation: Gaussian additive (stddev `0.02`),
   clamped `[0.0, 1.0]`.
