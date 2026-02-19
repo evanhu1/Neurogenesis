@@ -287,38 +287,6 @@ pub(super) fn enable_reproduce_action(organism: &mut OrganismState) {
     }
 }
 
-pub(super) fn enable_consume_action(organism: &mut OrganismState) {
-    let inter_id = organism.brain.inter[0].neuron.neuron_id;
-    let mut found = false;
-    for synapse in &mut organism.brain.inter[0].synapses {
-        if synapse.post_neuron_id == NeuronId(2002) {
-            synapse.weight = 8.0;
-            found = true;
-            break;
-        }
-    }
-    if !found {
-        organism.brain.inter[0].synapses.push(SynapseEdge {
-            pre_neuron_id: inter_id,
-            post_neuron_id: NeuronId(2002),
-            weight: 8.0,
-            eligibility: 0.0,
-        });
-        organism.brain.inter[0]
-            .synapses
-            .sort_by(|a, b| a.post_neuron_id.cmp(&b.post_neuron_id));
-        organism.brain.synapse_count = organism.brain.synapse_count.saturating_add(1);
-    }
-    if let Some(action) = organism
-        .brain
-        .action
-        .iter_mut()
-        .find(|action| action.action_type == ActionType::Consume)
-    {
-        action.neuron.parent_ids = vec![inter_id];
-    }
-}
-
 pub(super) fn reproduction_request_from_parent(
     sim: &Simulation,
     parent_id: OrganismId,

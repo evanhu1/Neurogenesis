@@ -16,7 +16,7 @@ fn two_organism_swap_resolves_deterministically() {
     let delta = tick_once(&mut sim);
     let moves = move_map(&delta);
     assert!(moves.is_empty());
-    assert_eq!(delta.metrics.consumptions_last_turn, 0);
+    assert_eq!(delta.metrics.consumptions_last_turn, 1);
 }
 
 #[test]
@@ -134,18 +134,17 @@ fn multi_node_cycle_resolves_without_conflict() {
     let delta = tick_once(&mut sim);
     let moves = move_map(&delta);
     assert_eq!(moves.len(), 0);
-    assert_eq!(delta.metrics.consumptions_last_turn, 0);
+    assert_eq!(delta.metrics.consumptions_last_turn, 2);
 }
 
 #[test]
-fn contested_occupied_target_where_occupant_remains_uses_consume_path() {
+fn contested_occupied_target_where_occupant_remains_triggers_passive_bite() {
     let cfg = test_config(5, 3);
-    let mut predator = make_organism(0, 1, 1, FacingDirection::East, true, false, false, 0.9, 6.0);
-    enable_consume_action(&mut predator);
+    let predator = make_organism(0, 1, 1, FacingDirection::East, true, false, false, 0.9, 6.0);
     let predator_metabolism = cfg.neuron_metabolism_cost * predator.genome.num_neurons as f32;
     let prey_energy_after_metabolism = 3.0 - cfg.neuron_metabolism_cost;
-    let expected_energy = 6.0 - predator_metabolism - (cfg.move_action_energy_cost * 2.0)
-        + prey_energy_after_metabolism;
+    let expected_energy =
+        6.0 - predator_metabolism - cfg.move_action_energy_cost + prey_energy_after_metabolism;
     let mut sim = Simulation::new(cfg, 17).expect("simulation should initialize");
     configure_sim(
         &mut sim,
@@ -167,7 +166,7 @@ fn contested_occupied_target_where_occupant_remains_uses_consume_path() {
                 1,
                 2,
                 FacingDirection::NorthEast,
-                true,
+                false,
                 false,
                 false,
                 0.2,
@@ -181,16 +180,14 @@ fn contested_occupied_target_where_occupant_remains_uses_consume_path() {
     assert_eq!(moves.len(), 0);
     assert_eq!(delta.metrics.consumptions_last_turn, 1);
     assert_eq!(delta.metrics.predations_last_turn, 1);
-    assert!(sim
+    assert!(!sim
         .organisms
         .iter()
         .any(|organism| organism.id == OrganismId(1)));
-    let prey = sim
-        .organisms
+    assert!(delta
+        .removed_positions
         .iter()
-        .find(|organism| organism.id == OrganismId(1))
-        .expect("prey should remain alive until lifecycle phase");
-    assert_eq!(prey.energy, 0.0);
+        .any(|pos| pos.entity_id == EntityId::Organism(OrganismId(1))));
     let predator = sim
         .organisms
         .iter()
@@ -213,21 +210,20 @@ fn move_into_food_consumes_and_schedules_regrowth() {
             1,
             1,
             FacingDirection::East,
-            false,
+            true,
             false,
             false,
             0.9,
             10.0,
         )],
     );
-    enable_consume_action(&mut sim.organisms[0]);
     let added = sim.add_food(make_food(0, 2, 1, 7.0));
     assert!(added, "food setup should succeed");
     sim.next_food_id = 1;
 
     let delta = tick_once(&mut sim);
     let moves = move_map(&delta);
-    assert!(moves.is_empty());
+    assert_eq!(moves.get(&OrganismId(0)), Some(&((1, 1), (2, 1))));
     assert_eq!(delta.removed_positions.len(), 1);
     assert_eq!(
         delta.removed_positions[0].entity_id,
@@ -242,7 +238,7 @@ fn move_into_food_consumes_and_schedules_regrowth() {
     assert_eq!(delta.metrics.predations_last_turn, 0);
     assert!(sim.foods.is_empty());
     assert_eq!(
-        sim.occupant_at(1, 1),
+        sim.occupant_at(2, 1),
         Some(Occupant::Organism(OrganismId(0)))
     );
 

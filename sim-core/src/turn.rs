@@ -35,7 +35,6 @@ struct TurnSnapshot {
 enum IntentActionKind {
     Turn,
     Move,
-    Consume,
 }
 
 #[derive(Clone, Copy)]
@@ -49,16 +48,11 @@ struct OrganismIntent {
     idx: usize,
     id: OrganismId,
     from: (i32, i32),
-    facing_before_actions: FacingDirection,
     facing_after_actions: FacingDirection,
-    turn_choice: TurnChoice,
     wants_move: bool,
-    wants_consume: bool,
     wants_reproduce: bool,
     move_target: Option<(i32, i32)>,
     move_confidence: f32,
-    ordered_actions: [IntentActionKind; 3],
-    ordered_action_count: u8,
     action_cost_count: u8,
     synapse_ops: u64,
 }
@@ -294,7 +288,7 @@ impl Simulation {
                 continue;
             };
             let cell_idx = target.1 as usize * w + target.0 as usize;
-            if occupancy[cell_idx].is_some() {
+            if matches!(occupancy[cell_idx], Some(Occupant::Organism(_))) {
                 continue;
             }
             let candidate = MoveCandidate {
@@ -357,7 +351,26 @@ impl Simulation {
 
         let org_count = self.organisms.len();
         let food_count = self.foods.len();
+        let mut bite_targets = vec![None; org_count];
+        for (idx, intent) in intents.iter().enumerate() {
+            if !intent.wants_move || successful_reproduction[idx] {
+                continue;
+            }
+            let Some((target_q, target_r)) = intent.move_target else {
+                continue;
+            };
+            let target_idx = target_r as usize * world_width_usize + target_q as usize;
+            if let Some(Occupant::Organism(prey_id)) = self.occupancy[target_idx] {
+                bite_targets[idx] = Some(prey_id);
+            }
+        }
+
         let mut move_to: Vec<Option<(i32, i32)>> = vec![None; org_count];
+        let mut consumed_food = vec![false; food_count];
+        let mut removed_positions = Vec::new();
+        let mut consumptions = 0_u64;
+        let mut predations = 0_u64;
+        let mut dead_organisms = vec![false; org_count];
         for resolution in resolutions {
             move_to[resolution.actor_idx] = Some(resolution.to);
             let from_idx =
@@ -367,41 +380,13 @@ impl Simulation {
                 self.occupancy[from_idx],
                 Some(Occupant::Organism(resolution.actor_id))
             );
-            debug_assert!(self.occupancy[to_idx].is_none());
-            self.occupancy[from_idx] = None;
-            self.occupancy[to_idx] = Some(Occupant::Organism(resolution.actor_id));
-            let organism = &mut self.organisms[resolution.actor_idx];
-            organism.q = resolution.to.0;
-            organism.r = resolution.to.1;
-        }
+            debug_assert!(!matches!(
+                self.occupancy[to_idx],
+                Some(Occupant::Organism(_))
+            ));
 
-        let mut consumed_food = vec![false; food_count];
-        let mut removed_positions = Vec::new();
-        let mut consumptions = 0_u64;
-        let mut predations = 0_u64;
-        for (idx, intent) in intents.iter().enumerate() {
-            if !intent.wants_consume {
-                continue;
-            }
-            if successful_reproduction[idx] {
-                continue;
-            }
-
-            let Some((target_q, target_r)) =
-                consume_target_for_intent(intent, move_to[idx], world_width)
-            else {
-                continue;
-            };
-            let target_idx = target_r as usize * world_width_usize + target_q as usize;
-
-            match self.occupancy[target_idx] {
-                Some(Occupant::Food(food_id)) => {
-                    let Some(food_idx) = food_index_by_id(&self.foods, food_id) else {
-                        continue;
-                    };
-                    if consumed_food[food_idx] {
-                        continue;
-                    }
+            if let Some(Occupant::Food(food_id)) = self.occupancy[to_idx] {
+                if let Some(food_idx) = food_index_by_id(&self.foods, food_id) {
                     consumed_food[food_idx] = true;
                     let food = &self.foods[food_idx];
                     removed_positions.push(RemovedEntityPosition {
@@ -409,19 +394,52 @@ impl Simulation {
                         q: food.q,
                         r: food.r,
                     });
-                    self.organisms[idx].energy += food.energy;
-                    self.organisms[idx].consumptions_count =
-                        self.organisms[idx].consumptions_count.saturating_add(1);
-                    self.occupancy[target_idx] = None;
+                    self.organisms[resolution.actor_idx].energy += food.energy;
+                    self.organisms[resolution.actor_idx].consumptions_count = self.organisms
+                        [resolution.actor_idx]
+                        .consumptions_count
+                        .saturating_add(1);
                     consumptions += 1;
                 }
-                Some(Occupant::Organism(prey_id)) => {
+            }
+
+            self.occupancy[from_idx] = None;
+            self.occupancy[to_idx] = Some(Occupant::Organism(resolution.actor_id));
+            let organism = &mut self.organisms[resolution.actor_idx];
+            organism.q = resolution.to.0;
+            organism.r = resolution.to.1;
+        }
+
+        for (idx, intent) in intents.iter().enumerate() {
+            if !intent.wants_move || dead_organisms[idx] {
+                continue;
+            }
+            if successful_reproduction[idx] {
+                continue;
+            }
+            if move_to[idx].is_some() {
+                continue;
+            }
+            let Some((target_q, target_r)) = intent.move_target else {
+                continue;
+            };
+            let Some(prey_id) = bite_targets[idx] else {
+                continue;
+            };
+            let target_idx = target_r as usize * world_width_usize + target_q as usize;
+
+            match self.occupancy[target_idx] {
+                Some(Occupant::Organism(current_prey_id)) if current_prey_id == prey_id => {
                     let Some(prey_idx) = organism_index_by_id(&self.organisms, prey_id) else {
                         continue;
                     };
+                    if idx == prey_idx || dead_organisms[prey_idx] {
+                        continue;
+                    }
+
                     let drain = self.organisms[prey_idx]
                         .energy
-                        .min(self.config.food_energy * 2.0f32)
+                        .min(self.config.food_energy * 2.0)
                         .max(0.0);
                     if drain <= 0.0 {
                         continue;
@@ -447,9 +465,31 @@ impl Simulation {
 
                     consumptions += 1;
                     predations += 1;
+
+                    if self.organisms[prey_idx].energy <= 0.0 && !dead_organisms[prey_idx] {
+                        dead_organisms[prey_idx] = true;
+                        removed_positions.push(RemovedEntityPosition {
+                            entity_id: EntityId::Organism(prey_id),
+                            q: self.organisms[prey_idx].q,
+                            r: self.organisms[prey_idx].r,
+                        });
+                        self.occupancy[target_idx] = None;
+                    }
                 }
                 None => {}
+                Some(Occupant::Food(_)) => {}
+                Some(Occupant::Organism(_)) => {}
             }
+        }
+
+        if dead_organisms.iter().any(|dead| *dead) {
+            let mut survivors = Vec::with_capacity(self.organisms.len());
+            for (idx, organism) in self.organisms.drain(..).enumerate() {
+                if !dead_organisms[idx] {
+                    survivors.push(organism);
+                }
+            }
+            self.organisms = survivors;
         }
 
         let mut new_foods = Vec::with_capacity(food_count);
@@ -612,7 +652,6 @@ fn intent_action_priority(action: IntentActionKind) -> u8 {
     match action {
         IntentActionKind::Turn => 0,
         IntentActionKind::Move => 1,
-        IntentActionKind::Consume => 2,
     }
 }
 
@@ -640,17 +679,15 @@ fn build_intent_for_organism(
 
     let turn_choice = evaluation.resolved_actions.turn;
     let wants_move = evaluation.resolved_actions.wants_move;
-    let wants_consume = evaluation.resolved_actions.wants_consume;
     let wants_reproduce = evaluation.resolved_actions.wants_reproduce;
     let move_confidence = evaluation.action_activations[action_index(ActionType::MoveForward)];
     let turn_strength = evaluation.action_activations[action_index(ActionType::Turn)].abs();
-    let consume_strength = evaluation.action_activations[action_index(ActionType::Consume)];
 
-    let mut ordered_actions = [IntentActionKind::Turn; 3];
+    let mut ordered_actions = [IntentActionKind::Turn; 2];
     let mut ordered_action_count = 0_usize;
     let mut move_target = None;
 
-    if turn_choice != TurnChoice::None || wants_move || wants_consume {
+    if turn_choice != TurnChoice::None || wants_move {
         let mut ranked_actions = [
             RankedIntentAction {
                 kind: IntentActionKind::Turn,
@@ -658,10 +695,6 @@ fn build_intent_for_organism(
             },
             RankedIntentAction {
                 kind: IntentActionKind::Move,
-                strength: 0.0,
-            },
-            RankedIntentAction {
-                kind: IntentActionKind::Consume,
                 strength: 0.0,
             },
         ];
@@ -677,13 +710,6 @@ fn build_intent_for_organism(
             ranked_actions[ordered_action_count] = RankedIntentAction {
                 kind: IntentActionKind::Move,
                 strength: move_confidence,
-            };
-            ordered_action_count += 1;
-        }
-        if wants_consume {
-            ranked_actions[ordered_action_count] = RankedIntentAction {
-                kind: IntentActionKind::Consume,
-                strength: consume_strength,
             };
             ordered_action_count += 1;
         }
@@ -713,7 +739,6 @@ fn build_intent_for_organism(
                     move_target = Some(target);
                     break;
                 }
-                IntentActionKind::Consume => {}
             }
         }
     }
@@ -724,50 +749,14 @@ fn build_intent_for_organism(
         idx,
         id: organism_id,
         from: (snapshot_state.q, snapshot_state.r),
-        facing_before_actions: snapshot_state.facing,
         facing_after_actions,
-        turn_choice,
         wants_move,
-        wants_consume,
         wants_reproduce,
         move_target,
         move_confidence,
-        ordered_actions,
-        ordered_action_count: ordered_action_count as u8,
         action_cost_count: ordered_action_count as u8 + wants_reproduce as u8,
         synapse_ops: evaluation.synapse_ops,
     }
-}
-
-fn consume_target_for_intent(
-    intent: &OrganismIntent,
-    move_to: Option<(i32, i32)>,
-    world_width: i32,
-) -> Option<(i32, i32)> {
-    if !intent.wants_consume {
-        return None;
-    }
-
-    let mut current_pos = intent.from;
-    let mut current_facing = intent.facing_before_actions;
-
-    for action in &intent.ordered_actions[..intent.ordered_action_count as usize] {
-        match action {
-            IntentActionKind::Turn => {
-                current_facing = facing_after_turn(current_facing, intent.turn_choice);
-            }
-            IntentActionKind::Move => {
-                if let Some(to) = move_to {
-                    current_pos = to;
-                }
-            }
-            IntentActionKind::Consume => {
-                return Some(hex_neighbor(current_pos, current_facing, world_width));
-            }
-        }
-    }
-
-    None
 }
 
 fn occupancy_snapshot_cell(
