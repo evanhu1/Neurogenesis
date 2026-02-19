@@ -4,6 +4,7 @@ import { colorForSpeciesId } from '../../speciesColor';
 
 const SQRT_3 = Math.sqrt(3);
 const PLANT_COLOR = '#16a34a';
+const WALL_COLOR = '#5f6572';
 const BASE_HEX_SIZE_AT_900PX = 8;
 const BASE_HEX_MIN_SIZE_PX = 6;
 const BASE_HEX_REFERENCE_CANVAS_PX = 900;
@@ -196,6 +197,18 @@ export function renderWorld(
   const minY = Math.min(topLeft.y, bottomRight.y) - layout.size * 2;
   const maxY = Math.max(topLeft.y, bottomRight.y) + layout.size * 2;
   drawVisibleGrid(ctx, layout, minX, maxX, minY, maxY);
+
+  const occupancy = Array.isArray(snapshot.occupancy) ? snapshot.occupancy : [];
+  for (const cell of occupancy) {
+    if (cell.occupant.type !== 'Wall') continue;
+    const center = hexCenter(layout, cell.q, cell.r);
+    traceHex(ctx, center.x, center.y, layout.size);
+    ctx.fillStyle = WALL_COLOR;
+    ctx.fill();
+    ctx.strokeStyle = '#4d5360';
+    ctx.lineWidth = 0.4;
+    ctx.stroke();
+  }
 
   if (visibility.plants) {
     const plants = Array.isArray(snapshot.foods) ? snapshot.foods : [];

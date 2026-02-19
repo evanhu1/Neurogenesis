@@ -1,8 +1,8 @@
 use super::support::test_genome;
 use super::*;
 use crate::brain::{
-    action_index, apply_runtime_plasticity, evaluate_brain, express_genome, BrainScratch,
-    ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT,
+    action_index, apply_runtime_plasticity, evaluate_brain, express_genome, scan_rays,
+    BrainScratch, ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT,
 };
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
@@ -285,6 +285,33 @@ fn action_biases_drive_actions_without_incoming_synapses() {
     let eval = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
 
     assert_eq!(eval.resolved_actions.selected_action, ActionType::Reproduce);
+}
+
+#[test]
+fn scan_rays_stops_at_wall_occluders() {
+    let world_width = 6;
+    let center_idx = 1 * world_width + 1;
+    let wall_idx = 1 * world_width + 2;
+    let food_idx = 1 * world_width + 3;
+    let organism_idx = 1 * world_width + 4;
+    let mut occupancy = vec![None; world_width * world_width];
+    occupancy[center_idx] = Some(Occupant::Organism(OrganismId(0)));
+    occupancy[wall_idx] = Some(Occupant::Wall);
+    occupancy[food_idx] = Some(Occupant::Food(FoodId(1)));
+    occupancy[organism_idx] = Some(Occupant::Organism(OrganismId(2)));
+
+    let scans = scan_rays(
+        (1, 1),
+        FacingDirection::East,
+        OrganismId(0),
+        world_width as i32,
+        &occupancy,
+        5,
+    );
+    assert!(
+        scans[2].is_none(),
+        "the center ray (offset 0) should be occluded by wall",
+    );
 }
 
 #[test]

@@ -202,6 +202,10 @@ pub struct WorldConfig {
     pub food_fertility_exponent: f32,
     #[serde(default = "default_food_fertility_floor")]
     pub food_fertility_floor: f32,
+    #[serde(default = "default_terrain_noise_scale")]
+    pub terrain_noise_scale: f32,
+    #[serde(default = "default_terrain_threshold")]
+    pub terrain_threshold: f32,
     pub max_organism_age: u32,
     pub speciation_threshold: f32,
     pub seed_genome_config: SeedGenomeConfig,
@@ -231,6 +235,10 @@ struct WorldConfigDeserialize {
     food_fertility_exponent: f32,
     #[serde(default = "default_food_fertility_floor")]
     food_fertility_floor: f32,
+    #[serde(default = "default_terrain_noise_scale")]
+    terrain_noise_scale: f32,
+    #[serde(default = "default_terrain_threshold")]
+    terrain_threshold: f32,
     max_organism_age: u32,
     speciation_threshold: f32,
     seed_genome_config: SeedGenomeConfig,
@@ -259,6 +267,8 @@ impl<'de> Deserialize<'de> for WorldConfig {
             food_fertility_noise_scale: raw.food_fertility_noise_scale,
             food_fertility_exponent: raw.food_fertility_exponent,
             food_fertility_floor: raw.food_fertility_floor,
+            terrain_noise_scale: raw.terrain_noise_scale,
+            terrain_threshold: raw.terrain_threshold,
             max_organism_age: raw.max_organism_age,
             speciation_threshold: raw.speciation_threshold,
             seed_genome_config: raw.seed_genome_config,
@@ -360,6 +370,14 @@ fn default_food_fertility_exponent() -> f32 {
 
 fn default_food_fertility_floor() -> f32 {
     0.04
+}
+
+fn default_terrain_noise_scale() -> f32 {
+    0.02
+}
+
+fn default_terrain_threshold() -> f32 {
+    0.86
 }
 
 fn default_plant_growth_speed() -> f32 {
@@ -467,6 +485,7 @@ pub struct WorldSnapshot {
 pub enum Occupant {
     Organism(OrganismId),
     Food(FoodId),
+    Wall,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

@@ -274,7 +274,10 @@ impl Simulation {
                 continue;
             };
             let cell_idx = target.1 as usize * w + target.0 as usize;
-            if matches!(occupancy[cell_idx], Some(Occupant::Organism(_))) {
+            if matches!(
+                occupancy[cell_idx],
+                Some(Occupant::Organism(_)) | Some(Occupant::Wall)
+            ) {
                 continue;
             }
             let candidate = MoveCandidate {
@@ -368,7 +371,7 @@ impl Simulation {
             );
             debug_assert!(!matches!(
                 self.occupancy[to_idx],
-                Some(Occupant::Organism(_))
+                Some(Occupant::Organism(_)) | Some(Occupant::Wall)
             ));
 
             if let Some(Occupant::Food(food_id)) = self.occupancy[to_idx] {
@@ -465,6 +468,7 @@ impl Simulation {
                 None => {}
                 Some(Occupant::Food(_)) => {}
                 Some(Occupant::Organism(_)) => {}
+                Some(Occupant::Wall) => {}
             }
         }
 

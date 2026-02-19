@@ -819,6 +819,9 @@ fn scan_ray(
                     signal,
                 });
             }
+            Some(Occupant::Wall) => {
+                return None;
+            }
             None => {}
         }
     }

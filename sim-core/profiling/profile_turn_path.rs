@@ -296,6 +296,8 @@ fn stable_perf_config() -> WorldConfig {
         food_fertility_noise_scale: 0.045,
         food_fertility_exponent: 1.8,
         food_fertility_floor: 0.04,
+        terrain_noise_scale: 0.02,
+        terrain_threshold: 1.0,
         max_organism_age: u32::MAX,
         speciation_threshold: 50.0,
         seed_genome_config: SeedGenomeConfig {

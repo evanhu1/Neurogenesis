@@ -1,4 +1,4 @@
-world_width = 1000
+world_width = 500
 steps_per_second = 5
 num_organisms = 5000
 food_energy = 20
@@ -9,6 +9,8 @@ food_regrowth_interval = 20
 food_fertility_noise_scale = 0.012
 food_fertility_exponent = 5.0
 food_fertility_floor = 0.001
+terrain_noise_scale = 0.01
+terrain_threshold = 0.75
 speciation_threshold = 20.0
 
 [seed_genome_config]

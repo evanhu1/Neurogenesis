@@ -288,3 +288,35 @@ fn food_regrows_naturally_based_on_fertility_schedule() {
     );
     assert!(!sim.foods.is_empty());
 }
+
+#[test]
+fn move_resolution_blocks_wall_cells() {
+    let cfg = test_config(5, 1);
+    let mut sim = Simulation::new(cfg, 203).expect("simulation should initialize");
+    let wall_idx = sim.cell_index(2, 1);
+    sim.terrain_map[wall_idx] = true;
+    configure_sim(
+        &mut sim,
+        vec![make_organism(
+            0,
+            1,
+            1,
+            FacingDirection::East,
+            true,
+            false,
+            false,
+            0.9,
+            0,
+        )],
+    );
+
+    let delta = tick_once(&mut sim);
+    assert!(delta.moves.is_empty(), "wall should block movement");
+    assert_eq!(sim.occupancy[wall_idx], Some(Occupant::Wall));
+    let organism = sim
+        .organisms
+        .iter()
+        .find(|item| item.id == OrganismId(0))
+        .expect("organism should exist");
+    assert_eq!((organism.q, organism.r), (1, 1));
+}

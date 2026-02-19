@@ -37,6 +37,8 @@ export type WorldConfig = {
   food_fertility_noise_scale: number;
   food_fertility_exponent: number;
   food_fertility_floor: number;
+  terrain_noise_scale: number;
+  terrain_threshold: number;
   max_organism_age: number;
   speciation_threshold: number;
   seed_genome_config: SeedGenomeConfig;
@@ -189,7 +191,14 @@ export type WorldSnapshot = {
   foods: FoodState[];
   metrics: MetricsSnapshot;
   species_registry?: Record<string, OrganismGenome>;
-  occupancy?: Array<{ q: number; r: number; occupant: { type: 'Organism' | 'Food'; id: OrganismId | FoodId } }>;
+  occupancy?: Array<{
+    q: number;
+    r: number;
+    occupant:
+      | { type: 'Organism'; id: OrganismId }
+      | { type: 'Food'; id: FoodId }
+      | { type: 'Wall' };
+  }>;
 };
 
 export type SessionMetadata = {

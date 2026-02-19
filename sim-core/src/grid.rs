@@ -77,7 +77,9 @@ impl Simulation {
                 "foods must be sorted by id"
             );
             debug_assert_eq!(
-                self.organisms.len() + self.foods.len(),
+                self.organisms.len()
+                    + self.foods.len()
+                    + self.terrain_map.iter().filter(|blocked| **blocked).count(),
                 self.occupancy.iter().flatten().count(),
                 "occupancy vector count should match total entity count",
             );
@@ -108,6 +110,15 @@ impl Simulation {
                     Some(Occupant::Food(food.id)),
                     "occupancy must point at food occupying that cell",
                 );
+            }
+            for (idx, blocked) in self.terrain_map.iter().copied().enumerate() {
+                if blocked {
+                    debug_assert_eq!(
+                        self.occupancy[idx],
+                        Some(Occupant::Wall),
+                        "occupancy must point at wall for blocked terrain cells",
+                    );
+                }
             }
         }
     }

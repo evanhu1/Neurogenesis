@@ -121,3 +121,47 @@ fn seed_num_synapses_is_clamped_to_possible_pairs() {
     assert_eq!(genome.num_synapses, max_pairs);
     assert_eq!(genome.edges.len(), max_pairs as usize);
 }
+
+#[test]
+fn config_validation_rejects_invalid_terrain_threshold() {
+    let mut cfg = stable_test_config();
+    cfg.terrain_threshold = 1.5;
+    let err = Simulation::new(cfg, 7).expect_err("config should be rejected");
+    assert!(err.to_string().contains("terrain_threshold"));
+}
+
+#[test]
+fn terrain_map_is_seed_deterministic_and_threshold_controlled() {
+    let mut low_threshold_cfg = stable_test_config();
+    low_threshold_cfg.world_width = 48;
+    low_threshold_cfg.num_organisms = 1;
+    low_threshold_cfg.terrain_noise_scale = 0.02;
+    low_threshold_cfg.terrain_threshold = 0.60;
+    let mut high_threshold_cfg = low_threshold_cfg.clone();
+    high_threshold_cfg.terrain_threshold = 0.95;
+
+    let sim_a = Simulation::new(low_threshold_cfg.clone(), 2026).expect("simulation should init");
+    let sim_b = Simulation::new(low_threshold_cfg, 2026).expect("simulation should init");
+    let sim_c = Simulation::new(high_threshold_cfg, 2026).expect("simulation should init");
+    let sim_other_seed = Simulation::new(stable_test_config_with_terrain(0.60), 2027)
+        .expect("simulation should init");
+
+    assert_eq!(sim_a.terrain_map, sim_b.terrain_map);
+    assert_ne!(sim_a.terrain_map, sim_other_seed.terrain_map);
+
+    let low_blocked = sim_a.terrain_map.iter().filter(|blocked| **blocked).count();
+    let high_blocked = sim_c.terrain_map.iter().filter(|blocked| **blocked).count();
+    assert!(
+        low_blocked > high_blocked,
+        "lower threshold should produce more blocked terrain: low={low_blocked} high={high_blocked}",
+    );
+}
+
+fn stable_test_config_with_terrain(terrain_threshold: f32) -> WorldConfig {
+    let mut cfg = stable_test_config();
+    cfg.world_width = 48;
+    cfg.num_organisms = 1;
+    cfg.terrain_noise_scale = 0.02;
+    cfg.terrain_threshold = terrain_threshold;
+    cfg
+}

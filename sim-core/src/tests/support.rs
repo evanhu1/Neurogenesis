@@ -76,6 +76,8 @@ pub(super) fn stable_test_config() -> WorldConfig {
         food_fertility_noise_scale: 0.045,
         food_fertility_exponent: 1.8,
         food_fertility_floor: 0.04,
+        terrain_noise_scale: 0.02,
+        terrain_threshold: 1.0,
         max_organism_age: 500,
         speciation_threshold: 50.0,
         seed_genome_config: SeedGenomeConfig {
@@ -373,6 +375,11 @@ pub(super) fn configure_sim(sim: &mut Simulation, mut organisms: Vec<OrganismSta
         .max()
         .map_or(0, |max_id| max_id + 1);
     sim.occupancy = vec![None; crate::grid::world_capacity(sim.config.world_width)];
+    for (idx, blocked) in sim.terrain_map.iter().copied().enumerate() {
+        if blocked {
+            sim.occupancy[idx] = Some(Occupant::Wall);
+        }
+    }
     for organism in &sim.organisms {
         let idx = sim.cell_index(organism.q, organism.r);
         assert!(
@@ -418,7 +425,9 @@ pub(super) fn assert_no_overlap(sim: &Simulation) {
         assert_eq!(sim.occupancy[idx], Some(Occupant::Food(food.id)));
     }
     assert_eq!(
-        sim.organisms.len() + sim.foods.len(),
+        sim.organisms.len()
+            + sim.foods.len()
+            + sim.terrain_map.iter().filter(|blocked| **blocked).count(),
         sim.occupancy.iter().flatten().count()
     );
 }

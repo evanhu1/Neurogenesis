@@ -12,6 +12,8 @@ use sim_types::{
     SpeciesId,
 };
 
+const DEFAULT_TERRAIN_THRESHOLD: f64 = 0.86;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct FoodRegrowthEvent {
     pub(crate) due_turn: u64,
@@ -96,8 +98,9 @@ impl Simulation {
 
         let mut open_positions = self.empty_positions();
         open_positions.shuffle(&mut self.rng);
+        let initial_population = self.target_population().min(open_positions.len());
 
-        for _ in 0..self.target_population() {
+        for _ in 0..initial_population {
             let (q, r) = open_positions
                 .pop()
                 .expect("initial population requires at least one unique cell per organism");
@@ -146,7 +149,42 @@ impl Simulation {
     }
 
     fn target_population(&self) -> usize {
-        (self.config.num_organisms as usize).min(world_capacity(self.config.world_width))
+        let max_population = self.config.num_organisms as usize;
+        let available_cells = if self.terrain_map.is_empty() {
+            world_capacity(self.config.world_width)
+        } else {
+            self.terrain_map.iter().filter(|blocked| !**blocked).count()
+        };
+        max_population.min(available_cells)
+    }
+
+    pub(crate) fn initialize_terrain(&mut self) {
+        let width = self.config.world_width;
+        let terrain_seed = self.seed ^ 0xA5A5_A5A5_u64;
+        self.terrain_map = if (self.config.terrain_threshold as f64 - DEFAULT_TERRAIN_THRESHOLD)
+            .abs()
+            > f64::EPSILON
+        {
+            build_terrain_map_with_threshold(
+                width,
+                width,
+                self.config.terrain_noise_scale as f64,
+                terrain_seed,
+                self.config.terrain_threshold as f64,
+            )
+        } else {
+            build_terrain_map(
+                width,
+                width,
+                self.config.terrain_noise_scale as f64,
+                terrain_seed,
+            )
+        };
+        for (idx, blocked) in self.terrain_map.iter().copied().enumerate() {
+            if blocked {
+                self.occupancy[idx] = Some(Occupant::Wall);
+            }
+        }
     }
 
     pub(crate) fn initialize_food_ecology(&mut self) {
@@ -299,6 +337,32 @@ fn build_fertility_map(world_width: u32, seed: u64, config: &sim_types::WorldCon
         }
     }
     fertility
+}
+
+pub(crate) fn build_terrain_map(width: u32, height: u32, scale: f64, seed: u64) -> Vec<bool> {
+    build_terrain_map_with_threshold(width, height, scale, seed, DEFAULT_TERRAIN_THRESHOLD)
+}
+
+fn build_terrain_map_with_threshold(
+    width: u32,
+    height: u32,
+    scale: f64,
+    seed: u64,
+    terrain_threshold: f64,
+) -> Vec<bool> {
+    let width = width as usize;
+    let height = height as usize;
+    let mut blocked = Vec::with_capacity(width * height);
+    for r in 0..height {
+        for q in 0..width {
+            let x = q as f64 * scale;
+            let y = r as f64 * scale;
+            let value = fractal_perlin_2d(x, y, seed);
+            let normalized = ((value + 1.0) * 0.5).clamp(0.0, 1.0);
+            blocked.push(normalized > terrain_threshold);
+        }
+    }
+    blocked
 }
 
 fn fractal_perlin_2d(x: f64, y: f64, seed: u64) -> f64 {

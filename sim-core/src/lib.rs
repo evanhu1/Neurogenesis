@@ -47,6 +47,8 @@ pub struct Simulation {
     foods: Vec<FoodState>,
     occupancy: Vec<Option<Occupant>>,
     #[serde(default)]
+    terrain_map: Vec<bool>,
+    #[serde(default)]
     food_fertility: Vec<u16>,
     #[serde(default)]
     food_regrowth_generation: Vec<u32>,
@@ -121,6 +123,7 @@ impl Simulation {
             organisms: Vec::new(),
             foods: Vec::new(),
             occupancy: vec![None; capacity],
+            terrain_map: Vec::new(),
             food_fertility: Vec::new(),
             food_regrowth_generation: Vec::new(),
             food_regrowth_queue: BTreeSet::new(),
@@ -129,6 +132,7 @@ impl Simulation {
             intent_parallel_min_organisms: default_intent_parallel_min_organisms(),
         };
 
+        sim.initialize_terrain();
         sim.spawn_initial_population();
         sim.initialize_food_ecology();
         sim.seed_initial_food_supply();
@@ -156,7 +160,7 @@ impl Simulation {
         foods.sort_by_key(|food| food.id);
 
         let width = self.config.world_width as usize;
-        let mut occupancy = Vec::with_capacity(self.organisms.len() + self.foods.len());
+        let mut occupancy = Vec::with_capacity(self.occupancy.iter().flatten().count());
         for (idx, maybe_entity) in self.occupancy.iter().enumerate() {
             if let Some(occupant) = *maybe_entity {
                 let q = (idx % width) as i32;
@@ -189,10 +193,12 @@ impl Simulation {
         self.organisms.clear();
         self.foods.clear();
         self.occupancy.fill(None);
+        self.terrain_map.clear();
         self.food_fertility.clear();
         self.food_regrowth_generation.clear();
         self.food_regrowth_queue.clear();
         self.metrics = MetricsSnapshot::default();
+        self.initialize_terrain();
         self.spawn_initial_population();
         self.initialize_food_ecology();
         self.seed_initial_food_supply();
@@ -245,6 +251,13 @@ impl Simulation {
                 expected_capacity
             )));
         }
+        if self.terrain_map.len() != expected_capacity {
+            return Err(SimError::InvalidState(format!(
+                "terrain_map length {} does not match expected capacity {}",
+                self.terrain_map.len(),
+                expected_capacity
+            )));
+        }
 
         if !self
             .organisms
@@ -268,6 +281,11 @@ impl Simulation {
 
         let width = self.config.world_width as i32;
         let mut expected_occupancy = vec![None; expected_capacity];
+        for (idx, blocked) in self.terrain_map.iter().copied().enumerate() {
+            if blocked {
+                expected_occupancy[idx] = Some(Occupant::Wall);
+            }
+        }
 
         for organism in &self.organisms {
             if organism.q < 0 || organism.r < 0 || organism.q >= width || organism.r >= width {
@@ -440,6 +458,16 @@ fn validate_world_config(config: &WorldConfig) -> Result<(), SimError> {
     if !(0.0..=1.0).contains(&config.food_fertility_floor) {
         return Err(SimError::InvalidConfig(
             "food_fertility_floor must be in [0.0, 1.0]".to_owned(),
+        ));
+    }
+    if config.terrain_noise_scale <= 0.0 {
+        return Err(SimError::InvalidConfig(
+            "terrain_noise_scale must be greater than zero".to_owned(),
+        ));
+    }
+    if !(0.0..=1.0).contains(&config.terrain_threshold) {
+        return Err(SimError::InvalidConfig(
+            "terrain_threshold must be in [0.0, 1.0]".to_owned(),
         ));
     }
     Ok(())
