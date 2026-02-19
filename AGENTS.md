@@ -47,8 +47,11 @@
 ### World
 
 Toroidal axial hex grid `(q, r)` with wraparound modulo `world_width` on both
-axes. Occupancy is a dense `Vec<Option<Occupant>>` (`Organism(OrganismId)` or
-`Food(FoodId)`), indexed by `r * world_width + q`. At most one entity per cell.
+axes. Occupancy is a dense `Vec<Option<Occupant>>`
+(`Organism(OrganismId)`, `Food(FoodId)`, or `Wall`), indexed by
+`r * world_width + q`. At most one entity per cell. Terrain walls are generated
+from Perlin noise at world init (`terrain_noise_scale`, `terrain_threshold`) and
+block spawn, movement, and ray vision.
 
 ### Turn Pipeline (execution order)
 
@@ -56,12 +59,17 @@ axes. Occupancy is a dense `Vec<Option<Occupant>>` (`Organism(OrganismId)` or
    `neuron_metabolism_cost * (enabled interneuron count)`, remove dead/old
    organisms.
 2. **Snapshot** — freeze occupancy + organism state, stable ID ordering.
-3. **Intent** — evaluate brains, produce per-organism intents. Apply runtime
-   plasticity (Hebbian learning, eligibility traces, synapse pruning).
+3. **Intent** — evaluate brains, select one categorical action per organism
+   (argmax over action neurons), then derive facing/move/reproduce intent from
+   that single action. Apply runtime plasticity (eligibility traces +
+   maturity-gated 3-factor updates). Any non-`Idle` action pays one
+   `move_action_energy_cost`.
 4. **Reproduction** — queue spawn at hex behind (opposite facing). Requires
    `age_turns >= age_of_maturity` and sufficient energy.
 5. **Move resolution** — simultaneous resolution; highest confidence wins, ties
-   broken by lower ID. Supports consumption and cycles.
+   broken by lower ID. Moving into food consumes it. Moving into an occupied
+   organism cell applies passive bite (`drain = min(prey_energy, food_energy *
+   2.0)`) instead of displacement. Walls block movement.
 6. **Commit** — apply moves, kills, energy transfers. Replenish food.
 7. **Age** — increment `age_turns`.
 8. **Spawn** — process queue, mutate genome, assign species.
@@ -69,13 +77,24 @@ axes. Occupancy is a dense `Vec<Option<Occupant>>` (`Organism(OrganismId)` or
 
 ### Brain
 
-3 sensory neurons (Look Food/Organism + Energy), inter neurons at IDs
-`1000..1000+n`, 5 action neurons at `2000..2005` (`MoveForward`, `Turn`,
-`Consume`, `Reproduce`, `Dopamine`). Evaluation: sensory→inter, inter→inter
-(prev tick), then →action. Inter=tanh with log-tau time constants,
-action=sigmoid, fires at `> 0.5`. Dopamine neuron modulates Hebbian learning
-rate. Oja's rule with eligibility traces applied after evaluation. Synapse
-pruning at maturity.
+Sensory receptors are multi-ray:
+`LookRay { ray_offset in [-2,-1,0,1,2], target in {Food, Organism} }` plus
+`Energy` (11 sensory neurons total). Ray scans are cached per tick and stop on
+first blocking entity (including walls), with signal
+`(max_dist - dist + 1) / max_dist`.
+
+Inter neurons are `1000..1000+n`. Action neurons are `2000..2008` mapped to:
+`Idle`, `TurnLeft`, `TurnRight`, `Forward`, `TurnLeftForward`,
+`TurnRightForward`, `Consume`, `Reproduce`. Policy is single-choice categorical
+per tick (highest activation).
+
+Runtime plasticity:
+- Eligibility: `e = eligibility_retention * e + pre * post`.
+- Reward signal: `dopamine = tanh((energy - energy_prev) / 10.0)`.
+- Mature-only update: `w += eta * dopamine * e - 0.001 * w`,
+  where `eta = max(0, hebb_eta_baseline + hebb_eta_gain)`.
+- Sign/clamp constraints preserve excitatory/inhibitory polarity.
+- Synapse pruning is maturity-gated.
 
 ### Genome
 
@@ -92,7 +111,7 @@ L1 genome distance; exceeding `speciation_threshold` creates a new species.
 `TickDelta` has unified `removed_positions: Vec<RemovedEntityPosition>` (each
 with `entity_id: EntityId` tagged `Organism` or `Food`). No separate food
 removal field. `food_spawned` for new food. Clients partition removals by entity
-type.
+type. Full `WorldSnapshot` occupancy cells now include `Wall`.
 
 ### Determinism
 

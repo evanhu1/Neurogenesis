@@ -7,7 +7,7 @@ Neuromorphic brains grown from scratch with simulated evolution in Rust.
 - `sim-types/` — shared domain types used across all Rust crates.
 - `sim-core/` — deterministic simulation engine:
   - `lib.rs` — `Simulation` struct, config validation.
-  - `turn.rs` — turn pipeline, move/consume/starvation resolution.
+  - `turn.rs` — turn pipeline, categorical action intents, movement/bite resolution.
   - `brain.rs` — neural network evaluation and genome expression.
   - `genome.rs` — genome generation, mutation, species assignment.
   - `spawn.rs` — initial population spawn and reproduction placement.
@@ -30,18 +30,21 @@ Neuromorphic brains grown from scratch with simulated evolution in Rust.
 Toroidal axial hex grid, `(q, r)` coordinates with wraparound modulo
 `world_width` on both axes. Capacity is `world_width * world_width`. Occupancy
 is a dense `Vec<Option<Occupant>>` indexed by `r * world_width + q`, where
-`Occupant` is `Organism(OrganismId)` or `Food(FoodId)`. At most one entity per
-cell.
+`Occupant` is `Organism(OrganismId)`, `Food(FoodId)`, or `Wall`. At most one
+entity per cell.
+
+Terrain walls are generated at world creation from Perlin noise and occupy
+cells permanently. Walls block movement, vision rays, food placement, and spawn
+placement.
 
 Six hex directions: `East (q+1,r)`, `NorthEast (q+1,r-1)`, `NorthWest (q,r-1)`,
-`West (q-1,r)`, `SouthWest (q-1,r+1)`, `SouthEast (q,r+1)`. `Turn` sign rotates
-one step (`<0` = left, `>0` = right), with a deadzone around `0` meaning no
-rotation. `MoveForward` uses post-turn facing.
+`West (q-1,r)`, `SouthWest (q-1,r+1)`, `SouthEast (q,r+1)`.
 
 ## Config
 
 All hyperparameters are configured in `config/default.toml`. Parameters
 configure either the World, or set default values for the first Species Genome.
+World terrain is controlled by `terrain_noise_scale` and `terrain_threshold`.
 
 ## Turn Pipeline
 
@@ -50,10 +53,12 @@ Phases execute in this order each tick:
 1. **Lifecycle** — deduct `neuron_metabolism_cost * (enabled interneuron count)` from all organisms. Remove any with
    `energy <= 0` or `age_turns >= max_organism_age`. Rebuild occupancy.
 2. **Snapshot** — freeze occupancy and organism state. Stable ordering by ID.
-3. **Intent** — evaluate each brain against the frozen snapshot. Produce per-
-   organism intent: `facing_after_turn`, `wants_move`, `move_target`,
-   `wants_reproduce`, `move_confidence`. Apply runtime plasticity (Hebbian
-   learning with eligibility traces and synapse pruning) after evaluation.
+3. **Intent** — evaluate each brain against the frozen snapshot. Select exactly
+   one action per organism (categorical argmax over action neurons), then derive
+   intent fields (`facing_after_actions`, `wants_move`, `move_target`,
+   `wants_reproduce`, `move_confidence`, `action_cost_count`). Any non-`Idle`
+   action pays one `move_action_energy_cost`. Apply runtime plasticity after
+   evaluation.
 4. **Reproduction** — organisms with `Reproduce` active,
    `age_turns >=
    age_of_maturity`, and sufficient energy queue a spawn
@@ -61,8 +66,10 @@ Phases execute in this order each tick:
    Conflicts resolved by ID order. Energy deducted on success.
 5. **Move resolution** — resolve all move intents simultaneously. Contenders for
    the same cell: highest confidence wins, ties broken by lower ID. Empty target
-   = move in. Stationary occupant = consume and replace. Food target = consume.
-   Vacated target (occupant also moving) = move in. Cycles resolve naturally.
+   = move in. Food target = consume and move in. Occupied organism target =
+   passive bite (drain `min(prey_energy, food_energy * 2.0)` and transfer to
+   predator) without displacement. Walls block movement. Vacated target
+   (occupant also moving) = move in. Cycles resolve naturally.
 6. **Commit** — atomically apply facing, moves, energy costs, consumption kills,
    energy transfers. Rebuild occupancy. Process due food regrowth events.
 7. **Age** — increment `age_turns` for all survivors.
@@ -76,26 +83,28 @@ ordering is the universal tie-breaker.
 
 ## Brain
 
-Three sensory neurons:
+Sensory receptors are multi-ray:
 
-- `Look(Food)`, `Look(Organism)` — scan forward up to `vision_distance` hexes on
-  a toroidal (wraparound) hex grid. Signal =
-  `(max_dist - dist + 1) /
-  max_dist` for the closest matching entity (with
-  occlusion), or `0.0` if none found.
-- `Energy` — `ln(1 + energy) / ln(101)` with negative energy clamped to `0`.
+- `LookRay { ray_offset, look_target }` with `ray_offset in [-2,-1,0,1,2]` and
+  `look_target in {Food, Organism}`.
+- `Energy`.
 
-Neuron IDs: sensory `0..3`, inter `1000..1000+n`, action `2000..2005`.
+This yields 11 sensory neurons total (10 look-ray + 1 energy). Ray scans are
+cached per tick and return the closest visible target signal
+`(max_dist - dist + 1) / max_dist`; walls and occupied cells occlude farther
+targets along a ray.
+
+Neuron IDs: sensory `0..11`, inter `1000..1000+n`, action `2000..2008`.
 
 Evaluation order: sensory→inter, inter→inter (previous tick activations), then
 sensory→action and inter→action. Inter uses per-neuron leaky integration:
 `h_i(t) = (1 - alpha_i) * h_i(t-1) + alpha_i * tanh(z_i(t))`, where
 `z_i(t) = b_i + sensory_to_inter_i + inter_to_inter_i(h(t-1))` and `alpha_i` is
-derived from a log-tau parameterisation. Actions use `sigmoid` except `Turn`,
-which uses `tanh`. Discrete action firing threshold remains `> 0.5` for non-turn
-actions.
+derived from a log-tau parameterisation. Actions are scored and resolved by
+single-choice categorical selection (argmax).
 
-Actions: `MoveForward`, `Turn`, `Consume`, `Reproduce`, `Dopamine`.
+Actions: `Idle`, `TurnLeft`, `TurnRight`, `Forward`, `TurnLeftForward`,
+`TurnRightForward`, `Consume`, `Reproduce`.
 
 Interneurons carry a polarity (`Excitatory` or `Inhibitory`). Sensory neurons
 are always excitatory. Dale's law is enforced for generated/mutated synapses:
@@ -103,23 +112,19 @@ all outgoing weights from a neuron share the sign implied by source type. Neuron
 type distribution is biased towards an 80:20 excitatory:inhibitory ratio to
 match biological brains.
 
-### Dopamine Neuromodulation
-
-The `Dopamine` action neuron produces a signal in `[-1, 1]` that modulates
-online Hebbian learning. The effective learning rate each tick is
-`eta = hebb_eta_gain * dopamine_signal`.
-
-### Hebbian Learning (Oja's Rule)
+### Runtime Plasticity
 
 After brain evaluation each tick, runtime plasticity is applied:
 
 1. **Eligibility trace update** — for every synapse:
-   `e(t) = (1 - lambda) * e(t-1) + pre * post`, where `lambda` is the genome's
-   `eligibility_retention` and `pre * post` represents Hebbian coactivation
-   "fire-together".
-2. **Weight update** — Oja's rule: `w += eta * post * (pre - post * w)` with
-   Dale's-law sign preservation.
-3. **Synapse pruning** — once `age_turns >= age_of_maturity`, every 10 ticks
+   `e = eligibility_retention * e + pre * post`.
+2. **Reward signal** — `dopamine = tanh((energy - energy_prev) / 10.0)`, then
+   `energy_prev` is updated to current energy.
+3. **Mature-only weight update** — once `age_turns >= age_of_maturity`:
+   `w += eta * dopamine * e - 0.001 * w`, where
+   `eta = max(0, hebb_eta_baseline + hebb_eta_gain)`, with Dale-sign and clamp
+   constraints preserved.
+4. **Synapse pruning** — once `age_turns >= age_of_maturity`, every 10 ticks
    synapses with `|weight| < threshold` and `|eligibility| < 2 * threshold` are
    removed. `synapse_prune_threshold` is a mutable genome parameter.
 
@@ -191,8 +196,9 @@ WS commands: `Start { ticks_per_second }`, `Pause`, `Step { count }`,
 
 `TickDelta`: `turn`, `moves`, `removed_positions` (unified
 `RemovedEntityPosition[]` with `entity_id: EntityId` tagged `Organism` or
-`Food`), `spawned`, `food_spawned`, `metrics`. Clients apply deltas
-incrementally; periodic full `WorldSnapshot`s serve as sync points.
+`Food`), `spawned`, `food_spawned`, `metrics`. `WorldSnapshot.occupancy` now
+contains tagged occupancy cells for `Organism`, `Food`, and `Wall`. Clients
+apply deltas incrementally; periodic full `WorldSnapshot`s serve as sync points.
 
 ## Performance
 
@@ -210,10 +216,10 @@ Optional CI budget override:
 
 - [x] Cull useless neurons and synapses, neuronal pruning (synapse pruning at
       maturity based on weight + eligibility thresholds)
-- [x] Use Hebbian/SDTP to guide synaptogenesis (Oja's rule with dopamine-
-      modulated learning rate and eligibility traces)
+- [x] Use local three-factor plasticity updates (eligibility traces + energy-
+      delta dopamine signal + mature-only weight updates)
 - [x] Implement temporal credit assignment (eligibility traces with configurable
-      decay lambda)
+      retention)
 - [ ] Experiment with local gradient descent in the brain.
 - [ ] Create multiple concentric evolution loops. Innermost is the organism
       loop. Evolve worlds, with a world DNA substrate that sets the "laws of
