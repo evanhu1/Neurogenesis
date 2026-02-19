@@ -118,9 +118,9 @@ export function InspectorPanel({
         value: genome.mutation_rate_action_bias,
       },
       {
-        key: 'mutation_rate_eligibility_decay_lambda',
-        label: 'Elig Lambda',
-        value: genome.mutation_rate_eligibility_decay_lambda,
+        key: 'mutation_rate_eligibility_decay',
+        label: 'Elig Decay',
+        value: genome.mutation_rate_eligibility_decay,
       },
       {
         key: 'mutation_rate_synapse_prune_threshold',

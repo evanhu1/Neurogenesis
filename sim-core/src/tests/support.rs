@@ -40,7 +40,7 @@ pub(super) fn test_genome() -> OrganismGenome {
         age_of_maturity: 0,
         hebb_eta_baseline: 0.0,
         hebb_eta_gain: 0.0,
-        eligibility_decay_lambda: 0.9,
+        eligibility_decay: 0.9,
         synapse_prune_threshold: 0.01,
         mutation_rate_age_of_maturity: 0.0,
         mutation_rate_vision_distance: 0.0,
@@ -48,7 +48,7 @@ pub(super) fn test_genome() -> OrganismGenome {
         mutation_rate_inter_bias: 0.0,
         mutation_rate_inter_update_rate: 0.0,
         mutation_rate_action_bias: 0.0,
-        mutation_rate_eligibility_decay_lambda: 0.0,
+        mutation_rate_eligibility_decay: 0.0,
         mutation_rate_synapse_prune_threshold: 0.0,
         mutation_rate_neuron_location: 0.0,
         inter_biases: vec![0.0],
@@ -89,7 +89,7 @@ pub(super) fn stable_test_config() -> WorldConfig {
             age_of_maturity: 0,
             hebb_eta_baseline: 0.0,
             hebb_eta_gain: 0.0,
-            eligibility_decay_lambda: 0.9,
+            eligibility_decay: 0.9,
             synapse_prune_threshold: 0.01,
             mutation_rate_age_of_maturity: 0.0,
             mutation_rate_vision_distance: 0.0,
@@ -97,7 +97,7 @@ pub(super) fn stable_test_config() -> WorldConfig {
             mutation_rate_inter_bias: 0.0,
             mutation_rate_inter_update_rate: 0.0,
             mutation_rate_action_bias: 0.0,
-            mutation_rate_eligibility_decay_lambda: 0.0,
+            mutation_rate_eligibility_decay: 0.0,
             mutation_rate_synapse_prune_threshold: 0.0,
             mutation_rate_neuron_location: 0.0,
         },
@@ -246,6 +246,7 @@ pub(super) fn make_organism(
     energy: impl IntoEnergy,
 ) -> OrganismState {
     let energy = energy.into_energy();
+    let initial_energy = if energy <= 0.0 { 10.0 } else { energy };
     OrganismState {
         id: OrganismId(id),
         species_id: SpeciesId(0),
@@ -253,7 +254,8 @@ pub(super) fn make_organism(
         r,
         age_turns: 0,
         facing,
-        energy: if energy <= 0.0 { 10.0 } else { energy },
+        energy: initial_energy,
+        energy_prev: initial_energy,
         consumptions_count: 0,
         reproductions_count: 0,
         brain: forced_brain(wants_move, turn_left, turn_right, confidence),

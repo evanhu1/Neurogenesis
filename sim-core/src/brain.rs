@@ -20,6 +20,8 @@ fn sigmoid(x: f32) -> f32 {
 
 const DEFAULT_BIAS: f32 = 0.0;
 const HEBB_WEIGHT_CLAMP_ENABLED: bool = true;
+const DOPAMINE_ENERGY_DELTA_SCALE: f32 = 10.0;
+const PLASTIC_WEIGHT_DECAY: f32 = 0.001;
 const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
 const LOOK_TARGETS: [EntityType; 2] = [EntityType::Food, EntityType::Organism];
 const LOOK_RAY_COUNT: usize = SensoryReceptor::LOOK_RAY_OFFSETS.len();
@@ -29,12 +31,6 @@ pub(crate) const ACTION_COUNT: usize = ActionType::ALL.len();
 pub(crate) const ACTION_COUNT_U32: u32 = ACTION_COUNT as u32;
 pub(crate) const INTER_ID_BASE: u32 = 1000;
 pub(crate) const ACTION_ID_BASE: u32 = 2000;
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum PostLayer {
-    Inter,
-    Action,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ResolvedActions {
@@ -412,9 +408,10 @@ pub(crate) fn apply_runtime_plasticity(
 ) {
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
-    let lambda = organism.genome.eligibility_decay_lambda.clamp(0.0, 1.0);
+    let eligibility_decay = organism.genome.eligibility_decay.clamp(0.0, 1.0);
     let weight_prune_threshold = organism.genome.synapse_prune_threshold.max(0.0);
     let should_prune = should_prune_synapses(organism.age_turns, organism.genome.age_of_maturity);
+    let is_mature = organism.age_turns >= u64::from(organism.genome.age_of_maturity);
 
     let brain = &mut organism.brain;
     scratch.inter_activations.clear();
@@ -424,11 +421,10 @@ pub(crate) fn apply_runtime_plasticity(
     for (idx, action) in brain.action.iter().enumerate() {
         scratch.action_activations[idx] = action.neuron.activation;
     }
-    let resolved_actions = resolve_actions(scratch.action_activations);
-    let selected_activation =
-        scratch.action_activations[action_index(resolved_actions.selected_action)];
-    let dopamine_signal = (2.0 * selected_activation - 1.0).clamp(-1.0, 1.0);
-    let eta = organism.genome.hebb_eta_baseline + organism.genome.hebb_eta_gain * dopamine_signal;
+    let energy_delta = organism.energy - organism.energy_prev;
+    let dopamine_signal = (energy_delta / DOPAMINE_ENERGY_DELTA_SCALE).tanh();
+    organism.energy_prev = organism.energy;
+    let eta = (organism.genome.hebb_eta_baseline + organism.genome.hebb_eta_gain).max(0.0);
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::PlasticitySetup, stage_started.elapsed());
 
@@ -440,7 +436,9 @@ pub(crate) fn apply_runtime_plasticity(
             sensory.neuron.activation,
             1.0,
             eta,
-            lambda,
+            dopamine_signal,
+            eligibility_decay,
+            is_mature,
             &scratch.inter_activations,
             &scratch.action_activations,
         );
@@ -460,7 +458,9 @@ pub(crate) fn apply_runtime_plasticity(
             inter.neuron.activation,
             required_sign,
             eta,
-            lambda,
+            dopamine_signal,
+            eligibility_decay,
+            is_mature,
             &scratch.inter_activations,
             &scratch.action_activations,
         );
@@ -487,57 +487,42 @@ fn tune_synapses(
     pre_activation: f32,
     required_sign: f32,
     eta: f32,
-    lambda: f32,
+    dopamine_signal: f32,
+    eligibility_decay: f32,
+    is_mature: bool,
     inter_activations: &[f32],
     action_activations: &[f32; ACTION_COUNT],
 ) {
-    // Generalized Hebbian (Sanger) update is applied per post layer.
-    let mut active_layer: Option<PostLayer> = None;
-    let mut projected_output_sum = 0.0f32; // Σ_{k<j} y_k * w_k
-
     for edge in edges {
-        let (layer, post_activation) = match post_layer_and_activation(
-            edge.post_neuron_id,
-            inter_activations,
-            action_activations,
-        ) {
-            Some(value) => value,
-            None => continue,
-        };
+        let post_activation =
+            match post_activation(edge.post_neuron_id, inter_activations, action_activations) {
+                Some(value) => value,
+                None => continue,
+            };
 
-        if active_layer != Some(layer) {
-            active_layer = Some(layer);
-            projected_output_sum = 0.0;
+        edge.eligibility = eligibility_decay * edge.eligibility + pre_activation * post_activation;
+        if !is_mature {
+            continue;
         }
 
-        let post_projection = post_activation * edge.weight;
-        let gha_gradient =
-            post_activation * (pre_activation - projected_output_sum - post_projection);
-        edge.eligibility = (1.0 - lambda) * edge.eligibility + gha_gradient;
-        let updated_weight = edge.weight + eta * edge.eligibility;
+        let updated_weight = edge.weight + eta * dopamine_signal * edge.eligibility
+            - PLASTIC_WEIGHT_DECAY * edge.weight;
         edge.weight = constrain_weight(updated_weight, required_sign);
-        projected_output_sum += post_projection;
     }
 }
 
-fn post_layer_and_activation(
+fn post_activation(
     neuron_id: NeuronId,
     inter_activations: &[f32],
     action_activations: &[f32; ACTION_COUNT],
-) -> Option<(PostLayer, f32)> {
+) -> Option<f32> {
     if neuron_id.0 >= ACTION_ID_BASE {
         let action_idx = (neuron_id.0 - ACTION_ID_BASE) as usize;
-        return action_activations
-            .get(action_idx)
-            .copied()
-            .map(|activation| (PostLayer::Action, activation));
+        return action_activations.get(action_idx).copied();
     }
     if neuron_id.0 >= INTER_ID_BASE {
         let inter_idx = (neuron_id.0 - INTER_ID_BASE) as usize;
-        return inter_activations
-            .get(inter_idx)
-            .copied()
-            .map(|activation| (PostLayer::Inter, activation));
+        return inter_activations.get(inter_idx).copied();
     }
     None
 }

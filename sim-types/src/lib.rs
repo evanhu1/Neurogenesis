@@ -127,8 +127,8 @@ pub struct OrganismGenome {
     pub hebb_eta_baseline: f32,
     #[serde(default)]
     pub hebb_eta_gain: f32,
-    #[serde(default = "default_eligibility_decay_lambda")]
-    pub eligibility_decay_lambda: f32,
+    #[serde(default = "default_eligibility_decay")]
+    pub eligibility_decay: f32,
     #[serde(default)]
     pub synapse_prune_threshold: f32,
     #[serde(default)]
@@ -144,7 +144,7 @@ pub struct OrganismGenome {
     #[serde(default)]
     pub mutation_rate_action_bias: f32,
     #[serde(default)]
-    pub mutation_rate_eligibility_decay_lambda: f32,
+    pub mutation_rate_eligibility_decay: f32,
     #[serde(default)]
     pub mutation_rate_synapse_prune_threshold: f32,
     #[serde(default)]
@@ -171,7 +171,7 @@ pub struct SeedGenomeConfig {
     pub age_of_maturity: u32,
     pub hebb_eta_baseline: f32,
     pub hebb_eta_gain: f32,
-    pub eligibility_decay_lambda: f32,
+    pub eligibility_decay: f32,
     pub synapse_prune_threshold: f32,
     pub mutation_rate_age_of_maturity: f32,
     pub mutation_rate_vision_distance: f32,
@@ -179,7 +179,7 @@ pub struct SeedGenomeConfig {
     pub mutation_rate_inter_bias: f32,
     pub mutation_rate_inter_update_rate: f32,
     pub mutation_rate_action_bias: f32,
-    pub mutation_rate_eligibility_decay_lambda: f32,
+    pub mutation_rate_eligibility_decay: f32,
     pub mutation_rate_synapse_prune_threshold: f32,
     pub mutation_rate_neuron_location: f32,
 }
@@ -344,8 +344,8 @@ pub struct SynapseEdge {
     pub eligibility: f32,
 }
 
-fn default_eligibility_decay_lambda() -> f32 {
-    0.9
+fn default_eligibility_decay() -> f32 {
+    0.95
 }
 
 fn default_age_of_maturity() -> u32 {
@@ -439,6 +439,8 @@ pub struct OrganismState {
     pub age_turns: u64,
     pub facing: FacingDirection,
     pub energy: f32,
+    #[serde(default)]
+    pub energy_prev: f32,
     pub consumptions_count: u64,
     pub reproductions_count: u64,
     pub brain: BrainState,
