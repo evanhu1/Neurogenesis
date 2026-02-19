@@ -93,13 +93,18 @@ pub enum EntityId {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "receptor_type")]
 pub enum SensoryReceptor {
-    Look { look_target: EntityType },
+    LookRay {
+        ray_offset: i8,
+        look_target: EntityType,
+    },
     Energy,
 }
 
 impl SensoryReceptor {
-    /// Number of look-based sensory neurons (Food, Organism).
-    pub const LOOK_NEURON_COUNT: u32 = 2;
+    /// Fixed relative ray offsets around facing direction.
+    pub const LOOK_RAY_OFFSETS: [i8; 5] = [-2, -1, 0, 1, 2];
+    /// Number of look-based sensory neurons (ray count x object type count).
+    pub const LOOK_NEURON_COUNT: u32 = (Self::LOOK_RAY_OFFSETS.len() as u32) * 2;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -2,7 +2,7 @@ use crate::genome::{
     inter_alpha_from_log_tau, BRAIN_SPACE_MAX, BRAIN_SPACE_MIN, DEFAULT_INTER_LOG_TAU,
     SYNAPSE_STRENGTH_MAX, SYNAPSE_STRENGTH_MIN,
 };
-use crate::grid::hex_neighbor;
+use crate::grid::{hex_neighbor, rotate_left, rotate_right};
 #[cfg(feature = "profiling")]
 use crate::profiling::{self, BrainStage};
 use rand::Rng;
@@ -23,7 +23,10 @@ const TURN_ACTION_DEADZONE: f32 = 0.3;
 const DEFAULT_BIAS: f32 = 0.0;
 const HEBB_WEIGHT_CLAMP_ENABLED: bool = true;
 const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
+const LOOK_TARGETS: [EntityType; 2] = [EntityType::Food, EntityType::Organism];
+const LOOK_RAY_COUNT: usize = SensoryReceptor::LOOK_RAY_OFFSETS.len();
 pub(crate) const SENSORY_COUNT: u32 = SensoryReceptor::LOOK_NEURON_COUNT + 1;
+pub(crate) const ENERGY_SENSORY_ID: u32 = SensoryReceptor::LOOK_NEURON_COUNT;
 pub(crate) const ACTION_COUNT: usize = ActionType::ALL.len();
 pub(crate) const ACTION_COUNT_U32: u32 = ACTION_COUNT as u32;
 pub(crate) const INTER_ID_BASE: u32 = 1000;
@@ -79,27 +82,27 @@ impl BrainScratch {
 
 /// Build a BrainState from inherited neuron genes and stored synapse topology.
 pub(crate) fn express_genome<R: Rng + ?Sized>(genome: &OrganismGenome, _rng: &mut R) -> BrainState {
-    let mut sensory = vec![
-        make_sensory_neuron(
-            0,
-            SensoryReceptor::Look {
-                look_target: EntityType::Food,
-            },
-            location_or_default(&genome.sensory_locations, 0),
-        ),
-        make_sensory_neuron(
-            1,
-            SensoryReceptor::Look {
-                look_target: EntityType::Organism,
-            },
-            location_or_default(&genome.sensory_locations, 1),
-        ),
-        make_sensory_neuron(
-            2,
-            SensoryReceptor::Energy,
-            location_or_default(&genome.sensory_locations, 2),
-        ),
-    ];
+    let mut sensory = Vec::with_capacity(SENSORY_COUNT as usize);
+    let mut sensory_id = 0_u32;
+    for ray_offset in SensoryReceptor::LOOK_RAY_OFFSETS {
+        for look_target in LOOK_TARGETS {
+            sensory.push(make_sensory_neuron(
+                sensory_id,
+                SensoryReceptor::LookRay {
+                    ray_offset,
+                    look_target,
+                },
+                location_or_default(&genome.sensory_locations, sensory_id as usize),
+            ));
+            sensory_id = sensory_id.saturating_add(1);
+        }
+    }
+    debug_assert_eq!(sensory_id, ENERGY_SENSORY_ID);
+    sensory.push(make_sensory_neuron(
+        ENERGY_SENSORY_ID,
+        SensoryReceptor::Energy,
+        location_or_default(&genome.sensory_locations, ENERGY_SENSORY_ID as usize),
+    ));
 
     let mut inter = Vec::with_capacity(genome.num_neurons as usize);
     for i in 0..genome.num_neurons {
@@ -287,7 +290,7 @@ pub(crate) fn evaluate_brain(
 
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
-    let scan = scan_ahead(
+    let ray_scans = scan_rays(
         (organism.q, organism.r),
         organism.facing,
         organism.id,
@@ -302,10 +305,10 @@ pub(crate) fn evaluate_brain(
     let stage_started = Instant::now();
     for sensory in &mut organism.brain.sensory {
         sensory.neuron.activation = match &sensory.receptor {
-            SensoryReceptor::Look { look_target } => match &scan {
-                Some(ref r) if r.target == *look_target => r.signal,
-                _ => 0.0,
-            },
+            SensoryReceptor::LookRay {
+                ray_offset,
+                look_target,
+            } => look_ray_signal(&ray_scans, *ray_offset, *look_target),
             SensoryReceptor::Energy => energy_sensor_value(organism.energy),
         };
     }
@@ -762,21 +765,80 @@ pub(crate) struct ScanResult {
     pub(crate) signal: f32,
 }
 
-/// Scans forward along the facing direction up to `vision_distance` hexes.
-/// Returns the closest entity found (with occlusion) and a distance-encoded signal
-/// strength: `(max_dist - dist + 1) / max_dist`. Returns `None` if all cells are empty.
-pub(crate) fn scan_ahead(
+type RayScans = [Option<ScanResult>; LOOK_RAY_COUNT];
+
+fn ray_offset_index(ray_offset: i8) -> Option<usize> {
+    SensoryReceptor::LOOK_RAY_OFFSETS
+        .iter()
+        .position(|offset| *offset == ray_offset)
+}
+
+fn look_ray_signal(ray_scans: &RayScans, ray_offset: i8, look_target: EntityType) -> f32 {
+    let Some(ray_idx) = ray_offset_index(ray_offset) else {
+        return 0.0;
+    };
+    match ray_scans[ray_idx].as_ref() {
+        Some(hit) if hit.target == look_target => hit.signal,
+        _ => 0.0,
+    }
+}
+
+fn rotate_facing_by_offset(
+    mut facing: sim_types::FacingDirection,
+    ray_offset: i8,
+) -> sim_types::FacingDirection {
+    if ray_offset >= 0 {
+        for _ in 0..u8::try_from(ray_offset).unwrap_or(0) {
+            facing = rotate_right(facing);
+        }
+        return facing;
+    }
+
+    for _ in 0..ray_offset.unsigned_abs() {
+        facing = rotate_left(facing);
+    }
+    facing
+}
+
+/// Scans all fixed look rays relative to `facing`, using occlusion per-ray.
+pub(crate) fn scan_rays(
     position: (i32, i32),
     facing: sim_types::FacingDirection,
     organism_id: OrganismId,
     world_width: i32,
     occupancy: &[Option<Occupant>],
     vision_distance: u32,
+) -> RayScans {
+    std::array::from_fn(|idx| {
+        scan_ray(
+            position,
+            facing,
+            SensoryReceptor::LOOK_RAY_OFFSETS[idx],
+            organism_id,
+            world_width,
+            occupancy,
+            vision_distance,
+        )
+    })
+}
+
+/// Scans one ray up to `vision_distance` hexes.
+/// Returns the closest entity found (with occlusion) and a distance-encoded signal
+/// strength: `(max_dist - dist + 1) / max_dist`. Returns `None` if all cells are empty.
+fn scan_ray(
+    position: (i32, i32),
+    facing: sim_types::FacingDirection,
+    ray_offset: i8,
+    organism_id: OrganismId,
+    world_width: i32,
+    occupancy: &[Option<Occupant>],
+    vision_distance: u32,
 ) -> Option<ScanResult> {
+    let ray_facing = rotate_facing_by_offset(facing, ray_offset);
     let max_dist = vision_distance.max(1);
     let mut current = position;
     for d in 1..=max_dist {
-        current = hex_neighbor(current, facing, world_width);
+        current = hex_neighbor(current, ray_facing, world_width);
         let idx = current.1 as usize * world_width as usize + current.0 as usize;
         match occupancy[idx] {
             Some(Occupant::Organism(id)) if id == organism_id => {}

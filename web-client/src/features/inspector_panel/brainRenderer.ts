@@ -44,8 +44,8 @@ export function computeBrainLayout(
       id: nid,
       type: 'sensory',
       label:
-        neuron.receptor_type === 'Look'
-          ? `Vision: ${neuron.look_target ?? 'Look'}`
+        neuron.receptor_type === 'LookRay'
+          ? `Vision[${neuron.ray_offset ?? 0}]: ${neuron.look_target ?? 'Look'}`
           : neuron.receptor_type,
       activation: neuron.neuron.activation,
       bias: neuron.neuron.bias,

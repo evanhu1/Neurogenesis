@@ -132,7 +132,7 @@ fn express_genome_uses_stored_synapse_topology() {
     genome.inter_log_taus = vec![0.0; 4];
     genome.interneuron_types = vec![InterNeuronType::Excitatory; 4];
     genome.inter_locations = (0..4).map(|i| loc(i as f32, 10.0 - i as f32)).collect();
-    genome.sensory_locations = vec![loc(0.0, 0.0), loc(1.0, 0.0), loc(2.0, 0.0)];
+    genome.sensory_locations = vec![loc(0.0, 0.0); SENSORY_COUNT as usize];
     genome.action_locations = vec![
         loc(8.0, 1.0),
         loc(8.0, 2.0),
@@ -168,7 +168,7 @@ fn synapse_addition_uses_spatial_prior() {
     genome_template.inter_biases = vec![0.0; 12];
     genome_template.inter_log_taus = vec![0.0; 12];
     genome_template.interneuron_types = vec![InterNeuronType::Excitatory; 12];
-    genome_template.sensory_locations = vec![loc(0.0, 0.0), loc(0.0, 2.0), loc(0.0, 4.0)];
+    genome_template.sensory_locations = vec![loc(0.0, 0.0); SENSORY_COUNT as usize];
     genome_template.inter_locations = (0..12).map(|i| loc(1.0 + i as f32 * 0.7, 5.0)).collect();
     genome_template.action_locations = (0..ActionType::ALL.len())
         .map(|i| loc(1.0 + i as f32 * 0.7, 9.0))
@@ -301,13 +301,14 @@ fn runtime_plasticity_updates_weights_and_preserves_sign() {
     genome.hebb_eta_gain = 0.0;
     genome.synapse_prune_threshold = 0.0;
 
+    let energy_id = SENSORY_COUNT - 1;
     let mut sensory = vec![make_sensory_neuron(
-        2,
+        energy_id,
         SensoryReceptor::Energy,
         loc(1.0, 1.0),
     )];
     sensory[0].synapses.push(SynapseEdge {
-        pre_neuron_id: NeuronId(2),
+        pre_neuron_id: NeuronId(energy_id),
         post_neuron_id: NeuronId(2000),
         weight: 0.2,
         eligibility: 0.0,
@@ -321,7 +322,7 @@ fn runtime_plasticity_updates_weights_and_preserves_sign() {
     ];
     action[action_index(ActionType::MoveForward)]
         .neuron
-        .parent_ids = vec![NeuronId(2)];
+        .parent_ids = vec![NeuronId(energy_id)];
     let brain = BrainState {
         sensory,
         inter: vec![],

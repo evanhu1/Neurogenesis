@@ -55,7 +55,7 @@ pub(super) fn test_genome() -> OrganismGenome {
         inter_log_taus: vec![0.0],
         interneuron_types: vec![InterNeuronType::Excitatory],
         action_biases: vec![0.0; ActionType::ALL.len()],
-        sensory_locations: vec![default_loc; 3],
+        sensory_locations: vec![default_loc; crate::brain::SENSORY_COUNT as usize],
         inter_locations: vec![default_loc],
         action_locations: vec![default_loc; ActionType::ALL.len()],
         edges: Vec::new(),
@@ -117,7 +117,8 @@ fn forced_brain(
 ) -> BrainState {
     let sensory = vec![make_sensory_neuron(
         0,
-        SensoryReceptor::Look {
+        SensoryReceptor::LookRay {
+            ray_offset: 0,
             look_target: EntityType::Food,
         },
         BrainLocation { x: 0.0, y: 0.0 },

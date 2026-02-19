@@ -102,6 +102,7 @@ export type FocusBrainData = {
 export type SensoryNeuronState = {
   neuron: NeuronState;
   receptor_type: string;
+  ray_offset?: number;
   look_target?: string;
   synapses: SynapseEdge[];
 };
