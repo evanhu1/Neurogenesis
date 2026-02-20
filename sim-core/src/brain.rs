@@ -51,7 +51,7 @@ impl Default for ResolvedActions {
 #[derive(Default)]
 pub(crate) struct BrainEvaluation {
     pub(crate) resolved_actions: ResolvedActions,
-    pub(crate) action_logits: Vec<f32>,
+    pub(crate) action_logits: [f32; ACTION_COUNT],
     pub(crate) action_activations: [f32; ACTION_COUNT],
     pub(crate) synapse_ops: u64,
 }
@@ -288,7 +288,7 @@ pub(crate) fn evaluate_brain(
     occupancy: &[Option<Occupant>],
     vision_distance: u32,
     action_selection: ActionSelectionPolicy,
-    action_rng: &mut impl Rng,
+    action_sample: f32,
     scratch: &mut BrainScratch,
 ) -> BrainEvaluation {
     let mut result = BrainEvaluation::default();
@@ -350,20 +350,20 @@ pub(crate) fn evaluate_brain(
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     for sensory in &brain.sensory {
-        result.synapse_ops += accumulate_weighted_inputs(
+        result.synapse_ops += accumulate_mixed_inputs(
             &sensory.synapses,
             sensory.neuron.activation,
-            INTER_ID_BASE,
             &mut scratch.inter_inputs,
+            &mut action_inputs,
         );
     }
 
     // Recurrent inter → inter uses previous tick's inter activations.
     for (i, inter) in brain.inter.iter().enumerate() {
-        result.synapse_ops += accumulate_weighted_inputs(
-            &inter.synapses,
+        let (inter_edges, _) = split_inter_and_action_edges(&inter.synapses);
+        result.synapse_ops += accumulate_inter_inputs(
+            inter_edges,
             scratch.prev_inter[i],
-            INTER_ID_BASE,
             &mut scratch.inter_inputs,
         );
     }
@@ -384,29 +384,17 @@ pub(crate) fn evaluate_brain(
     // Inter → action uses this tick's freshly updated inter activations.
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
-    for sensory in &brain.sensory {
-        result.synapse_ops += accumulate_weighted_inputs(
-            &sensory.synapses,
-            sensory.neuron.activation,
-            ACTION_ID_BASE,
-            &mut action_inputs,
-        );
-    }
-
     for inter in &brain.inter {
-        result.synapse_ops += accumulate_weighted_inputs(
-            &inter.synapses,
-            inter.neuron.activation,
-            ACTION_ID_BASE,
-            &mut action_inputs,
-        );
+        let (_, action_edges) = split_inter_and_action_edges(&inter.synapses);
+        result.synapse_ops +=
+            accumulate_action_inputs(action_edges, inter.neuron.activation, &mut action_inputs);
     }
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::ActionAccumulation, stage_started.elapsed());
 
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
-    result.action_logits = action_inputs.to_vec();
+    result.action_logits = action_inputs;
     let logit_mean = action_inputs.iter().sum::<f32>() / ACTION_COUNT as f32;
     for (idx, logit) in action_inputs.iter().copied().enumerate() {
         scratch.action_post_signals[idx] = logit - logit_mean;
@@ -418,9 +406,9 @@ pub(crate) fn evaluate_brain(
 
     result.resolved_actions = ResolvedActions {
         selected_action: select_action_from_logits(
-            &result.action_logits,
+            result.action_logits,
             action_selection,
-            action_rng,
+            action_sample,
         ),
     };
     #[cfg(feature = "profiling")]
@@ -433,6 +421,10 @@ pub(crate) fn update_runtime_eligibility_traces(
     organism: &mut sim_types::OrganismState,
     scratch: &mut BrainScratch,
 ) {
+    if organism.genome.hebb_eta_gain <= 0.0 {
+        return;
+    }
+
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     let eligibility_retention = organism.genome.eligibility_retention.clamp(0.0, 1.0);
@@ -448,7 +440,7 @@ pub(crate) fn update_runtime_eligibility_traces(
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     for sensory in &mut brain.sensory {
-        update_edge_eligibility(
+        update_sensory_edge_eligibility(
             &mut sensory.synapses,
             sensory.neuron.activation,
             eligibility_retention,
@@ -499,6 +491,10 @@ pub(crate) fn apply_runtime_weight_updates(
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::PlasticitySetup, stage_started.elapsed());
 
+    if eta == 0.0 {
+        return;
+    }
+
     if is_mature {
         #[cfg(feature = "profiling")]
         let stage_started = Instant::now();
@@ -530,20 +526,29 @@ pub(crate) fn apply_runtime_weight_updates(
     }
 }
 
-fn update_edge_eligibility(
+fn update_sensory_edge_eligibility(
     edges: &mut [SynapseEdge],
     pre_activation: f32,
     eligibility_retention: f32,
     inter_activations: &[f32],
     action_post_signals: &[f32; ACTION_COUNT],
 ) {
-    for edge in edges {
-        let post_activation =
-            match post_signal(edge.post_neuron_id, inter_activations, action_post_signals) {
-                Some(value) => value,
-                None => continue,
-            };
+    let (inter_edges, action_edges) = split_inter_and_action_edges_mut(edges);
 
+    for edge in inter_edges {
+        let idx = edge.post_neuron_id.0.wrapping_sub(INTER_ID_BASE) as usize;
+        let Some(post_activation) = inter_activations.get(idx).copied() else {
+            continue;
+        };
+        edge.eligibility =
+            eligibility_retention * edge.eligibility + pre_activation * post_activation;
+    }
+
+    for edge in action_edges {
+        let idx = edge.post_neuron_id.0.wrapping_sub(ACTION_ID_BASE) as usize;
+        let Some(post_activation) = action_post_signals.get(idx).copied() else {
+            continue;
+        };
         edge.eligibility =
             eligibility_retention * edge.eligibility + pre_activation * post_activation;
     }
@@ -564,22 +569,22 @@ fn update_inter_edge_eligibility(
         return;
     };
 
-    for edge in edges {
-        let post_activation =
-            match post_signal(edge.post_neuron_id, inter_activations, action_post_signals) {
-                Some(value) => value,
-                None => continue,
-            };
-        let pre_activation = if edge.post_neuron_id.0 >= ACTION_ID_BASE {
-            pre_current
-        } else if edge.post_neuron_id.0 >= INTER_ID_BASE {
-            pre_prev
-        } else {
+    let (inter_edges, action_edges) = split_inter_and_action_edges_mut(edges);
+
+    for edge in inter_edges {
+        let idx = edge.post_neuron_id.0.wrapping_sub(INTER_ID_BASE) as usize;
+        let Some(post_activation) = inter_activations.get(idx).copied() else {
             continue;
         };
+        edge.eligibility = eligibility_retention * edge.eligibility + pre_prev * post_activation;
+    }
 
-        edge.eligibility =
-            eligibility_retention * edge.eligibility + pre_activation * post_activation;
+    for edge in action_edges {
+        let idx = edge.post_neuron_id.0.wrapping_sub(ACTION_ID_BASE) as usize;
+        let Some(post_activation) = action_post_signals.get(idx).copied() else {
+            continue;
+        };
+        edge.eligibility = eligibility_retention * edge.eligibility + pre_current * post_activation;
     }
 }
 
@@ -594,22 +599,6 @@ fn apply_edge_weight_update(
             edge.weight + eta * dopamine * edge.eligibility - PLASTIC_WEIGHT_DECAY * edge.weight;
         edge.weight = constrain_weight(updated_weight, required_sign);
     }
-}
-
-fn post_signal(
-    neuron_id: NeuronId,
-    inter_activations: &[f32],
-    action_post_signals: &[f32; ACTION_COUNT],
-) -> Option<f32> {
-    if neuron_id.0 >= ACTION_ID_BASE {
-        let action_idx = (neuron_id.0 - ACTION_ID_BASE) as usize;
-        return action_post_signals.get(action_idx).copied();
-    }
-    if neuron_id.0 >= INTER_ID_BASE {
-        let inter_idx = (neuron_id.0 - INTER_ID_BASE) as usize;
-        return inter_activations.get(inter_idx).copied();
-    }
-    None
 }
 
 fn constrain_weight(weight: f32, required_sign: f32) -> f32 {
@@ -757,17 +746,13 @@ fn resolve_actions(activations: [f32; ACTION_COUNT]) -> ResolvedActions {
 }
 
 fn select_action_from_logits(
-    action_logits: &[f32],
+    action_logits: [f32; ACTION_COUNT],
     action_selection: ActionSelectionPolicy,
-    action_rng: &mut impl Rng,
+    action_sample: f32,
 ) -> ActionType {
-    if action_logits.len() != ACTION_COUNT {
-        return ActionType::Idle;
-    }
-
-    let best_idx = argmax_index(action_logits);
+    let best_idx = argmax_index(&action_logits);
     let best_logit = action_logits[best_idx];
-    let second_logit = second_largest(action_logits, best_idx);
+    let second_logit = second_largest(&action_logits, best_idx);
     if let Some(margin) = action_selection.argmax_margin {
         if best_logit - second_logit > margin {
             return ActionType::ALL[best_idx];
@@ -790,7 +775,7 @@ fn select_action_from_logits(
         return ActionType::ALL[best_idx];
     }
 
-    let sample = action_rng.random::<f32>() * weight_sum;
+    let sample = action_sample.clamp(0.0, 1.0 - f32::EPSILON) * weight_sum;
     let mut cumulative = 0.0_f32;
     for (idx, weight) in weights.iter().copied().enumerate() {
         cumulative += weight;
@@ -823,23 +808,86 @@ fn second_largest(values: &[f32], best_idx: usize) -> f32 {
     second
 }
 
-/// Accumulates weighted inputs using arithmetic index resolution.
-/// `id_base` is the neuron ID offset for the target layer (e.g. 1000 for inter, 2000 for action).
-/// Edges targeting neurons outside the range are skipped via bounds check.
-fn accumulate_weighted_inputs(
+fn split_inter_and_action_edges(edges: &[SynapseEdge]) -> (&[SynapseEdge], &[SynapseEdge]) {
+    let split_idx = edges.partition_point(|edge| edge.post_neuron_id.0 < ACTION_ID_BASE);
+    edges.split_at(split_idx)
+}
+
+fn split_inter_and_action_edges_mut(
+    edges: &mut [SynapseEdge],
+) -> (&mut [SynapseEdge], &mut [SynapseEdge]) {
+    let split_idx = edges.partition_point(|edge| edge.post_neuron_id.0 < ACTION_ID_BASE);
+    edges.split_at_mut(split_idx)
+}
+
+fn accumulate_inter_inputs(
     edges: &[SynapseEdge],
     source_activation: f32,
-    id_base: u32,
-    inputs: &mut [f32],
+    inter_inputs: &mut [f32],
 ) -> u64 {
-    let num_slots = inputs.len();
+    if source_activation == 0.0 {
+        return 0;
+    }
     let mut synapse_ops = 0;
     for edge in edges {
-        let idx = edge.post_neuron_id.0.wrapping_sub(id_base) as usize;
-        if idx < num_slots {
-            inputs[idx] += source_activation * edge.weight;
+        let idx = edge.post_neuron_id.0.wrapping_sub(INTER_ID_BASE) as usize;
+        let Some(input_slot) = inter_inputs.get_mut(idx) else {
+            continue;
+        };
+        *input_slot += source_activation * edge.weight;
+        synapse_ops += 1;
+    }
+    synapse_ops
+}
+
+fn accumulate_mixed_inputs(
+    edges: &[SynapseEdge],
+    source_activation: f32,
+    inter_inputs: &mut [f32],
+    action_inputs: &mut [f32; ACTION_COUNT],
+) -> u64 {
+    if source_activation == 0.0 {
+        return 0;
+    }
+    let mut synapse_ops = 0;
+    for edge in edges {
+        if edge.post_neuron_id.0 >= ACTION_ID_BASE {
+            let idx = edge.post_neuron_id.0.wrapping_sub(ACTION_ID_BASE) as usize;
+            let Some(input_slot) = action_inputs.get_mut(idx) else {
+                continue;
+            };
+            *input_slot += source_activation * edge.weight;
+            synapse_ops += 1;
+            continue;
+        }
+        if edge.post_neuron_id.0 >= INTER_ID_BASE {
+            let idx = edge.post_neuron_id.0.wrapping_sub(INTER_ID_BASE) as usize;
+            let Some(input_slot) = inter_inputs.get_mut(idx) else {
+                continue;
+            };
+            *input_slot += source_activation * edge.weight;
             synapse_ops += 1;
         }
+    }
+    synapse_ops
+}
+
+fn accumulate_action_inputs(
+    edges: &[SynapseEdge],
+    source_activation: f32,
+    action_inputs: &mut [f32; ACTION_COUNT],
+) -> u64 {
+    if source_activation == 0.0 {
+        return 0;
+    }
+    let mut synapse_ops = 0;
+    for edge in edges {
+        let idx = edge.post_neuron_id.0.wrapping_sub(ACTION_ID_BASE) as usize;
+        let Some(input_slot) = action_inputs.get_mut(idx) else {
+            continue;
+        };
+        *input_slot += source_activation * edge.weight;
+        synapse_ops += 1;
     }
     synapse_ops
 }

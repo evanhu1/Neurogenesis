@@ -16,6 +16,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 rand_distr.workspace = true
 sim-types = { path = "../sim-types" }
+rayon = "1.10"
 
 [dev-dependencies]
 serde_json.workspace = true

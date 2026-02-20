@@ -7,8 +7,7 @@ use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 #[cfg(feature = "profiling")]
 use crate::{profiling, profiling::TurnPhase};
 use crate::{PendingActionKind, PendingActionState, Simulation};
-use rand::SeedableRng;
-use rand_chacha::ChaCha8Rng;
+use rayon::prelude::*;
 use sim_types::{
     ActionType, EntityId, FacingDirection, FoodState, Occupant, OrganismFacing, OrganismId,
     OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId, TickDelta, WorldConfig,
@@ -239,45 +238,71 @@ impl Simulation {
 
     fn build_intents(&mut self, snapshot: &TurnSnapshot) -> Vec<OrganismIntent> {
         let occupancy = &self.occupancy;
+        let pending_actions = &self.pending_actions;
         let action_selection = ActionSelectionPolicy {
             temperature: self.config.action_temperature,
             argmax_margin: self.config.action_selection_margin,
         };
         let sim_seed = self.seed;
         let tick = self.turn;
-
-        let mut intents = Vec::with_capacity(snapshot.organism_count);
-        let mut scratch = BrainScratch::new();
-        for idx in 0..snapshot.organism_count {
-            let pending_action = self.pending_actions[idx];
-            intents.push(build_intent_for_organism(
-                idx,
-                &mut self.organisms[idx],
-                pending_action,
-                snapshot.world_width,
-                occupancy,
-                snapshot.organism_states[idx],
-                snapshot.organism_ids[idx],
-                sim_seed,
-                tick,
-                action_selection,
-                &mut scratch,
-            ));
-        }
+        #[cfg(feature = "profiling")]
+        let brain_eval_started = Instant::now();
+        let intents = self
+            .organisms
+            .par_iter_mut()
+            .enumerate()
+            .map_init(BrainScratch::new, |scratch, (idx, organism)| {
+                build_intent_for_organism(
+                    idx,
+                    organism,
+                    pending_actions[idx],
+                    snapshot.world_width,
+                    occupancy,
+                    snapshot.organism_states[idx],
+                    snapshot.organism_ids[idx],
+                    sim_seed,
+                    tick,
+                    action_selection,
+                    scratch,
+                )
+            })
+            .collect();
+        #[cfg(feature = "profiling")]
+        profiling::record_brain_eval_total(brain_eval_started.elapsed());
         intents
     }
 
     fn apply_post_commit_runtime_weight_updates(&mut self) {
         let food_energy = self.config.food_energy;
-        for organism in &mut self.organisms {
-            let passive_energy_baseline =
-                organism_metabolism_energy_cost_from_food_energy(food_energy, organism);
+        if self
+            .organisms
+            .iter()
+            .all(|organism| organism.genome.hebb_eta_gain <= 0.0)
+        {
             #[cfg(feature = "profiling")]
             let plasticity_started = Instant::now();
-            apply_runtime_weight_updates(organism, passive_energy_baseline);
+            for organism in &mut self.organisms {
+                let passive_energy_baseline =
+                    organism_metabolism_energy_cost_from_food_energy(food_energy, organism);
+                let energy_delta = organism.energy - organism.energy_prev;
+                let corrected_energy_delta = energy_delta + passive_energy_baseline.max(0.0);
+                organism.dopamine = (corrected_energy_delta / 10.0).tanh();
+                organism.energy_prev = organism.energy;
+            }
             #[cfg(feature = "profiling")]
             profiling::record_brain_plasticity_total(plasticity_started.elapsed());
+            return;
         }
+
+        #[cfg(feature = "profiling")]
+        let plasticity_started = Instant::now();
+        self.organisms.par_iter_mut().for_each(|organism| {
+            let passive_energy_baseline =
+                organism_metabolism_energy_cost_from_food_energy(food_energy, organism);
+            apply_runtime_weight_updates(organism, passive_energy_baseline);
+        });
+        #[cfg(feature = "profiling")]
+        profiling::record_brain_plasticity_total(plasticity_started.elapsed());
     }
 
     fn resolve_moves(
@@ -767,26 +792,17 @@ fn build_intent_for_organism(
     }
 
     let vision_distance = organism.genome.vision_distance;
-    let mut action_rng = ChaCha8Rng::seed_from_u64(action_rng_seed(sim_seed, tick, organism_id));
-    #[cfg(feature = "profiling")]
-    let brain_eval_started = Instant::now();
+    let action_sample = deterministic_action_sample(sim_seed, tick, organism_id);
     let evaluation = evaluate_brain(
         organism,
         world_width,
         occupancy,
         vision_distance,
         action_selection,
-        &mut action_rng,
+        action_sample,
         scratch,
     );
-    #[cfg(feature = "profiling")]
-    profiling::record_brain_eval_total(brain_eval_started.elapsed());
-
-    #[cfg(feature = "profiling")]
-    let plasticity_started = Instant::now();
     update_runtime_eligibility_traces(organism, scratch);
-    #[cfg(feature = "profiling")]
-    profiling::record_brain_plasticity_total(plasticity_started.elapsed());
 
     let selected_action = evaluation.resolved_actions.selected_action;
     let selected_action_activation = evaluation.action_activations[action_index(selected_action)];
@@ -885,6 +901,11 @@ fn action_rng_seed(sim_seed: u64, tick: u64, organism_id: OrganismId) -> u64 {
     let mixed =
         sim_seed ^ tick.wrapping_mul(RNG_TURN_MIX) ^ organism_id.0.wrapping_mul(RNG_ORGANISM_MIX);
     mix_u64(mixed)
+}
+
+fn deterministic_action_sample(sim_seed: u64, tick: u64, organism_id: OrganismId) -> f32 {
+    let sample = (action_rng_seed(sim_seed, tick, organism_id) >> 40) as u32;
+    sample as f32 / ((1_u32 << 24) - 1) as f32
 }
 
 fn jittered_plant_biomass_depletion(

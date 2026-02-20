@@ -220,10 +220,10 @@ fn print_report(args: Args, snapshot: &ProfilingSnapshot, wall_elapsed: Duration
         "{:<28} {:>12} {:>10} {:>14} {:>10}",
         "stage", "total_ms", "%brain", "avg_us/call", "calls"
     );
-    let brain_total_ns = snapshot
-        .brain_eval_total
-        .total_ns
-        .saturating_add(snapshot.brain_plasticity_total.total_ns)
+    let brain_total_ns = brain_rows
+        .iter()
+        .map(|(_, counter)| counter.total_ns)
+        .sum::<u64>()
         .max(1);
     for (label, counter) in brain_rows {
         println!(
