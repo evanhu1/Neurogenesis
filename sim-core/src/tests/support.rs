@@ -262,15 +262,6 @@ pub(super) fn make_organism(
     }
 }
 
-pub(super) fn make_food(id: u64, q: i32, r: i32, energy: impl IntoEnergy) -> FoodState {
-    FoodState {
-        id: FoodId(id),
-        q,
-        r,
-        energy: energy.into_energy(),
-    }
-}
-
 pub(super) fn enable_reproduce_action(organism: &mut OrganismState) {
     let inter_id = organism.brain.inter[0].neuron.neuron_id;
     let reproduce_action_id =

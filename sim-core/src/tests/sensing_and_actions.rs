@@ -381,3 +381,65 @@ fn runtime_plasticity_updates_weights_and_preserves_sign() {
     assert_ne!(before, after);
     assert!(after > 0.0);
 }
+
+#[test]
+fn energy_sensor_clamps_and_scales_with_starting_energy() {
+    let mut genome = test_genome();
+    genome.starting_energy = 250.0;
+
+    let energy_id = SENSORY_COUNT - 1;
+    let sensory = vec![make_sensory_neuron(
+        energy_id,
+        SensoryReceptor::Energy,
+        loc(1.0, 1.0),
+    )];
+    let action: Vec<_> = ActionType::ALL
+        .into_iter()
+        .enumerate()
+        .map(|(idx, action_type)| {
+            make_action_neuron(
+                2000 + idx as u32,
+                action_type,
+                0.0,
+                loc(2.0, 1.0 + idx as f32),
+            )
+        })
+        .collect();
+    let brain = BrainState {
+        sensory,
+        inter: vec![],
+        action,
+        synapse_count: 0,
+    };
+
+    let mut organism = OrganismState {
+        id: OrganismId(0),
+        species_id: SpeciesId(0),
+        q: 0,
+        r: 0,
+        age_turns: 0,
+        facing: FacingDirection::East,
+        energy: 250.0,
+        energy_prev: 250.0,
+        consumptions_count: 0,
+        reproductions_count: 0,
+        brain,
+        genome,
+    };
+
+    let occupancy = vec![None; 9];
+    let mut scratch = BrainScratch::new();
+    let vision_distance = organism.genome.vision_distance;
+
+    let _ = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
+    assert_eq!(organism.brain.sensory[0].neuron.activation, 1.0);
+
+    organism.energy = 1_000_000.0;
+    let _ = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
+    assert_eq!(organism.brain.sensory[0].neuron.activation, 1.0);
+
+    organism.energy = 20.0;
+    let _ = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
+    let expected = (1.0 + organism.energy).ln() / (1.0 + organism.genome.starting_energy).ln();
+    assert!((organism.brain.sensory[0].neuron.activation - expected).abs() < 1e-6);
+}

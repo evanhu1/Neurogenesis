@@ -23,6 +23,7 @@ const HEBB_WEIGHT_CLAMP_ENABLED: bool = true;
 const DOPAMINE_ENERGY_DELTA_SCALE: f32 = 10.0;
 const PLASTIC_WEIGHT_DECAY: f32 = 0.001;
 const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
+const MIN_ENERGY_SENSOR_SCALE: f32 = 1.0;
 const LOOK_TARGETS: [EntityType; 3] = [EntityType::Food, EntityType::Organism, EntityType::Wall];
 const LOOK_RAY_COUNT: usize = SensoryReceptor::LOOK_RAY_OFFSETS.len();
 pub(crate) const SENSORY_COUNT: u32 = SensoryReceptor::LOOK_NEURON_COUNT + 1;
@@ -295,6 +296,11 @@ pub(crate) fn evaluate_brain(
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::ScanAhead, stage_started.elapsed());
 
+    let energy_signal = energy_sensor_value(
+        organism.energy,
+        organism.genome.starting_energy.max(MIN_ENERGY_SENSOR_SCALE),
+    );
+
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     for sensory in &mut organism.brain.sensory {
@@ -303,7 +309,7 @@ pub(crate) fn evaluate_brain(
                 ray_offset,
                 look_target,
             } => look_ray_signal(&ray_scans, *ray_offset, *look_target),
-            SensoryReceptor::Energy => energy_sensor_value(organism.energy),
+            SensoryReceptor::Energy => energy_signal,
         };
     }
     #[cfg(feature = "profiling")]
@@ -704,9 +710,9 @@ fn accumulate_weighted_inputs(
 
 /// Normalizes energy to a [0, 1] range using a logarithmic curve.
 /// Uses ln(1 + energy) / ln(1 + scale) where scale controls the saturation point.
-fn energy_sensor_value(energy: f32) -> f32 {
-    const ENERGY_SCALE: f32 = 100.0;
-    (1.0 + energy.max(0.0)).ln() / (1.0 + ENERGY_SCALE).ln()
+fn energy_sensor_value(energy: f32, scale: f32) -> f32 {
+    let normalized = (1.0 + energy.max(0.0)).ln() / (1.0 + scale.max(MIN_ENERGY_SENSOR_SCALE)).ln();
+    normalized.clamp(0.0, 1.0)
 }
 
 pub(crate) struct ScanResult {
