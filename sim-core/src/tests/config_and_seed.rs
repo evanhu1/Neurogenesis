@@ -437,6 +437,70 @@ fn genome_distance_captures_geometry_and_synapse_traits() {
 }
 
 #[test]
+fn global_mutation_rate_modifier_does_not_change_inherited_mutation_rate_genes() {
+    let mut genome_a = test_genome();
+
+    genome_a.mutation_rate_age_of_maturity = 0.17;
+    genome_a.mutation_rate_vision_distance = 0.13;
+    genome_a.mutation_rate_inter_bias = 0.09;
+    genome_a.mutation_rate_inter_update_rate = 0.11;
+    genome_a.mutation_rate_action_bias = 0.07;
+    genome_a.mutation_rate_eligibility_retention = 0.05;
+    genome_a.mutation_rate_synapse_prune_threshold = 0.03;
+    genome_a.mutation_rate_neuron_location = 0.19;
+    genome_a.mutation_rate_synapse_weight_perturbation = 0.23;
+    genome_a.mutation_rate_add_neuron_split_edge = 0.29;
+    let mut genome_b = genome_a.clone();
+
+    let mut rng_a = ChaCha8Rng::seed_from_u64(404);
+    let mut rng_b = ChaCha8Rng::seed_from_u64(404);
+
+    crate::genome::mutate_genome(&mut genome_a, 1.0, &mut rng_a);
+    crate::genome::mutate_genome(&mut genome_b, 10.0, &mut rng_b);
+
+    assert_eq!(
+        genome_a.mutation_rate_age_of_maturity,
+        genome_b.mutation_rate_age_of_maturity
+    );
+    assert_eq!(
+        genome_a.mutation_rate_vision_distance,
+        genome_b.mutation_rate_vision_distance
+    );
+    assert_eq!(
+        genome_a.mutation_rate_inter_bias,
+        genome_b.mutation_rate_inter_bias
+    );
+    assert_eq!(
+        genome_a.mutation_rate_inter_update_rate,
+        genome_b.mutation_rate_inter_update_rate
+    );
+    assert_eq!(
+        genome_a.mutation_rate_action_bias,
+        genome_b.mutation_rate_action_bias
+    );
+    assert_eq!(
+        genome_a.mutation_rate_eligibility_retention,
+        genome_b.mutation_rate_eligibility_retention
+    );
+    assert_eq!(
+        genome_a.mutation_rate_synapse_prune_threshold,
+        genome_b.mutation_rate_synapse_prune_threshold
+    );
+    assert_eq!(
+        genome_a.mutation_rate_neuron_location,
+        genome_b.mutation_rate_neuron_location
+    );
+    assert_eq!(
+        genome_a.mutation_rate_synapse_weight_perturbation,
+        genome_b.mutation_rate_synapse_weight_perturbation
+    );
+    assert_eq!(
+        genome_a.mutation_rate_add_neuron_split_edge,
+        genome_b.mutation_rate_add_neuron_split_edge
+    );
+}
+
+#[test]
 fn config_validation_rejects_invalid_terrain_threshold() {
     let mut cfg = stable_test_config();
     cfg.terrain_threshold = 1.5;

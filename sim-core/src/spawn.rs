@@ -13,6 +13,7 @@ const DEFAULT_TERRAIN_THRESHOLD: f64 = 0.86;
 const MAX_BIOMASS_PER_TILE: f32 = 1.0;
 const BIOMASS_SPAWN_THRESHOLD: f32 = 1.0;
 const BLOCKED_BIOMASS_DECAY_PER_TICK: f32 = 0.0;
+const SEASONAL_TRANSLATION_PERIOD_TURNS: u64 = 2048;
 
 #[derive(Clone)]
 pub(crate) struct ReproductionSpawn {
@@ -301,7 +302,13 @@ impl Simulation {
     }
 
     fn fertility_value(&self, tile_idx: usize) -> f32 {
-        self.food_fertility[tile_idx] as f32 / u16::MAX as f32
+        self.seasonal_fertility(tile_idx, self.turn)
+    }
+
+    fn seasonal_fertility(&self, tile_idx: usize, turn: u64) -> f32 {
+        let width = self.config.world_width as usize;
+        let translated_idx = seasonal_translated_tile_idx(width, tile_idx, turn);
+        self.food_fertility[translated_idx] as f32 / u16::MAX as f32
     }
 
     fn empty_positions(&self) -> Vec<(i32, i32)> {
@@ -438,4 +445,17 @@ fn fade(t: f64) -> f64 {
 
 fn lerp(a: f64, b: f64, t: f64) -> f64 {
     a + t * (b - a)
+}
+
+fn seasonal_translated_tile_idx(world_width: usize, tile_idx: usize, turn: u64) -> usize {
+    let q = tile_idx % world_width;
+    let r = tile_idx / world_width;
+    let phase = turn % SEASONAL_TRANSLATION_PERIOD_TURNS;
+    let phase_r =
+        (phase + (SEASONAL_TRANSLATION_PERIOD_TURNS / 3)) % SEASONAL_TRANSLATION_PERIOD_TURNS;
+    let shift_q = (phase as usize * world_width) / SEASONAL_TRANSLATION_PERIOD_TURNS as usize;
+    let shift_r = (phase_r as usize * world_width) / SEASONAL_TRANSLATION_PERIOD_TURNS as usize;
+    let src_q = (q + shift_q) % world_width;
+    let src_r = (r + shift_r) % world_width;
+    src_r * world_width + src_q
 }

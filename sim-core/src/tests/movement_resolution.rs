@@ -299,6 +299,78 @@ fn dopamine_becomes_positive_after_food_consumption() {
 }
 
 #[test]
+fn plant_consumption_biomass_depletion_has_deterministic_jitter() {
+    let cfg = test_config(6, 1);
+    let mut sim_a = Simulation::new(cfg.clone(), 701).expect("simulation should initialize");
+    let mut sim_b = Simulation::new(cfg.clone(), 702).expect("simulation should initialize");
+    let mut sim_c = Simulation::new(cfg, 701).expect("simulation should initialize");
+
+    let setup = |sim: &mut Simulation| {
+        configure_sim(
+            sim,
+            vec![make_organism(
+                0,
+                1,
+                1,
+                FacingDirection::East,
+                true,
+                false,
+                false,
+                0.95,
+                100.0,
+            )],
+        );
+
+        let food_id = FoodId(0);
+        sim.foods.push(sim_types::FoodState {
+            id: food_id,
+            q: 2,
+            r: 1,
+            energy: 5.0,
+        });
+        let food_idx = sim.cell_index(2, 1);
+        sim.occupancy[food_idx] = Some(Occupant::Food(food_id));
+        sim.next_food_id = 1;
+
+        let capacity = crate::grid::world_capacity(sim.config.world_width);
+        sim.food_fertility = vec![0; capacity];
+        sim.biomass = vec![0.0; capacity];
+        sim.biomass[food_idx] = 1.0;
+    };
+    setup(&mut sim_a);
+    setup(&mut sim_b);
+    setup(&mut sim_c);
+
+    let _ = tick_once(&mut sim_a);
+    let _ = tick_once(&mut sim_b);
+    let _ = tick_once(&mut sim_c);
+
+    let biomass_idx_a = sim_a.cell_index(2, 1);
+    let biomass_idx_b = sim_b.cell_index(2, 1);
+    let biomass_idx_c = sim_c.cell_index(2, 1);
+    let biomass_a = sim_a.biomass[biomass_idx_a];
+    let biomass_b = sim_b.biomass[biomass_idx_b];
+    let biomass_c = sim_c.biomass[biomass_idx_c];
+
+    assert!(
+        (0.0625..=0.4375).contains(&biomass_a),
+        "jittered biomass depletion should leave expected residue, got {biomass_a}",
+    );
+    assert!(
+        (0.0625..=0.4375).contains(&biomass_b),
+        "jittered biomass depletion should leave expected residue, got {biomass_b}",
+    );
+    assert!(
+        (biomass_a - biomass_c).abs() < 1.0e-6,
+        "same seed/setup should produce identical jittered depletion: {biomass_a} vs {biomass_c}",
+    );
+    assert!(
+        (biomass_a - biomass_b).abs() > 1.0e-6,
+        "different seeds should produce different jittered depletion: {biomass_a} vs {biomass_b}",
+    );
+}
+
+#[test]
 fn dopamine_becomes_negative_when_other_organism_bites_prey() {
     let cfg = test_config(6, 2);
     let mut sim = Simulation::new(cfg, 303).expect("simulation should initialize");

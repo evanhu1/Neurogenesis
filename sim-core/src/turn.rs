@@ -21,6 +21,9 @@ use std::time::Instant;
 const FOOD_ENERGY_METABOLISM_DIVISOR: f32 = 1000.0;
 const RNG_TURN_MIX: u64 = 0x9E37_79B9_7F4A_7C15;
 const RNG_ORGANISM_MIX: u64 = 0xBF58_476D_1CE4_E5B9;
+const RNG_FOOD_MIX: u64 = 0x94D0_49BB_1331_11EB;
+const PLANT_BIOMASS_DEPLETION_BASE: f32 = 0.75;
+const PLANT_BIOMASS_DEPLETION_JITTER_FRACTION: f32 = 0.25;
 
 #[derive(Clone, Copy)]
 struct SnapshotOrganismState {
@@ -391,6 +394,15 @@ impl Simulation {
                         r: food.r,
                     });
                     self.organisms[resolution.actor_idx].energy += food.energy;
+                    if let Some(tile_biomass) = self.biomass.get_mut(to_idx) {
+                        let depletion = jittered_plant_biomass_depletion(
+                            self.seed,
+                            self.turn,
+                            resolution.actor_id,
+                            food_id.0,
+                        );
+                        *tile_biomass = (*tile_biomass - depletion).max(0.0);
+                    }
                     self.organisms[resolution.actor_idx].consumptions_count = self.organisms
                         [resolution.actor_idx]
                         .consumptions_count
@@ -789,6 +801,22 @@ fn action_rng_seed(sim_seed: u64, tick: u64, organism_id: OrganismId) -> u64 {
     let mixed =
         sim_seed ^ tick.wrapping_mul(RNG_TURN_MIX) ^ organism_id.0.wrapping_mul(RNG_ORGANISM_MIX);
     mix_u64(mixed)
+}
+
+fn jittered_plant_biomass_depletion(
+    sim_seed: u64,
+    tick: u64,
+    organism_id: OrganismId,
+    food_id: u64,
+) -> f32 {
+    let mixed = sim_seed
+        ^ tick.wrapping_mul(RNG_TURN_MIX)
+        ^ organism_id.0.wrapping_mul(RNG_ORGANISM_MIX)
+        ^ food_id.wrapping_mul(RNG_FOOD_MIX);
+    let sample = (mix_u64(mixed) >> 40) as u32;
+    let unit = sample as f32 / ((1_u32 << 24) - 1) as f32;
+    let signed_jitter = (unit * 2.0 - 1.0) * PLANT_BIOMASS_DEPLETION_JITTER_FRACTION;
+    PLANT_BIOMASS_DEPLETION_BASE * (1.0 + signed_jitter)
 }
 
 fn mix_u64(mut value: u64) -> u64 {
