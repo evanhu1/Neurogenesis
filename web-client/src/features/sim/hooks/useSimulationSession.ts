@@ -113,6 +113,7 @@ function syncFocusedOrganismFromWorld(
     species_id: worldOrganism.species_id,
     q: worldOrganism.q,
     r: worldOrganism.r,
+    generation: worldOrganism.generation,
     age_turns: worldOrganism.age_turns,
     facing: worldOrganism.facing,
     energy: worldOrganism.energy,

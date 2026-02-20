@@ -19,7 +19,14 @@ const SEASONAL_TRANSLATION_PERIOD_TURNS: u64 = 2048;
 pub(crate) struct ReproductionSpawn {
     pub(crate) parent_genome: OrganismGenome,
     pub(crate) parent_species_id: SpeciesId,
+    pub(crate) parent_generation: u64,
     pub(crate) parent_facing: FacingDirection,
+    pub(crate) q: i32,
+    pub(crate) r: i32,
+}
+
+#[derive(Clone)]
+pub(crate) struct PeriodicInjectionSpawn {
     pub(crate) q: i32,
     pub(crate) r: i32,
 }
@@ -27,11 +34,27 @@ pub(crate) struct ReproductionSpawn {
 #[derive(Clone)]
 pub(crate) enum SpawnRequestKind {
     Reproduction(ReproductionSpawn),
+    PeriodicInjection(PeriodicInjectionSpawn),
 }
 
 #[derive(Clone)]
 pub(crate) struct SpawnRequest {
     pub(crate) kind: SpawnRequestKind,
+}
+
+impl SpawnRequest {
+    fn target_position(&self) -> (i32, i32) {
+        self.kind.target_position()
+    }
+}
+
+impl SpawnRequestKind {
+    fn target_position(&self) -> (i32, i32) {
+        match self {
+            Self::Reproduction(spawn) => (spawn.q, spawn.r),
+            Self::PeriodicInjection(spawn) => (spawn.q, spawn.r),
+        }
+    }
 }
 
 impl Simulation {
@@ -62,6 +85,11 @@ impl Simulation {
                             id
                         }
                     };
+                    let generation = if child_species_id == reproduction.parent_species_id {
+                        reproduction.parent_generation.saturating_add(1)
+                    } else {
+                        0
+                    };
 
                     let brain = express_genome(&child_genome, &mut self.rng);
                     OrganismState {
@@ -69,6 +97,7 @@ impl Simulation {
                         species_id: child_species_id,
                         q: reproduction.q,
                         r: reproduction.r,
+                        generation,
                         age_turns: 0,
                         facing: opposite_direction(reproduction.parent_facing),
                         energy: child_genome.starting_energy,
@@ -80,6 +109,29 @@ impl Simulation {
                         genome: child_genome,
                     }
                 }
+                SpawnRequestKind::PeriodicInjection(injection) => {
+                    let genome =
+                        generate_seed_genome(&self.config.seed_genome_config, &mut self.rng);
+                    let species_id = self.alloc_species_id();
+                    self.species_registry.insert(species_id, genome.clone());
+                    let brain = express_genome(&genome, &mut self.rng);
+                    OrganismState {
+                        id: self.alloc_organism_id(),
+                        species_id,
+                        q: injection.q,
+                        r: injection.r,
+                        generation: 0,
+                        age_turns: 0,
+                        facing: self.random_facing(),
+                        energy: genome.starting_energy,
+                        energy_prev: genome.starting_energy,
+                        dopamine: 0.0,
+                        consumptions_count: 0,
+                        reproductions_count: 0,
+                        brain,
+                        genome,
+                    }
+                }
             };
 
             if self.add_organism(organism.clone()) {
@@ -88,6 +140,43 @@ impl Simulation {
         }
 
         spawned
+    }
+
+    pub(crate) fn enqueue_periodic_injections(&mut self, queue: &mut Vec<SpawnRequest>) {
+        let interval = self.config.periodic_injection_interval_turns as u64;
+        let count = self.config.periodic_injection_count as usize;
+        if interval == 0 || count == 0 {
+            return;
+        }
+
+        let next_turn = self.turn.saturating_add(1);
+        if next_turn % interval != 0 {
+            return;
+        }
+
+        let width = self.config.world_width as usize;
+        let mut reserved = vec![false; self.occupancy.len()];
+        for request in queue.iter() {
+            let (q, r) = request.target_position();
+            let idx = r as usize * width + q as usize;
+            reserved[idx] = true;
+        }
+
+        let mut open_positions = Vec::new();
+        for (idx, occupant) in self.occupancy.iter().enumerate() {
+            if occupant.is_none() && !reserved[idx] {
+                let q = (idx % width) as i32;
+                let r = (idx / width) as i32;
+                open_positions.push((q, r));
+            }
+        }
+        open_positions.shuffle(&mut self.rng);
+
+        for (q, r) in open_positions.into_iter().take(count) {
+            queue.push(SpawnRequest {
+                kind: SpawnRequestKind::PeriodicInjection(PeriodicInjectionSpawn { q, r }),
+            });
+        }
     }
 
     pub(crate) fn spawn_initial_population(&mut self) {
@@ -116,6 +205,7 @@ impl Simulation {
                 species_id,
                 q,
                 r,
+                generation: 0,
                 age_turns: 0,
                 facing,
                 energy: genome.starting_energy,

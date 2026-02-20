@@ -36,6 +36,7 @@ fn spawn_queue_order_is_deterministic_under_limited_space() {
         .find(|organism| organism.id == OrganismId(3))
         .expect("first spawn request should consume final empty slot");
     assert_eq!((child.q, child.r), (1, 1));
+    assert_eq!(child.generation, 1);
 }
 
 #[test]
@@ -168,6 +169,7 @@ fn reproduction_can_create_new_species_via_genome_distance() {
     assert_eq!(third.spawned.len(), 1);
     // With threshold=0.001 and high mutation pressure, child should be a new species
     assert_ne!(third.spawned[0].species_id, SpeciesId(0));
+    assert_eq!(third.spawned[0].generation, 0);
     assert!(sim.species_registry.len() >= 2);
 }
 
@@ -214,6 +216,7 @@ fn reproduction_commit_locks_parent_for_two_turns_before_spawn() {
         1,
         "spawn should complete on lock expiry"
     );
+    assert_eq!(third.spawned[0].generation, 1);
     assert_eq!(
         sim.organisms[0].reproductions_count, 1,
         "locked parent should not re-trigger reproduction before release",

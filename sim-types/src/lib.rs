@@ -193,6 +193,10 @@ pub struct WorldConfig {
     pub world_width: u32,
     pub steps_per_second: u32,
     pub num_organisms: u32,
+    #[serde(default = "default_periodic_injection_interval_turns")]
+    pub periodic_injection_interval_turns: u32,
+    #[serde(default = "default_periodic_injection_count")]
+    pub periodic_injection_count: u32,
     pub food_energy: f32,
     pub move_action_energy_cost: f32,
     #[serde(default = "default_action_temperature")]
@@ -224,6 +228,10 @@ struct WorldConfigDeserialize {
     world_width: u32,
     steps_per_second: u32,
     num_organisms: u32,
+    #[serde(default = "default_periodic_injection_interval_turns")]
+    periodic_injection_interval_turns: u32,
+    #[serde(default = "default_periodic_injection_count")]
+    periodic_injection_count: u32,
     food_energy: f32,
     move_action_energy_cost: f32,
     #[serde(default = "default_action_temperature")]
@@ -268,6 +276,8 @@ impl<'de> Deserialize<'de> for WorldConfig {
             world_width: raw.world_width,
             steps_per_second: raw.steps_per_second,
             num_organisms: raw.num_organisms,
+            periodic_injection_interval_turns: raw.periodic_injection_interval_turns,
+            periodic_injection_count: raw.periodic_injection_count,
             food_energy: raw.food_energy,
             move_action_energy_cost: raw.move_action_energy_cost,
             action_temperature: raw.action_temperature,
@@ -366,6 +376,14 @@ fn default_food_regrowth_interval() -> u32 {
     10
 }
 
+fn default_periodic_injection_interval_turns() -> u32 {
+    100
+}
+
+fn default_periodic_injection_count() -> u32 {
+    100
+}
+
 fn default_food_fertility_noise_scale() -> f32 {
     0.045
 }
@@ -446,6 +464,8 @@ pub struct OrganismState {
     pub species_id: SpeciesId,
     pub q: i32,
     pub r: i32,
+    #[serde(default)]
+    pub generation: u64,
     pub age_turns: u64,
     pub facing: FacingDirection,
     pub energy: f32,

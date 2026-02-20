@@ -269,6 +269,8 @@ fn stable_perf_config() -> WorldConfig {
         world_width: 100,
         steps_per_second: 5,
         num_organisms: 2_000,
+        periodic_injection_interval_turns: 0,
+        periodic_injection_count: 0,
         food_energy: 50.0,
         move_action_energy_cost: 0.0,
         action_temperature: 0.5,

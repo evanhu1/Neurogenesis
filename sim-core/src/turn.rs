@@ -158,6 +158,7 @@ impl Simulation {
 
         #[cfg(feature = "profiling")]
         let phase_started = Instant::now();
+        self.enqueue_periodic_injections(&mut spawn_requests);
         let spawned = self.resolve_spawn_requests(&spawn_requests);
         #[cfg(feature = "profiling")]
         profiling::record_turn_phase(TurnPhase::Spawn, phase_started.elapsed());
@@ -634,6 +635,7 @@ impl Simulation {
                         kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
                             parent_genome: parent.genome.clone(),
                             parent_species_id: parent.species_id,
+                            parent_generation: parent.generation,
                             parent_facing: parent.facing,
                             q,
                             r,

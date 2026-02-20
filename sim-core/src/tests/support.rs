@@ -67,6 +67,8 @@ pub(super) fn stable_test_config() -> WorldConfig {
         world_width: 10,
         steps_per_second: 5,
         num_organisms: 10,
+        periodic_injection_interval_turns: 0,
+        periodic_injection_count: 0,
         food_energy: 50.0,
         move_action_energy_cost: 1.0,
         action_temperature: 0.5,
@@ -247,6 +249,7 @@ pub(super) fn make_organism(
         species_id: SpeciesId(0),
         q,
         r,
+        generation: 0,
         age_turns: 0,
         facing,
         energy: initial_energy,
@@ -323,6 +326,7 @@ pub(super) fn reproduction_request_from_parent(
         kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
             parent_genome: parent.genome.clone(),
             parent_species_id: parent.species_id,
+            parent_generation: parent.generation,
             parent_facing: parent.facing,
             q,
             r,
@@ -345,6 +349,7 @@ pub(super) fn reproduction_request_at(
         kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
             parent_genome: parent.genome.clone(),
             parent_species_id: parent.species_id,
+            parent_generation: parent.generation,
             parent_facing: parent.facing,
             q,
             r,
@@ -354,6 +359,20 @@ pub(super) fn reproduction_request_at(
 
 pub(super) fn configure_sim(sim: &mut Simulation, mut organisms: Vec<OrganismState>) {
     organisms.sort_by_key(|organism| organism.id);
+    sim.species_registry.clear();
+    let mut max_species_id = None;
+    for organism in &organisms {
+        sim.species_registry
+            .entry(organism.species_id)
+            .or_insert_with(|| organism.genome.clone());
+        max_species_id = Some(
+            max_species_id.map_or(organism.species_id.0, |current: u32| {
+                current.max(organism.species_id.0)
+            }),
+        );
+    }
+    sim.next_species_id = max_species_id.map_or(0, |max_id| max_id.saturating_add(1));
+
     sim.organisms = organisms;
     sim.pending_actions = vec![PendingActionState::default(); sim.organisms.len()];
     sim.foods.clear();

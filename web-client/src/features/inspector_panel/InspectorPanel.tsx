@@ -138,6 +138,7 @@ export function InspectorPanel({
       coreStats: [
         { label: 'Organism ID', value: String(unwrapId(focusedOrganism.id)) },
         { label: 'Species ID', value: String(unwrapId(focusedOrganism.species_id)) },
+        { label: 'Generation', value: String(focusedOrganism.generation) },
         { label: 'Position', value: `(${focusedOrganism.q}, ${focusedOrganism.r})` },
         { label: 'Facing', value: focusedOrganism.facing },
         { label: 'Age (turns)', value: String(focusedOrganism.age_turns) },

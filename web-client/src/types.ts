@@ -28,6 +28,8 @@ export type WorldConfig = {
   world_width: number;
   steps_per_second: number;
   num_organisms: number;
+  periodic_injection_interval_turns: number;
+  periodic_injection_count: number;
   food_energy: number;
   move_action_energy_cost: number;
   action_temperature: number;
@@ -143,6 +145,7 @@ export type OrganismState = {
   species_id: SpeciesId;
   q: number;
   r: number;
+  generation: number;
   age_turns: number;
   facing: FacingDirection;
   energy: number;
@@ -159,6 +162,7 @@ export type WorldOrganismState = {
   species_id: SpeciesId;
   q: number;
   r: number;
+  generation: number;
   age_turns: number;
   facing: FacingDirection;
   energy: number;
