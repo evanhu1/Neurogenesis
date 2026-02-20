@@ -1,7 +1,5 @@
 use crate::brain::express_genome;
-use crate::genome::{
-    generate_seed_genome, genome_distance, mutate_genome, prune_disconnected_inter_neurons,
-};
+use crate::genome::{generate_seed_genome, genome_distance, mutate_genome};
 use crate::grid::{opposite_direction, world_capacity};
 use crate::Simulation;
 use rand::seq::SliceRandom;
@@ -50,7 +48,6 @@ impl Simulation {
                 SpawnRequestKind::Reproduction(reproduction) => {
                     let mut child_genome = reproduction.parent_genome.clone();
                     mutate_genome(&mut child_genome, &mut self.rng);
-                    prune_disconnected_inter_neurons(&mut child_genome);
 
                     let threshold = self.config.speciation_threshold;
                     let child_species_id = {
@@ -78,6 +75,7 @@ impl Simulation {
                         facing: opposite_direction(reproduction.parent_facing),
                         energy: child_genome.starting_energy,
                         energy_prev: child_genome.starting_energy,
+                        dopamine: 0.0,
                         consumptions_count: 0,
                         reproductions_count: 0,
                         brain,
@@ -124,6 +122,7 @@ impl Simulation {
                 facing,
                 energy: genome.starting_energy,
                 energy_prev: genome.starting_energy,
+                dopamine: 0.0,
                 consumptions_count: 0,
                 reproductions_count: 0,
                 brain,

@@ -425,11 +425,6 @@ fn validate_world_config(config: &WorldConfig) -> Result<(), SimError> {
             "food_energy must be greater than zero".to_owned(),
         ));
     }
-    if config.reproduction_energy_cost < 0.0 {
-        return Err(SimError::InvalidConfig(
-            "reproduction_energy_cost must be >= 0".to_owned(),
-        ));
-    }
     if config.move_action_energy_cost < 0.0 {
         return Err(SimError::InvalidConfig(
             "move_action_energy_cost must be >= 0".to_owned(),

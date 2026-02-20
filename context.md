@@ -46,7 +46,7 @@ use crate::genome::{
     inter_alpha_from_log_tau, BRAIN_SPACE_MAX, BRAIN_SPACE_MIN, DEFAULT_INTER_LOG_TAU,
     SYNAPSE_STRENGTH_MAX, SYNAPSE_STRENGTH_MIN,
 };
-use crate::grid::hex_neighbor;
+use crate::grid::{hex_neighbor, rotate_left, rotate_right};
 #[cfg(feature = "profiling")]
 use crate::profiling::{self, BrainStage};
 use rand::Rng;
@@ -62,40 +62,33 @@ fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
 }
 
-const ACTION_ACTIVATION_THRESHOLD: f32 = 0.5;
-const TURN_ACTION_DEADZONE: f32 = 0.3;
 const DEFAULT_BIAS: f32 = 0.0;
 const HEBB_WEIGHT_CLAMP_ENABLED: bool = true;
+const DOPAMINE_ENERGY_DELTA_SCALE: f32 = 10.0;
+const PLASTIC_WEIGHT_DECAY: f32 = 0.001;
 const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
-const SYNAPSE_WEIGHT_LOG_NORMAL_MU: f32 = -0.5;
-const SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA: f32 = 0.8;
-const SPATIAL_PRIOR_LONG_RANGE_FLOOR: f32 = 0.01;
+const MIN_ENERGY_SENSOR_SCALE: f32 = 1.0;
+const ENERGY_SENSOR_CURVE_EXPONENT: f32 = 2.0;
+const LOOK_TARGETS: [EntityType; 3] = [EntityType::Food, EntityType::Organism, EntityType::Wall];
+const LOOK_RAY_COUNT: usize = SensoryReceptor::LOOK_RAY_OFFSETS.len();
 pub(crate) const SENSORY_COUNT: u32 = SensoryReceptor::LOOK_NEURON_COUNT + 1;
+pub(crate) const ENERGY_SENSORY_ID: u32 = SensoryReceptor::LOOK_NEURON_COUNT;
 pub(crate) const ACTION_COUNT: usize = ActionType::ALL.len();
 pub(crate) const ACTION_COUNT_U32: u32 = ACTION_COUNT as u32;
 pub(crate) const INTER_ID_BASE: u32 = 1000;
 pub(crate) const ACTION_ID_BASE: u32 = 2000;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum PostLayer {
-    Inter,
-    Action,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub(crate) enum TurnChoice {
-    #[default]
-    None,
-    Left,
-    Right,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ResolvedActions {
-    pub(crate) turn: TurnChoice,
-    pub(crate) wants_move: bool,
-    pub(crate) wants_consume: bool,
-    pub(crate) wants_reproduce: bool,
+    pub(crate) selected_action: ActionType,
+}
+
+impl Default for ResolvedActions {
+    fn default() -> Self {
+        Self {
+            selected_action: ActionType::Idle,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -124,29 +117,29 @@ impl BrainScratch {
     }
 }
 
-/// Build a BrainState from inherited neuron genes and spatially sampled birth synapses.
-pub(crate) fn express_genome<R: Rng + ?Sized>(genome: &OrganismGenome, rng: &mut R) -> BrainState {
-    let mut sensory = vec![
-        make_sensory_neuron(
-            0,
-            SensoryReceptor::Look {
-                look_target: EntityType::Food,
-            },
-            location_or_default(&genome.sensory_locations, 0),
-        ),
-        make_sensory_neuron(
-            1,
-            SensoryReceptor::Look {
-                look_target: EntityType::Organism,
-            },
-            location_or_default(&genome.sensory_locations, 1),
-        ),
-        make_sensory_neuron(
-            2,
-            SensoryReceptor::Energy,
-            location_or_default(&genome.sensory_locations, 2),
-        ),
-    ];
+/// Build a BrainState from inherited neuron genes and stored synapse topology.
+pub(crate) fn express_genome<R: Rng + ?Sized>(genome: &OrganismGenome, _rng: &mut R) -> BrainState {
+    let mut sensory = Vec::with_capacity(SENSORY_COUNT as usize);
+    let mut sensory_id = 0_u32;
+    for ray_offset in SensoryReceptor::LOOK_RAY_OFFSETS {
+        for look_target in LOOK_TARGETS {
+            sensory.push(make_sensory_neuron(
+                sensory_id,
+                SensoryReceptor::LookRay {
+                    ray_offset,
+                    look_target,
+                },
+                location_or_default(&genome.sensory_locations, sensory_id as usize),
+            ));
+            sensory_id = sensory_id.saturating_add(1);
+        }
+    }
+    debug_assert_eq!(sensory_id, ENERGY_SENSORY_ID);
+    sensory.push(make_sensory_neuron(
+        ENERGY_SENSORY_ID,
+        SensoryReceptor::Energy,
+        location_or_default(&genome.sensory_locations, ENERGY_SENSORY_ID as usize),
+    ));
 
     let mut inter = Vec::with_capacity(genome.num_neurons as usize);
     for i in 0..genome.num_neurons {
@@ -187,7 +180,7 @@ pub(crate) fn express_genome<R: Rng + ?Sized>(genome: &OrganismGenome, rng: &mut
         ));
     }
 
-    wire_birth_synapses_spatial(genome, &mut sensory, &mut inter, &action, rng);
+    wire_birth_synapses_from_genome(genome, &mut sensory, &mut inter);
 
     let mut brain = BrainState {
         sensory,
@@ -201,11 +194,14 @@ pub(crate) fn express_genome<R: Rng + ?Sized>(genome: &OrganismGenome, rng: &mut
 
 pub(crate) fn action_index(action: ActionType) -> usize {
     match action {
-        ActionType::MoveForward => 0,
-        ActionType::Turn => 1,
-        ActionType::Consume => 2,
-        ActionType::Reproduce => 3,
-        ActionType::Dopamine => 4,
+        ActionType::Idle => 0,
+        ActionType::TurnLeft => 1,
+        ActionType::TurnRight => 2,
+        ActionType::Forward => 3,
+        ActionType::TurnLeftForward => 4,
+        ActionType::TurnRightForward => 5,
+        ActionType::Consume => 6,
+        ActionType::Reproduce => 7,
     }
 }
 
@@ -216,155 +212,69 @@ fn location_or_default(locations: &[BrainLocation], index: usize) -> BrainLocati
     })
 }
 
-fn connection_probability(pre: &NeuronState, post: &NeuronState, sigma: f32) -> f32 {
-    let dx = pre.x - post.x;
-    let dy = pre.y - post.y;
-    let distance_sq = dx * dx + dy * dy;
-    let sigma_sq = sigma * sigma;
-    let local_bias = (-0.5 * distance_sq / sigma_sq).exp();
-    (SPATIAL_PRIOR_LONG_RANGE_FLOOR + (1.0 - SPATIAL_PRIOR_LONG_RANGE_FLOOR) * local_bias)
-        .clamp(0.0, 1.0)
-}
-
-fn weighted_without_replacement_priority<R: Rng + ?Sized>(weight: f32, rng: &mut R) -> f32 {
-    let clamped_weight = weight.max(f32::MIN_POSITIVE);
-    let u = rng.random::<f32>().max(f32::MIN_POSITIVE);
-    -u.ln() / clamped_weight
-}
-
-fn sample_signed_lognormal_weight<R: Rng + ?Sized>(required_sign: f32, rng: &mut R) -> f32 {
-    let z: f32 = rng.sample(rand_distr::StandardNormal);
-    let magnitude = (SYNAPSE_WEIGHT_LOG_NORMAL_MU + SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA * z)
-        .exp()
-        .clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX);
-    if required_sign.is_sign_negative() {
-        -magnitude
-    } else {
-        magnitude
-    }
-}
-
-fn add_synapse<R: Rng + ?Sized>(
-    pre_idx: usize,
-    post_idx: usize,
-    sensory_len: usize,
-    inter_len: usize,
-    sensory: &mut [SensoryNeuronState],
-    inter: &mut [InterNeuronState],
-    action: &[ActionNeuronState],
-    rng: &mut R,
-) {
-    let (pre_id, pre_sign) = if pre_idx < sensory_len {
-        let pre = &sensory[pre_idx].neuron;
-        (pre.neuron_id, 1.0_f32)
-    } else {
-        let inter_idx = pre_idx - sensory_len;
-        let pre = &inter[inter_idx];
-        let sign = match pre.interneuron_type {
-            InterNeuronType::Excitatory => 1.0,
-            InterNeuronType::Inhibitory => -1.0,
-        };
-        (pre.neuron.neuron_id, sign)
-    };
-
-    let post_id = if post_idx < inter_len {
-        inter[post_idx].neuron.neuron_id
-    } else {
-        action[post_idx - inter_len].neuron.neuron_id
-    };
-
-    let weight = sample_signed_lognormal_weight(pre_sign, rng);
-    let edge = SynapseEdge {
-        pre_neuron_id: pre_id,
-        post_neuron_id: post_id,
-        weight,
-        eligibility: 0.0,
-    };
-
-    if pre_idx < sensory_len {
-        sensory[pre_idx].synapses.push(edge);
-    } else {
-        inter[pre_idx - sensory_len].synapses.push(edge);
-    }
-}
-
-fn wire_birth_synapses_spatial<R: Rng + ?Sized>(
+fn wire_birth_synapses_from_genome(
     genome: &OrganismGenome,
     sensory: &mut [SensoryNeuronState],
     inter: &mut [InterNeuronState],
-    action: &[ActionNeuronState],
-    rng: &mut R,
 ) {
-    let sensory_len = sensory.len();
-    let inter_len = inter.len();
-    let action_len = action.len();
-    let pre_count = sensory_len + inter_len;
-    let post_count = inter_len + action_len;
-    if pre_count == 0 || post_count == 0 {
-        return;
-    }
+    let max_inter_id = INTER_ID_BASE + inter.len() as u32;
+    let max_action_id = ACTION_ID_BASE + ACTION_COUNT_U32;
 
-    let max_pairs = pre_count.saturating_mul(post_count);
-    let max_allowed_pairs = max_pairs.saturating_sub(inter_len);
-    let target = (genome.num_synapses as usize).min(max_allowed_pairs);
-    let sigma = genome.spatial_prior_sigma.max(0.01);
-    if target == 0 {
-        return;
-    }
-
-    let mut weighted_candidates = Vec::with_capacity(max_allowed_pairs);
-    for pre_idx in 0..pre_count {
-        let pre_neuron = if pre_idx < sensory_len {
-            &sensory[pre_idx].neuron
-        } else {
-            &inter[pre_idx - sensory_len].neuron
-        };
-
-        for post_idx in 0..post_count {
-            if pre_idx >= sensory_len && post_idx < inter_len && (pre_idx - sensory_len) == post_idx
-            {
-                continue;
-            }
-
-            let post_neuron = if post_idx < inter_len {
-                &inter[post_idx].neuron
-            } else {
-                &action[post_idx - inter_len].neuron
-            };
-            let weight = connection_probability(pre_neuron, post_neuron, sigma);
-            let priority = weighted_without_replacement_priority(weight, rng);
-            weighted_candidates.push((priority, pre_idx, post_idx));
+    for edge in &genome.edges {
+        let post_is_inter = (INTER_ID_BASE..max_inter_id).contains(&edge.post_neuron_id.0);
+        let post_is_action = (ACTION_ID_BASE..max_action_id).contains(&edge.post_neuron_id.0);
+        if !(post_is_inter || post_is_action) {
+            continue;
         }
-    }
 
-    weighted_candidates.sort_unstable_by(|a, b| {
-        a.0.total_cmp(&b.0)
-            .then_with(|| a.1.cmp(&b.1))
-            .then_with(|| a.2.cmp(&b.2))
-    });
+        if edge.pre_neuron_id.0 < SENSORY_COUNT {
+            let Some(pre) = sensory.get_mut(edge.pre_neuron_id.0 as usize) else {
+                continue;
+            };
+            pre.synapses.push(SynapseEdge {
+                pre_neuron_id: edge.pre_neuron_id,
+                post_neuron_id: edge.post_neuron_id,
+                weight: constrain_weight(edge.weight, 1.0),
+                eligibility: 0.0,
+            });
+            continue;
+        }
 
-    for &(_, pre_idx, post_idx) in weighted_candidates.iter().take(target) {
-        add_synapse(
-            pre_idx,
-            post_idx,
-            sensory_len,
-            inter_len,
-            sensory,
-            inter,
-            action,
-            rng,
-        );
+        if !(INTER_ID_BASE..max_inter_id).contains(&edge.pre_neuron_id.0) {
+            continue;
+        }
+        if edge.pre_neuron_id == edge.post_neuron_id {
+            continue;
+        }
+        let pre_idx = (edge.pre_neuron_id.0 - INTER_ID_BASE) as usize;
+        let Some(pre) = inter.get_mut(pre_idx) else {
+            continue;
+        };
+        let required_sign = match pre.interneuron_type {
+            InterNeuronType::Excitatory => 1.0,
+            InterNeuronType::Inhibitory => -1.0,
+        };
+        pre.synapses.push(SynapseEdge {
+            pre_neuron_id: edge.pre_neuron_id,
+            post_neuron_id: edge.post_neuron_id,
+            weight: constrain_weight(edge.weight, required_sign),
+            eligibility: 0.0,
+        });
     }
 
     for sensory_neuron in sensory.iter_mut() {
-        sensory_neuron
-            .synapses
-            .sort_by_key(|edge| edge.post_neuron_id);
+        sensory_neuron.synapses.sort_by(|a, b| {
+            a.post_neuron_id
+                .cmp(&b.post_neuron_id)
+                .then_with(|| a.weight.total_cmp(&b.weight))
+        });
     }
     for inter_neuron in inter.iter_mut() {
-        inter_neuron
-            .synapses
-            .sort_by_key(|edge| edge.post_neuron_id);
+        inter_neuron.synapses.sort_by(|a, b| {
+            a.post_neuron_id
+                .cmp(&b.post_neuron_id)
+                .then_with(|| a.weight.total_cmp(&b.weight))
+        });
     }
 }
 
@@ -420,7 +330,7 @@ pub(crate) fn evaluate_brain(
 
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
-    let scan = scan_ahead(
+    let ray_scans = scan_rays(
         (organism.q, organism.r),
         organism.facing,
         organism.id,
@@ -431,15 +341,20 @@ pub(crate) fn evaluate_brain(
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::ScanAhead, stage_started.elapsed());
 
+    let energy_signal = energy_sensor_value(
+        organism.energy,
+        organism.genome.starting_energy.max(MIN_ENERGY_SENSOR_SCALE),
+    );
+
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     for sensory in &mut organism.brain.sensory {
         sensory.neuron.activation = match &sensory.receptor {
-            SensoryReceptor::Look { look_target } => match &scan {
-                Some(ref r) if r.target == *look_target => r.signal,
-                _ => 0.0,
-            },
-            SensoryReceptor::Energy => energy_sensor_value(organism.energy),
+            SensoryReceptor::LookRay {
+                ray_offset,
+                look_target,
+            } => look_ray_signal(&ray_scans, *ray_offset, *look_target),
+            SensoryReceptor::Energy => energy_signal,
         };
     }
     #[cfg(feature = "profiling")]
@@ -527,10 +442,7 @@ pub(crate) fn evaluate_brain(
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     for (idx, action) in brain.action.iter_mut().enumerate() {
-        action.neuron.activation = match action.action_type {
-            ActionType::Turn | ActionType::Dopamine => action_inputs[idx].tanh(),
-            _ => sigmoid(action_inputs[idx]),
-        };
+        action.neuron.activation = sigmoid(action_inputs[idx]);
         result.action_activations[action_index(action.action_type)] = action.neuron.activation;
     }
 
@@ -543,13 +455,15 @@ pub(crate) fn evaluate_brain(
 
 pub(crate) fn apply_runtime_plasticity(
     organism: &mut sim_types::OrganismState,
+    passive_energy_baseline: f32,
     scratch: &mut BrainScratch,
 ) {
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
-    let lambda = organism.genome.eligibility_decay_lambda.clamp(0.0, 1.0);
+    let eligibility_retention = organism.genome.eligibility_retention.clamp(0.0, 1.0);
     let weight_prune_threshold = organism.genome.synapse_prune_threshold.max(0.0);
     let should_prune = should_prune_synapses(organism.age_turns, organism.genome.age_of_maturity);
+    let is_mature = organism.age_turns >= u64::from(organism.genome.age_of_maturity);
 
     let brain = &mut organism.brain;
     scratch.inter_activations.clear();
@@ -559,9 +473,12 @@ pub(crate) fn apply_runtime_plasticity(
     for (idx, action) in brain.action.iter().enumerate() {
         scratch.action_activations[idx] = action.neuron.activation;
     }
-    let dopamine_signal =
-        scratch.action_activations[action_index(ActionType::Dopamine)].clamp(-1.0, 1.0);
-    let eta = organism.genome.hebb_eta_baseline + organism.genome.hebb_eta_gain * dopamine_signal;
+    let energy_delta = organism.energy - organism.energy_prev;
+    // Baseline-correct the reward signal so passive metabolism alone is neutral.
+    let corrected_energy_delta = energy_delta + passive_energy_baseline.max(0.0);
+    let dopamine_signal = (corrected_energy_delta / DOPAMINE_ENERGY_DELTA_SCALE).tanh();
+    organism.energy_prev = organism.energy;
+    let eta = (organism.genome.hebb_eta_baseline + organism.genome.hebb_eta_gain).max(0.0);
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::PlasticitySetup, stage_started.elapsed());
 
@@ -573,7 +490,9 @@ pub(crate) fn apply_runtime_plasticity(
             sensory.neuron.activation,
             1.0,
             eta,
-            lambda,
+            dopamine_signal,
+            eligibility_retention,
+            is_mature,
             &scratch.inter_activations,
             &scratch.action_activations,
         );
@@ -593,7 +512,9 @@ pub(crate) fn apply_runtime_plasticity(
             inter.neuron.activation,
             required_sign,
             eta,
-            lambda,
+            dopamine_signal,
+            eligibility_retention,
+            is_mature,
             &scratch.inter_activations,
             &scratch.action_activations,
         );
@@ -620,57 +541,43 @@ fn tune_synapses(
     pre_activation: f32,
     required_sign: f32,
     eta: f32,
-    lambda: f32,
+    dopamine_signal: f32,
+    eligibility_retention: f32,
+    is_mature: bool,
     inter_activations: &[f32],
     action_activations: &[f32; ACTION_COUNT],
 ) {
-    // Generalized Hebbian (Sanger) update is applied per post layer.
-    let mut active_layer: Option<PostLayer> = None;
-    let mut projected_output_sum = 0.0f32; // Σ_{k<j} y_k * w_k
-
     for edge in edges {
-        let (layer, post_activation) = match post_layer_and_activation(
-            edge.post_neuron_id,
-            inter_activations,
-            action_activations,
-        ) {
-            Some(value) => value,
-            None => continue,
-        };
+        let post_activation =
+            match post_activation(edge.post_neuron_id, inter_activations, action_activations) {
+                Some(value) => value,
+                None => continue,
+            };
 
-        if active_layer != Some(layer) {
-            active_layer = Some(layer);
-            projected_output_sum = 0.0;
+        edge.eligibility =
+            eligibility_retention * edge.eligibility + pre_activation * post_activation;
+        if !is_mature {
+            continue;
         }
 
-        let post_projection = post_activation * edge.weight;
-        let gha_gradient =
-            post_activation * (pre_activation - projected_output_sum - post_projection);
-        edge.eligibility = (1.0 - lambda) * edge.eligibility + gha_gradient;
-        let updated_weight = edge.weight + eta * edge.eligibility;
+        let updated_weight = edge.weight + eta * dopamine_signal * edge.eligibility
+            - PLASTIC_WEIGHT_DECAY * edge.weight;
         edge.weight = constrain_weight(updated_weight, required_sign);
-        projected_output_sum += post_projection;
     }
 }
 
-fn post_layer_and_activation(
+fn post_activation(
     neuron_id: NeuronId,
     inter_activations: &[f32],
     action_activations: &[f32; ACTION_COUNT],
-) -> Option<(PostLayer, f32)> {
+) -> Option<f32> {
     if neuron_id.0 >= ACTION_ID_BASE {
         let action_idx = (neuron_id.0 - ACTION_ID_BASE) as usize;
-        return action_activations
-            .get(action_idx)
-            .copied()
-            .map(|activation| (PostLayer::Action, activation));
+        return action_activations.get(action_idx).copied();
     }
     if neuron_id.0 >= INTER_ID_BASE {
         let inter_idx = (neuron_id.0 - INTER_ID_BASE) as usize;
-        return inter_activations
-            .get(inter_idx)
-            .copied()
-            .map(|activation| (PostLayer::Inter, activation));
+        return inter_activations.get(inter_idx).copied();
     }
     None
 }
@@ -790,7 +697,7 @@ fn refresh_parent_ids_and_synapse_count(brain: &mut BrainState) {
 
 /// Derives the set of active neuron IDs from a brain's current activation state.
 /// Sensory/Inter neurons are active when activation > 0.0.
-/// Action neurons use policy-based resolution with ACTION_ACTIVATION_THRESHOLD.
+/// Action neurons use policy-based categorical argmax resolution.
 pub fn derive_active_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
     let mut active = Vec::new();
 
@@ -804,61 +711,27 @@ pub fn derive_active_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
         std::array::from_fn(|i| brain.action.get(i).map_or(0.0, |n| n.neuron.activation));
 
     let resolved = resolve_actions(action_activations);
-    if resolved.wants_move {
-        active.push(
-            brain.action[action_index(ActionType::MoveForward)]
-                .neuron
-                .neuron_id,
-        );
-    }
-    match resolved.turn {
-        TurnChoice::None => {}
-        TurnChoice::Left | TurnChoice::Right => active.push(
-            brain.action[action_index(ActionType::Turn)]
-                .neuron
-                .neuron_id,
-        ),
-    }
-    if resolved.wants_reproduce {
-        active.push(
-            brain.action[action_index(ActionType::Reproduce)]
-                .neuron
-                .neuron_id,
-        );
-    }
-    if resolved.wants_consume {
-        active.push(
-            brain.action[action_index(ActionType::Consume)]
-                .neuron
-                .neuron_id,
-        );
-    }
+    active.push(
+        brain.action[action_index(resolved.selected_action)]
+            .neuron
+            .neuron_id,
+    );
 
     active
 }
 
 fn resolve_actions(activations: [f32; ACTION_COUNT]) -> ResolvedActions {
-    let move_activation = activations[action_index(ActionType::MoveForward)];
-    let turn_signal = activations[action_index(ActionType::Turn)];
-    let consume_activation = activations[action_index(ActionType::Consume)];
-    let reproduce_activation = activations[action_index(ActionType::Reproduce)];
+    let mut best_idx = 0usize;
+    let mut best_activation = activations[0];
+    for (idx, activation) in activations.iter().copied().enumerate().skip(1) {
+        if activation > best_activation {
+            best_idx = idx;
+            best_activation = activation;
+        }
+    }
 
-    let turn = if turn_signal > TURN_ACTION_DEADZONE {
-        TurnChoice::Right
-    } else if turn_signal < -TURN_ACTION_DEADZONE {
-        TurnChoice::Left
-    } else {
-        TurnChoice::None
-    };
-
-    let wants_move = move_activation > ACTION_ACTIVATION_THRESHOLD;
-    let wants_consume = consume_activation > ACTION_ACTIVATION_THRESHOLD;
-    let wants_reproduce = reproduce_activation > ACTION_ACTIVATION_THRESHOLD;
     ResolvedActions {
-        turn,
-        wants_move,
-        wants_consume,
-        wants_reproduce,
+        selected_action: ActionType::ALL[best_idx],
     }
 }
 
@@ -883,11 +756,13 @@ fn accumulate_weighted_inputs(
     synapse_ops
 }
 
-/// Normalizes energy to a [0, 1] range using a logarithmic curve.
-/// Uses ln(1 + energy) / ln(1 + scale) where scale controls the saturation point.
-fn energy_sensor_value(energy: f32) -> f32 {
-    const ENERGY_SCALE: f32 = 100.0;
-    (1.0 + energy.max(0.0)).ln() / (1.0 + ENERGY_SCALE).ln()
+/// Maps energy to [0, 1) with a midpoint of 0.5 at `scale`.
+/// Uses a Hill-style curve: v = (r^n) / (1 + r^n), where r = energy / scale.
+fn energy_sensor_value(energy: f32, scale: f32) -> f32 {
+    let safe_scale = scale.max(MIN_ENERGY_SENSOR_SCALE);
+    let ratio = energy.max(0.0) / safe_scale;
+    let curved = ratio.powf(ENERGY_SENSOR_CURVE_EXPONENT);
+    curved / (1.0 + curved)
 }
 
 pub(crate) struct ScanResult {
@@ -895,21 +770,80 @@ pub(crate) struct ScanResult {
     pub(crate) signal: f32,
 }
 
-/// Scans forward along the facing direction up to `vision_distance` hexes.
-/// Returns the closest entity found (with occlusion) and a distance-encoded signal
-/// strength: `(max_dist - dist + 1) / max_dist`. Returns `None` if all cells are empty.
-pub(crate) fn scan_ahead(
+type RayScans = [Option<ScanResult>; LOOK_RAY_COUNT];
+
+fn ray_offset_index(ray_offset: i8) -> Option<usize> {
+    SensoryReceptor::LOOK_RAY_OFFSETS
+        .iter()
+        .position(|offset| *offset == ray_offset)
+}
+
+fn look_ray_signal(ray_scans: &RayScans, ray_offset: i8, look_target: EntityType) -> f32 {
+    let Some(ray_idx) = ray_offset_index(ray_offset) else {
+        return 0.0;
+    };
+    match ray_scans[ray_idx].as_ref() {
+        Some(hit) if hit.target == look_target => hit.signal,
+        _ => 0.0,
+    }
+}
+
+fn rotate_facing_by_offset(
+    mut facing: sim_types::FacingDirection,
+    ray_offset: i8,
+) -> sim_types::FacingDirection {
+    if ray_offset >= 0 {
+        for _ in 0..u8::try_from(ray_offset).unwrap_or(0) {
+            facing = rotate_right(facing);
+        }
+        return facing;
+    }
+
+    for _ in 0..ray_offset.unsigned_abs() {
+        facing = rotate_left(facing);
+    }
+    facing
+}
+
+/// Scans all fixed look rays relative to `facing`, using occlusion per-ray.
+pub(crate) fn scan_rays(
     position: (i32, i32),
     facing: sim_types::FacingDirection,
     organism_id: OrganismId,
     world_width: i32,
     occupancy: &[Option<Occupant>],
     vision_distance: u32,
+) -> RayScans {
+    std::array::from_fn(|idx| {
+        scan_ray(
+            position,
+            facing,
+            SensoryReceptor::LOOK_RAY_OFFSETS[idx],
+            organism_id,
+            world_width,
+            occupancy,
+            vision_distance,
+        )
+    })
+}
+
+/// Scans one ray up to `vision_distance` hexes.
+/// Returns the closest entity found (with occlusion) and a distance-encoded signal
+/// strength: `(max_dist - dist + 1) / max_dist`. Returns `None` if all cells are empty.
+fn scan_ray(
+    position: (i32, i32),
+    facing: sim_types::FacingDirection,
+    ray_offset: i8,
+    organism_id: OrganismId,
+    world_width: i32,
+    occupancy: &[Option<Occupant>],
+    vision_distance: u32,
 ) -> Option<ScanResult> {
+    let ray_facing = rotate_facing_by_offset(facing, ray_offset);
     let max_dist = vision_distance.max(1);
     let mut current = position;
     for d in 1..=max_dist {
-        current = hex_neighbor(current, facing, world_width);
+        current = hex_neighbor(current, ray_facing, world_width);
         let idx = current.1 as usize * world_width as usize + current.0 as usize;
         match occupancy[idx] {
             Some(Occupant::Organism(id)) if id == organism_id => {}
@@ -927,6 +861,13 @@ pub(crate) fn scan_ahead(
                     signal,
                 });
             }
+            Some(Occupant::Wall) => {
+                let signal = (max_dist - d + 1) as f32 / max_dist as f32;
+                return Some(ScanResult {
+                    target: EntityType::Wall,
+                    signal,
+                });
+            }
             None => {}
         }
     }
@@ -937,11 +878,16 @@ pub(crate) fn scan_ahead(
 ## sim-core/src/genome.rs
 
 ```rust
-use crate::brain::{ACTION_COUNT, ACTION_COUNT_U32, SENSORY_COUNT};
+use crate::brain::{ACTION_COUNT, ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT};
 use crate::SimError;
 use rand::Rng;
 use rand_distr::{Distribution, StandardNormal};
-use sim_types::{ActionType, BrainLocation, InterNeuronType, OrganismGenome, SeedGenomeConfig};
+use sim_types::{
+    ActionType, BrainLocation, InterNeuronType, NeuronId, OrganismGenome, SeedGenomeConfig,
+    SynapseEdge,
+};
+use std::cmp::Ordering;
+use std::collections::HashSet;
 
 const MIN_MUTATED_VISION_DISTANCE: u32 = 1;
 const MAX_MUTATED_VISION_DISTANCE: u32 = 32;
@@ -954,8 +900,8 @@ const ETA_BASELINE_MIN: f32 = 0.0;
 const ETA_BASELINE_MAX: f32 = 0.2;
 const ETA_GAIN_MIN: f32 = -1.0;
 const ETA_GAIN_MAX: f32 = 1.0;
-const ELIGIBILITY_DECAY_LAMBDA_MIN: f32 = 0.0;
-const ELIGIBILITY_DECAY_LAMBDA_MAX: f32 = 1.0;
+const ELIGIBILITY_RETENTION_MIN: f32 = 0.0;
+const ELIGIBILITY_RETENTION_MAX: f32 = 1.0;
 const SYNAPSE_PRUNE_THRESHOLD_MIN: f32 = 0.0;
 const SYNAPSE_PRUNE_THRESHOLD_MAX: f32 = 1.0;
 
@@ -966,7 +912,7 @@ const MUTATION_RATE_MAX: f32 = 1.0 - MUTATION_RATE_MIN;
 
 const BIAS_PERTURBATION_STDDEV: f32 = 0.15;
 const INTER_LOG_TAU_PERTURBATION_STDDEV: f32 = 0.05;
-const ELIGIBILITY_DECAY_LAMBDA_PERTURBATION_STDDEV: f32 = 0.05;
+const ELIGIBILITY_RETENTION_PERTURBATION_STDDEV: f32 = 0.05;
 const SYNAPSE_PRUNE_THRESHOLD_PERTURBATION_STDDEV: f32 = 0.02;
 const LOCATION_PERTURBATION_STDDEV: f32 = 0.75;
 pub(crate) const INTER_TAU_MIN: f32 = 0.1;
@@ -976,6 +922,9 @@ pub(crate) const INTER_LOG_TAU_MAX: f32 = 2.995_732_3;
 pub(crate) const DEFAULT_INTER_LOG_TAU: f32 = 0.0;
 pub(crate) const BRAIN_SPACE_MIN: f32 = 0.0;
 pub(crate) const BRAIN_SPACE_MAX: f32 = 10.0;
+const SPATIAL_PRIOR_LONG_RANGE_FLOOR: f32 = 0.01;
+const SYNAPSE_WEIGHT_LOG_NORMAL_MU: f32 = -0.5;
+const SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA: f32 = 0.8;
 
 pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     config: &SeedGenomeConfig,
@@ -995,13 +944,7 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         .collect();
     let action_biases: Vec<f32> = ActionType::ALL
         .into_iter()
-        .map(|action_type| {
-            if matches!(action_type, ActionType::Dopamine) {
-                0.0
-            } else {
-                sample_initial_bias(rng)
-            }
-        })
+        .map(|_| sample_initial_bias(rng))
         .collect();
     let sensory_locations: Vec<BrainLocation> = (0..SENSORY_COUNT)
         .map(|_| sample_uniform_location(rng))
@@ -1010,7 +953,7 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         .map(|_| sample_uniform_location(rng))
         .collect();
 
-    OrganismGenome {
+    let mut genome = OrganismGenome {
         num_neurons,
         num_synapses: config.num_synapses.min(max_synapses),
         spatial_prior_sigma: config.spatial_prior_sigma.max(0.01),
@@ -1019,7 +962,7 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         age_of_maturity: config.age_of_maturity,
         hebb_eta_baseline: config.hebb_eta_baseline,
         hebb_eta_gain: config.hebb_eta_gain,
-        eligibility_decay_lambda: config.eligibility_decay_lambda,
+        eligibility_retention: config.eligibility_retention,
         synapse_prune_threshold: config.synapse_prune_threshold,
         mutation_rate_age_of_maturity: config.mutation_rate_age_of_maturity,
         mutation_rate_vision_distance: config.mutation_rate_vision_distance,
@@ -1027,7 +970,7 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         mutation_rate_inter_bias: config.mutation_rate_inter_bias,
         mutation_rate_inter_update_rate: config.mutation_rate_inter_update_rate,
         mutation_rate_action_bias: config.mutation_rate_action_bias,
-        mutation_rate_eligibility_decay_lambda: config.mutation_rate_eligibility_decay_lambda,
+        mutation_rate_eligibility_retention: config.mutation_rate_eligibility_retention,
         mutation_rate_synapse_prune_threshold: config.mutation_rate_synapse_prune_threshold,
         mutation_rate_neuron_location: config.mutation_rate_neuron_location,
         inter_biases,
@@ -1037,7 +980,10 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         sensory_locations,
         inter_locations,
         action_locations,
-    }
+        edges: Vec::new(),
+    };
+    sync_synapse_genes_to_target(&mut genome, rng);
+    genome
 }
 
 fn sample_interneuron_type<R: Rng + ?Sized>(rng: &mut R) -> InterNeuronType {
@@ -1056,7 +1002,7 @@ fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng:
         genome.mutation_rate_inter_bias,
         genome.mutation_rate_inter_update_rate,
         genome.mutation_rate_action_bias,
-        genome.mutation_rate_eligibility_decay_lambda,
+        genome.mutation_rate_eligibility_retention,
         genome.mutation_rate_synapse_prune_threshold,
         genome.mutation_rate_neuron_location,
     ];
@@ -1074,7 +1020,7 @@ fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng:
     genome.mutation_rate_inter_bias = rates[3];
     genome.mutation_rate_inter_update_rate = rates[4];
     genome.mutation_rate_action_bias = rates[5];
-    genome.mutation_rate_eligibility_decay_lambda = rates[6];
+    genome.mutation_rate_eligibility_retention = rates[6];
     genome.mutation_rate_synapse_prune_threshold = rates[7];
     genome.mutation_rate_neuron_location = rates[8];
 }
@@ -1122,6 +1068,8 @@ fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut 
         genome.action_locations.push(sample_uniform_location(rng));
     }
     genome.action_locations.truncate(ACTION_COUNT);
+
+    sanitize_synapse_genes(genome);
 }
 
 pub(crate) fn mutate_genome<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
@@ -1184,12 +1132,12 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &
         );
     }
 
-    if rng.random::<f32>() < genome.mutation_rate_eligibility_decay_lambda {
-        genome.eligibility_decay_lambda = perturb_clamped(
-            genome.eligibility_decay_lambda,
-            ELIGIBILITY_DECAY_LAMBDA_PERTURBATION_STDDEV,
-            ELIGIBILITY_DECAY_LAMBDA_MIN,
-            ELIGIBILITY_DECAY_LAMBDA_MAX,
+    if rng.random::<f32>() < genome.mutation_rate_eligibility_retention {
+        genome.eligibility_retention = perturb_clamped(
+            genome.eligibility_retention,
+            ELIGIBILITY_RETENTION_PERTURBATION_STDDEV,
+            ELIGIBILITY_RETENTION_MIN,
+            ELIGIBILITY_RETENTION_MAX,
             rng,
         );
     }
@@ -1207,6 +1155,8 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &
     if rng.random::<f32>() < genome.mutation_rate_neuron_location {
         mutate_random_neuron_location(genome, rng);
     }
+
+    sync_synapse_genes_to_target(genome, rng);
 }
 
 fn mutate_random_neuron_location<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
@@ -1244,6 +1194,264 @@ fn mutate_random_neuron_location<R: Rng + ?Sized>(genome: &mut OrganismGenome, r
             BRAIN_SPACE_MAX,
             rng,
         );
+    }
+}
+
+fn sync_synapse_genes_to_target<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
+    sanitize_synapse_genes(genome);
+
+    let target = genome.num_synapses as usize;
+    if genome.edges.len() > target {
+        remove_random_synapse_genes(genome, genome.edges.len() - target, rng);
+    }
+    if genome.edges.len() < target {
+        add_synapse_genes_with_spatial_prior(genome, target - genome.edges.len(), rng);
+    }
+
+    sort_synapse_genes(&mut genome.edges);
+    genome.num_synapses = genome.edges.len() as u32;
+}
+
+fn sanitize_synapse_genes(genome: &mut OrganismGenome) {
+    let num_neurons = genome.num_neurons;
+    genome
+        .edges
+        .retain(|edge| is_valid_synapse_pair(edge.pre_neuron_id, edge.post_neuron_id, num_neurons));
+
+    for edge in &mut genome.edges {
+        let required_sign =
+            required_pre_sign(edge.pre_neuron_id, num_neurons, &genome.interneuron_types)
+                .unwrap_or(1.0);
+        edge.weight = constrain_weight_to_sign(edge.weight, required_sign);
+        edge.eligibility = 0.0;
+    }
+
+    sort_synapse_genes(&mut genome.edges);
+    genome.edges.dedup_by(|a, b| {
+        a.pre_neuron_id == b.pre_neuron_id && a.post_neuron_id == b.post_neuron_id
+    });
+}
+
+fn remove_random_synapse_genes<R: Rng + ?Sized>(
+    genome: &mut OrganismGenome,
+    remove_count: usize,
+    rng: &mut R,
+) {
+    let to_remove = remove_count.min(genome.edges.len());
+    for _ in 0..to_remove {
+        let idx = rng.random_range(0..genome.edges.len());
+        genome.edges.swap_remove(idx);
+    }
+}
+
+fn add_synapse_genes_with_spatial_prior<R: Rng + ?Sized>(
+    genome: &mut OrganismGenome,
+    add_count: usize,
+    rng: &mut R,
+) {
+    if add_count == 0 {
+        return;
+    }
+
+    let mut existing_pairs: HashSet<(u32, u32)> = HashSet::with_capacity(genome.edges.len());
+    for edge in &genome.edges {
+        existing_pairs.insert((edge.pre_neuron_id.0, edge.post_neuron_id.0));
+    }
+
+    let mut weighted_candidates: Vec<(f32, NeuronId, NeuronId)> = Vec::new();
+
+    let num_neurons = genome.num_neurons;
+    for sensory_idx in 0..SENSORY_COUNT {
+        let pre_id = NeuronId(sensory_idx);
+        for post_id in post_ids(num_neurons) {
+            if existing_pairs.contains(&(pre_id.0, post_id.0)) {
+                continue;
+            }
+            let probability = connection_probability(genome, pre_id, post_id);
+            let priority = weighted_without_replacement_priority(probability, rng);
+            weighted_candidates.push((priority, pre_id, post_id));
+        }
+    }
+
+    for inter_idx in 0..num_neurons {
+        let pre_id = NeuronId(INTER_ID_BASE + inter_idx);
+        for post_id in post_ids(num_neurons) {
+            if !is_valid_synapse_pair(pre_id, post_id, num_neurons) {
+                continue;
+            }
+            if existing_pairs.contains(&(pre_id.0, post_id.0)) {
+                continue;
+            }
+            let probability = connection_probability(genome, pre_id, post_id);
+            let priority = weighted_without_replacement_priority(probability, rng);
+            weighted_candidates.push((priority, pre_id, post_id));
+        }
+    }
+
+    weighted_candidates.sort_unstable_by(|a, b| {
+        a.0.total_cmp(&b.0)
+            .then_with(|| a.1.cmp(&b.1))
+            .then_with(|| a.2.cmp(&b.2))
+    });
+
+    for &(_, pre_id, post_id) in weighted_candidates.iter().take(add_count) {
+        let required_sign =
+            required_pre_sign(pre_id, num_neurons, &genome.interneuron_types).unwrap_or(1.0);
+        genome.edges.push(SynapseEdge {
+            pre_neuron_id: pre_id,
+            post_neuron_id: post_id,
+            weight: sample_signed_lognormal_weight(required_sign, rng),
+            eligibility: 0.0,
+        });
+    }
+}
+
+fn post_ids(num_neurons: u32) -> impl Iterator<Item = NeuronId> {
+    let inter = (0..num_neurons).map(|idx| NeuronId(INTER_ID_BASE + idx));
+    let actions = (0..ACTION_COUNT_U32).map(|idx| NeuronId(ACTION_ID_BASE + idx));
+    inter.chain(actions)
+}
+
+fn is_valid_synapse_pair(pre: NeuronId, post: NeuronId, num_neurons: u32) -> bool {
+    if !is_valid_pre_id(pre, num_neurons) || !is_valid_post_id(post, num_neurons) {
+        return false;
+    }
+
+    if is_inter_id(pre, num_neurons) && is_inter_id(post, num_neurons) && pre == post {
+        return false;
+    }
+
+    true
+}
+
+fn is_valid_pre_id(id: NeuronId, num_neurons: u32) -> bool {
+    id.0 < SENSORY_COUNT || is_inter_id(id, num_neurons)
+}
+
+fn is_valid_post_id(id: NeuronId, num_neurons: u32) -> bool {
+    is_inter_id(id, num_neurons)
+        || (ACTION_ID_BASE..ACTION_ID_BASE + ACTION_COUNT_U32).contains(&id.0)
+}
+
+fn is_inter_id(id: NeuronId, num_neurons: u32) -> bool {
+    (INTER_ID_BASE..INTER_ID_BASE + num_neurons).contains(&id.0)
+}
+
+fn required_pre_sign(
+    pre: NeuronId,
+    num_neurons: u32,
+    interneuron_types: &[InterNeuronType],
+) -> Option<f32> {
+    if pre.0 < SENSORY_COUNT {
+        return Some(1.0);
+    }
+    if is_inter_id(pre, num_neurons) {
+        let idx = (pre.0 - INTER_ID_BASE) as usize;
+        let inter_type = interneuron_types
+            .get(idx)
+            .copied()
+            .unwrap_or(InterNeuronType::Excitatory);
+        return Some(match inter_type {
+            InterNeuronType::Excitatory => 1.0,
+            InterNeuronType::Inhibitory => -1.0,
+        });
+    }
+    None
+}
+
+fn sort_synapse_genes(edges: &mut [SynapseEdge]) {
+    edges.sort_unstable_by(|a, b| {
+        synapse_key_cmp(a, b)
+            .then_with(|| a.weight.total_cmp(&b.weight))
+            .then_with(|| a.eligibility.total_cmp(&b.eligibility))
+    });
+}
+
+fn synapse_key_cmp(a: &SynapseEdge, b: &SynapseEdge) -> Ordering {
+    a.pre_neuron_id
+        .cmp(&b.pre_neuron_id)
+        .then_with(|| a.post_neuron_id.cmp(&b.post_neuron_id))
+}
+
+fn connection_probability(genome: &OrganismGenome, pre: NeuronId, post: NeuronId) -> f32 {
+    let pre_location = neuron_location_or_default(genome, pre);
+    let post_location = neuron_location_or_default(genome, post);
+    let dx = pre_location.x - post_location.x;
+    let dy = pre_location.y - post_location.y;
+    let distance_sq = dx * dx + dy * dy;
+    let sigma = genome.spatial_prior_sigma.max(0.01);
+    let sigma_sq = sigma * sigma;
+    let local_bias = (-0.5 * distance_sq / sigma_sq).exp();
+    (SPATIAL_PRIOR_LONG_RANGE_FLOOR + (1.0 - SPATIAL_PRIOR_LONG_RANGE_FLOOR) * local_bias)
+        .clamp(0.0, 1.0)
+}
+
+fn neuron_location_or_default(genome: &OrganismGenome, id: NeuronId) -> BrainLocation {
+    if id.0 < SENSORY_COUNT {
+        return genome
+            .sensory_locations
+            .get(id.0 as usize)
+            .copied()
+            .unwrap_or(default_brain_location());
+    }
+
+    if is_inter_id(id, genome.num_neurons) {
+        let idx = (id.0 - INTER_ID_BASE) as usize;
+        return genome
+            .inter_locations
+            .get(idx)
+            .copied()
+            .unwrap_or(default_brain_location());
+    }
+
+    if (ACTION_ID_BASE..ACTION_ID_BASE + ACTION_COUNT_U32).contains(&id.0) {
+        let idx = (id.0 - ACTION_ID_BASE) as usize;
+        return genome
+            .action_locations
+            .get(idx)
+            .copied()
+            .unwrap_or(default_brain_location());
+    }
+
+    default_brain_location()
+}
+
+fn default_brain_location() -> BrainLocation {
+    BrainLocation {
+        x: 0.5 * (BRAIN_SPACE_MIN + BRAIN_SPACE_MAX),
+        y: 0.5 * (BRAIN_SPACE_MIN + BRAIN_SPACE_MAX),
+    }
+}
+
+fn weighted_without_replacement_priority<R: Rng + ?Sized>(weight: f32, rng: &mut R) -> f32 {
+    let clamped_weight = weight.max(f32::MIN_POSITIVE);
+    let u = rng.random::<f32>().max(f32::MIN_POSITIVE);
+    -u.ln() / clamped_weight
+}
+
+fn sample_signed_lognormal_weight<R: Rng + ?Sized>(required_sign: f32, rng: &mut R) -> f32 {
+    let z = standard_normal(rng);
+    let magnitude = (SYNAPSE_WEIGHT_LOG_NORMAL_MU + SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA * z)
+        .exp()
+        .clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX);
+    if required_sign.is_sign_negative() {
+        -magnitude
+    } else {
+        magnitude
+    }
+}
+
+fn constrain_weight_to_sign(weight: f32, required_sign: f32) -> f32 {
+    if required_sign.is_sign_negative() {
+        if weight >= 0.0 {
+            return -SYNAPSE_STRENGTH_MIN;
+        }
+        -(-weight).clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX)
+    } else {
+        if weight <= 0.0 {
+            return SYNAPSE_STRENGTH_MIN;
+        }
+        weight.clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX)
     }
 }
 
@@ -1351,7 +1559,43 @@ fn centroid(locations: &[BrainLocation], len: usize) -> BrainLocation {
     }
 }
 
-/// L1 genome distance: scalar traits + mutation-rate genes + neuron types + brain geometry.
+fn synapse_gene_distance(a: &[SynapseEdge], b: &[SynapseEdge]) -> f32 {
+    let mut distance = 0.0;
+
+    let mut a_idx = 0usize;
+    let mut b_idx = 0usize;
+
+    while a_idx < a.len() && b_idx < b.len() {
+        match synapse_key_cmp(&a[a_idx], &b[b_idx]) {
+            Ordering::Equal => {
+                distance += (a[a_idx].weight - b[b_idx].weight).abs();
+                a_idx += 1;
+                b_idx += 1;
+            }
+            Ordering::Less => {
+                distance += 1.0 + a[a_idx].weight.abs();
+                a_idx += 1;
+            }
+            Ordering::Greater => {
+                distance += 1.0 + b[b_idx].weight.abs();
+                b_idx += 1;
+            }
+        }
+    }
+
+    while a_idx < a.len() {
+        distance += 1.0 + a[a_idx].weight.abs();
+        a_idx += 1;
+    }
+    while b_idx < b.len() {
+        distance += 1.0 + b[b_idx].weight.abs();
+        b_idx += 1;
+    }
+
+    distance
+}
+
+/// L1 genome distance: scalar traits + mutation-rate genes + topology + brain geometry.
 pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
     let mut dist = (a.num_neurons as f32 - b.num_neurons as f32).abs()
         + (a.num_synapses as f32 - b.num_synapses as f32).abs()
@@ -1361,7 +1605,7 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
         + (a.age_of_maturity as f32 - b.age_of_maturity as f32).abs()
         + (a.hebb_eta_baseline - b.hebb_eta_baseline).abs()
         + (a.hebb_eta_gain - b.hebb_eta_gain).abs()
-        + (a.eligibility_decay_lambda - b.eligibility_decay_lambda).abs()
+        + (a.eligibility_retention - b.eligibility_retention).abs()
         + (a.synapse_prune_threshold - b.synapse_prune_threshold).abs();
 
     let a_rates = [
@@ -1371,7 +1615,7 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
         a.mutation_rate_inter_bias,
         a.mutation_rate_inter_update_rate,
         a.mutation_rate_action_bias,
-        a.mutation_rate_eligibility_decay_lambda,
+        a.mutation_rate_eligibility_retention,
         a.mutation_rate_synapse_prune_threshold,
         a.mutation_rate_neuron_location,
     ];
@@ -1382,7 +1626,7 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
         b.mutation_rate_inter_bias,
         b.mutation_rate_inter_update_rate,
         b.mutation_rate_action_bias,
-        b.mutation_rate_eligibility_decay_lambda,
+        b.mutation_rate_eligibility_retention,
         b.mutation_rate_synapse_prune_threshold,
         b.mutation_rate_neuron_location,
     ];
@@ -1406,6 +1650,8 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
             dist += 1.0;
         }
     }
+
+    dist += synapse_gene_distance(&a.edges, &b.edges);
 
     dist += average_location_distance(
         &a.sensory_locations,
@@ -1452,11 +1698,11 @@ pub(crate) fn validate_seed_genome_config(config: &SeedGenomeConfig) -> Result<(
             "hebb_eta_gain must be within [{ETA_GAIN_MIN}, {ETA_GAIN_MAX}]"
         )));
     }
-    if !(ELIGIBILITY_DECAY_LAMBDA_MIN..=ELIGIBILITY_DECAY_LAMBDA_MAX)
-        .contains(&config.eligibility_decay_lambda)
+    if !(ELIGIBILITY_RETENTION_MIN..=ELIGIBILITY_RETENTION_MAX)
+        .contains(&config.eligibility_retention)
     {
         return Err(SimError::InvalidConfig(format!(
-            "eligibility_decay_lambda must be within [{ELIGIBILITY_DECAY_LAMBDA_MIN}, {ELIGIBILITY_DECAY_LAMBDA_MAX}]"
+            "eligibility_retention must be within [{ELIGIBILITY_RETENTION_MIN}, {ELIGIBILITY_RETENTION_MAX}]"
         )));
     }
     if !(SYNAPSE_PRUNE_THRESHOLD_MIN..=SYNAPSE_PRUNE_THRESHOLD_MAX)
@@ -1500,8 +1746,8 @@ pub(crate) fn validate_seed_genome_config(config: &SeedGenomeConfig) -> Result<(
         config.mutation_rate_action_bias,
     )?;
     validate_rate(
-        "mutation_rate_eligibility_decay_lambda",
-        config.mutation_rate_eligibility_decay_lambda,
+        "mutation_rate_eligibility_retention",
+        config.mutation_rate_eligibility_retention,
     )?;
     validate_rate(
         "mutation_rate_synapse_prune_threshold",
@@ -1558,6 +1804,8 @@ use sim_types::{
     FacingDirection, FoodId, FoodState, Occupant, OrganismGenome, OrganismId, OrganismState,
     SpeciesId,
 };
+
+const DEFAULT_TERRAIN_THRESHOLD: f64 = 0.86;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct FoodRegrowthEvent {
@@ -1622,6 +1870,7 @@ impl Simulation {
                         age_turns: 0,
                         facing: opposite_direction(reproduction.parent_facing),
                         energy: child_genome.starting_energy,
+                        energy_prev: child_genome.starting_energy,
                         consumptions_count: 0,
                         reproductions_count: 0,
                         brain,
@@ -1643,8 +1892,9 @@ impl Simulation {
 
         let mut open_positions = self.empty_positions();
         open_positions.shuffle(&mut self.rng);
+        let initial_population = self.target_population().min(open_positions.len());
 
-        for _ in 0..self.target_population() {
+        for _ in 0..initial_population {
             let (q, r) = open_positions
                 .pop()
                 .expect("initial population requires at least one unique cell per organism");
@@ -1666,6 +1916,7 @@ impl Simulation {
                 age_turns: 0,
                 facing,
                 energy: genome.starting_energy,
+                energy_prev: genome.starting_energy,
                 consumptions_count: 0,
                 reproductions_count: 0,
                 brain,
@@ -1693,7 +1944,42 @@ impl Simulation {
     }
 
     fn target_population(&self) -> usize {
-        (self.config.num_organisms as usize).min(world_capacity(self.config.world_width))
+        let max_population = self.config.num_organisms as usize;
+        let available_cells = if self.terrain_map.is_empty() {
+            world_capacity(self.config.world_width)
+        } else {
+            self.terrain_map.iter().filter(|blocked| !**blocked).count()
+        };
+        max_population.min(available_cells)
+    }
+
+    pub(crate) fn initialize_terrain(&mut self) {
+        let width = self.config.world_width;
+        let terrain_seed = self.seed ^ 0xA5A5_A5A5_u64;
+        self.terrain_map = if (self.config.terrain_threshold as f64 - DEFAULT_TERRAIN_THRESHOLD)
+            .abs()
+            > f64::EPSILON
+        {
+            build_terrain_map_with_threshold(
+                width,
+                width,
+                self.config.terrain_noise_scale as f64,
+                terrain_seed,
+                self.config.terrain_threshold as f64,
+            )
+        } else {
+            build_terrain_map(
+                width,
+                width,
+                self.config.terrain_noise_scale as f64,
+                terrain_seed,
+            )
+        };
+        for (idx, blocked) in self.terrain_map.iter().copied().enumerate() {
+            if blocked {
+                self.occupancy[idx] = Some(Occupant::Wall);
+            }
+        }
     }
 
     pub(crate) fn initialize_food_ecology(&mut self) {
@@ -1848,6 +2134,32 @@ fn build_fertility_map(world_width: u32, seed: u64, config: &sim_types::WorldCon
     fertility
 }
 
+pub(crate) fn build_terrain_map(width: u32, height: u32, scale: f64, seed: u64) -> Vec<bool> {
+    build_terrain_map_with_threshold(width, height, scale, seed, DEFAULT_TERRAIN_THRESHOLD)
+}
+
+fn build_terrain_map_with_threshold(
+    width: u32,
+    height: u32,
+    scale: f64,
+    seed: u64,
+    terrain_threshold: f64,
+) -> Vec<bool> {
+    let width = width as usize;
+    let height = height as usize;
+    let mut blocked = Vec::with_capacity(width * height);
+    for r in 0..height {
+        for q in 0..width {
+            let x = q as f64 * scale;
+            let y = r as f64 * scale;
+            let value = fractal_perlin_2d(x, y, seed);
+            let normalized = ((value + 1.0) * 0.5).clamp(0.0, 1.0);
+            blocked.push(normalized > terrain_threshold);
+        }
+    }
+    blocked
+}
+
 fn fractal_perlin_2d(x: f64, y: f64, seed: u64) -> f64 {
     const OCTAVES: usize = 1;
     let mut amplitude = 1.0_f64;
@@ -1929,9 +2241,7 @@ fn lerp(a: f64, b: f64, t: f64) -> f64 {
 ## sim-core/src/turn.rs
 
 ```rust
-use crate::brain::{
-    action_index, apply_runtime_plasticity, evaluate_brain, BrainScratch, TurnChoice,
-};
+use crate::brain::{action_index, apply_runtime_plasticity, evaluate_brain, BrainScratch};
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right, wrap_position};
 use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 use crate::Simulation;
@@ -1940,12 +2250,14 @@ use crate::{profiling, profiling::TurnPhase};
 use rayon::prelude::*;
 use sim_types::{
     ActionType, EntityId, FacingDirection, FoodState, Occupant, OrganismFacing, OrganismId,
-    OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId, TickDelta,
+    OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId, TickDelta, WorldConfig,
 };
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
 #[cfg(feature = "profiling")]
 use std::time::Instant;
+
+const FOOD_ENERGY_METABOLISM_DIVISOR: f32 = 1000.0;
 
 #[derive(Clone, Copy)]
 struct SnapshotOrganismState {
@@ -1962,34 +2274,16 @@ struct TurnSnapshot {
     organism_states: Vec<SnapshotOrganismState>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum IntentActionKind {
-    Turn,
-    Move,
-    Consume,
-}
-
-#[derive(Clone, Copy)]
-struct RankedIntentAction {
-    kind: IntentActionKind,
-    strength: f32,
-}
-
 #[derive(Clone, Copy)]
 struct OrganismIntent {
     idx: usize,
     id: OrganismId,
     from: (i32, i32),
-    facing_before_actions: FacingDirection,
     facing_after_actions: FacingDirection,
-    turn_choice: TurnChoice,
     wants_move: bool,
-    wants_consume: bool,
     wants_reproduce: bool,
     move_target: Option<(i32, i32)>,
     move_confidence: f32,
-    ordered_actions: [IntentActionKind; 3],
-    ordered_action_count: u8,
     action_cost_count: u8,
     synapse_ops: u64,
 }
@@ -2162,6 +2456,7 @@ impl Simulation {
 
     fn build_intents(&mut self, snapshot: &TurnSnapshot) -> Vec<OrganismIntent> {
         let occupancy = &self.occupancy;
+        let food_energy = self.config.food_energy;
 
         if self.should_parallelize_intents(snapshot.organism_count) {
             let intent_threads = self.intent_parallelism();
@@ -2176,6 +2471,7 @@ impl Simulation {
                         build_intent_for_organism(
                             idx,
                             organism,
+                            food_energy,
                             world_width,
                             occupancy,
                             organism_states[idx],
@@ -2193,6 +2489,7 @@ impl Simulation {
             intents.push(build_intent_for_organism(
                 idx,
                 &mut self.organisms[idx],
+                food_energy,
                 snapshot.world_width,
                 occupancy,
                 snapshot.organism_states[idx],
@@ -2225,7 +2522,10 @@ impl Simulation {
                 continue;
             };
             let cell_idx = target.1 as usize * w + target.0 as usize;
-            if occupancy[cell_idx].is_some() {
+            if matches!(
+                occupancy[cell_idx],
+                Some(Occupant::Organism(_)) | Some(Occupant::Wall)
+            ) {
                 continue;
             }
             let candidate = MoveCandidate {
@@ -2288,7 +2588,26 @@ impl Simulation {
 
         let org_count = self.organisms.len();
         let food_count = self.foods.len();
+        let mut bite_targets = vec![None; org_count];
+        for (idx, intent) in intents.iter().enumerate() {
+            if !intent.wants_move || successful_reproduction[idx] {
+                continue;
+            }
+            let Some((target_q, target_r)) = intent.move_target else {
+                continue;
+            };
+            let target_idx = target_r as usize * world_width_usize + target_q as usize;
+            if let Some(Occupant::Organism(prey_id)) = self.occupancy[target_idx] {
+                bite_targets[idx] = Some(prey_id);
+            }
+        }
+
         let mut move_to: Vec<Option<(i32, i32)>> = vec![None; org_count];
+        let mut consumed_food = vec![false; food_count];
+        let mut removed_positions = Vec::new();
+        let mut consumptions = 0_u64;
+        let mut predations = 0_u64;
+        let mut dead_organisms = vec![false; org_count];
         for resolution in resolutions {
             move_to[resolution.actor_idx] = Some(resolution.to);
             let from_idx =
@@ -2298,41 +2617,13 @@ impl Simulation {
                 self.occupancy[from_idx],
                 Some(Occupant::Organism(resolution.actor_id))
             );
-            debug_assert!(self.occupancy[to_idx].is_none());
-            self.occupancy[from_idx] = None;
-            self.occupancy[to_idx] = Some(Occupant::Organism(resolution.actor_id));
-            let organism = &mut self.organisms[resolution.actor_idx];
-            organism.q = resolution.to.0;
-            organism.r = resolution.to.1;
-        }
+            debug_assert!(!matches!(
+                self.occupancy[to_idx],
+                Some(Occupant::Organism(_)) | Some(Occupant::Wall)
+            ));
 
-        let mut consumed_food = vec![false; food_count];
-        let mut removed_positions = Vec::new();
-        let mut consumptions = 0_u64;
-        let mut predations = 0_u64;
-        for (idx, intent) in intents.iter().enumerate() {
-            if !intent.wants_consume {
-                continue;
-            }
-            if successful_reproduction[idx] {
-                continue;
-            }
-
-            let Some((target_q, target_r)) =
-                consume_target_for_intent(intent, move_to[idx], world_width)
-            else {
-                continue;
-            };
-            let target_idx = target_r as usize * world_width_usize + target_q as usize;
-
-            match self.occupancy[target_idx] {
-                Some(Occupant::Food(food_id)) => {
-                    let Some(food_idx) = food_index_by_id(&self.foods, food_id) else {
-                        continue;
-                    };
-                    if consumed_food[food_idx] {
-                        continue;
-                    }
+            if let Some(Occupant::Food(food_id)) = self.occupancy[to_idx] {
+                if let Some(food_idx) = food_index_by_id(&self.foods, food_id) {
                     consumed_food[food_idx] = true;
                     let food = &self.foods[food_idx];
                     removed_positions.push(RemovedEntityPosition {
@@ -2340,19 +2631,52 @@ impl Simulation {
                         q: food.q,
                         r: food.r,
                     });
-                    self.organisms[idx].energy += food.energy;
-                    self.organisms[idx].consumptions_count =
-                        self.organisms[idx].consumptions_count.saturating_add(1);
-                    self.occupancy[target_idx] = None;
+                    self.organisms[resolution.actor_idx].energy += food.energy;
+                    self.organisms[resolution.actor_idx].consumptions_count = self.organisms
+                        [resolution.actor_idx]
+                        .consumptions_count
+                        .saturating_add(1);
                     consumptions += 1;
                 }
-                Some(Occupant::Organism(prey_id)) => {
+            }
+
+            self.occupancy[from_idx] = None;
+            self.occupancy[to_idx] = Some(Occupant::Organism(resolution.actor_id));
+            let organism = &mut self.organisms[resolution.actor_idx];
+            organism.q = resolution.to.0;
+            organism.r = resolution.to.1;
+        }
+
+        for (idx, intent) in intents.iter().enumerate() {
+            if !intent.wants_move || dead_organisms[idx] {
+                continue;
+            }
+            if successful_reproduction[idx] {
+                continue;
+            }
+            if move_to[idx].is_some() {
+                continue;
+            }
+            let Some((target_q, target_r)) = intent.move_target else {
+                continue;
+            };
+            let Some(prey_id) = bite_targets[idx] else {
+                continue;
+            };
+            let target_idx = target_r as usize * world_width_usize + target_q as usize;
+
+            match self.occupancy[target_idx] {
+                Some(Occupant::Organism(current_prey_id)) if current_prey_id == prey_id => {
                     let Some(prey_idx) = organism_index_by_id(&self.organisms, prey_id) else {
                         continue;
                     };
+                    if idx == prey_idx || dead_organisms[prey_idx] {
+                        continue;
+                    }
+
                     let drain = self.organisms[prey_idx]
                         .energy
-                        .min(self.config.food_energy * 2.0f32)
+                        .min(self.config.food_energy * 2.0)
                         .max(0.0);
                     if drain <= 0.0 {
                         continue;
@@ -2378,9 +2702,32 @@ impl Simulation {
 
                     consumptions += 1;
                     predations += 1;
+
+                    if self.organisms[prey_idx].energy <= 0.0 && !dead_organisms[prey_idx] {
+                        dead_organisms[prey_idx] = true;
+                        removed_positions.push(RemovedEntityPosition {
+                            entity_id: EntityId::Organism(prey_id),
+                            q: self.organisms[prey_idx].q,
+                            r: self.organisms[prey_idx].r,
+                        });
+                        self.occupancy[target_idx] = None;
+                    }
                 }
                 None => {}
+                Some(Occupant::Food(_)) => {}
+                Some(Occupant::Organism(_)) => {}
+                Some(Occupant::Wall) => {}
             }
+        }
+
+        if dead_organisms.iter().any(|dead| *dead) {
+            let mut survivors = Vec::with_capacity(self.organisms.len());
+            for (idx, organism) in self.organisms.drain(..).enumerate() {
+                if !dead_organisms[idx] {
+                    survivors.push(organism);
+                }
+            }
+            self.organisms = survivors;
         }
 
         let mut new_foods = Vec::with_capacity(food_count);
@@ -2477,9 +2824,7 @@ impl Simulation {
         let mut starved_positions = Vec::new();
 
         for (idx, organism) in self.organisms.iter_mut().enumerate() {
-            // Genome `num_neurons` tracks enabled interneurons only.
-            let interneuron_count = organism.genome.num_neurons as f32;
-            let metabolism_energy_cost = self.config.neuron_metabolism_cost * interneuron_count;
+            let metabolism_energy_cost = organism_metabolism_energy_cost(&self.config, organism);
             organism.energy -= metabolism_energy_cost;
             if organism.energy <= 0.0 || organism.age_turns >= max_age {
                 dead[idx] = true;
@@ -2508,6 +2853,21 @@ impl Simulation {
 
         (starvation_count, starved_positions)
     }
+}
+
+fn organism_metabolism_energy_cost(config: &WorldConfig, organism: &OrganismState) -> f32 {
+    organism_metabolism_energy_cost_from_food_energy(config.food_energy, organism)
+}
+
+fn organism_metabolism_energy_cost_from_food_energy(
+    food_energy: f32,
+    organism: &OrganismState,
+) -> f32 {
+    // `num_neurons` tracks enabled interneurons. Sensory neurons are concrete runtime nodes.
+    let neuron_count = organism.genome.num_neurons as f32 + organism.brain.sensory.len() as f32;
+    let vision_distance_cost = organism.genome.vision_distance as f32 / 3.0;
+    let neuron_energy_cost = food_energy / FOOD_ENERGY_METABOLISM_DIVISOR;
+    neuron_energy_cost * (neuron_count + vision_distance_cost)
 }
 
 impl Simulation {
@@ -2539,17 +2899,10 @@ fn compare_move_candidates(a: &MoveCandidate, b: &MoveCandidate) -> Ordering {
         .then_with(|| b.actor_id.cmp(&a.actor_id))
 }
 
-fn intent_action_priority(action: IntentActionKind) -> u8 {
-    match action {
-        IntentActionKind::Turn => 0,
-        IntentActionKind::Move => 1,
-        IntentActionKind::Consume => 2,
-    }
-}
-
 fn build_intent_for_organism(
     idx: usize,
     organism: &mut OrganismState,
+    food_energy: f32,
     world_width: i32,
     occupancy: &[Option<Occupant>],
     snapshot_state: SnapshotOrganismState,
@@ -2563,142 +2916,77 @@ fn build_intent_for_organism(
     #[cfg(feature = "profiling")]
     profiling::record_brain_eval_total(brain_eval_started.elapsed());
 
+    let passive_energy_baseline =
+        organism_metabolism_energy_cost_from_food_energy(food_energy, organism);
     #[cfg(feature = "profiling")]
     let plasticity_started = Instant::now();
-    apply_runtime_plasticity(organism, scratch);
+    apply_runtime_plasticity(organism, passive_energy_baseline, scratch);
     #[cfg(feature = "profiling")]
     profiling::record_brain_plasticity_total(plasticity_started.elapsed());
 
-    let turn_choice = evaluation.resolved_actions.turn;
-    let wants_move = evaluation.resolved_actions.wants_move;
-    let wants_consume = evaluation.resolved_actions.wants_consume;
-    let wants_reproduce = evaluation.resolved_actions.wants_reproduce;
-    let move_confidence = evaluation.action_activations[action_index(ActionType::MoveForward)];
-    let turn_strength = evaluation.action_activations[action_index(ActionType::Turn)].abs();
-    let consume_strength = evaluation.action_activations[action_index(ActionType::Consume)];
-
-    let mut ordered_actions = [IntentActionKind::Turn; 3];
-    let mut ordered_action_count = 0_usize;
-    let mut move_target = None;
-
-    if turn_choice != TurnChoice::None || wants_move || wants_consume {
-        let mut ranked_actions = [
-            RankedIntentAction {
-                kind: IntentActionKind::Turn,
-                strength: 0.0,
-            },
-            RankedIntentAction {
-                kind: IntentActionKind::Move,
-                strength: 0.0,
-            },
-            RankedIntentAction {
-                kind: IntentActionKind::Consume,
-                strength: 0.0,
-            },
-        ];
-
-        if turn_choice != TurnChoice::None {
-            ranked_actions[ordered_action_count] = RankedIntentAction {
-                kind: IntentActionKind::Turn,
-                strength: turn_strength,
-            };
-            ordered_action_count += 1;
-        }
-        if wants_move {
-            ranked_actions[ordered_action_count] = RankedIntentAction {
-                kind: IntentActionKind::Move,
-                strength: move_confidence,
-            };
-            ordered_action_count += 1;
-        }
-        if wants_consume {
-            ranked_actions[ordered_action_count] = RankedIntentAction {
-                kind: IntentActionKind::Consume,
-                strength: consume_strength,
-            };
-            ordered_action_count += 1;
-        }
-
-        ranked_actions[..ordered_action_count].sort_by(|a, b| {
-            b.strength
-                .total_cmp(&a.strength)
-                .then_with(|| intent_action_priority(a.kind).cmp(&intent_action_priority(b.kind)))
-        });
-
-        for idx in 0..ordered_action_count {
-            ordered_actions[idx] = ranked_actions[idx].kind;
-        }
-
-        let mut virtual_facing = snapshot_state.facing;
-        for action in &ordered_actions[..ordered_action_count] {
-            match action {
-                IntentActionKind::Turn => {
-                    virtual_facing = facing_after_turn(virtual_facing, turn_choice);
-                }
-                IntentActionKind::Move => {
-                    let target = hex_neighbor(
-                        (snapshot_state.q, snapshot_state.r),
-                        virtual_facing,
-                        world_width,
-                    );
-                    move_target = Some(target);
-                    break;
-                }
-                IntentActionKind::Consume => {}
-            }
-        }
-    }
-
-    let facing_after_actions = facing_after_turn(snapshot_state.facing, turn_choice);
+    let selected_action = evaluation.resolved_actions.selected_action;
+    let selected_action_activation = evaluation.action_activations[action_index(selected_action)];
+    let (facing_after_actions, wants_move, wants_reproduce, move_target) =
+        intent_from_selected_action(selected_action, snapshot_state, world_width);
+    let move_confidence = if wants_move {
+        selected_action_activation
+    } else {
+        0.0
+    };
 
     OrganismIntent {
         idx,
         id: organism_id,
         from: (snapshot_state.q, snapshot_state.r),
-        facing_before_actions: snapshot_state.facing,
         facing_after_actions,
-        turn_choice,
         wants_move,
-        wants_consume,
         wants_reproduce,
         move_target,
         move_confidence,
-        ordered_actions,
-        ordered_action_count: ordered_action_count as u8,
-        action_cost_count: ordered_action_count as u8 + wants_reproduce as u8,
+        action_cost_count: u8::from(selected_action != ActionType::Idle),
         synapse_ops: evaluation.synapse_ops,
     }
 }
 
-fn consume_target_for_intent(
-    intent: &OrganismIntent,
-    move_to: Option<(i32, i32)>,
+fn intent_from_selected_action(
+    selected_action: ActionType,
+    snapshot_state: SnapshotOrganismState,
     world_width: i32,
-) -> Option<(i32, i32)> {
-    if !intent.wants_consume {
-        return None;
-    }
+) -> (FacingDirection, bool, bool, Option<(i32, i32)>) {
+    let from = (snapshot_state.q, snapshot_state.r);
+    let current_facing = snapshot_state.facing;
 
-    let mut current_pos = intent.from;
-    let mut current_facing = intent.facing_before_actions;
-
-    for action in &intent.ordered_actions[..intent.ordered_action_count as usize] {
-        match action {
-            IntentActionKind::Turn => {
-                current_facing = facing_after_turn(current_facing, intent.turn_choice);
-            }
-            IntentActionKind::Move => {
-                if let Some(to) = move_to {
-                    current_pos = to;
-                }
-            }
-            IntentActionKind::Consume => {
-                return Some(hex_neighbor(current_pos, current_facing, world_width));
-            }
+    match selected_action {
+        ActionType::Idle => (current_facing, false, false, None),
+        ActionType::TurnLeft => (rotate_left(current_facing), false, false, None),
+        ActionType::TurnRight => (rotate_right(current_facing), false, false, None),
+        ActionType::Forward => (
+            current_facing,
+            true,
+            false,
+            Some(hex_neighbor(from, current_facing, world_width)),
+        ),
+        ActionType::TurnLeftForward => {
+            let facing = rotate_left(current_facing);
+            (
+                facing,
+                true,
+                false,
+                Some(hex_neighbor(from, facing, world_width)),
+            )
         }
+        ActionType::TurnRightForward => {
+            let facing = rotate_right(current_facing);
+            (
+                facing,
+                true,
+                false,
+                Some(hex_neighbor(from, facing, world_width)),
+            )
+        }
+        ActionType::Consume => (current_facing, false, false, None),
+        ActionType::Reproduce => (current_facing, false, true, None),
     }
-
-    None
 }
 
 fn occupancy_snapshot_cell(
@@ -2729,34 +3017,43 @@ fn reproduction_target(
     let opposite_facing = opposite_direction(parent_facing);
     hex_neighbor((parent_q, parent_r), opposite_facing, world_width)
 }
-
-pub(crate) fn facing_after_turn(
-    current: FacingDirection,
-    turn_choice: TurnChoice,
-) -> FacingDirection {
-    match turn_choice {
-        TurnChoice::None => current,
-        TurnChoice::Left => rotate_left(current),
-        TurnChoice::Right => rotate_right(current),
-    }
-}
 ```
 
-## config.toml
+## config/default.toml
 
-```
-world_width = 1000 steps_per_second = 5 num_organisms = 5000 food_energy = 20
-move_action_energy_cost = 1.0 neuron_metabolism_cost = 0.01 plant_growth_speed =
-0.05 food_regrowth_interval = 20 food_fertility_noise_scale = 0.012
-food_fertility_exponent = 5.0 food_fertility_floor = 0.001 speciation_threshold
-= 20.0
+```toml
+world_width = 500
+steps_per_second = 5
+num_organisms = 5000
+food_energy = 20
+move_action_energy_cost = 1.0
+plant_growth_speed = 0.05
+food_regrowth_interval = 20
+food_fertility_noise_scale = 0.012
+food_fertility_exponent = 5.0
+food_fertility_floor = 0.001
+terrain_noise_scale = 0.01
+terrain_threshold = 0.70
+speciation_threshold = 20.0
 
-[seed_genome_config] num_neurons = 10 num_synapses = 50 spatial_prior_sigma =
-1.0 vision_distance = 10 starting_energy = 250.0 age_of_maturity = 50
-hebb_eta_baseline = 0.001 hebb_eta_gain = 0.01 eligibility_decay_lambda = 0.8
-synapse_prune_threshold = 0.1 mutation_rate_age_of_maturity = 0.04
-mutation_rate_vision_distance = 0.04 mutation_rate_num_synapses = 0.05
-mutation_rate_inter_bias = 0.2 mutation_rate_inter_update_rate = 0.12
-mutation_rate_action_bias = 0.2 mutation_rate_eligibility_decay_lambda = 0.05
-mutation_rate_synapse_prune_threshold = 0.05 mutation_rate_neuron_location = 0.2
+[seed_genome_config]
+num_neurons = 20
+num_synapses = 50
+spatial_prior_sigma = 3.0
+vision_distance = 10
+starting_energy = 250.0
+age_of_maturity = 50
+hebb_eta_baseline = 0.001
+hebb_eta_gain = 0.01
+eligibility_retention = 0.95
+synapse_prune_threshold = 0.05
+mutation_rate_age_of_maturity = 0.05
+mutation_rate_vision_distance = 0.05
+mutation_rate_num_synapses = 0.05
+mutation_rate_inter_bias = 0.1
+mutation_rate_inter_update_rate = 0.1
+mutation_rate_action_bias = 0.1
+mutation_rate_eligibility_retention = 0.05
+mutation_rate_synapse_prune_threshold = 0.05
+mutation_rate_neuron_location = 0.1
 ```

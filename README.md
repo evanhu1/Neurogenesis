@@ -118,11 +118,12 @@ After brain evaluation each tick, runtime plasticity is applied:
 
 1. **Eligibility trace update** — for every synapse:
    `e = eligibility_retention * e + pre * post`.
-2. **Reward signal** — `dopamine = tanh((energy - energy_prev) / 10.0)`, then
-   `energy_prev` is updated to current energy.
+2. **Reward signal** —
+   `dopamine = tanh((energy - energy_prev + passive_metabolism_baseline) / 10.0)`,
+   then `energy_prev` is updated to current energy.
 3. **Mature-only weight update** — once `age_turns >= age_of_maturity`:
    `w += eta * dopamine * e - 0.001 * w`, where
-   `eta = max(0, hebb_eta_baseline + hebb_eta_gain)`, with Dale-sign and clamp
+   `eta = max(0, hebb_eta_gain)`, with Dale-sign and clamp
    constraints preserved.
 4. **Synapse pruning** — once `age_turns >= age_of_maturity`, every 10 ticks
    synapses with `|weight| < threshold` and `|eligibility| < 2 * threshold` are
@@ -131,7 +132,7 @@ After brain evaluation each tick, runtime plasticity is applied:
 ## Genome & Mutation
 
 `OrganismGenome`: `num_neurons`, `vision_distance`, `age_of_maturity`,
-`hebb_eta_baseline`, `hebb_eta_gain`, `eligibility_retention`,
+`hebb_eta_gain`, `eligibility_retention`,
 `synapse_prune_threshold`, `inter_biases` (vec), `inter_log_taus` (vec),
 `interneuron_types` (vec), `action_biases` (vec), `edges` (sorted `SynapseEdge`
 list with per-edge `eligibility` trace), and explicit per-operator mutation-rate

@@ -132,7 +132,7 @@ fn reproduction_offspring_brain_topology_matches_child_genome_edges() {
 #[test]
 fn reproduction_can_create_new_species_via_genome_distance() {
     let mut cfg = test_config(7, 1);
-    cfg.reproduction_energy_cost = 20.0;
+    cfg.seed_genome_config.starting_energy = 20.0;
     // High mutation pressure ensures child genome diverges from parent
     cfg.seed_genome_config.mutation_rate_num_synapses = 1.0;
     cfg.seed_genome_config.mutation_rate_neuron_location = 1.0;

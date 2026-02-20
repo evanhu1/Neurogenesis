@@ -1,7 +1,5 @@
 use crate::Simulation;
 use sim_types::FacingDirection;
-#[cfg(test)]
-use sim_types::FoodState;
 use sim_types::{Occupant, OrganismState};
 
 pub(crate) fn world_capacity(width: u32) -> usize {
@@ -134,21 +132,6 @@ impl Simulation {
         organism.r = r;
         self.occupancy[cell_idx] = Some(Occupant::Organism(organism.id));
         self.organisms.push(organism);
-        true
-    }
-
-    #[cfg(test)]
-    pub(crate) fn add_food(&mut self, mut food: FoodState) -> bool {
-        let (q, r) = self.wrap_position(food.q, food.r);
-        let cell_idx = self.cell_index(q, r);
-        if self.occupancy[cell_idx].is_some() {
-            return false;
-        }
-
-        food.q = q;
-        food.r = r;
-        self.occupancy[cell_idx] = Some(Occupant::Food(food.id));
-        self.foods.push(food);
         true
     }
 

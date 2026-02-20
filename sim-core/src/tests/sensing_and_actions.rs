@@ -274,6 +274,7 @@ fn action_biases_drive_actions_without_incoming_synapses() {
         facing: FacingDirection::East,
         energy: 10.0,
         energy_prev: 10.0,
+        dopamine: 0.0,
         consumptions_count: 0,
         reproductions_count: 0,
         brain,
@@ -318,8 +319,7 @@ fn runtime_plasticity_updates_weights_and_preserves_sign() {
     let mut genome = test_genome();
     genome.num_neurons = 0;
     genome.num_synapses = 0;
-    genome.hebb_eta_baseline = 0.1;
-    genome.hebb_eta_gain = 0.0;
+    genome.hebb_eta_gain = 0.1;
     genome.synapse_prune_threshold = 0.0;
 
     let energy_id = SENSORY_COUNT - 1;
@@ -363,6 +363,7 @@ fn runtime_plasticity_updates_weights_and_preserves_sign() {
         facing: FacingDirection::East,
         energy: 100.0,
         energy_prev: 100.0,
+        dopamine: 0.0,
         consumptions_count: 0,
         reproductions_count: 0,
         brain,
@@ -375,11 +376,80 @@ fn runtime_plasticity_updates_weights_and_preserves_sign() {
     let _ = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
 
     let before = organism.brain.sensory[0].synapses[0].weight;
-    apply_runtime_plasticity(&mut organism, &mut scratch);
+    apply_runtime_plasticity(&mut organism, 0.0, &mut scratch);
     let after = organism.brain.sensory[0].synapses[0].weight;
 
     assert_ne!(before, after);
     assert!(after > 0.0);
+}
+
+#[test]
+fn runtime_plasticity_neutralizes_passive_metabolism_for_dopamine() {
+    let mut genome = test_genome();
+    genome.num_neurons = 0;
+    genome.num_synapses = 0;
+    genome.hebb_eta_gain = 0.1;
+    genome.synapse_prune_threshold = 0.0;
+
+    let energy_id = SENSORY_COUNT - 1;
+    let mut sensory = vec![make_sensory_neuron(
+        energy_id,
+        SensoryReceptor::Energy,
+        loc(1.0, 1.0),
+    )];
+    sensory[0].synapses.push(SynapseEdge {
+        pre_neuron_id: NeuronId(energy_id),
+        post_neuron_id: NeuronId(2000),
+        weight: 0.2,
+        eligibility: 0.0,
+    });
+    let action: Vec<_> = ActionType::ALL
+        .into_iter()
+        .enumerate()
+        .map(|(idx, action_type)| {
+            make_action_neuron(
+                2000 + idx as u32,
+                action_type,
+                0.0,
+                loc(2.0, 1.0 + idx as f32),
+            )
+        })
+        .collect();
+    let brain = BrainState {
+        sensory,
+        inter: vec![],
+        action,
+        synapse_count: 1,
+    };
+
+    let mut organism = OrganismState {
+        id: OrganismId(0),
+        species_id: SpeciesId(0),
+        q: 0,
+        r: 0,
+        age_turns: 50,
+        facing: FacingDirection::East,
+        energy: 99.0,
+        energy_prev: 100.0,
+        dopamine: 0.0,
+        consumptions_count: 0,
+        reproductions_count: 0,
+        brain,
+        genome,
+    };
+
+    let occupancy = vec![None; 9];
+    let mut scratch = BrainScratch::new();
+    let vision_distance = organism.genome.vision_distance;
+    let _ = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
+
+    let before = organism.brain.sensory[0].synapses[0].weight;
+    // Passive drain baseline (1.0) exactly cancels the raw -1.0 energy delta.
+    apply_runtime_plasticity(&mut organism, 1.0, &mut scratch);
+    let after = organism.brain.sensory[0].synapses[0].weight;
+
+    let expected = before * (1.0 - 0.001);
+    assert!((after - expected).abs() < 1.0e-6);
 }
 
 #[test]
@@ -421,6 +491,7 @@ fn energy_sensor_clamps_and_scales_with_starting_energy() {
         facing: FacingDirection::East,
         energy: 250.0,
         energy_prev: 250.0,
+        dopamine: 0.0,
         consumptions_count: 0,
         reproductions_count: 0,
         brain,
@@ -432,14 +503,17 @@ fn energy_sensor_clamps_and_scales_with_starting_energy() {
     let vision_distance = organism.genome.vision_distance;
 
     let _ = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
-    assert_eq!(organism.brain.sensory[0].neuron.activation, 1.0);
+    assert_eq!(organism.brain.sensory[0].neuron.activation, 0.5);
 
     organism.energy = 1_000_000.0;
     let _ = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
-    assert_eq!(organism.brain.sensory[0].neuron.activation, 1.0);
+    assert!(organism.brain.sensory[0].neuron.activation > 0.999_999);
 
-    organism.energy = 20.0;
+    organism.energy = 0.0;
     let _ = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
-    let expected = (1.0 + organism.energy).ln() / (1.0 + organism.genome.starting_energy).ln();
-    assert!((organism.brain.sensory[0].neuron.activation - expected).abs() < 1e-6);
+    assert_eq!(organism.brain.sensory[0].neuron.activation, 0.0);
+
+    organism.energy = 28.0;
+    let _ = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
+    assert!(organism.brain.sensory[0].neuron.activation < 0.05);
 }

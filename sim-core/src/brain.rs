@@ -24,6 +24,7 @@ const DOPAMINE_ENERGY_DELTA_SCALE: f32 = 10.0;
 const PLASTIC_WEIGHT_DECAY: f32 = 0.001;
 const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
 const MIN_ENERGY_SENSOR_SCALE: f32 = 1.0;
+const ENERGY_SENSOR_CURVE_EXPONENT: f32 = 2.0;
 const LOOK_TARGETS: [EntityType; 3] = [EntityType::Food, EntityType::Organism, EntityType::Wall];
 const LOOK_RAY_COUNT: usize = SensoryReceptor::LOOK_RAY_OFFSETS.len();
 pub(crate) const SENSORY_COUNT: u32 = SensoryReceptor::LOOK_NEURON_COUNT + 1;
@@ -155,8 +156,7 @@ pub(crate) fn action_index(action: ActionType) -> usize {
         ActionType::Forward => 3,
         ActionType::TurnLeftForward => 4,
         ActionType::TurnRightForward => 5,
-        ActionType::Consume => 6,
-        ActionType::Reproduce => 7,
+        ActionType::Reproduce => 6,
     }
 }
 
@@ -410,6 +410,7 @@ pub(crate) fn evaluate_brain(
 
 pub(crate) fn apply_runtime_plasticity(
     organism: &mut sim_types::OrganismState,
+    passive_energy_baseline: f32,
     scratch: &mut BrainScratch,
 ) {
     #[cfg(feature = "profiling")]
@@ -428,9 +429,12 @@ pub(crate) fn apply_runtime_plasticity(
         scratch.action_activations[idx] = action.neuron.activation;
     }
     let energy_delta = organism.energy - organism.energy_prev;
-    let dopamine_signal = (energy_delta / DOPAMINE_ENERGY_DELTA_SCALE).tanh();
+    // Baseline-correct the reward signal so passive metabolism alone is neutral.
+    let corrected_energy_delta = energy_delta + passive_energy_baseline.max(0.0);
+    let dopamine_signal = (corrected_energy_delta / DOPAMINE_ENERGY_DELTA_SCALE).tanh();
+    organism.dopamine = dopamine_signal;
     organism.energy_prev = organism.energy;
-    let eta = (organism.genome.hebb_eta_baseline + organism.genome.hebb_eta_gain).max(0.0);
+    let eta = organism.genome.hebb_eta_gain.max(0.0);
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::PlasticitySetup, stage_started.elapsed());
 
@@ -708,11 +712,13 @@ fn accumulate_weighted_inputs(
     synapse_ops
 }
 
-/// Normalizes energy to a [0, 1] range using a logarithmic curve.
-/// Uses ln(1 + energy) / ln(1 + scale) where scale controls the saturation point.
+/// Maps energy to [0, 1) with a midpoint of 0.5 at `scale`.
+/// Uses a Hill-style curve: v = (r^n) / (1 + r^n), where r = energy / scale.
 fn energy_sensor_value(energy: f32, scale: f32) -> f32 {
-    let normalized = (1.0 + energy.max(0.0)).ln() / (1.0 + scale.max(MIN_ENERGY_SENSOR_SCALE)).ln();
-    normalized.clamp(0.0, 1.0)
+    let safe_scale = scale.max(MIN_ENERGY_SENSOR_SCALE);
+    let ratio = energy.max(0.0) / safe_scale;
+    let curved = ratio.powf(ENERGY_SENSOR_CURVE_EXPONENT);
+    curved / (1.0 + curved)
 }
 
 pub(crate) struct ScanResult {

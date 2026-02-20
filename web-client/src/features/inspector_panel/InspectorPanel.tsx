@@ -137,6 +137,7 @@ export function InspectorPanel({
         { label: 'Facing', value: focusedOrganism.facing },
         { label: 'Age (turns)', value: String(focusedOrganism.age_turns) },
         { label: 'Energy', value: formatFloat(focusedOrganism.energy, 2) },
+        { label: 'Dopamine', value: formatFloat(focusedOrganism.dopamine, 3) },
         { label: 'Consumptions', value: String(focusedOrganism.consumptions_count) },
         { label: 'Reproductions', value: String(focusedOrganism.reproductions_count) },
       ] satisfies StatItem[],

@@ -9,7 +9,6 @@ export type SeedGenomeConfig = {
   vision_distance: number;
   starting_energy: number;
   age_of_maturity: number;
-  hebb_eta_baseline: number;
   hebb_eta_gain: number;
   eligibility_retention: number;
   synapse_prune_threshold: number;
@@ -29,7 +28,6 @@ export type WorldConfig = {
   steps_per_second: number;
   num_organisms: number;
   food_energy: number;
-  reproduction_energy_cost: number;
   move_action_energy_cost: number;
   neuron_metabolism_cost: number;
   plant_growth_speed: number;
@@ -51,7 +49,6 @@ export type OrganismGenome = {
   vision_distance: number;
   starting_energy: number;
   age_of_maturity: number;
-  hebb_eta_baseline: number;
   hebb_eta_gain: number;
   eligibility_retention: number;
   synapse_prune_threshold: number;
@@ -145,6 +142,7 @@ export type OrganismState = {
   facing: FacingDirection;
   energy: number;
   energy_prev: number;
+  dopamine: number;
   consumptions_count: number;
   reproductions_count: number;
   brain: BrainState;

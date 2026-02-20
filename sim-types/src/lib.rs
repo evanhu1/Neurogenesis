@@ -21,18 +21,16 @@ pub enum ActionType {
     Forward,
     TurnLeftForward,
     TurnRightForward,
-    Consume,
     Reproduce,
 }
 impl ActionType {
-    pub const ALL: [ActionType; 8] = [
+    pub const ALL: [ActionType; 7] = [
         ActionType::Idle,
         ActionType::TurnLeft,
         ActionType::TurnRight,
         ActionType::Forward,
         ActionType::TurnLeftForward,
         ActionType::TurnRightForward,
-        ActionType::Consume,
         ActionType::Reproduce,
     ];
 }
@@ -128,8 +126,6 @@ pub struct OrganismGenome {
     #[serde(default = "default_age_of_maturity")]
     pub age_of_maturity: u32,
     #[serde(default)]
-    pub hebb_eta_baseline: f32,
-    #[serde(default)]
     pub hebb_eta_gain: f32,
     #[serde(default = "default_eligibility_retention")]
     pub eligibility_retention: f32,
@@ -173,7 +169,6 @@ pub struct SeedGenomeConfig {
     #[serde(default = "default_starting_energy")]
     pub starting_energy: f32,
     pub age_of_maturity: u32,
-    pub hebb_eta_baseline: f32,
     pub hebb_eta_gain: f32,
     pub eligibility_retention: f32,
     pub synapse_prune_threshold: f32,
@@ -194,7 +189,6 @@ pub struct WorldConfig {
     pub steps_per_second: u32,
     pub num_organisms: u32,
     pub food_energy: f32,
-    pub reproduction_energy_cost: f32,
     pub move_action_energy_cost: f32,
     pub plant_growth_speed: f32,
     #[serde(default = "default_food_regrowth_interval")]
@@ -220,7 +214,6 @@ struct WorldConfigDeserialize {
     steps_per_second: u32,
     num_organisms: u32,
     food_energy: f32,
-    reproduction_energy_cost: f32,
     move_action_energy_cost: f32,
     #[serde(default)]
     plant_growth_speed: Option<f32>,
@@ -259,7 +252,6 @@ impl<'de> Deserialize<'de> for WorldConfig {
             steps_per_second: raw.steps_per_second,
             num_organisms: raw.num_organisms,
             food_energy: raw.food_energy,
-            reproduction_energy_cost: raw.reproduction_energy_cost,
             move_action_energy_cost: raw.move_action_energy_cost,
             plant_growth_speed,
             food_regrowth_interval: raw.food_regrowth_interval,
@@ -319,19 +311,6 @@ fn normalize_world_config_toml(value: &mut toml::Value) {
             seed_genome_table
                 .entry("starting_energy")
                 .or_insert_with(|| toml::Value::Float(legacy_starting_energy));
-        }
-        if let Some(starting_energy) =
-            seed_genome_table
-                .get("starting_energy")
-                .and_then(|value| match value {
-                    toml::Value::Float(v) => Some(*v),
-                    toml::Value::Integer(v) => Some(*v as f64),
-                    _ => None,
-                })
-        {
-            table
-                .entry("reproduction_energy_cost")
-                .or_insert_with(|| toml::Value::Float(starting_energy));
         }
     }
 
@@ -444,6 +423,8 @@ pub struct OrganismState {
     pub energy: f32,
     #[serde(default)]
     pub energy_prev: f32,
+    #[serde(default)]
+    pub dopamine: f32,
     pub consumptions_count: u64,
     pub reproductions_count: u64,
     pub brain: BrainState,

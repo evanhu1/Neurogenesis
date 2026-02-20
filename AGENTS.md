@@ -90,16 +90,17 @@ per tick (highest activation).
 
 Runtime plasticity:
 - Eligibility: `e = eligibility_retention * e + pre * post`.
-- Reward signal: `dopamine = tanh((energy - energy_prev) / 10.0)`.
+- Reward signal:
+  `dopamine = tanh((energy - energy_prev + passive_metabolism_baseline) / 10.0)`.
 - Mature-only update: `w += eta * dopamine * e - 0.001 * w`,
-  where `eta = max(0, hebb_eta_baseline + hebb_eta_gain)`.
+  where `eta = max(0, hebb_eta_gain)`.
 - Sign/clamp constraints preserve excitatory/inhibitory polarity.
 - Synapse pruning is maturity-gated.
 
 ### Genome
 
 `OrganismGenome` has `num_neurons`, `vision_distance`, `age_of_maturity`,
-`hebb_eta_baseline`, `hebb_eta_gain`, `eligibility_retention`,
+`hebb_eta_gain`, `eligibility_retention`,
 `synapse_prune_threshold`, `inter_biases`, `inter_log_taus`,
 `interneuron_types`, `action_biases`, `edges` (sorted, with per-edge
 `eligibility` trace), and per-operator mutation-rate genes. No weight mutation;

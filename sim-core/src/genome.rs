@@ -16,8 +16,6 @@ const MAX_MUTATED_AGE_OF_MATURITY: u32 = 10_000;
 pub(crate) const SYNAPSE_STRENGTH_MAX: f32 = 1.0;
 pub(crate) const SYNAPSE_STRENGTH_MIN: f32 = 0.001;
 const BIAS_MAX: f32 = 1.0;
-const ETA_BASELINE_MIN: f32 = 0.0;
-const ETA_BASELINE_MAX: f32 = 0.2;
 const ETA_GAIN_MIN: f32 = -1.0;
 const ETA_GAIN_MAX: f32 = 1.0;
 const ELIGIBILITY_RETENTION_MIN: f32 = 0.0;
@@ -80,7 +78,6 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         vision_distance: config.vision_distance,
         starting_energy: config.starting_energy,
         age_of_maturity: config.age_of_maturity,
-        hebb_eta_baseline: config.hebb_eta_baseline,
         hebb_eta_gain: config.hebb_eta_gain,
         eligibility_retention: config.eligibility_retention,
         synapse_prune_threshold: config.synapse_prune_threshold,
@@ -619,8 +616,6 @@ fn sample_initial_bias<R: Rng + ?Sized>(rng: &mut R) -> f32 {
     )
 }
 
-pub(crate) fn prune_disconnected_inter_neurons(_genome: &mut OrganismGenome) {}
-
 fn perturb_clamped<R: Rng + ?Sized>(
     value: f32,
     stddev: f32,
@@ -723,7 +718,6 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
         + (a.vision_distance as f32 - b.vision_distance as f32).abs()
         + (a.starting_energy - b.starting_energy).abs()
         + (a.age_of_maturity as f32 - b.age_of_maturity as f32).abs()
-        + (a.hebb_eta_baseline - b.hebb_eta_baseline).abs()
         + (a.hebb_eta_gain - b.hebb_eta_gain).abs()
         + (a.eligibility_retention - b.eligibility_retention).abs()
         + (a.synapse_prune_threshold - b.synapse_prune_threshold).abs();
@@ -808,11 +802,6 @@ fn max_possible_synapses(num_neurons: u32) -> u32 {
 }
 
 pub(crate) fn validate_seed_genome_config(config: &SeedGenomeConfig) -> Result<(), SimError> {
-    if !(ETA_BASELINE_MIN..=ETA_BASELINE_MAX).contains(&config.hebb_eta_baseline) {
-        return Err(SimError::InvalidConfig(format!(
-            "hebb_eta_baseline must be within [{ETA_BASELINE_MIN}, {ETA_BASELINE_MAX}]"
-        )));
-    }
     if !(ETA_GAIN_MIN..=ETA_GAIN_MAX).contains(&config.hebb_eta_gain) {
         return Err(SimError::InvalidConfig(format!(
             "hebb_eta_gain must be within [{ETA_GAIN_MIN}, {ETA_GAIN_MAX}]"

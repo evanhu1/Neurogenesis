@@ -38,7 +38,6 @@ pub(super) fn test_genome() -> OrganismGenome {
         vision_distance: 2,
         starting_energy: 100.0,
         age_of_maturity: 0,
-        hebb_eta_baseline: 0.0,
         hebb_eta_gain: 0.0,
         eligibility_retention: 0.9,
         synapse_prune_threshold: 0.01,
@@ -68,7 +67,6 @@ pub(super) fn stable_test_config() -> WorldConfig {
         steps_per_second: 5,
         num_organisms: 10,
         food_energy: 50.0,
-        reproduction_energy_cost: 100.0,
         move_action_energy_cost: 1.0,
         plant_growth_speed: 1.0,
         food_regrowth_interval: 10,
@@ -86,7 +84,6 @@ pub(super) fn stable_test_config() -> WorldConfig {
             vision_distance: 2,
             starting_energy: 100.0,
             age_of_maturity: 0,
-            hebb_eta_baseline: 0.0,
             hebb_eta_gain: 0.0,
             eligibility_retention: 0.9,
             synapse_prune_threshold: 0.01,
@@ -209,15 +206,9 @@ fn forced_brain(
         ),
         make_action_neuron(
             2006,
-            ActionType::Consume,
-            0.0,
-            BrainLocation { x: 2.0, y: 6.0 },
-        ),
-        make_action_neuron(
-            2007,
             ActionType::Reproduce,
             0.0,
-            BrainLocation { x: 2.0, y: 7.0 },
+            BrainLocation { x: 2.0, y: 6.0 },
         ),
     ];
     for action_neuron in &mut action {
@@ -255,6 +246,7 @@ pub(super) fn make_organism(
         facing,
         energy: initial_energy,
         energy_prev: initial_energy,
+        dopamine: 0.0,
         consumptions_count: 0,
         reproductions_count: 0,
         brain: forced_brain(wants_move, turn_left, turn_right, confidence),

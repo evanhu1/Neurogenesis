@@ -207,3 +207,148 @@ fn move_resolution_blocks_wall_cells() {
         .expect("organism should exist");
     assert_eq!((organism.q, organism.r), (1, 1));
 }
+
+#[test]
+fn dopamine_stays_near_zero_when_idle_without_events() {
+    let cfg = test_config(5, 1);
+    let mut sim = Simulation::new(cfg, 301).expect("simulation should initialize");
+    configure_sim(
+        &mut sim,
+        vec![make_organism(
+            0,
+            1,
+            1,
+            FacingDirection::East,
+            false,
+            false,
+            false,
+            0.9,
+            100.0,
+        )],
+    );
+
+    let _ = tick_once(&mut sim);
+    let dopamine_t1 = sim
+        .organisms
+        .iter()
+        .find(|organism| organism.id == OrganismId(0))
+        .expect("organism should exist")
+        .dopamine;
+    let _ = tick_once(&mut sim);
+    let dopamine_t2 = sim
+        .organisms
+        .iter()
+        .find(|organism| organism.id == OrganismId(0))
+        .expect("organism should exist")
+        .dopamine;
+
+    assert!(
+        dopamine_t1.abs() < 1.0e-4,
+        "idle baseline dopamine should stay near zero, got {dopamine_t1}"
+    );
+    assert!(
+        dopamine_t2.abs() < 1.0e-4,
+        "idle baseline dopamine should stay near zero, got {dopamine_t2}"
+    );
+}
+
+#[test]
+fn dopamine_becomes_positive_after_food_consumption() {
+    let cfg = test_config(6, 1);
+    let mut sim = Simulation::new(cfg, 302).expect("simulation should initialize");
+    configure_sim(
+        &mut sim,
+        vec![make_organism(
+            0,
+            1,
+            1,
+            FacingDirection::East,
+            true,
+            false,
+            false,
+            0.95,
+            100.0,
+        )],
+    );
+
+    let food_id = FoodId(0);
+    sim.foods.push(sim_types::FoodState {
+        id: food_id,
+        q: 2,
+        r: 1,
+        energy: 5.0,
+    });
+    let food_idx = sim.cell_index(2, 1);
+    sim.occupancy[food_idx] = Some(Occupant::Food(food_id));
+    sim.next_food_id = 1;
+
+    let first = tick_once(&mut sim);
+    assert_eq!(first.metrics.consumptions_last_turn, 1);
+
+    let _ = tick_once(&mut sim);
+    let dopamine = sim
+        .organisms
+        .iter()
+        .find(|organism| organism.id == OrganismId(0))
+        .expect("organism should exist")
+        .dopamine;
+    assert!(
+        dopamine > 0.2,
+        "food gain should produce a meaningful positive dopamine signal, got {dopamine}"
+    );
+}
+
+#[test]
+fn dopamine_becomes_negative_when_other_organism_bites_prey() {
+    let cfg = test_config(6, 2);
+    let mut sim = Simulation::new(cfg, 303).expect("simulation should initialize");
+    configure_sim(
+        &mut sim,
+        vec![
+            make_organism(
+                0,
+                1,
+                1,
+                FacingDirection::East,
+                true,
+                false,
+                false,
+                0.95,
+                120.0,
+            ),
+            make_organism(
+                1,
+                2,
+                1,
+                FacingDirection::East,
+                false,
+                false,
+                false,
+                0.9,
+                120.0,
+            ),
+        ],
+    );
+
+    let first = tick_once(&mut sim);
+    assert_eq!(first.metrics.predations_last_turn, 1);
+
+    if let Some(predator) = sim
+        .organisms
+        .iter_mut()
+        .find(|organism| organism.id == OrganismId(0))
+    {
+        predator.facing = FacingDirection::West;
+    }
+    let _ = tick_once(&mut sim);
+    let prey_dopamine = sim
+        .organisms
+        .iter()
+        .find(|organism| organism.id == OrganismId(1))
+        .expect("prey should survive")
+        .dopamine;
+    assert!(
+        prey_dopamine < -0.5,
+        "being bitten should produce a meaningful negative dopamine signal, got {prey_dopamine}"
+    );
+}

@@ -106,7 +106,7 @@ impl Simulation {
             &intents,
             &self.occupancy,
             snapshot.world_width,
-            self.config.reproduction_energy_cost,
+            self.config.seed_genome_config.starting_energy,
             &mut spawn_requests,
         );
         #[cfg(feature = "profiling")]
@@ -213,6 +213,7 @@ impl Simulation {
 
     fn build_intents(&mut self, snapshot: &TurnSnapshot) -> Vec<OrganismIntent> {
         let occupancy = &self.occupancy;
+        let food_energy = self.config.food_energy;
 
         if self.should_parallelize_intents(snapshot.organism_count) {
             let intent_threads = self.intent_parallelism();
@@ -227,6 +228,7 @@ impl Simulation {
                         build_intent_for_organism(
                             idx,
                             organism,
+                            food_energy,
                             world_width,
                             occupancy,
                             organism_states[idx],
@@ -244,6 +246,7 @@ impl Simulation {
             intents.push(build_intent_for_organism(
                 idx,
                 &mut self.organisms[idx],
+                food_energy,
                 snapshot.world_width,
                 occupancy,
                 snapshot.organism_states[idx],
@@ -519,7 +522,7 @@ impl Simulation {
         intents: &[OrganismIntent],
         occupancy: &[Option<Occupant>],
         world_width: i32,
-        reproduction_energy_cost: f32,
+        reproduction_investment_energy: f32,
         spawn_requests: &mut Vec<SpawnRequest>,
     ) -> Vec<bool> {
         let mut reserved_spawn_cells = HashSet::new();
@@ -533,7 +536,7 @@ impl Simulation {
             }
 
             let parent_energy = organism.energy;
-            if parent_energy < reproduction_energy_cost {
+            if parent_energy < reproduction_investment_energy {
                 continue;
             }
             let maturity_age = u64::from(organism.genome.age_of_maturity);
@@ -563,7 +566,7 @@ impl Simulation {
                 }),
             });
             reserved_spawn_cells.insert((q, r));
-            organism.energy -= reproduction_energy_cost;
+            organism.energy -= reproduction_investment_energy;
             organism.reproductions_count = organism.reproductions_count.saturating_add(1);
             successful_reproduction[org_idx] = true;
         }
@@ -610,10 +613,17 @@ impl Simulation {
 }
 
 fn organism_metabolism_energy_cost(config: &WorldConfig, organism: &OrganismState) -> f32 {
+    organism_metabolism_energy_cost_from_food_energy(config.food_energy, organism)
+}
+
+fn organism_metabolism_energy_cost_from_food_energy(
+    food_energy: f32,
+    organism: &OrganismState,
+) -> f32 {
     // `num_neurons` tracks enabled interneurons. Sensory neurons are concrete runtime nodes.
     let neuron_count = organism.genome.num_neurons as f32 + organism.brain.sensory.len() as f32;
     let vision_distance_cost = organism.genome.vision_distance as f32 / 3.0;
-    let neuron_energy_cost = config.food_energy / FOOD_ENERGY_METABOLISM_DIVISOR;
+    let neuron_energy_cost = food_energy / FOOD_ENERGY_METABOLISM_DIVISOR;
     neuron_energy_cost * (neuron_count + vision_distance_cost)
 }
 
@@ -649,6 +659,7 @@ fn compare_move_candidates(a: &MoveCandidate, b: &MoveCandidate) -> Ordering {
 fn build_intent_for_organism(
     idx: usize,
     organism: &mut OrganismState,
+    food_energy: f32,
     world_width: i32,
     occupancy: &[Option<Occupant>],
     snapshot_state: SnapshotOrganismState,
@@ -662,9 +673,11 @@ fn build_intent_for_organism(
     #[cfg(feature = "profiling")]
     profiling::record_brain_eval_total(brain_eval_started.elapsed());
 
+    let passive_energy_baseline =
+        organism_metabolism_energy_cost_from_food_energy(food_energy, organism);
     #[cfg(feature = "profiling")]
     let plasticity_started = Instant::now();
-    apply_runtime_plasticity(organism, scratch);
+    apply_runtime_plasticity(organism, passive_energy_baseline, scratch);
     #[cfg(feature = "profiling")]
     profiling::record_brain_plasticity_total(plasticity_started.elapsed());
 
@@ -728,7 +741,6 @@ fn intent_from_selected_action(
                 Some(hex_neighbor(from, facing, world_width)),
             )
         }
-        ActionType::Consume => (current_facing, false, false, None),
         ActionType::Reproduce => (current_facing, false, true, None),
     }
 }
