@@ -141,39 +141,41 @@ fn multi_node_cycle_resolves_without_conflict() {
 fn contested_occupied_target_where_occupant_remains_triggers_passive_bite() {
     let cfg = test_config(5, 3);
     let predator = make_organism(0, 1, 1, FacingDirection::East, true, false, false, 0.9, 6.0);
-    let predator_metabolism = cfg.neuron_metabolism_cost * predator.genome.num_neurons as f32;
-    let prey_energy_after_metabolism = 3.0 - cfg.neuron_metabolism_cost;
+    let prey = make_organism(
+        1,
+        2,
+        1,
+        FacingDirection::West,
+        false,
+        false,
+        false,
+        0.1,
+        3.0,
+    );
+    let blocker = make_organism(
+        2,
+        1,
+        2,
+        FacingDirection::NorthEast,
+        false,
+        false,
+        false,
+        0.2,
+        0,
+    );
+    let predator_metabolism = cfg.neuron_metabolism_cost
+        * (predator.genome.num_neurons as f32
+            + predator.brain.sensory.len() as f32
+            + predator.genome.vision_distance as f32);
+    let prey_metabolism = cfg.neuron_metabolism_cost
+        * (prey.genome.num_neurons as f32
+            + prey.brain.sensory.len() as f32
+            + prey.genome.vision_distance as f32);
+    let prey_energy_after_metabolism = prey.energy - prey_metabolism;
     let expected_energy =
         6.0 - predator_metabolism - cfg.move_action_energy_cost + prey_energy_after_metabolism;
     let mut sim = Simulation::new(cfg, 17).expect("simulation should initialize");
-    configure_sim(
-        &mut sim,
-        vec![
-            predator,
-            make_organism(
-                1,
-                2,
-                1,
-                FacingDirection::West,
-                false,
-                false,
-                false,
-                0.1,
-                3.0,
-            ),
-            make_organism(
-                2,
-                1,
-                2,
-                FacingDirection::NorthEast,
-                false,
-                false,
-                false,
-                0.2,
-                0,
-            ),
-        ],
-    );
+    configure_sim(&mut sim, vec![predator, prey, blocker]);
 
     let delta = tick_once(&mut sim);
     let moves = move_map(&delta);
@@ -247,7 +249,7 @@ fn move_into_food_consumes_and_schedules_regrowth() {
         .iter()
         .find(|organism| organism.id == OrganismId(0))
         .expect("predator should survive");
-    assert_eq!(predator.energy, 15.75);
+    assert_eq!(predator.energy, 15.0);
 }
 
 #[test]

@@ -309,10 +309,8 @@ fn scan_rays_stops_at_wall_occluders() {
         &occupancy,
         5,
     );
-    assert!(
-        scans[2].is_none(),
-        "the center ray (offset 0) should be occluded by wall",
-    );
+    let center_ray = scans[2].as_ref().expect("center ray should detect wall");
+    assert_eq!(center_ray.target, EntityType::Wall);
 }
 
 #[test]

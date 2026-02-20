@@ -87,6 +87,7 @@ pub struct BrainLocation {
 pub enum EntityType {
     Food,
     Organism,
+    Wall,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -109,8 +110,11 @@ pub enum SensoryReceptor {
 impl SensoryReceptor {
     /// Fixed relative ray offsets around facing direction.
     pub const LOOK_RAY_OFFSETS: [i8; 5] = [-2, -1, 0, 1, 2];
+    /// Number of entity classes available to look-ray sensors.
+    pub const LOOK_TARGET_COUNT: u32 = 3;
     /// Number of look-based sensory neurons (ray count x object type count).
-    pub const LOOK_NEURON_COUNT: u32 = (Self::LOOK_RAY_OFFSETS.len() as u32) * 2;
+    pub const LOOK_NEURON_COUNT: u32 =
+        (Self::LOOK_RAY_OFFSETS.len() as u32) * Self::LOOK_TARGET_COUNT;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -282,17 +286,26 @@ impl Default for WorldConfig {
     }
 }
 
+pub fn world_config_from_toml_str(raw: &str) -> Result<WorldConfig, toml::de::Error> {
+    let mut value: toml::Value = toml::from_str(raw)?;
+    normalize_world_config_toml(&mut value);
+    value.try_into()
+}
+
 fn default_world_config() -> WorldConfig {
-    let mut value: toml::Value = toml::from_str(include_str!("../../config/default.toml"))
-        .expect("default world config TOML must parse");
-    let table = value
-        .as_table_mut()
-        .expect("default world config root must be a table");
+    world_config_from_toml_str(include_str!("../../config/default.toml"))
+        .expect("default world config TOML must deserialize")
+}
+
+fn normalize_world_config_toml(value: &mut toml::Value) {
+    let Some(table) = value.as_table_mut() else {
+        return;
+    };
 
     let world_width = table
         .get("world_width")
         .and_then(toml::Value::as_integer)
-        .expect("default world config world_width must be an integer");
+        .and_then(|v| u32::try_from(v).ok());
     let legacy_starting_energy = table
         .get("starting_energy")
         .and_then(|value| match value {
@@ -300,39 +313,41 @@ fn default_world_config() -> WorldConfig {
             toml::Value::Integer(v) => Some(*v as f64),
             _ => None,
         })
-        .unwrap_or(world_width as f64);
+        .or_else(|| world_width.map(|w| w as f64));
 
-    let seed_genome_table = table
+    if let Some(seed_genome_table) = table
         .entry("seed_genome_config")
         .or_insert_with(|| toml::Value::Table(Default::default()))
         .as_table_mut()
-        .expect("default world config seed_genome_config must be a table");
-    seed_genome_table
-        .entry("starting_energy")
-        .or_insert_with(|| toml::Value::Float(legacy_starting_energy));
+    {
+        if let Some(legacy_starting_energy) = legacy_starting_energy {
+            seed_genome_table
+                .entry("starting_energy")
+                .or_insert_with(|| toml::Value::Float(legacy_starting_energy));
+        }
+        if let Some(starting_energy) =
+            seed_genome_table
+                .get("starting_energy")
+                .and_then(|value| match value {
+                    toml::Value::Float(v) => Some(*v),
+                    toml::Value::Integer(v) => Some(*v as f64),
+                    _ => None,
+                })
+        {
+            table
+                .entry("reproduction_energy_cost")
+                .or_insert_with(|| toml::Value::Float(starting_energy));
+        }
+    }
 
-    let starting_energy = seed_genome_table
-        .get("starting_energy")
-        .and_then(|value| match value {
-            toml::Value::Float(v) => Some(*v),
-            toml::Value::Integer(v) => Some(*v as f64),
-            _ => None,
-        })
-        .expect("default seed_genome_config starting_energy must be numeric");
-    table
-        .entry("reproduction_energy_cost")
-        .or_insert_with(|| toml::Value::Float(starting_energy));
-
-    table
-        .entry("max_organism_age")
-        .or_insert_with(|| toml::Value::Integer(world_width.saturating_mul(10)));
+    if let Some(world_width) = world_width {
+        table
+            .entry("max_organism_age")
+            .or_insert_with(|| toml::Value::Integer(i64::from(world_width.saturating_mul(10))));
+    }
     table
         .entry("neuron_metabolism_cost")
         .or_insert_with(|| toml::Value::Float(default_neuron_metabolism_cost() as f64));
-
-    value
-        .try_into()
-        .expect("default world config TOML must deserialize")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

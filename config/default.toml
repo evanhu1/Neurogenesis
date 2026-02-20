@@ -10,11 +10,11 @@ food_fertility_noise_scale = 0.012
 food_fertility_exponent = 5.0
 food_fertility_floor = 0.001
 terrain_noise_scale = 0.01
-terrain_threshold = 0.75
+terrain_threshold = 0.70
 speciation_threshold = 20.0
 
 [seed_genome_config]
-num_neurons = 10
+num_neurons = 20
 num_synapses = 50
 spatial_prior_sigma = 1.0
 vision_distance = 10

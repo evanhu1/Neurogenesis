@@ -23,7 +23,7 @@ const HEBB_WEIGHT_CLAMP_ENABLED: bool = true;
 const DOPAMINE_ENERGY_DELTA_SCALE: f32 = 10.0;
 const PLASTIC_WEIGHT_DECAY: f32 = 0.001;
 const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
-const LOOK_TARGETS: [EntityType; 2] = [EntityType::Food, EntityType::Organism];
+const LOOK_TARGETS: [EntityType; 3] = [EntityType::Food, EntityType::Organism, EntityType::Wall];
 const LOOK_RAY_COUNT: usize = SensoryReceptor::LOOK_RAY_OFFSETS.len();
 pub(crate) const SENSORY_COUNT: u32 = SensoryReceptor::LOOK_NEURON_COUNT + 1;
 pub(crate) const ENERGY_SENSORY_ID: u32 = SensoryReceptor::LOOK_NEURON_COUNT;
@@ -806,7 +806,11 @@ fn scan_ray(
                 });
             }
             Some(Occupant::Wall) => {
-                return None;
+                let signal = (max_dist - d + 1) as f32 / max_dist as f32;
+                return Some(ScanResult {
+                    target: EntityType::Wall,
+                    signal,
+                });
             }
             None => {}
         }

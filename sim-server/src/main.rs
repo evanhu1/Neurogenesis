@@ -7,12 +7,15 @@ use axum::{Json, Router};
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use sim_core::{derive_active_neuron_ids, SimError, Simulation};
-use sim_server::protocol::{
-    ApiError, ArchivedWorldSource, ArchivedWorldSummary, BatchAggregateStats, BatchRunStatus,
-    BatchRunStatusResponse, ClientCommand, CountRequest, CreateBatchRunRequest,
-    CreateBatchRunResponse, CreateSessionRequest, CreateSessionResponse, FocusBrainData,
-    FocusRequest, ListArchivedWorldsResponse, ResetRequest, ServerEvent, SessionMetadata,
-    StepProgressData, WorldSnapshotView,
+use sim_server::{
+    load_default_world_config,
+    protocol::{
+        ApiError, ArchivedWorldSource, ArchivedWorldSummary, BatchAggregateStats, BatchRunStatus,
+        BatchRunStatusResponse, ClientCommand, CountRequest, CreateBatchRunRequest,
+        CreateBatchRunResponse, CreateSessionRequest, CreateSessionResponse, FocusBrainData,
+        FocusRequest, ListArchivedWorldsResponse, ResetRequest, ServerEvent, SessionMetadata,
+        StepProgressData, WorldSnapshotView,
+    },
 };
 use sim_types::WorldSnapshot;
 use std::collections::HashMap;
@@ -138,6 +141,15 @@ fn batch_parallelism_plan(world_count: u32) -> (usize, usize) {
     let world_workers = (world_count as usize).min(total_cpu).max(1);
     let threads_per_world = (total_cpu / world_workers).max(1);
     (world_workers, threads_per_world)
+}
+
+fn load_runtime_default_world_config() -> Result<sim_types::WorldConfig, AppError> {
+    load_default_world_config().map_err(|err| {
+        AppError::Internal(format!(
+            "failed to load {}: {err}",
+            sim_server::default_world_config_path().display()
+        ))
+    })
 }
 
 fn simulate_ticks(simulation: &mut Simulation, ticks: u64) {
@@ -603,7 +615,7 @@ async fn create_batch_run(
         runs.insert(run_id, batch_run.clone());
     }
 
-    let config = sim_types::WorldConfig::default();
+    let config = load_runtime_default_world_config()?;
 
     tokio::spawn(run_batch_simulations(
         state.clone(),
@@ -672,7 +684,8 @@ async fn create_session(
     State(state): State<AppState>,
     Json(req): Json<CreateSessionRequest>,
 ) -> Result<Json<CreateSessionResponse>, AppError> {
-    let simulation = Simulation::new(sim_types::WorldConfig::default(), req.seed)?;
+    let config = load_runtime_default_world_config()?;
+    let simulation = Simulation::new(config, req.seed)?;
     let response = create_runtime_session(&state, simulation).await?;
     Ok(Json(response))
 }

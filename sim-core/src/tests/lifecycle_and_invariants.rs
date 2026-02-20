@@ -71,8 +71,8 @@ fn starvation_and_reproduction_interact_in_same_turn() {
         .expect("reproducer should survive");
     assert_eq!(reproducer.consumptions_count, 0);
     assert_eq!(reproducer.reproductions_count, 1);
-    // 6.0 - 0.25 (turn upkeep: 0.25 * 1 neuron) - 5.0 (reproduction) - 1.0 (single selected action cost) = -0.25
-    assert_eq!(reproducer.energy, -0.25);
+    // 6.0 - 1.0 (turn upkeep: 0.25 * (1 inter + 1 sensory + vision 2)) - 5.0 (reproduction) - 1.0 (single selected action cost) = -1.0
+    assert_eq!(reproducer.energy, -1.0);
 }
 
 #[test]
@@ -118,8 +118,8 @@ fn move_energy_cost_applies_to_attempted_moves() {
         .iter()
         .find(|organism| organism.id == OrganismId(1))
         .expect("loser should survive");
-    assert_eq!(winner.energy, 8.75);
-    assert_eq!(loser.energy, 8.75);
+    assert_eq!(winner.energy, 8.0);
+    assert_eq!(loser.energy, 8.0);
 }
 
 #[test]

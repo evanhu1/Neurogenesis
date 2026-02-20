@@ -7,7 +7,7 @@ use crate::{profiling, profiling::TurnPhase};
 use rayon::prelude::*;
 use sim_types::{
     ActionType, EntityId, FacingDirection, FoodState, Occupant, OrganismFacing, OrganismId,
-    OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId, TickDelta,
+    OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId, TickDelta, WorldConfig,
 };
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
@@ -576,9 +576,7 @@ impl Simulation {
         let mut starved_positions = Vec::new();
 
         for (idx, organism) in self.organisms.iter_mut().enumerate() {
-            // Genome `num_neurons` tracks enabled interneurons only.
-            let interneuron_count = organism.genome.num_neurons as f32;
-            let metabolism_energy_cost = self.config.neuron_metabolism_cost * interneuron_count;
+            let metabolism_energy_cost = organism_metabolism_energy_cost(&self.config, organism);
             organism.energy -= metabolism_energy_cost;
             if organism.energy <= 0.0 || organism.age_turns >= max_age {
                 dead[idx] = true;
@@ -607,6 +605,13 @@ impl Simulation {
 
         (starvation_count, starved_positions)
     }
+}
+
+fn organism_metabolism_energy_cost(config: &WorldConfig, organism: &OrganismState) -> f32 {
+    // `num_neurons` tracks enabled interneurons. Sensory neurons are concrete runtime nodes.
+    let neuron_count = organism.genome.num_neurons as f32 + organism.brain.sensory.len() as f32;
+    let vision_distance_cost = organism.genome.vision_distance as f32;
+    config.neuron_metabolism_cost * (neuron_count + vision_distance_cost)
 }
 
 impl Simulation {
