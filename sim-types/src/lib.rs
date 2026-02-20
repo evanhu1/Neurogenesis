@@ -149,6 +149,8 @@ pub struct OrganismGenome {
     pub mutation_rate_neuron_location: f32,
     #[serde(default)]
     pub mutation_rate_synapse_weight_perturbation: f32,
+    #[serde(default)]
+    pub mutation_rate_add_neuron_split_edge: f32,
     pub inter_biases: Vec<f32>,
     pub inter_log_time_constants: Vec<f32>,
     #[serde(default)]
@@ -182,6 +184,8 @@ pub struct SeedGenomeConfig {
     pub mutation_rate_neuron_location: f32,
     #[serde(default)]
     pub mutation_rate_synapse_weight_perturbation: f32,
+    #[serde(default)]
+    pub mutation_rate_add_neuron_split_edge: f32,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]

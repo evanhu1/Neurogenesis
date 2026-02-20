@@ -50,6 +50,7 @@ pub(super) fn test_genome() -> OrganismGenome {
         mutation_rate_synapse_prune_threshold: 0.0,
         mutation_rate_neuron_location: 0.0,
         mutation_rate_synapse_weight_perturbation: 0.0,
+        mutation_rate_add_neuron_split_edge: 0.0,
         inter_biases: vec![0.0],
         inter_log_time_constants: vec![0.0],
         interneuron_types: vec![InterNeuronType::Excitatory],
@@ -96,6 +97,7 @@ pub(super) fn stable_test_config() -> WorldConfig {
             mutation_rate_synapse_prune_threshold: 0.0,
             mutation_rate_neuron_location: 0.0,
             mutation_rate_synapse_weight_perturbation: 0.0,
+            mutation_rate_add_neuron_split_edge: 0.0,
         },
     }
 }

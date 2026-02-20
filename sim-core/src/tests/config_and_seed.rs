@@ -12,6 +12,16 @@ fn config_validation_rejects_out_of_range_vision_distance_mutation_rate() {
 }
 
 #[test]
+fn config_validation_rejects_out_of_range_split_edge_mutation_rate() {
+    let mut cfg = stable_test_config();
+    cfg.seed_genome_config.mutation_rate_add_neuron_split_edge = 1.5;
+    let err = Simulation::new(cfg, 1).expect_err("config should be rejected");
+    assert!(err
+        .to_string()
+        .contains("mutation_rate_add_neuron_split_edge"));
+}
+
+#[test]
 fn config_validation_rejects_non_positive_seed_starting_energy() {
     let mut cfg = stable_test_config();
     cfg.seed_genome_config.starting_energy = 0.0;
@@ -237,6 +247,49 @@ fn mutate_genome_can_perturb_inherited_synapse_weights_without_flipping_sign() {
         changed,
         "at least one inherited edge weight should be perturbed"
     );
+}
+
+#[test]
+fn mutate_genome_can_apply_add_neuron_split_edge_operator() {
+    let mut genome = test_genome();
+    genome.num_neurons = 1;
+    genome.inter_biases = vec![0.0];
+    genome.inter_log_time_constants = vec![0.0];
+    genome.interneuron_types = vec![InterNeuronType::Excitatory];
+    genome.inter_locations = vec![BrainLocation { x: 5.0, y: 5.0 }];
+    genome.edges = vec![SynapseEdge {
+        pre_neuron_id: NeuronId(0),
+        post_neuron_id: NeuronId(crate::brain::ACTION_ID_BASE),
+        weight: 0.5,
+        eligibility: 0.0,
+    }];
+    genome.num_synapses = 1;
+    genome.mutation_rate_age_of_maturity = 0.0;
+    genome.mutation_rate_vision_distance = 0.0;
+    genome.mutation_rate_inter_bias = 0.0;
+    genome.mutation_rate_inter_update_rate = 0.0;
+    genome.mutation_rate_action_bias = 0.0;
+    genome.mutation_rate_eligibility_retention = 0.0;
+    genome.mutation_rate_synapse_prune_threshold = 0.0;
+    genome.mutation_rate_neuron_location = 0.0;
+    genome.mutation_rate_synapse_weight_perturbation = 0.0;
+    genome.mutation_rate_add_neuron_split_edge = 1.0;
+
+    let mut rng = ChaCha8Rng::seed_from_u64(12345);
+    let initial_neurons = genome.num_neurons;
+    let initial_synapses = genome.num_synapses;
+    for _ in 0..64 {
+        crate::genome::mutate_genome(&mut genome, &mut rng);
+        if genome.num_neurons > initial_neurons {
+            break;
+        }
+    }
+
+    assert!(
+        genome.num_neurons > initial_neurons,
+        "expected add-neuron split-edge mutation to be applied",
+    );
+    assert!(genome.num_synapses > initial_synapses);
 }
 
 #[test]

@@ -87,6 +87,7 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         mutation_rate_synapse_prune_threshold: config.mutation_rate_synapse_prune_threshold,
         mutation_rate_neuron_location: config.mutation_rate_neuron_location,
         mutation_rate_synapse_weight_perturbation: config.mutation_rate_synapse_weight_perturbation,
+        mutation_rate_add_neuron_split_edge: config.mutation_rate_add_neuron_split_edge,
         inter_biases,
         inter_log_time_constants,
         interneuron_types,
@@ -119,6 +120,7 @@ fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng:
         genome.mutation_rate_synapse_prune_threshold,
         genome.mutation_rate_neuron_location,
         genome.mutation_rate_synapse_weight_perturbation,
+        genome.mutation_rate_add_neuron_split_edge,
     ];
     let shared_normal = standard_normal(rng) * MUTATION_RATE_ADAPTATION_TIME_CONSTANT;
 
@@ -137,6 +139,7 @@ fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng:
     genome.mutation_rate_synapse_prune_threshold = rates[6];
     genome.mutation_rate_neuron_location = rates[7];
     genome.mutation_rate_synapse_weight_perturbation = rates[8];
+    genome.mutation_rate_add_neuron_split_edge = rates[9];
 }
 
 fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
@@ -271,6 +274,10 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &
         mutate_random_synapse_weight(genome, rng);
     }
 
+    if rng.random::<f32>() < genome.mutation_rate_add_neuron_split_edge {
+        mutate_add_neuron_split_edge(genome, rng);
+    }
+
     sync_synapse_genes_to_target(genome);
 }
 
@@ -330,7 +337,6 @@ fn mutate_random_synapse_weight<R: Rng + ?Sized>(genome: &mut OrganismGenome, rn
     genome.edges[idx].weight = constrain_weight_to_sign(perturbed_weight, required_sign);
 }
 
-#[allow(dead_code)]
 pub(crate) fn mutate_add_neuron_split_edge<R: Rng + ?Sized>(
     genome: &mut OrganismGenome,
     rng: &mut R,
@@ -455,7 +461,6 @@ pub(crate) fn mutate_add_neuron_split_edge<R: Rng + ?Sized>(
     sync_synapse_genes_to_target(genome);
 }
 
-#[allow(dead_code)]
 fn select_weighted_edge_index<R: Rng + ?Sized>(edges: &[SynapseEdge], rng: &mut R) -> usize {
     if edges.len() <= 1 {
         return 0;
@@ -480,7 +485,6 @@ fn select_weighted_edge_index<R: Rng + ?Sized>(edges: &[SynapseEdge], rng: &mut 
     edges.len() - 1
 }
 
-#[allow(dead_code)]
 fn inter_log_time_constant_for_neuron(neuron_id: NeuronId, genome: &OrganismGenome) -> Option<f32> {
     if !is_inter_id(neuron_id, genome.num_neurons) {
         return None;
@@ -489,7 +493,6 @@ fn inter_log_time_constant_for_neuron(neuron_id: NeuronId, genome: &OrganismGeno
     genome.inter_log_time_constants.get(inter_idx).copied()
 }
 
-#[allow(dead_code)]
 fn location_for_neuron(neuron_id: NeuronId, genome: &OrganismGenome) -> BrainLocation {
     if neuron_id.0 < SENSORY_COUNT {
         return genome
@@ -783,6 +786,7 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
         a.mutation_rate_synapse_prune_threshold,
         a.mutation_rate_neuron_location,
         a.mutation_rate_synapse_weight_perturbation,
+        a.mutation_rate_add_neuron_split_edge,
     ];
     let b_rates = [
         b.mutation_rate_age_of_maturity,
@@ -794,6 +798,7 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
         b.mutation_rate_synapse_prune_threshold,
         b.mutation_rate_neuron_location,
         b.mutation_rate_synapse_weight_perturbation,
+        b.mutation_rate_add_neuron_split_edge,
     ];
     for i in 0..a_rates.len() {
         dist += (a_rates[i] - b_rates[i]).abs();
@@ -916,6 +921,10 @@ pub(crate) fn validate_seed_genome_config(config: &SeedGenomeConfig) -> Result<(
     validate_rate(
         "mutation_rate_synapse_weight_perturbation",
         config.mutation_rate_synapse_weight_perturbation,
+    )?;
+    validate_rate(
+        "mutation_rate_add_neuron_split_edge",
+        config.mutation_rate_add_neuron_split_edge,
     )?;
 
     if config.vision_distance < MIN_MUTATED_VISION_DISTANCE {

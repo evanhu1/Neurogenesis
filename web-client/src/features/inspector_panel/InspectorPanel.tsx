@@ -122,6 +122,16 @@ export function InspectorPanel({
         label: 'Prune Thresh',
         value: genome.mutation_rate_synapse_prune_threshold,
       },
+      {
+        key: 'mutation_rate_synapse_weight_perturbation',
+        label: 'Weight Perturb',
+        value: genome.mutation_rate_synapse_weight_perturbation,
+      },
+      {
+        key: 'mutation_rate_add_neuron_split_edge',
+        label: 'Split Edge Add',
+        value: genome.mutation_rate_add_neuron_split_edge,
+      },
     ];
 
     return {
