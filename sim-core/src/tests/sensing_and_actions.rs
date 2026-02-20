@@ -2,13 +2,56 @@ use super::support::test_genome;
 use super::*;
 use crate::brain::{
     action_index, apply_runtime_plasticity, evaluate_brain, express_genome, scan_rays,
-    BrainScratch, ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT,
+    ActionSelectionPolicy, BrainScratch, ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE,
+    SENSORY_COUNT,
 };
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
 fn loc(x: f32, y: f32) -> BrainLocation {
     BrainLocation { x, y }
+}
+
+fn deterministic_action_policy() -> ActionSelectionPolicy {
+    ActionSelectionPolicy {
+        temperature: 0.5,
+        argmax_margin: Some(0.0),
+    }
+}
+
+fn simple_action_bias_organism(
+    forward_bias: f32,
+    reproduce_bias: f32,
+    energy: f32,
+) -> OrganismState {
+    let mut genome = test_genome();
+    genome.num_neurons = 0;
+    genome.num_synapses = 0;
+    genome.action_biases = vec![0.0; ActionType::ALL.len()];
+    genome.action_biases[action_index(ActionType::Forward)] = forward_bias;
+    genome.action_biases[action_index(ActionType::Reproduce)] = reproduce_bias;
+    genome.inter_biases.clear();
+    genome.inter_log_time_constants.clear();
+    genome.interneuron_types.clear();
+    genome.inter_locations.clear();
+
+    let mut rng = ChaCha8Rng::seed_from_u64(55);
+    let brain = express_genome(&genome, &mut rng);
+    OrganismState {
+        id: OrganismId(0),
+        species_id: SpeciesId(0),
+        q: 0,
+        r: 0,
+        age_turns: 0,
+        facing: FacingDirection::East,
+        energy,
+        energy_prev: energy,
+        dopamine: 0.0,
+        consumptions_count: 0,
+        reproductions_count: 0,
+        brain,
+        genome,
+    }
 }
 
 fn dense_edges(
@@ -192,41 +235,86 @@ fn express_genome_respects_dale_signs_for_inter_outgoing_synapses() {
 
 #[test]
 fn action_biases_drive_actions_without_incoming_synapses() {
-    let mut genome = test_genome();
-    genome.num_neurons = 0;
-    genome.num_synapses = 0;
-    genome.action_biases = vec![0.0; ActionType::ALL.len()];
-    genome.action_biases[action_index(ActionType::Forward)] = 5.0;
-    genome.action_biases[action_index(ActionType::Reproduce)] = 6.0;
-    genome.inter_biases.clear();
-    genome.inter_log_time_constants.clear();
-    genome.interneuron_types.clear();
-    genome.inter_locations.clear();
-
-    let mut rng = ChaCha8Rng::seed_from_u64(5);
-    let brain = express_genome(&genome, &mut rng);
-    let mut organism = OrganismState {
-        id: OrganismId(0),
-        species_id: SpeciesId(0),
-        q: 0,
-        r: 0,
-        age_turns: 0,
-        facing: FacingDirection::East,
-        energy: 10.0,
-        energy_prev: 10.0,
-        dopamine: 0.0,
-        consumptions_count: 0,
-        reproductions_count: 0,
-        brain,
-        genome,
-    };
+    let mut organism = simple_action_bias_organism(5.0, 6.0, 10.0);
 
     let occupancy = vec![None; 9];
     let mut scratch = BrainScratch::new();
+    let mut action_rng = ChaCha8Rng::seed_from_u64(1);
     let vision_distance = organism.genome.vision_distance;
-    let eval = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
+    let eval = evaluate_brain(
+        &mut organism,
+        3,
+        &occupancy,
+        vision_distance,
+        deterministic_action_policy(),
+        &mut action_rng,
+        &mut scratch,
+    );
 
     assert_eq!(eval.resolved_actions.selected_action, ActionType::Reproduce);
+}
+
+#[test]
+fn stochastic_action_selection_is_seed_deterministic() {
+    let mut organism_a = simple_action_bias_organism(0.8, 0.7, 10.0);
+    let mut organism_b = organism_a.clone();
+    let occupancy = vec![None; 9];
+    let mut scratch_a = BrainScratch::new();
+    let mut scratch_b = BrainScratch::new();
+    let mut rng_a = ChaCha8Rng::seed_from_u64(777);
+    let mut rng_b = ChaCha8Rng::seed_from_u64(777);
+    let vision_distance_a = organism_a.genome.vision_distance;
+    let vision_distance_b = organism_b.genome.vision_distance;
+    let policy = ActionSelectionPolicy {
+        temperature: 1.5,
+        argmax_margin: None,
+    };
+
+    let eval_a = evaluate_brain(
+        &mut organism_a,
+        3,
+        &occupancy,
+        vision_distance_a,
+        policy,
+        &mut rng_a,
+        &mut scratch_a,
+    );
+    let eval_b = evaluate_brain(
+        &mut organism_b,
+        3,
+        &occupancy,
+        vision_distance_b,
+        policy,
+        &mut rng_b,
+        &mut scratch_b,
+    );
+
+    assert_eq!(eval_a.action_logits, eval_b.action_logits);
+    assert_eq!(eval_a.resolved_actions, eval_b.resolved_actions);
+}
+
+#[test]
+fn action_selection_margin_forces_argmax_when_gap_is_large() {
+    let occupancy = vec![None; 9];
+    for seed in 0..32_u64 {
+        let mut organism = simple_action_bias_organism(2.5, 0.2, 10.0);
+        let mut scratch = BrainScratch::new();
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let vision_distance = organism.genome.vision_distance;
+        let eval = evaluate_brain(
+            &mut organism,
+            3,
+            &occupancy,
+            vision_distance,
+            ActionSelectionPolicy {
+                temperature: 2.0,
+                argmax_margin: Some(0.5),
+            },
+            &mut rng,
+            &mut scratch,
+        );
+        assert_eq!(eval.resolved_actions.selected_action, ActionType::Forward);
+    }
 }
 
 #[test]
@@ -312,8 +400,17 @@ fn runtime_plasticity_updates_weights_and_preserves_sign() {
 
     let occupancy = vec![None; 9];
     let mut scratch = BrainScratch::new();
+    let mut action_rng = ChaCha8Rng::seed_from_u64(2);
     let vision_distance = organism.genome.vision_distance;
-    let _ = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
+    let _ = evaluate_brain(
+        &mut organism,
+        3,
+        &occupancy,
+        vision_distance,
+        deterministic_action_policy(),
+        &mut action_rng,
+        &mut scratch,
+    );
 
     let before = organism.brain.sensory[0].synapses[0].weight;
     apply_runtime_plasticity(&mut organism, 0.0, &mut scratch);
@@ -380,8 +477,17 @@ fn runtime_plasticity_neutralizes_passive_metabolism_for_dopamine() {
 
     let occupancy = vec![None; 9];
     let mut scratch = BrainScratch::new();
+    let mut action_rng = ChaCha8Rng::seed_from_u64(3);
     let vision_distance = organism.genome.vision_distance;
-    let _ = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
+    let _ = evaluate_brain(
+        &mut organism,
+        3,
+        &occupancy,
+        vision_distance,
+        deterministic_action_policy(),
+        &mut action_rng,
+        &mut scratch,
+    );
 
     let before = organism.brain.sensory[0].synapses[0].weight;
     // Passive drain baseline (1.0) exactly cancels the raw -1.0 energy delta.
@@ -441,19 +547,52 @@ fn energy_sensor_clamps_and_scales_with_starting_energy() {
     let occupancy = vec![None; 9];
     let mut scratch = BrainScratch::new();
     let vision_distance = organism.genome.vision_distance;
+    let mut action_rng = ChaCha8Rng::seed_from_u64(4);
 
-    let _ = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
+    let _ = evaluate_brain(
+        &mut organism,
+        3,
+        &occupancy,
+        vision_distance,
+        deterministic_action_policy(),
+        &mut action_rng,
+        &mut scratch,
+    );
     assert_eq!(organism.brain.sensory[0].neuron.activation, 0.5);
 
     organism.energy = 1_000_000.0;
-    let _ = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
+    let _ = evaluate_brain(
+        &mut organism,
+        3,
+        &occupancy,
+        vision_distance,
+        deterministic_action_policy(),
+        &mut action_rng,
+        &mut scratch,
+    );
     assert!(organism.brain.sensory[0].neuron.activation > 0.999_999);
 
     organism.energy = 0.0;
-    let _ = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
+    let _ = evaluate_brain(
+        &mut organism,
+        3,
+        &occupancy,
+        vision_distance,
+        deterministic_action_policy(),
+        &mut action_rng,
+        &mut scratch,
+    );
     assert_eq!(organism.brain.sensory[0].neuron.activation, 0.0);
 
     organism.energy = 28.0;
-    let _ = evaluate_brain(&mut organism, 3, &occupancy, vision_distance, &mut scratch);
+    let _ = evaluate_brain(
+        &mut organism,
+        3,
+        &occupancy,
+        vision_distance,
+        deterministic_action_policy(),
+        &mut action_rng,
+        &mut scratch,
+    );
     assert!(organism.brain.sensory[0].neuron.activation < 0.05);
 }

@@ -195,6 +195,10 @@ pub struct WorldConfig {
     pub num_organisms: u32,
     pub food_energy: f32,
     pub move_action_energy_cost: f32,
+    #[serde(default = "default_action_temperature")]
+    pub action_temperature: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_selection_margin: Option<f32>,
     pub plant_growth_speed: f32,
     #[serde(default = "default_food_regrowth_interval")]
     pub food_regrowth_interval: u32,
@@ -220,6 +224,10 @@ struct WorldConfigDeserialize {
     num_organisms: u32,
     food_energy: f32,
     move_action_energy_cost: f32,
+    #[serde(default = "default_action_temperature")]
+    action_temperature: f32,
+    #[serde(default)]
+    action_selection_margin: Option<f32>,
     #[serde(default)]
     plant_growth_speed: Option<f32>,
     #[serde(default)]
@@ -258,6 +266,8 @@ impl<'de> Deserialize<'de> for WorldConfig {
             num_organisms: raw.num_organisms,
             food_energy: raw.food_energy,
             move_action_energy_cost: raw.move_action_energy_cost,
+            action_temperature: raw.action_temperature,
+            action_selection_margin: raw.action_selection_margin,
             plant_growth_speed,
             food_regrowth_interval: raw.food_regrowth_interval,
             food_fertility_noise_scale: raw.food_fertility_noise_scale,
@@ -373,6 +383,10 @@ fn default_terrain_threshold() -> f32 {
 
 fn default_plant_growth_speed() -> f32 {
     1.0
+}
+
+fn default_action_temperature() -> f32 {
+    0.5
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -136,11 +136,9 @@ fn available_cpu_parallelism() -> usize {
         .max(1)
 }
 
-fn batch_parallelism_plan(world_count: u32) -> (usize, usize) {
+fn batch_parallelism_plan(world_count: u32) -> usize {
     let total_cpu = available_cpu_parallelism();
-    let world_workers = (world_count as usize).min(total_cpu).max(1);
-    let threads_per_world = (total_cpu / world_workers).max(1);
-    (world_workers, threads_per_world)
+    (world_count as usize).min(total_cpu).max(1)
 }
 
 fn load_runtime_default_world_config() -> Result<sim_types::WorldConfig, AppError> {
@@ -692,10 +690,8 @@ async fn create_session(
 
 async fn create_runtime_session(
     state: &AppState,
-    mut simulation: Simulation,
+    simulation: Simulation,
 ) -> Result<CreateSessionResponse, AppError> {
-    simulation.set_intent_parallelism(available_cpu_parallelism());
-    simulation.set_intent_parallel_min_organisms(1);
     let now_ms = now_unix_ms()?;
     let id = Uuid::new_v4();
     let snapshot = simulation.snapshot();
@@ -737,7 +733,7 @@ async fn run_batch_simulations(
     universe_seed: u64,
     ticks_per_world: u64,
 ) {
-    let (max_world_workers, threads_per_world) = batch_parallelism_plan(world_count);
+    let max_world_workers = batch_parallelism_plan(world_count);
     let mut join_set = JoinSet::new();
 
     for world_index in 0..world_count {
@@ -745,12 +741,9 @@ async fn run_batch_simulations(
         let world_archive = state.world_archive.clone();
         let world_config = config.clone();
         let seed = world_seed(universe_seed, world_index);
-        let intent_threads = threads_per_world;
         join_set.spawn(async move {
             tokio::task::spawn_blocking(move || -> Result<ArchivedWorldSummary, AppError> {
                 let mut simulation = Simulation::new(world_config, seed)?;
-                simulation.set_intent_parallelism(intent_threads);
-                simulation.set_intent_parallel_min_organisms(1);
                 simulate_ticks(&mut simulation, ticks_per_world);
                 world_archive.persist_batch_world(
                     run_id,

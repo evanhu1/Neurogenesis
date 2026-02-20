@@ -1,10 +1,13 @@
-use crate::brain::{action_index, apply_runtime_plasticity, evaluate_brain, BrainScratch};
+use crate::brain::{
+    action_index, apply_runtime_plasticity, evaluate_brain, ActionSelectionPolicy, BrainScratch,
+};
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right, wrap_position};
 use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 use crate::Simulation;
 #[cfg(feature = "profiling")]
 use crate::{profiling, profiling::TurnPhase};
-use rayon::prelude::*;
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 use sim_types::{
     ActionType, EntityId, FacingDirection, FoodState, Occupant, OrganismFacing, OrganismId,
     OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId, TickDelta, WorldConfig,
@@ -15,6 +18,8 @@ use std::collections::{BTreeMap, HashSet};
 use std::time::Instant;
 
 const FOOD_ENERGY_METABOLISM_DIVISOR: f32 = 1000.0;
+const RNG_TURN_MIX: u64 = 0x9E37_79B9_7F4A_7C15;
+const RNG_ORGANISM_MIX: u64 = 0xBF58_476D_1CE4_E5B9;
 
 #[derive(Clone, Copy)]
 struct SnapshotOrganismState {
@@ -214,31 +219,12 @@ impl Simulation {
     fn build_intents(&mut self, snapshot: &TurnSnapshot) -> Vec<OrganismIntent> {
         let occupancy = &self.occupancy;
         let food_energy = self.config.food_energy;
-
-        if self.should_parallelize_intents(snapshot.organism_count) {
-            let intent_threads = self.intent_parallelism();
-            let world_width = snapshot.world_width;
-            let organism_ids = &snapshot.organism_ids;
-            let organism_states = &snapshot.organism_states;
-            return crate::install_with_intent_pool(intent_threads, || {
-                self.organisms
-                    .par_iter_mut()
-                    .enumerate()
-                    .map_init(BrainScratch::new, |scratch, (idx, organism)| {
-                        build_intent_for_organism(
-                            idx,
-                            organism,
-                            food_energy,
-                            world_width,
-                            occupancy,
-                            organism_states[idx],
-                            organism_ids[idx],
-                            scratch,
-                        )
-                    })
-                    .collect()
-            });
-        }
+        let action_selection = ActionSelectionPolicy {
+            temperature: self.config.action_temperature,
+            argmax_margin: self.config.action_selection_margin,
+        };
+        let sim_seed = self.seed;
+        let tick = self.turn;
 
         let mut intents = Vec::with_capacity(snapshot.organism_count);
         let mut scratch = BrainScratch::new();
@@ -251,6 +237,9 @@ impl Simulation {
                 occupancy,
                 snapshot.organism_states[idx],
                 snapshot.organism_ids[idx],
+                sim_seed,
+                tick,
+                action_selection,
                 &mut scratch,
             ));
         }
@@ -664,12 +653,24 @@ fn build_intent_for_organism(
     occupancy: &[Option<Occupant>],
     snapshot_state: SnapshotOrganismState,
     organism_id: OrganismId,
+    sim_seed: u64,
+    tick: u64,
+    action_selection: ActionSelectionPolicy,
     scratch: &mut BrainScratch,
 ) -> OrganismIntent {
     let vision_distance = organism.genome.vision_distance;
+    let mut action_rng = ChaCha8Rng::seed_from_u64(action_rng_seed(sim_seed, tick, organism_id));
     #[cfg(feature = "profiling")]
     let brain_eval_started = Instant::now();
-    let evaluation = evaluate_brain(organism, world_width, occupancy, vision_distance, scratch);
+    let evaluation = evaluate_brain(
+        organism,
+        world_width,
+        occupancy,
+        vision_distance,
+        action_selection,
+        &mut action_rng,
+        scratch,
+    );
     #[cfg(feature = "profiling")]
     profiling::record_brain_eval_total(brain_eval_started.elapsed());
 
@@ -772,4 +773,19 @@ fn reproduction_target(
 ) -> (i32, i32) {
     let opposite_facing = opposite_direction(parent_facing);
     hex_neighbor((parent_q, parent_r), opposite_facing, world_width)
+}
+
+fn action_rng_seed(sim_seed: u64, tick: u64, organism_id: OrganismId) -> u64 {
+    let mixed =
+        sim_seed ^ tick.wrapping_mul(RNG_TURN_MIX) ^ organism_id.0.wrapping_mul(RNG_ORGANISM_MIX);
+    mix_u64(mixed)
+}
+
+fn mix_u64(mut value: u64) -> u64 {
+    value ^= value >> 30;
+    value = value.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    value ^= value >> 27;
+    value = value.wrapping_mul(0x94D0_49BB_1331_11EB);
+    value ^= value >> 31;
+    value
 }

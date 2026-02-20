@@ -13,8 +13,6 @@ struct Args {
     turns: u32,
     warmup_turns: u32,
     seed: u64,
-    intent_threads: usize,
-    intent_parallel_min: usize,
 }
 
 #[cfg(feature = "profiling")]
@@ -40,9 +38,6 @@ fn run() -> Result<(), String> {
     let mut sim = Simulation::new(stable_perf_config(), args.seed)
         .map_err(|err| format!("failed to initialize simulation: {err}"))?;
 
-    sim.set_intent_parallelism(args.intent_threads);
-    sim.set_intent_parallel_min_organisms(args.intent_parallel_min);
-
     if args.warmup_turns > 0 {
         sim.advance_n(args.warmup_turns);
     }
@@ -63,8 +58,6 @@ fn parse_args() -> Result<Args, String> {
         turns: 1_000,
         warmup_turns: 200,
         seed: 42,
-        intent_threads: 1,
-        intent_parallel_min: 1,
     };
 
     let mut iter = std::env::args().skip(1);
@@ -73,13 +66,6 @@ fn parse_args() -> Result<Args, String> {
             "--turns" => args.turns = parse_value(&mut iter, "--turns")?,
             "--warmup-turns" => args.warmup_turns = parse_value(&mut iter, "--warmup-turns")?,
             "--seed" => args.seed = parse_value(&mut iter, "--seed")?,
-            "--intent-threads" => {
-                args.intent_threads = parse_value::<usize>(&mut iter, "--intent-threads")?.max(1);
-            }
-            "--intent-parallel-min" => {
-                args.intent_parallel_min =
-                    parse_value::<usize>(&mut iter, "--intent-parallel-min")?.max(1);
-            }
             "--help" | "-h" => {
                 print_help();
                 std::process::exit(0);
@@ -123,8 +109,6 @@ fn print_help() {
     println!("  --turns <u32>                Number of measured turns (default: 1000)");
     println!("  --warmup-turns <u32>         Warmup turns before reset (default: 200)");
     println!("  --seed <u64>                 Simulation seed (default: 42)");
-    println!("  --intent-threads <usize>     Intent thread count (default: 1)");
-    println!("  --intent-parallel-min <usize>  Min organisms to parallelize intents (default: 1)");
 }
 
 #[cfg(feature = "profiling")]
@@ -136,8 +120,6 @@ fn print_report(args: Args, snapshot: &ProfilingSnapshot, wall_elapsed: Duration
     println!("turns: {}", args.turns);
     println!("warmup_turns: {}", args.warmup_turns);
     println!("seed: {}", args.seed);
-    println!("intent_threads: {}", args.intent_threads);
-    println!("intent_parallel_min: {}", args.intent_parallel_min);
     println!("wall_time_ms: {:.3}", ns_to_ms(wall_ns));
     println!(
         "avg_wall_us_per_turn: {:.3}",
@@ -289,6 +271,8 @@ fn stable_perf_config() -> WorldConfig {
         num_organisms: 2_000,
         food_energy: 50.0,
         move_action_energy_cost: 0.0,
+        action_temperature: 0.5,
+        action_selection_margin: None,
         plant_growth_speed: 1.0,
         food_regrowth_interval: 10,
         food_fertility_noise_scale: 0.045,

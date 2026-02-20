@@ -890,6 +890,9 @@ pub(crate) const INTER_LOG_TIME_CONSTANT_MAX: f32 = 2.995_732_3;
 pub(crate) const DEFAULT_INTER_LOG_TIME_CONSTANT: f32 = 0.0;
 pub(crate) const BRAIN_SPACE_MIN: f32 = 0.0;
 pub(crate) const BRAIN_SPACE_MAX: f32 = 10.0;
+const SPATIAL_PRIOR_LONG_RANGE_FLOOR: f32 = 0.01;
+const SYNAPSE_WEIGHT_LOG_NORMAL_MU: f32 = -0.5;
+const SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA: f32 = 0.8;
 
 pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     config: &SeedGenomeConfig,
@@ -947,7 +950,7 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         action_locations,
         edges: Vec::new(),
     };
-    sync_synapse_genes_to_target(&mut genome);
+    sync_synapse_genes_to_target(&mut genome, rng);
     genome
 }
 
@@ -1128,7 +1131,7 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &
         mutate_add_neuron_split_edge(genome, rng);
     }
 
-    sync_synapse_genes_to_target(genome);
+    sync_synapse_genes_to_target(genome, rng);
 }
 
 fn mutate_random_neuron_location<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
@@ -1308,7 +1311,7 @@ pub(crate) fn mutate_add_neuron_split_edge<R: Rng + ?Sized>(
     });
 
     genome.num_synapses = genome.num_synapses.saturating_add(1);
-    sync_synapse_genes_to_target(genome);
+    sync_synapse_genes_to_target(genome, rng);
 }
 
 fn select_weighted_edge_index<R: Rng + ?Sized>(edges: &[SynapseEdge], rng: &mut R) -> usize {
@@ -1373,8 +1376,15 @@ fn location_for_neuron(neuron_id: NeuronId, genome: &OrganismGenome) -> BrainLoc
     BrainLocation { x: 5.0, y: 5.0 }
 }
 
-fn sync_synapse_genes_to_target(genome: &mut OrganismGenome) {
+fn sync_synapse_genes_to_target<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
     sanitize_synapse_genes(genome);
+
+    let target = genome.num_synapses as usize;
+    if genome.edges.len() < target {
+        add_synapse_genes_with_spatial_prior(genome, target - genome.edges.len(), rng);
+    }
+
+    sort_synapse_genes(&mut genome.edges);
     genome.num_synapses = genome.edges.len() as u32;
 }
 
@@ -1396,6 +1406,105 @@ fn sanitize_synapse_genes(genome: &mut OrganismGenome) {
     genome.edges.dedup_by(|a, b| {
         a.pre_neuron_id == b.pre_neuron_id && a.post_neuron_id == b.post_neuron_id
     });
+}
+
+fn add_synapse_genes_with_spatial_prior<R: Rng + ?Sized>(
+    genome: &mut OrganismGenome,
+    add_count: usize,
+    rng: &mut R,
+) {
+    if add_count == 0 {
+        return;
+    }
+
+    let mut existing_pairs: HashSet<(u32, u32)> = HashSet::with_capacity(genome.edges.len());
+    for edge in &genome.edges {
+        existing_pairs.insert((edge.pre_neuron_id.0, edge.post_neuron_id.0));
+    }
+
+    let mut weighted_candidates: Vec<(f32, NeuronId, NeuronId)> = Vec::new();
+
+    let num_neurons = genome.num_neurons;
+    for sensory_idx in 0..SENSORY_COUNT {
+        let pre_id = NeuronId(sensory_idx);
+        for post_id in post_ids(num_neurons) {
+            if existing_pairs.contains(&(pre_id.0, post_id.0)) {
+                continue;
+            }
+            let probability = connection_probability(genome, pre_id, post_id);
+            let priority = weighted_without_replacement_priority(probability, rng);
+            weighted_candidates.push((priority, pre_id, post_id));
+        }
+    }
+
+    for inter_idx in 0..num_neurons {
+        let pre_id = NeuronId(INTER_ID_BASE + inter_idx);
+        for post_id in post_ids(num_neurons) {
+            if !is_valid_synapse_pair(pre_id, post_id, num_neurons) {
+                continue;
+            }
+            if existing_pairs.contains(&(pre_id.0, post_id.0)) {
+                continue;
+            }
+            let probability = connection_probability(genome, pre_id, post_id);
+            let priority = weighted_without_replacement_priority(probability, rng);
+            weighted_candidates.push((priority, pre_id, post_id));
+        }
+    }
+
+    weighted_candidates.sort_unstable_by(|a, b| {
+        a.0.total_cmp(&b.0)
+            .then_with(|| a.1.cmp(&b.1))
+            .then_with(|| a.2.cmp(&b.2))
+    });
+
+    for &(_, pre_id, post_id) in weighted_candidates.iter().take(add_count) {
+        let required_sign =
+            required_pre_sign(pre_id, num_neurons, &genome.interneuron_types).unwrap_or(1.0);
+        genome.edges.push(SynapseEdge {
+            pre_neuron_id: pre_id,
+            post_neuron_id: post_id,
+            weight: sample_signed_lognormal_weight(required_sign, rng),
+            eligibility: 0.0,
+        });
+    }
+}
+
+fn post_ids(num_neurons: u32) -> impl Iterator<Item = NeuronId> {
+    let inter = (0..num_neurons).map(|idx| NeuronId(INTER_ID_BASE + idx));
+    let actions = (0..ACTION_COUNT_U32).map(|idx| NeuronId(ACTION_ID_BASE + idx));
+    inter.chain(actions)
+}
+
+fn connection_probability(genome: &OrganismGenome, pre: NeuronId, post: NeuronId) -> f32 {
+    let pre_location = location_for_neuron(pre, genome);
+    let post_location = location_for_neuron(post, genome);
+    let dx = pre_location.x - post_location.x;
+    let dy = pre_location.y - post_location.y;
+    let distance_sq = dx * dx + dy * dy;
+    let sigma = genome.spatial_prior_sigma.max(0.01);
+    let sigma_sq = sigma * sigma;
+    let local_bias = (-0.5 * distance_sq / sigma_sq).exp();
+    (SPATIAL_PRIOR_LONG_RANGE_FLOOR + (1.0 - SPATIAL_PRIOR_LONG_RANGE_FLOOR) * local_bias)
+        .clamp(0.0, 1.0)
+}
+
+fn weighted_without_replacement_priority<R: Rng + ?Sized>(weight: f32, rng: &mut R) -> f32 {
+    let clamped_weight = weight.max(f32::MIN_POSITIVE);
+    let u = rng.random::<f32>().max(f32::MIN_POSITIVE);
+    -u.ln() / clamped_weight
+}
+
+fn sample_signed_lognormal_weight<R: Rng + ?Sized>(required_sign: f32, rng: &mut R) -> f32 {
+    let z = standard_normal(rng);
+    let magnitude = (SYNAPSE_WEIGHT_LOG_NORMAL_MU + SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA * z)
+        .exp()
+        .clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX);
+    if required_sign.is_sign_negative() {
+        -magnitude
+    } else {
+        magnitude
+    }
 }
 
 fn is_valid_synapse_pair(pre: NeuronId, post: NeuronId, num_neurons: u32) -> bool {

@@ -16,6 +16,8 @@ fn stable_perf_config() -> WorldConfig {
         num_organisms: 2_000,
         food_energy: 50.0,
         move_action_energy_cost: 0.0,
+        action_temperature: 0.5,
+        action_selection_margin: None,
         plant_growth_speed: 1.0,
         food_regrowth_interval: 10,
         food_fertility_noise_scale: 0.045,

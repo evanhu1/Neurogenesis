@@ -27,5 +27,4 @@ uuid = { version = "1", features = ["serde", "v4"] }
 criterion = "0.7"
 toml = "0.9"
 tower-http = { version = "0.6", features = ["cors"] }
-rayon = "1"
 rand_distr = "0.5"

@@ -25,6 +25,7 @@ const PLASTIC_WEIGHT_DECAY: f32 = 0.001;
 const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
 const MIN_ENERGY_SENSOR_SCALE: f32 = 1.0;
 const ENERGY_SENSOR_CURVE_EXPONENT: f32 = 2.0;
+const MIN_ACTION_TEMPERATURE: f32 = 1.0e-6;
 const LOOK_TARGETS: [EntityType; 3] = [EntityType::Food, EntityType::Organism, EntityType::Wall];
 const LOOK_RAY_COUNT: usize = SensoryReceptor::LOOK_RAY_OFFSETS.len();
 pub(crate) const SENSORY_COUNT: u32 = SensoryReceptor::LOOK_NEURON_COUNT + 1;
@@ -50,8 +51,15 @@ impl Default for ResolvedActions {
 #[derive(Default)]
 pub(crate) struct BrainEvaluation {
     pub(crate) resolved_actions: ResolvedActions,
+    pub(crate) action_logits: Vec<f32>,
     pub(crate) action_activations: [f32; ACTION_COUNT],
     pub(crate) synapse_ops: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ActionSelectionPolicy {
+    pub(crate) temperature: f32,
+    pub(crate) argmax_margin: Option<f32>,
 }
 
 /// Reusable scratch buffers for brain evaluation, avoiding per-tick allocations.
@@ -279,6 +287,8 @@ pub(crate) fn evaluate_brain(
     world_width: i32,
     occupancy: &[Option<Occupant>],
     vision_distance: u32,
+    action_selection: ActionSelectionPolicy,
+    action_rng: &mut impl Rng,
     scratch: &mut BrainScratch,
 ) -> BrainEvaluation {
     let mut result = BrainEvaluation::default();
@@ -396,12 +406,19 @@ pub(crate) fn evaluate_brain(
 
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
+    result.action_logits = action_inputs.to_vec();
     for (idx, action) in brain.action.iter_mut().enumerate() {
         action.neuron.activation = sigmoid(action_inputs[idx]);
         result.action_activations[action_index(action.action_type)] = action.neuron.activation;
     }
 
-    result.resolved_actions = resolve_actions(result.action_activations);
+    result.resolved_actions = ResolvedActions {
+        selected_action: select_action_from_logits(
+            &result.action_logits,
+            action_selection,
+            action_rng,
+        ),
+    };
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::ActionActivationResolve, stage_started.elapsed());
 
@@ -677,18 +694,76 @@ pub fn derive_active_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
 }
 
 fn resolve_actions(activations: [f32; ACTION_COUNT]) -> ResolvedActions {
-    let mut best_idx = 0usize;
-    let mut best_activation = activations[0];
-    for (idx, activation) in activations.iter().copied().enumerate().skip(1) {
-        if activation > best_activation {
-            best_idx = idx;
-            best_activation = activation;
+    ResolvedActions {
+        selected_action: ActionType::ALL[argmax_index(&activations)],
+    }
+}
+
+fn select_action_from_logits(
+    action_logits: &[f32],
+    action_selection: ActionSelectionPolicy,
+    action_rng: &mut impl Rng,
+) -> ActionType {
+    if action_logits.len() != ACTION_COUNT {
+        return ActionType::Idle;
+    }
+
+    let best_idx = argmax_index(action_logits);
+    let best_logit = action_logits[best_idx];
+    let second_logit = second_largest(action_logits, best_idx);
+    if let Some(margin) = action_selection.argmax_margin {
+        if best_logit - second_logit > margin {
+            return ActionType::ALL[best_idx];
         }
     }
 
-    ResolvedActions {
-        selected_action: ActionType::ALL[best_idx],
+    let temperature = action_selection.temperature.max(MIN_ACTION_TEMPERATURE);
+    let mut weights = [0.0_f32; ACTION_COUNT];
+    let mut weight_sum = 0.0_f32;
+    for (idx, logit) in action_logits.iter().copied().enumerate() {
+        let scaled = (logit - best_logit) / temperature;
+        let weight = scaled.exp();
+        if weight.is_finite() {
+            weights[idx] = weight;
+            weight_sum += weight;
+        }
     }
+
+    if !weight_sum.is_finite() || weight_sum <= 0.0 {
+        return ActionType::ALL[best_idx];
+    }
+
+    let sample = action_rng.random::<f32>() * weight_sum;
+    let mut cumulative = 0.0_f32;
+    for (idx, weight) in weights.iter().copied().enumerate() {
+        cumulative += weight;
+        if sample < cumulative {
+            return ActionType::ALL[idx];
+        }
+    }
+    ActionType::ALL[ACTION_COUNT - 1]
+}
+
+fn argmax_index(values: &[f32]) -> usize {
+    let mut best_idx = 0usize;
+    let mut best_value = values[0];
+    for (idx, value) in values.iter().copied().enumerate().skip(1) {
+        if value > best_value {
+            best_idx = idx;
+            best_value = value;
+        }
+    }
+    best_idx
+}
+
+fn second_largest(values: &[f32], best_idx: usize) -> f32 {
+    let mut second = f32::NEG_INFINITY;
+    for (idx, value) in values.iter().copied().enumerate() {
+        if idx != best_idx && value > second {
+            second = value;
+        }
+    }
+    second
 }
 
 /// Accumulates weighted inputs using arithmetic index resolution.

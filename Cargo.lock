@@ -1538,7 +1538,6 @@ dependencies = [
  "rand",
  "rand_chacha",
  "rand_distr",
- "rayon",
  "serde",
  "serde_json",
  "sim-types",

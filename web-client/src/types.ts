@@ -30,6 +30,8 @@ export type WorldConfig = {
   num_organisms: number;
   food_energy: number;
   move_action_energy_cost: number;
+  action_temperature: number;
+  action_selection_margin?: number | null;
   neuron_metabolism_cost: number;
   plant_growth_speed: number;
   food_regrowth_interval: number;

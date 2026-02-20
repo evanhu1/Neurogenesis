@@ -30,6 +30,22 @@ fn config_validation_rejects_non_positive_seed_starting_energy() {
 }
 
 #[test]
+fn config_validation_rejects_non_positive_action_temperature() {
+    let mut cfg = stable_test_config();
+    cfg.action_temperature = 0.0;
+    let err = Simulation::new(cfg, 1).expect_err("config should be rejected");
+    assert!(err.to_string().contains("action_temperature"));
+}
+
+#[test]
+fn config_validation_rejects_negative_action_selection_margin() {
+    let mut cfg = stable_test_config();
+    cfg.action_selection_margin = Some(-0.1);
+    let err = Simulation::new(cfg, 1).expect_err("config should be rejected");
+    assert!(err.to_string().contains("action_selection_margin"));
+}
+
+#[test]
 fn seed_genome_initializes_spatial_vectors_within_brain_space() {
     let mut cfg = stable_test_config();
     cfg.seed_genome_config.num_neurons = 4;
@@ -445,6 +461,25 @@ fn terrain_map_is_seed_deterministic_and_threshold_controlled() {
         low_blocked > high_blocked,
         "lower threshold should produce more blocked terrain: low={low_blocked} high={high_blocked}",
     );
+}
+
+#[test]
+fn stochastic_action_sampling_is_deterministic_for_repeated_runs() {
+    let mut cfg = stable_test_config();
+    cfg.world_width = 30;
+    cfg.num_organisms = 120;
+    cfg.action_temperature = 1.2;
+    cfg.action_selection_margin = None;
+
+    let mut run_a = Simulation::new(cfg.clone(), 2026).expect("simulation should initialize");
+    let mut run_b = Simulation::new(cfg, 2026).expect("simulation should initialize");
+
+    for _ in 0..25 {
+        let _ = run_a.tick();
+        let _ = run_b.tick();
+    }
+
+    assert_eq!(run_a.snapshot(), run_b.snapshot());
 }
 
 fn stable_test_config_with_terrain(terrain_threshold: f32) -> WorldConfig {
