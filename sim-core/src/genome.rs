@@ -26,7 +26,10 @@ const SYNAPSE_PRUNE_THRESHOLD_MAX: f32 = 1.0;
 const INTER_TYPE_EXCITATORY_PRIOR: f32 = 0.8;
 const MUTATION_RATE_ADAPTATION_TIME_CONSTANT: f32 = 0.25;
 const MUTATION_RATE_MIN: f32 = 1.0e-4;
-const MUTATION_RATE_MAX: f32 = 1.0 - MUTATION_RATE_MIN;
+const MUTATION_RATE_MAX: f32 = 0.5;
+const MUTATION_RATE_LATENT_MIN: f32 = -8.0;
+const MUTATION_RATE_LATENT_MAX: f32 = 8.0;
+const MUTATION_RATE_LOGIT_EPSILON: f32 = 1.0e-6;
 
 const BIAS_PERTURBATION_STDDEV: f32 = 0.15;
 const INTER_LOG_TIME_CONSTANT_PERTURBATION_STDDEV: f32 = 0.05;
@@ -113,7 +116,11 @@ fn sample_interneuron_type<R: Rng + ?Sized>(rng: &mut R) -> InterNeuronType {
     }
 }
 
-fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
+fn mutate_mutation_rate_genes<R: Rng + ?Sized>(
+    genome: &mut OrganismGenome,
+    global_mutation_rate_modifier: f32,
+    rng: &mut R,
+) {
     let mut rates = [
         genome.mutation_rate_age_of_maturity,
         genome.mutation_rate_vision_distance,
@@ -129,9 +136,12 @@ fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng:
     let shared_normal = standard_normal(rng) * MUTATION_RATE_ADAPTATION_TIME_CONSTANT;
 
     for rate in &mut rates {
+        let scaled_rate = *rate * global_mutation_rate_modifier;
+        let mut latent = mutation_rate_to_latent(scaled_rate);
         let gene_normal = standard_normal(rng) * MUTATION_RATE_ADAPTATION_TIME_CONSTANT;
-        let adapted = *rate * (shared_normal + gene_normal).exp();
-        *rate = adapted.clamp(MUTATION_RATE_MIN, MUTATION_RATE_MAX);
+        latent = (latent + shared_normal + gene_normal)
+            .clamp(MUTATION_RATE_LATENT_MIN, MUTATION_RATE_LATENT_MAX);
+        *rate = mutation_rate_from_latent(latent);
     }
 
     genome.mutation_rate_age_of_maturity = rates[0];
@@ -195,8 +205,25 @@ fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut 
     sanitize_synapse_genes(genome);
 }
 
-fn effective_mutation_rate(rate: f32, global_mutation_rate_modifier: f32) -> f32 {
-    (rate * global_mutation_rate_modifier).clamp(0.0, 1.0)
+fn clamp_mutation_rate(rate: f32) -> f32 {
+    rate.clamp(MUTATION_RATE_MIN, MUTATION_RATE_MAX)
+}
+
+fn mutation_rate_to_latent(rate: f32) -> f32 {
+    let clamped_rate = clamp_mutation_rate(rate);
+    let span = (MUTATION_RATE_MAX - MUTATION_RATE_MIN).max(f32::MIN_POSITIVE);
+    let normalized = ((clamped_rate - MUTATION_RATE_MIN) / span).clamp(
+        MUTATION_RATE_LOGIT_EPSILON,
+        1.0 - MUTATION_RATE_LOGIT_EPSILON,
+    );
+    (normalized / (1.0 - normalized)).ln()
+}
+
+fn mutation_rate_from_latent(latent: f32) -> f32 {
+    let clamped_latent = latent.clamp(MUTATION_RATE_LATENT_MIN, MUTATION_RATE_LATENT_MAX);
+    let sigmoid = 1.0 / (1.0 + (-clamped_latent).exp());
+    let rate = MUTATION_RATE_MIN + sigmoid * (MUTATION_RATE_MAX - MUTATION_RATE_MIN);
+    clamp_mutation_rate(rate)
 }
 
 pub(crate) fn mutate_genome<R: Rng + ?Sized>(
@@ -205,50 +232,9 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
     rng: &mut R,
 ) {
     align_genome_vectors(genome, rng);
-    mutate_mutation_rate_genes(genome, rng);
+    mutate_mutation_rate_genes(genome, global_mutation_rate_modifier, rng);
 
-    let mutation_rate_age_of_maturity = effective_mutation_rate(
-        genome.mutation_rate_age_of_maturity,
-        global_mutation_rate_modifier,
-    );
-    let mutation_rate_vision_distance = effective_mutation_rate(
-        genome.mutation_rate_vision_distance,
-        global_mutation_rate_modifier,
-    );
-    let mutation_rate_inter_bias = effective_mutation_rate(
-        genome.mutation_rate_inter_bias,
-        global_mutation_rate_modifier,
-    );
-    let mutation_rate_inter_update_rate = effective_mutation_rate(
-        genome.mutation_rate_inter_update_rate,
-        global_mutation_rate_modifier,
-    );
-    let mutation_rate_action_bias = effective_mutation_rate(
-        genome.mutation_rate_action_bias,
-        global_mutation_rate_modifier,
-    );
-    let mutation_rate_eligibility_retention = effective_mutation_rate(
-        genome.mutation_rate_eligibility_retention,
-        global_mutation_rate_modifier,
-    );
-    let mutation_rate_synapse_prune_threshold = effective_mutation_rate(
-        genome.mutation_rate_synapse_prune_threshold,
-        global_mutation_rate_modifier,
-    );
-    let mutation_rate_neuron_location = effective_mutation_rate(
-        genome.mutation_rate_neuron_location,
-        global_mutation_rate_modifier,
-    );
-    let mutation_rate_synapse_weight_perturbation = effective_mutation_rate(
-        genome.mutation_rate_synapse_weight_perturbation,
-        global_mutation_rate_modifier,
-    );
-    let mutation_rate_add_neuron_split_edge = effective_mutation_rate(
-        genome.mutation_rate_add_neuron_split_edge,
-        global_mutation_rate_modifier,
-    );
-
-    if rng.random::<f32>() < mutation_rate_age_of_maturity {
+    if rng.random::<f32>() < genome.mutation_rate_age_of_maturity {
         genome.age_of_maturity = step_u32(
             genome.age_of_maturity,
             MIN_MUTATED_AGE_OF_MATURITY,
@@ -257,7 +243,7 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
         );
     }
 
-    if rng.random::<f32>() < mutation_rate_vision_distance {
+    if rng.random::<f32>() < genome.mutation_rate_vision_distance {
         genome.vision_distance = step_u32(
             genome.vision_distance,
             MIN_MUTATED_VISION_DISTANCE,
@@ -266,7 +252,7 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
         );
     }
 
-    if rng.random::<f32>() < mutation_rate_inter_bias && genome.num_neurons > 0 {
+    if rng.random::<f32>() < genome.mutation_rate_inter_bias && genome.num_neurons > 0 {
         let idx = rng.random_range(0..genome.num_neurons as usize);
         genome.inter_biases[idx] = perturb_clamped(
             genome.inter_biases[idx],
@@ -277,7 +263,7 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
         );
     }
 
-    if rng.random::<f32>() < mutation_rate_inter_update_rate && genome.num_neurons > 0 {
+    if rng.random::<f32>() < genome.mutation_rate_inter_update_rate && genome.num_neurons > 0 {
         let idx = rng.random_range(0..genome.num_neurons as usize);
         genome.inter_log_time_constants[idx] = perturb_clamped(
             genome.inter_log_time_constants[idx],
@@ -288,7 +274,7 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
         );
     }
 
-    if rng.random::<f32>() < mutation_rate_action_bias && !genome.action_biases.is_empty() {
+    if rng.random::<f32>() < genome.mutation_rate_action_bias && !genome.action_biases.is_empty() {
         let idx = rng.random_range(0..genome.action_biases.len());
         genome.action_biases[idx] = perturb_clamped(
             genome.action_biases[idx],
@@ -299,7 +285,7 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
         );
     }
 
-    if rng.random::<f32>() < mutation_rate_eligibility_retention {
+    if rng.random::<f32>() < genome.mutation_rate_eligibility_retention {
         genome.eligibility_retention = perturb_clamped(
             genome.eligibility_retention,
             ELIGIBILITY_RETENTION_PERTURBATION_STDDEV,
@@ -309,7 +295,7 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
         );
     }
 
-    if rng.random::<f32>() < mutation_rate_synapse_prune_threshold {
+    if rng.random::<f32>() < genome.mutation_rate_synapse_prune_threshold {
         genome.synapse_prune_threshold = perturb_clamped(
             genome.synapse_prune_threshold,
             SYNAPSE_PRUNE_THRESHOLD_PERTURBATION_STDDEV,
@@ -319,15 +305,15 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
         );
     }
 
-    if rng.random::<f32>() < mutation_rate_neuron_location {
+    if rng.random::<f32>() < genome.mutation_rate_neuron_location {
         mutate_random_neuron_location(genome, rng);
     }
 
-    if rng.random::<f32>() < mutation_rate_synapse_weight_perturbation {
+    if rng.random::<f32>() < genome.mutation_rate_synapse_weight_perturbation {
         mutate_random_synapse_weight(genome, rng);
     }
 
-    if rng.random::<f32>() < mutation_rate_add_neuron_split_edge {
+    if rng.random::<f32>() < genome.mutation_rate_add_neuron_split_edge {
         mutate_add_neuron_split_edge(genome, rng);
     }
 
@@ -923,7 +909,7 @@ fn synapse_gene_distance(a: &[SynapseEdge], b: &[SynapseEdge]) -> f32 {
     distance
 }
 
-/// L1 genome distance: scalar traits + mutation-rate genes + topology + brain geometry.
+/// L1 genome distance: scalar traits + topology + brain geometry.
 pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
     let mut dist = (a.num_neurons as f32 - b.num_neurons as f32).abs()
         + (a.num_synapses as f32 - b.num_synapses as f32).abs()
@@ -934,34 +920,6 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
         + (a.hebb_eta_gain - b.hebb_eta_gain).abs()
         + (a.eligibility_retention - b.eligibility_retention).abs()
         + (a.synapse_prune_threshold - b.synapse_prune_threshold).abs();
-
-    let a_rates = [
-        a.mutation_rate_age_of_maturity,
-        a.mutation_rate_vision_distance,
-        a.mutation_rate_inter_bias,
-        a.mutation_rate_inter_update_rate,
-        a.mutation_rate_action_bias,
-        a.mutation_rate_eligibility_retention,
-        a.mutation_rate_synapse_prune_threshold,
-        a.mutation_rate_neuron_location,
-        a.mutation_rate_synapse_weight_perturbation,
-        a.mutation_rate_add_neuron_split_edge,
-    ];
-    let b_rates = [
-        b.mutation_rate_age_of_maturity,
-        b.mutation_rate_vision_distance,
-        b.mutation_rate_inter_bias,
-        b.mutation_rate_inter_update_rate,
-        b.mutation_rate_action_bias,
-        b.mutation_rate_eligibility_retention,
-        b.mutation_rate_synapse_prune_threshold,
-        b.mutation_rate_neuron_location,
-        b.mutation_rate_synapse_weight_perturbation,
-        b.mutation_rate_add_neuron_split_edge,
-    ];
-    for i in 0..a_rates.len() {
-        dist += (a_rates[i] - b_rates[i]).abs();
-    }
 
     let max_enabled = a.num_neurons.max(b.num_neurons) as usize;
     for i in 0..max_enabled {
