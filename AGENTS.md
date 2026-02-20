@@ -101,7 +101,7 @@ Runtime plasticity:
 
 `OrganismGenome` has `num_neurons`, `vision_distance`, `age_of_maturity`,
 `hebb_eta_gain`, `eligibility_retention`,
-`synapse_prune_threshold`, `inter_biases`, `inter_log_taus`,
+`synapse_prune_threshold`, `inter_biases`, `inter_log_time_constants`,
 `interneuron_types`, `action_biases`, `edges` (sorted, with per-edge
 `eligibility` trace), and per-operator mutation-rate genes. No weight mutation;
 weights are set at birth and modified by Hebbian learning. Species assigned by

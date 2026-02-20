@@ -93,11 +93,6 @@ export function InspectorPanel({
         value: genome.mutation_rate_vision_distance,
       },
       {
-        key: 'mutation_rate_num_synapses',
-        label: 'Num Synapses',
-        value: genome.mutation_rate_num_synapses,
-      },
-      {
         key: 'mutation_rate_neuron_location',
         label: 'Neuron Location',
         value: genome.mutation_rate_neuron_location,
@@ -154,7 +149,10 @@ export function InspectorPanel({
         { label: 'Vision Distance', value: String(genome.vision_distance) },
         { label: 'Age Maturity', value: String(genome.age_of_maturity) },
         { label: 'Inter Bias Genes', value: String(genome.inter_biases.length) },
-        { label: 'Inter Tau Genes', value: String(genome.inter_log_taus.length) },
+        {
+          label: 'Inter Time Constant Genes',
+          value: String(genome.inter_log_time_constants.length),
+        },
         { label: 'Action Bias Genes', value: String(genome.action_biases.length) },
         { label: 'Inter Excitatory', value: String(interExcitatoryCount) },
         { label: 'Inter Inhibitory', value: String(interInhibitoryCount) },

@@ -43,7 +43,7 @@ The goals of this project:
 
 ```rust
 use crate::genome::{
-    inter_alpha_from_log_tau, BRAIN_SPACE_MAX, BRAIN_SPACE_MIN, DEFAULT_INTER_LOG_TAU,
+    inter_alpha_from_log_time_constant, BRAIN_SPACE_MAX, BRAIN_SPACE_MIN, DEFAULT_INTER_LOG_TIME_CONSTANT,
     SYNAPSE_STRENGTH_MAX, SYNAPSE_STRENGTH_MIN,
 };
 use crate::grid::{hex_neighbor, rotate_left, rotate_right};
@@ -145,12 +145,12 @@ pub(crate) fn express_genome<R: Rng + ?Sized>(genome: &OrganismGenome, _rng: &mu
     for i in 0..genome.num_neurons {
         let idx = i as usize;
         let bias = genome.inter_biases.get(idx).copied().unwrap_or(0.0);
-        let log_tau = genome
-            .inter_log_taus
+        let log_time_constant = genome
+            .inter_log_time_constants
             .get(idx)
             .copied()
-            .unwrap_or(DEFAULT_INTER_LOG_TAU);
-        let alpha = inter_alpha_from_log_tau(log_tau);
+            .unwrap_or(DEFAULT_INTER_LOG_TIME_CONSTANT);
+        let alpha = inter_alpha_from_log_time_constant(log_time_constant);
         let interneuron_type = genome
             .interneuron_types
             .get(idx)
@@ -906,20 +906,20 @@ const SYNAPSE_PRUNE_THRESHOLD_MIN: f32 = 0.0;
 const SYNAPSE_PRUNE_THRESHOLD_MAX: f32 = 1.0;
 
 const INTER_TYPE_EXCITATORY_PRIOR: f32 = 0.8;
-const MUTATION_RATE_ADAPTATION_TAU: f32 = 0.25;
+const MUTATION_RATE_ADAPTATION_TIME_CONSTANT: f32 = 0.25;
 const MUTATION_RATE_MIN: f32 = 1.0e-4;
 const MUTATION_RATE_MAX: f32 = 1.0 - MUTATION_RATE_MIN;
 
 const BIAS_PERTURBATION_STDDEV: f32 = 0.15;
-const INTER_LOG_TAU_PERTURBATION_STDDEV: f32 = 0.05;
+const INTER_LOG_TIME_CONSTANT_PERTURBATION_STDDEV: f32 = 0.05;
 const ELIGIBILITY_RETENTION_PERTURBATION_STDDEV: f32 = 0.05;
 const SYNAPSE_PRUNE_THRESHOLD_PERTURBATION_STDDEV: f32 = 0.02;
 const LOCATION_PERTURBATION_STDDEV: f32 = 0.75;
-pub(crate) const INTER_TAU_MIN: f32 = 0.1;
-pub(crate) const INTER_TAU_MAX: f32 = 15.0;
-pub(crate) const INTER_LOG_TAU_MIN: f32 = -2.302_585_1;
-pub(crate) const INTER_LOG_TAU_MAX: f32 = 2.995_732_3;
-pub(crate) const DEFAULT_INTER_LOG_TAU: f32 = 0.0;
+pub(crate) const INTER_TIME_CONSTANT_MIN: f32 = 0.1;
+pub(crate) const INTER_TIME_CONSTANT_MAX: f32 = 15.0;
+pub(crate) const INTER_LOG_TIME_CONSTANT_MIN: f32 = -2.302_585_1;
+pub(crate) const INTER_LOG_TIME_CONSTANT_MAX: f32 = 2.995_732_3;
+pub(crate) const DEFAULT_INTER_LOG_TIME_CONSTANT: f32 = 0.0;
 pub(crate) const BRAIN_SPACE_MIN: f32 = 0.0;
 pub(crate) const BRAIN_SPACE_MAX: f32 = 10.0;
 const SPATIAL_PRIOR_LONG_RANGE_FLOOR: f32 = 0.01;
@@ -933,8 +933,8 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     let num_neurons = config.num_neurons;
     let max_synapses = max_possible_synapses(num_neurons);
     let inter_biases: Vec<f32> = (0..num_neurons).map(|_| sample_initial_bias(rng)).collect();
-    let inter_log_taus: Vec<f32> = (0..num_neurons)
-        .map(|_| sample_uniform_log_tau(rng))
+    let inter_log_time_constants: Vec<f32> = (0..num_neurons)
+        .map(|_| sample_uniform_log_time_constant(rng))
         .collect();
     let interneuron_types: Vec<InterNeuronType> = (0..num_neurons)
         .map(|_| sample_interneuron_type(rng))
@@ -966,7 +966,6 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         synapse_prune_threshold: config.synapse_prune_threshold,
         mutation_rate_age_of_maturity: config.mutation_rate_age_of_maturity,
         mutation_rate_vision_distance: config.mutation_rate_vision_distance,
-        mutation_rate_num_synapses: config.mutation_rate_num_synapses,
         mutation_rate_inter_bias: config.mutation_rate_inter_bias,
         mutation_rate_inter_update_rate: config.mutation_rate_inter_update_rate,
         mutation_rate_action_bias: config.mutation_rate_action_bias,
@@ -974,7 +973,7 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         mutation_rate_synapse_prune_threshold: config.mutation_rate_synapse_prune_threshold,
         mutation_rate_neuron_location: config.mutation_rate_neuron_location,
         inter_biases,
-        inter_log_taus,
+        inter_log_time_constants,
         interneuron_types,
         action_biases,
         sensory_locations,
@@ -998,7 +997,6 @@ fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng:
     let mut rates = [
         genome.mutation_rate_age_of_maturity,
         genome.mutation_rate_vision_distance,
-        genome.mutation_rate_num_synapses,
         genome.mutation_rate_inter_bias,
         genome.mutation_rate_inter_update_rate,
         genome.mutation_rate_action_bias,
@@ -1006,23 +1004,22 @@ fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng:
         genome.mutation_rate_synapse_prune_threshold,
         genome.mutation_rate_neuron_location,
     ];
-    let shared_normal = standard_normal(rng) * MUTATION_RATE_ADAPTATION_TAU;
+    let shared_normal = standard_normal(rng) * MUTATION_RATE_ADAPTATION_TIME_CONSTANT;
 
     for rate in &mut rates {
-        let gene_normal = standard_normal(rng) * MUTATION_RATE_ADAPTATION_TAU;
+        let gene_normal = standard_normal(rng) * MUTATION_RATE_ADAPTATION_TIME_CONSTANT;
         let adapted = *rate * (shared_normal + gene_normal).exp();
         *rate = adapted.clamp(MUTATION_RATE_MIN, MUTATION_RATE_MAX);
     }
 
     genome.mutation_rate_age_of_maturity = rates[0];
     genome.mutation_rate_vision_distance = rates[1];
-    genome.mutation_rate_num_synapses = rates[2];
-    genome.mutation_rate_inter_bias = rates[3];
-    genome.mutation_rate_inter_update_rate = rates[4];
-    genome.mutation_rate_action_bias = rates[5];
-    genome.mutation_rate_eligibility_retention = rates[6];
-    genome.mutation_rate_synapse_prune_threshold = rates[7];
-    genome.mutation_rate_neuron_location = rates[8];
+    genome.mutation_rate_inter_bias = rates[2];
+    genome.mutation_rate_inter_update_rate = rates[3];
+    genome.mutation_rate_action_bias = rates[4];
+    genome.mutation_rate_eligibility_retention = rates[5];
+    genome.mutation_rate_synapse_prune_threshold = rates[6];
+    genome.mutation_rate_neuron_location = rates[7];
 }
 
 fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
@@ -1038,10 +1035,10 @@ fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut 
     }
     genome.inter_biases.truncate(target_inter_len);
 
-    while genome.inter_log_taus.len() < target_inter_len {
-        genome.inter_log_taus.push(sample_uniform_log_tau(rng));
+    while genome.inter_log_time_constants.len() < target_inter_len {
+        genome.inter_log_time_constants.push(sample_uniform_log_time_constant(rng));
     }
-    genome.inter_log_taus.truncate(target_inter_len);
+    genome.inter_log_time_constants.truncate(target_inter_len);
 
     while genome.interneuron_types.len() < target_inter_len {
         genome.interneuron_types.push(sample_interneuron_type(rng));
@@ -1094,11 +1091,6 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &
         );
     }
 
-    if rng.random::<f32>() < genome.mutation_rate_num_synapses {
-        let max_synapses = max_possible_synapses(genome.num_neurons);
-        genome.num_synapses = step_u32(genome.num_synapses, 0, max_synapses, rng);
-    }
-
     if rng.random::<f32>() < genome.mutation_rate_inter_bias && genome.num_neurons > 0 {
         let idx = rng.random_range(0..genome.num_neurons as usize);
         genome.inter_biases[idx] = perturb_clamped(
@@ -1112,11 +1104,11 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &
 
     if rng.random::<f32>() < genome.mutation_rate_inter_update_rate && genome.num_neurons > 0 {
         let idx = rng.random_range(0..genome.num_neurons as usize);
-        genome.inter_log_taus[idx] = perturb_clamped(
-            genome.inter_log_taus[idx],
-            INTER_LOG_TAU_PERTURBATION_STDDEV,
-            INTER_LOG_TAU_MIN,
-            INTER_LOG_TAU_MAX,
+        genome.inter_log_time_constants[idx] = perturb_clamped(
+            genome.inter_log_time_constants[idx],
+            INTER_LOG_TIME_CONSTANT_PERTURBATION_STDDEV,
+            INTER_LOG_TIME_CONSTANT_MIN,
+            INTER_LOG_TIME_CONSTANT_MAX,
             rng,
         );
     }
@@ -1472,8 +1464,8 @@ fn step_u32<R: Rng + ?Sized>(value: u32, min: u32, max: u32, rng: &mut R) -> u32
     }
 }
 
-fn sample_uniform_log_tau<R: Rng + ?Sized>(rng: &mut R) -> f32 {
-    rng.random_range(INTER_LOG_TAU_MIN..=INTER_LOG_TAU_MAX)
+fn sample_uniform_log_time_constant<R: Rng + ?Sized>(rng: &mut R) -> f32 {
+    rng.random_range(INTER_LOG_TIME_CONSTANT_MIN..=INTER_LOG_TIME_CONSTANT_MAX)
 }
 
 fn sample_uniform_location<R: Rng + ?Sized>(rng: &mut R) -> BrainLocation {
@@ -1483,10 +1475,10 @@ fn sample_uniform_location<R: Rng + ?Sized>(rng: &mut R) -> BrainLocation {
     }
 }
 
-pub(crate) fn inter_alpha_from_log_tau(log_tau: f32) -> f32 {
-    let clamped_log_tau = log_tau.clamp(INTER_LOG_TAU_MIN, INTER_LOG_TAU_MAX);
-    let tau = clamped_log_tau.exp().clamp(INTER_TAU_MIN, INTER_TAU_MAX);
-    1.0 - (-1.0 / tau).exp()
+pub(crate) fn inter_alpha_from_log_time_constant(log_time_constant: f32) -> f32 {
+    let clamped_log_time_constant = log_time_constant.clamp(INTER_LOG_TIME_CONSTANT_MIN, INTER_LOG_TIME_CONSTANT_MAX);
+    let time_constant = clamped_log_time_constant.exp().clamp(INTER_TIME_CONSTANT_MIN, INTER_TIME_CONSTANT_MAX);
+    1.0 - (-1.0 / time_constant).exp()
 }
 
 fn sample_initial_bias<R: Rng + ?Sized>(rng: &mut R) -> f32 {
@@ -1611,7 +1603,6 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
     let a_rates = [
         a.mutation_rate_age_of_maturity,
         a.mutation_rate_vision_distance,
-        a.mutation_rate_num_synapses,
         a.mutation_rate_inter_bias,
         a.mutation_rate_inter_update_rate,
         a.mutation_rate_action_bias,
@@ -1622,7 +1613,6 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
     let b_rates = [
         b.mutation_rate_age_of_maturity,
         b.mutation_rate_vision_distance,
-        b.mutation_rate_num_synapses,
         b.mutation_rate_inter_bias,
         b.mutation_rate_inter_update_rate,
         b.mutation_rate_action_bias,
@@ -1731,10 +1721,6 @@ pub(crate) fn validate_seed_genome_config(config: &SeedGenomeConfig) -> Result<(
     validate_rate(
         "mutation_rate_vision_distance",
         config.mutation_rate_vision_distance,
-    )?;
-    validate_rate(
-        "mutation_rate_num_synapses",
-        config.mutation_rate_num_synapses,
     )?;
     validate_rate("mutation_rate_inter_bias", config.mutation_rate_inter_bias)?;
     validate_rate(
@@ -3049,7 +3035,6 @@ eligibility_retention = 0.95
 synapse_prune_threshold = 0.05
 mutation_rate_age_of_maturity = 0.05
 mutation_rate_vision_distance = 0.05
-mutation_rate_num_synapses = 0.05
 mutation_rate_inter_bias = 0.1
 mutation_rate_inter_update_rate = 0.1
 mutation_rate_action_bias = 0.1

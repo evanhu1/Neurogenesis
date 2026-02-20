@@ -11,47 +11,6 @@ fn loc(x: f32, y: f32) -> BrainLocation {
     BrainLocation { x, y }
 }
 
-fn post_location(brain: &BrainState, post_id: NeuronId) -> (f32, f32) {
-    if let Some(inter) = brain.inter.iter().find(|n| n.neuron.neuron_id == post_id) {
-        return (inter.neuron.x, inter.neuron.y);
-    }
-    if let Some(action) = brain.action.iter().find(|n| n.neuron.neuron_id == post_id) {
-        return (action.neuron.x, action.neuron.y);
-    }
-    panic!("missing post neuron for synapse target {:?}", post_id);
-}
-
-fn mean_synapse_distance(brain: &BrainState) -> f32 {
-    let mut total = 0.0;
-    let mut count = 0usize;
-
-    for sensory in &brain.sensory {
-        let pre_x = sensory.neuron.x;
-        let pre_y = sensory.neuron.y;
-        for edge in &sensory.synapses {
-            let (post_x, post_y) = post_location(brain, edge.post_neuron_id);
-            total += ((pre_x - post_x).powi(2) + (pre_y - post_y).powi(2)).sqrt();
-            count += 1;
-        }
-    }
-
-    for inter in &brain.inter {
-        let pre_x = inter.neuron.x;
-        let pre_y = inter.neuron.y;
-        for edge in &inter.synapses {
-            let (post_x, post_y) = post_location(brain, edge.post_neuron_id);
-            total += ((pre_x - post_x).powi(2) + (pre_y - post_y).powi(2)).sqrt();
-            count += 1;
-        }
-    }
-
-    if count == 0 {
-        0.0
-    } else {
-        total / count as f32
-    }
-}
-
 fn dense_edges(
     num_neurons: u32,
     inter_types: &[InterNeuronType],
@@ -129,7 +88,7 @@ fn express_genome_uses_stored_synapse_topology() {
     let mut genome = test_genome();
     genome.num_neurons = 4;
     genome.inter_biases = vec![0.1; 4];
-    genome.inter_log_taus = vec![0.0; 4];
+    genome.inter_log_time_constants = vec![0.0; 4];
     genome.interneuron_types = vec![InterNeuronType::Excitatory; 4];
     genome.inter_locations = (0..4).map(|i| loc(i as f32, 10.0 - i as f32)).collect();
     genome.sensory_locations = vec![loc(0.0, 0.0); SENSORY_COUNT as usize];
@@ -154,55 +113,43 @@ fn express_genome_uses_stored_synapse_topology() {
     assert_eq!(brain_a.sensory[0].neuron.y, 0.0);
     let reproduce_idx = action_index(ActionType::Reproduce);
     assert_eq!(brain_a.action[reproduce_idx].neuron.x, 8.0);
-    assert_eq!(brain_a.action[reproduce_idx].neuron.y, 8.0);
+    assert_eq!(
+        brain_a.action[reproduce_idx].neuron.y,
+        1.0 + reproduce_idx as f32
+    );
 }
 
 #[test]
-fn synapse_addition_uses_spatial_prior() {
+fn mutate_genome_does_not_add_synapses_from_spatial_prior_target() {
     let mut genome_template = test_genome();
     genome_template.num_neurons = 12;
     genome_template.num_synapses = 8;
     genome_template.inter_biases = vec![0.0; 12];
-    genome_template.inter_log_taus = vec![0.0; 12];
+    genome_template.inter_log_time_constants = vec![0.0; 12];
     genome_template.interneuron_types = vec![InterNeuronType::Excitatory; 12];
     genome_template.sensory_locations = vec![loc(0.0, 0.0); SENSORY_COUNT as usize];
     genome_template.inter_locations = (0..12).map(|i| loc(1.0 + i as f32 * 0.7, 5.0)).collect();
     genome_template.action_locations = (0..ActionType::ALL.len())
         .map(|i| loc(1.0 + i as f32 * 0.7, 9.0))
         .collect();
-    genome_template.mutation_rate_num_synapses = 0.0;
     genome_template.mutation_rate_neuron_location = 0.0;
 
-    let mut local_distance_sum = 0.0;
-    let mut global_distance_sum = 0.0;
-    for seed in 0..32_u64 {
-        let mut local_genome = genome_template.clone();
-        local_genome.spatial_prior_sigma = 0.25;
-        local_genome.edges.clear();
-        let mut global_genome = genome_template.clone();
-        global_genome.spatial_prior_sigma = 100.0;
-        global_genome.edges.clear();
+    let mut local_genome = genome_template.clone();
+    local_genome.spatial_prior_sigma = 0.25;
+    local_genome.edges.clear();
+    let mut global_genome = genome_template.clone();
+    global_genome.spatial_prior_sigma = 100.0;
+    global_genome.edges.clear();
 
-        let mut local_rng = ChaCha8Rng::seed_from_u64(10_000 + seed);
-        let mut global_rng = ChaCha8Rng::seed_from_u64(10_000 + seed);
-        crate::genome::mutate_genome(&mut local_genome, &mut local_rng);
-        crate::genome::mutate_genome(&mut global_genome, &mut global_rng);
-        assert!(local_genome.num_synapses > 0);
-        assert!(global_genome.num_synapses > 0);
+    let mut local_rng = ChaCha8Rng::seed_from_u64(10_000);
+    let mut global_rng = ChaCha8Rng::seed_from_u64(10_000);
+    crate::genome::mutate_genome(&mut local_genome, &mut local_rng);
+    crate::genome::mutate_genome(&mut global_genome, &mut global_rng);
 
-        let local_brain = express_genome(&local_genome, &mut local_rng);
-        let global_brain = express_genome(&global_genome, &mut global_rng);
-
-        local_distance_sum += mean_synapse_distance(&local_brain);
-        global_distance_sum += mean_synapse_distance(&global_brain);
-    }
-
-    let local_mean_distance = local_distance_sum / 32.0;
-    let global_mean_distance = global_distance_sum / 32.0;
-    assert!(
-        local_mean_distance + 0.05 < global_mean_distance,
-        "expected stronger local prior to shorten connections; local_mean={local_mean_distance:.3}, global_mean={global_mean_distance:.3}"
-    );
+    assert_eq!(local_genome.num_synapses, 0);
+    assert!(local_genome.edges.is_empty());
+    assert_eq!(global_genome.num_synapses, 0);
+    assert!(global_genome.edges.is_empty());
 }
 
 #[test]
@@ -210,7 +157,7 @@ fn express_genome_respects_dale_signs_for_inter_outgoing_synapses() {
     let mut genome = test_genome();
     genome.num_neurons = 2;
     genome.inter_biases = vec![0.0, 0.0];
-    genome.inter_log_taus = vec![0.0, 0.0];
+    genome.inter_log_time_constants = vec![0.0, 0.0];
     genome.interneuron_types = vec![InterNeuronType::Excitatory, InterNeuronType::Inhibitory];
     genome.inter_locations = vec![loc(5.0, 5.0), loc(5.5, 5.5)];
     genome.edges = vec![
@@ -257,9 +204,11 @@ fn action_biases_drive_actions_without_incoming_synapses() {
     let mut genome = test_genome();
     genome.num_neurons = 0;
     genome.num_synapses = 0;
-    genome.action_biases = vec![0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 6.0];
+    genome.action_biases = vec![0.0; ActionType::ALL.len()];
+    genome.action_biases[action_index(ActionType::Forward)] = 5.0;
+    genome.action_biases[action_index(ActionType::Reproduce)] = 6.0;
     genome.inter_biases.clear();
-    genome.inter_log_taus.clear();
+    genome.inter_log_time_constants.clear();
     genome.interneuron_types.clear();
     genome.inter_locations.clear();
 

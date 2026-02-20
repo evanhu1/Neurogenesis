@@ -136,8 +136,6 @@ pub struct OrganismGenome {
     #[serde(default)]
     pub mutation_rate_vision_distance: f32,
     #[serde(default)]
-    pub mutation_rate_num_synapses: f32,
-    #[serde(default)]
     pub mutation_rate_inter_bias: f32,
     #[serde(default)]
     pub mutation_rate_inter_update_rate: f32,
@@ -150,7 +148,7 @@ pub struct OrganismGenome {
     #[serde(default)]
     pub mutation_rate_neuron_location: f32,
     pub inter_biases: Vec<f32>,
-    pub inter_log_taus: Vec<f32>,
+    pub inter_log_time_constants: Vec<f32>,
     #[serde(default)]
     pub interneuron_types: Vec<InterNeuronType>,
     pub action_biases: Vec<f32>,
@@ -174,7 +172,6 @@ pub struct SeedGenomeConfig {
     pub synapse_prune_threshold: f32,
     pub mutation_rate_age_of_maturity: f32,
     pub mutation_rate_vision_distance: f32,
-    pub mutation_rate_num_synapses: f32,
     pub mutation_rate_inter_bias: f32,
     pub mutation_rate_inter_update_rate: f32,
     pub mutation_rate_action_bias: f32,

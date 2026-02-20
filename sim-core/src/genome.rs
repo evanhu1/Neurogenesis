@@ -7,7 +7,6 @@ use sim_types::{
     SynapseEdge,
 };
 use std::cmp::Ordering;
-use std::collections::HashSet;
 
 const MIN_MUTATED_VISION_DISTANCE: u32 = 1;
 const MAX_MUTATED_VISION_DISTANCE: u32 = 32;
@@ -24,25 +23,22 @@ const SYNAPSE_PRUNE_THRESHOLD_MIN: f32 = 0.0;
 const SYNAPSE_PRUNE_THRESHOLD_MAX: f32 = 1.0;
 
 const INTER_TYPE_EXCITATORY_PRIOR: f32 = 0.8;
-const MUTATION_RATE_ADAPTATION_TAU: f32 = 0.25;
+const MUTATION_RATE_ADAPTATION_TIME_CONSTANT: f32 = 0.25;
 const MUTATION_RATE_MIN: f32 = 1.0e-4;
 const MUTATION_RATE_MAX: f32 = 1.0 - MUTATION_RATE_MIN;
 
 const BIAS_PERTURBATION_STDDEV: f32 = 0.15;
-const INTER_LOG_TAU_PERTURBATION_STDDEV: f32 = 0.05;
+const INTER_LOG_TIME_CONSTANT_PERTURBATION_STDDEV: f32 = 0.05;
 const ELIGIBILITY_RETENTION_PERTURBATION_STDDEV: f32 = 0.05;
 const SYNAPSE_PRUNE_THRESHOLD_PERTURBATION_STDDEV: f32 = 0.02;
 const LOCATION_PERTURBATION_STDDEV: f32 = 0.75;
-pub(crate) const INTER_TAU_MIN: f32 = 0.1;
-pub(crate) const INTER_TAU_MAX: f32 = 15.0;
-pub(crate) const INTER_LOG_TAU_MIN: f32 = -2.302_585_1;
-pub(crate) const INTER_LOG_TAU_MAX: f32 = 2.995_732_3;
-pub(crate) const DEFAULT_INTER_LOG_TAU: f32 = 0.0;
+pub(crate) const INTER_TIME_CONSTANT_MIN: f32 = 0.1;
+pub(crate) const INTER_TIME_CONSTANT_MAX: f32 = 15.0;
+pub(crate) const INTER_LOG_TIME_CONSTANT_MIN: f32 = -2.302_585_1;
+pub(crate) const INTER_LOG_TIME_CONSTANT_MAX: f32 = 2.995_732_3;
+pub(crate) const DEFAULT_INTER_LOG_TIME_CONSTANT: f32 = 0.0;
 pub(crate) const BRAIN_SPACE_MIN: f32 = 0.0;
 pub(crate) const BRAIN_SPACE_MAX: f32 = 10.0;
-const SPATIAL_PRIOR_LONG_RANGE_FLOOR: f32 = 0.01;
-const SYNAPSE_WEIGHT_LOG_NORMAL_MU: f32 = -0.5;
-const SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA: f32 = 0.8;
 
 pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     config: &SeedGenomeConfig,
@@ -51,8 +47,8 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     let num_neurons = config.num_neurons;
     let max_synapses = max_possible_synapses(num_neurons);
     let inter_biases: Vec<f32> = (0..num_neurons).map(|_| sample_initial_bias(rng)).collect();
-    let inter_log_taus: Vec<f32> = (0..num_neurons)
-        .map(|_| sample_uniform_log_tau(rng))
+    let inter_log_time_constants: Vec<f32> = (0..num_neurons)
+        .map(|_| sample_uniform_log_time_constant(rng))
         .collect();
     let interneuron_types: Vec<InterNeuronType> = (0..num_neurons)
         .map(|_| sample_interneuron_type(rng))
@@ -83,7 +79,6 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         synapse_prune_threshold: config.synapse_prune_threshold,
         mutation_rate_age_of_maturity: config.mutation_rate_age_of_maturity,
         mutation_rate_vision_distance: config.mutation_rate_vision_distance,
-        mutation_rate_num_synapses: config.mutation_rate_num_synapses,
         mutation_rate_inter_bias: config.mutation_rate_inter_bias,
         mutation_rate_inter_update_rate: config.mutation_rate_inter_update_rate,
         mutation_rate_action_bias: config.mutation_rate_action_bias,
@@ -91,7 +86,7 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         mutation_rate_synapse_prune_threshold: config.mutation_rate_synapse_prune_threshold,
         mutation_rate_neuron_location: config.mutation_rate_neuron_location,
         inter_biases,
-        inter_log_taus,
+        inter_log_time_constants,
         interneuron_types,
         action_biases,
         sensory_locations,
@@ -99,7 +94,7 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         action_locations,
         edges: Vec::new(),
     };
-    sync_synapse_genes_to_target(&mut genome, rng);
+    sync_synapse_genes_to_target(&mut genome);
     genome
 }
 
@@ -115,7 +110,6 @@ fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng:
     let mut rates = [
         genome.mutation_rate_age_of_maturity,
         genome.mutation_rate_vision_distance,
-        genome.mutation_rate_num_synapses,
         genome.mutation_rate_inter_bias,
         genome.mutation_rate_inter_update_rate,
         genome.mutation_rate_action_bias,
@@ -123,23 +117,22 @@ fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng:
         genome.mutation_rate_synapse_prune_threshold,
         genome.mutation_rate_neuron_location,
     ];
-    let shared_normal = standard_normal(rng) * MUTATION_RATE_ADAPTATION_TAU;
+    let shared_normal = standard_normal(rng) * MUTATION_RATE_ADAPTATION_TIME_CONSTANT;
 
     for rate in &mut rates {
-        let gene_normal = standard_normal(rng) * MUTATION_RATE_ADAPTATION_TAU;
+        let gene_normal = standard_normal(rng) * MUTATION_RATE_ADAPTATION_TIME_CONSTANT;
         let adapted = *rate * (shared_normal + gene_normal).exp();
         *rate = adapted.clamp(MUTATION_RATE_MIN, MUTATION_RATE_MAX);
     }
 
     genome.mutation_rate_age_of_maturity = rates[0];
     genome.mutation_rate_vision_distance = rates[1];
-    genome.mutation_rate_num_synapses = rates[2];
-    genome.mutation_rate_inter_bias = rates[3];
-    genome.mutation_rate_inter_update_rate = rates[4];
-    genome.mutation_rate_action_bias = rates[5];
-    genome.mutation_rate_eligibility_retention = rates[6];
-    genome.mutation_rate_synapse_prune_threshold = rates[7];
-    genome.mutation_rate_neuron_location = rates[8];
+    genome.mutation_rate_inter_bias = rates[2];
+    genome.mutation_rate_inter_update_rate = rates[3];
+    genome.mutation_rate_action_bias = rates[4];
+    genome.mutation_rate_eligibility_retention = rates[5];
+    genome.mutation_rate_synapse_prune_threshold = rates[6];
+    genome.mutation_rate_neuron_location = rates[7];
 }
 
 fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
@@ -155,10 +148,10 @@ fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut 
     }
     genome.inter_biases.truncate(target_inter_len);
 
-    while genome.inter_log_taus.len() < target_inter_len {
-        genome.inter_log_taus.push(sample_uniform_log_tau(rng));
+    while genome.inter_log_time_constants.len() < target_inter_len {
+        genome.inter_log_time_constants.push(sample_uniform_log_time_constant(rng));
     }
-    genome.inter_log_taus.truncate(target_inter_len);
+    genome.inter_log_time_constants.truncate(target_inter_len);
 
     while genome.interneuron_types.len() < target_inter_len {
         genome.interneuron_types.push(sample_interneuron_type(rng));
@@ -211,11 +204,6 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &
         );
     }
 
-    if rng.random::<f32>() < genome.mutation_rate_num_synapses {
-        let max_synapses = max_possible_synapses(genome.num_neurons);
-        genome.num_synapses = step_u32(genome.num_synapses, 0, max_synapses, rng);
-    }
-
     if rng.random::<f32>() < genome.mutation_rate_inter_bias && genome.num_neurons > 0 {
         let idx = rng.random_range(0..genome.num_neurons as usize);
         genome.inter_biases[idx] = perturb_clamped(
@@ -229,11 +217,11 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &
 
     if rng.random::<f32>() < genome.mutation_rate_inter_update_rate && genome.num_neurons > 0 {
         let idx = rng.random_range(0..genome.num_neurons as usize);
-        genome.inter_log_taus[idx] = perturb_clamped(
-            genome.inter_log_taus[idx],
-            INTER_LOG_TAU_PERTURBATION_STDDEV,
-            INTER_LOG_TAU_MIN,
-            INTER_LOG_TAU_MAX,
+        genome.inter_log_time_constants[idx] = perturb_clamped(
+            genome.inter_log_time_constants[idx],
+            INTER_LOG_TIME_CONSTANT_PERTURBATION_STDDEV,
+            INTER_LOG_TIME_CONSTANT_MIN,
+            INTER_LOG_TIME_CONSTANT_MAX,
             rng,
         );
     }
@@ -273,7 +261,7 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &
         mutate_random_neuron_location(genome, rng);
     }
 
-    sync_synapse_genes_to_target(genome, rng);
+    sync_synapse_genes_to_target(genome);
 }
 
 fn mutate_random_neuron_location<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
@@ -314,18 +302,8 @@ fn mutate_random_neuron_location<R: Rng + ?Sized>(genome: &mut OrganismGenome, r
     }
 }
 
-fn sync_synapse_genes_to_target<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
+fn sync_synapse_genes_to_target(genome: &mut OrganismGenome) {
     sanitize_synapse_genes(genome);
-
-    let target = genome.num_synapses as usize;
-    if genome.edges.len() > target {
-        remove_random_synapse_genes(genome, genome.edges.len() - target, rng);
-    }
-    if genome.edges.len() < target {
-        add_synapse_genes_with_spatial_prior(genome, target - genome.edges.len(), rng);
-    }
-
-    sort_synapse_genes(&mut genome.edges);
     genome.num_synapses = genome.edges.len() as u32;
 }
 
@@ -347,86 +325,6 @@ fn sanitize_synapse_genes(genome: &mut OrganismGenome) {
     genome.edges.dedup_by(|a, b| {
         a.pre_neuron_id == b.pre_neuron_id && a.post_neuron_id == b.post_neuron_id
     });
-}
-
-fn remove_random_synapse_genes<R: Rng + ?Sized>(
-    genome: &mut OrganismGenome,
-    remove_count: usize,
-    rng: &mut R,
-) {
-    let to_remove = remove_count.min(genome.edges.len());
-    for _ in 0..to_remove {
-        let idx = rng.random_range(0..genome.edges.len());
-        genome.edges.swap_remove(idx);
-    }
-}
-
-fn add_synapse_genes_with_spatial_prior<R: Rng + ?Sized>(
-    genome: &mut OrganismGenome,
-    add_count: usize,
-    rng: &mut R,
-) {
-    if add_count == 0 {
-        return;
-    }
-
-    let mut existing_pairs: HashSet<(u32, u32)> = HashSet::with_capacity(genome.edges.len());
-    for edge in &genome.edges {
-        existing_pairs.insert((edge.pre_neuron_id.0, edge.post_neuron_id.0));
-    }
-
-    let mut weighted_candidates: Vec<(f32, NeuronId, NeuronId)> = Vec::new();
-
-    let num_neurons = genome.num_neurons;
-    for sensory_idx in 0..SENSORY_COUNT {
-        let pre_id = NeuronId(sensory_idx);
-        for post_id in post_ids(num_neurons) {
-            if existing_pairs.contains(&(pre_id.0, post_id.0)) {
-                continue;
-            }
-            let probability = connection_probability(genome, pre_id, post_id);
-            let priority = weighted_without_replacement_priority(probability, rng);
-            weighted_candidates.push((priority, pre_id, post_id));
-        }
-    }
-
-    for inter_idx in 0..num_neurons {
-        let pre_id = NeuronId(INTER_ID_BASE + inter_idx);
-        for post_id in post_ids(num_neurons) {
-            if !is_valid_synapse_pair(pre_id, post_id, num_neurons) {
-                continue;
-            }
-            if existing_pairs.contains(&(pre_id.0, post_id.0)) {
-                continue;
-            }
-            let probability = connection_probability(genome, pre_id, post_id);
-            let priority = weighted_without_replacement_priority(probability, rng);
-            weighted_candidates.push((priority, pre_id, post_id));
-        }
-    }
-
-    weighted_candidates.sort_unstable_by(|a, b| {
-        a.0.total_cmp(&b.0)
-            .then_with(|| a.1.cmp(&b.1))
-            .then_with(|| a.2.cmp(&b.2))
-    });
-
-    for &(_, pre_id, post_id) in weighted_candidates.iter().take(add_count) {
-        let required_sign =
-            required_pre_sign(pre_id, num_neurons, &genome.interneuron_types).unwrap_or(1.0);
-        genome.edges.push(SynapseEdge {
-            pre_neuron_id: pre_id,
-            post_neuron_id: post_id,
-            weight: sample_signed_lognormal_weight(required_sign, rng),
-            eligibility: 0.0,
-        });
-    }
-}
-
-fn post_ids(num_neurons: u32) -> impl Iterator<Item = NeuronId> {
-    let inter = (0..num_neurons).map(|idx| NeuronId(INTER_ID_BASE + idx));
-    let actions = (0..ACTION_COUNT_U32).map(|idx| NeuronId(ACTION_ID_BASE + idx));
-    inter.chain(actions)
 }
 
 fn is_valid_synapse_pair(pre: NeuronId, post: NeuronId, num_neurons: u32) -> bool {
@@ -490,74 +388,6 @@ fn synapse_key_cmp(a: &SynapseEdge, b: &SynapseEdge) -> Ordering {
         .then_with(|| a.post_neuron_id.cmp(&b.post_neuron_id))
 }
 
-fn connection_probability(genome: &OrganismGenome, pre: NeuronId, post: NeuronId) -> f32 {
-    let pre_location = neuron_location_or_default(genome, pre);
-    let post_location = neuron_location_or_default(genome, post);
-    let dx = pre_location.x - post_location.x;
-    let dy = pre_location.y - post_location.y;
-    let distance_sq = dx * dx + dy * dy;
-    let sigma = genome.spatial_prior_sigma.max(0.01);
-    let sigma_sq = sigma * sigma;
-    let local_bias = (-0.5 * distance_sq / sigma_sq).exp();
-    (SPATIAL_PRIOR_LONG_RANGE_FLOOR + (1.0 - SPATIAL_PRIOR_LONG_RANGE_FLOOR) * local_bias)
-        .clamp(0.0, 1.0)
-}
-
-fn neuron_location_or_default(genome: &OrganismGenome, id: NeuronId) -> BrainLocation {
-    if id.0 < SENSORY_COUNT {
-        return genome
-            .sensory_locations
-            .get(id.0 as usize)
-            .copied()
-            .unwrap_or(default_brain_location());
-    }
-
-    if is_inter_id(id, genome.num_neurons) {
-        let idx = (id.0 - INTER_ID_BASE) as usize;
-        return genome
-            .inter_locations
-            .get(idx)
-            .copied()
-            .unwrap_or(default_brain_location());
-    }
-
-    if (ACTION_ID_BASE..ACTION_ID_BASE + ACTION_COUNT_U32).contains(&id.0) {
-        let idx = (id.0 - ACTION_ID_BASE) as usize;
-        return genome
-            .action_locations
-            .get(idx)
-            .copied()
-            .unwrap_or(default_brain_location());
-    }
-
-    default_brain_location()
-}
-
-fn default_brain_location() -> BrainLocation {
-    BrainLocation {
-        x: 0.5 * (BRAIN_SPACE_MIN + BRAIN_SPACE_MAX),
-        y: 0.5 * (BRAIN_SPACE_MIN + BRAIN_SPACE_MAX),
-    }
-}
-
-fn weighted_without_replacement_priority<R: Rng + ?Sized>(weight: f32, rng: &mut R) -> f32 {
-    let clamped_weight = weight.max(f32::MIN_POSITIVE);
-    let u = rng.random::<f32>().max(f32::MIN_POSITIVE);
-    -u.ln() / clamped_weight
-}
-
-fn sample_signed_lognormal_weight<R: Rng + ?Sized>(required_sign: f32, rng: &mut R) -> f32 {
-    let z = standard_normal(rng);
-    let magnitude = (SYNAPSE_WEIGHT_LOG_NORMAL_MU + SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA * z)
-        .exp()
-        .clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX);
-    if required_sign.is_sign_negative() {
-        -magnitude
-    } else {
-        magnitude
-    }
-}
-
 fn constrain_weight_to_sign(weight: f32, required_sign: f32) -> f32 {
     if required_sign.is_sign_negative() {
         if weight >= 0.0 {
@@ -589,8 +419,8 @@ fn step_u32<R: Rng + ?Sized>(value: u32, min: u32, max: u32, rng: &mut R) -> u32
     }
 }
 
-fn sample_uniform_log_tau<R: Rng + ?Sized>(rng: &mut R) -> f32 {
-    rng.random_range(INTER_LOG_TAU_MIN..=INTER_LOG_TAU_MAX)
+fn sample_uniform_log_time_constant<R: Rng + ?Sized>(rng: &mut R) -> f32 {
+    rng.random_range(INTER_LOG_TIME_CONSTANT_MIN..=INTER_LOG_TIME_CONSTANT_MAX)
 }
 
 fn sample_uniform_location<R: Rng + ?Sized>(rng: &mut R) -> BrainLocation {
@@ -600,10 +430,10 @@ fn sample_uniform_location<R: Rng + ?Sized>(rng: &mut R) -> BrainLocation {
     }
 }
 
-pub(crate) fn inter_alpha_from_log_tau(log_tau: f32) -> f32 {
-    let clamped_log_tau = log_tau.clamp(INTER_LOG_TAU_MIN, INTER_LOG_TAU_MAX);
-    let tau = clamped_log_tau.exp().clamp(INTER_TAU_MIN, INTER_TAU_MAX);
-    1.0 - (-1.0 / tau).exp()
+pub(crate) fn inter_alpha_from_log_time_constant(log_time_constant: f32) -> f32 {
+    let clamped_log_time_constant = log_time_constant.clamp(INTER_LOG_TIME_CONSTANT_MIN, INTER_LOG_TIME_CONSTANT_MAX);
+    let time_constant = clamped_log_time_constant.exp().clamp(INTER_TIME_CONSTANT_MIN, INTER_TIME_CONSTANT_MAX);
+    1.0 - (-1.0 / time_constant).exp()
 }
 
 fn sample_initial_bias<R: Rng + ?Sized>(rng: &mut R) -> f32 {
@@ -725,7 +555,6 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
     let a_rates = [
         a.mutation_rate_age_of_maturity,
         a.mutation_rate_vision_distance,
-        a.mutation_rate_num_synapses,
         a.mutation_rate_inter_bias,
         a.mutation_rate_inter_update_rate,
         a.mutation_rate_action_bias,
@@ -736,7 +565,6 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
     let b_rates = [
         b.mutation_rate_age_of_maturity,
         b.mutation_rate_vision_distance,
-        b.mutation_rate_num_synapses,
         b.mutation_rate_inter_bias,
         b.mutation_rate_inter_update_rate,
         b.mutation_rate_action_bias,
@@ -840,10 +668,6 @@ pub(crate) fn validate_seed_genome_config(config: &SeedGenomeConfig) -> Result<(
     validate_rate(
         "mutation_rate_vision_distance",
         config.mutation_rate_vision_distance,
-    )?;
-    validate_rate(
-        "mutation_rate_num_synapses",
-        config.mutation_rate_num_synapses,
     )?;
     validate_rate("mutation_rate_inter_bias", config.mutation_rate_inter_bias)?;
     validate_rate(

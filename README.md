@@ -100,7 +100,7 @@ Evaluation order: sensory→inter, inter→inter (previous tick activations), th
 sensory→action and inter→action. Inter uses per-neuron leaky integration:
 `h_i(t) = (1 - alpha_i) * h_i(t-1) + alpha_i * tanh(z_i(t))`, where
 `z_i(t) = b_i + sensory_to_inter_i + inter_to_inter_i(h(t-1))` and `alpha_i` is
-derived from a log-tau parameterisation. Actions are scored and resolved by
+derived from a log-time-constant parameterization. Actions are scored and resolved by
 single-choice categorical selection (argmax).
 
 Actions: `Idle`, `TurnLeft`, `TurnRight`, `Forward`, `TurnLeftForward`,
@@ -133,14 +133,14 @@ After brain evaluation each tick, runtime plasticity is applied:
 
 `OrganismGenome`: `num_neurons`, `vision_distance`, `age_of_maturity`,
 `hebb_eta_gain`, `eligibility_retention`,
-`synapse_prune_threshold`, `inter_biases` (vec), `inter_log_taus` (vec),
+`synapse_prune_threshold`, `inter_biases` (vec), `inter_log_time_constants` (vec),
 `interneuron_types` (vec), `action_biases` (vec), `edges` (sorted `SynapseEdge`
 list with per-edge `eligibility` trace), and explicit per-operator mutation-rate
 genes.
 
 Mutation applies to offspring only. Each operator is gated by its own mutation
 rate gene, and mutation-rate genes self-adapt every mutation step using
-`tau = 1 / sqrt(2 * sqrt(n))`, where `n` is the number of mutation-rate genes.
+`time_constant = 1 / sqrt(2 * sqrt(n))`, where `n` is the number of mutation-rate genes.
 
 Implemented operators:
 
@@ -154,7 +154,7 @@ Implemented operators:
   `(new_inter -> old_post)`.
 - Inter bias perturbation: Gaussian additive (stddev `0.15`), clamped
   `[-1.0, 1.0]`.
-- Inter log-tau perturbation: Gaussian additive (stddev `0.05`).
+- Inter log-time-constant perturbation: Gaussian additive (stddev `0.05`).
 - Action bias perturbation: Gaussian additive (stddev `0.15`), clamped
   `[-1.0, 1.0]`.
 - `eligibility_retention` perturbation: Gaussian additive (stddev `0.05`),

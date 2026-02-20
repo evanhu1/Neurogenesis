@@ -83,7 +83,7 @@ Brain model changes:
 6. **Apply per-gene mutation rates with self-adaptive mutation-rate mutation.**
    - Gate each mutation operator by its own mutation-rate gene.
    - Mutate mutation-rate genes themselves using global rate-rate
-     `tau = 1 / sqrt(2 * sqrt(n))`, `n = number of mutable genes`.
+     `time_constant = 1 / sqrt(2 * sqrt(n))`, `n = number of mutable genes`.
    - Clamp all mutation rates to valid bounds and keep structural rates much
      smaller than non-structural defaults in config.
 

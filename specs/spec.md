@@ -94,8 +94,8 @@ Mutation is applied to offspring genomes only.
 ### Self-adaptive mutation rates
 
 - Mutation-rate genes mutate every mutation step using:
-  `tau = 1 / sqrt(2 * sqrt(n))` where `n = number of mutation-rate genes`.
-- Rate update form: `rate <- clamp(rate * exp(tau * N(0,1)), 0, 1)`.
+  `time_constant = 1 / sqrt(2 * sqrt(n))` where `n = number of mutation-rate genes`.
+- Rate update form: `rate <- clamp(rate * exp(time_constant * N(0,1)), 0, 1)`.
 
 ### Operator gating
 

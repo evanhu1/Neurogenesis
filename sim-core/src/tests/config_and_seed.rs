@@ -4,11 +4,11 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
 #[test]
-fn config_validation_rejects_out_of_range_num_synapse_mutation_rate() {
+fn config_validation_rejects_out_of_range_vision_distance_mutation_rate() {
     let mut cfg = stable_test_config();
-    cfg.seed_genome_config.mutation_rate_num_synapses = 1.5;
+    cfg.seed_genome_config.mutation_rate_vision_distance = 1.5;
     let err = Simulation::new(cfg, 1).expect_err("config should be rejected");
-    assert!(err.to_string().contains("mutation_rate_num_synapses"));
+    assert!(err.to_string().contains("mutation_rate_vision_distance"));
 }
 
 #[test]
@@ -30,7 +30,7 @@ fn seed_genome_initializes_spatial_vectors_within_brain_space() {
 
     assert_eq!(genome.num_neurons, 4);
     assert_eq!(genome.inter_biases.len(), 4);
-    assert_eq!(genome.inter_log_taus.len(), 4);
+    assert_eq!(genome.inter_log_time_constants.len(), 4);
     assert_eq!(genome.interneuron_types.len(), 4);
     assert_eq!(genome.inter_locations.len(), 4);
     assert_eq!(
@@ -56,11 +56,10 @@ fn seed_genome_initializes_spatial_vectors_within_brain_space() {
 }
 
 #[test]
-fn mutate_genome_can_mutate_num_synapses_and_location_in_bounds() {
+fn mutate_genome_canonicalizes_synapse_count_and_mutates_location_in_bounds() {
     let mut genome = test_genome();
     genome.num_neurons = 2;
-    genome.num_synapses = 0;
-    genome.mutation_rate_num_synapses = 1.0;
+    genome.num_synapses = 8;
     genome.mutation_rate_neuron_location = 1.0;
 
     let original_location = genome.sensory_locations[0];
@@ -70,7 +69,9 @@ fn mutate_genome_can_mutate_num_synapses_and_location_in_bounds() {
         crate::genome::mutate_genome(&mut genome, &mut rng);
     }
 
-    assert!(genome.num_synapses > 0);
+    assert_eq!(genome.num_synapses, genome.edges.len() as u32);
+    assert_eq!(genome.num_synapses, 0);
+    assert!(genome.edges.is_empty());
     assert_eq!(genome.edges.len(), genome.num_synapses as usize);
     assert_ne!(genome.sensory_locations[0], original_location);
 
@@ -90,6 +91,84 @@ fn mutate_genome_can_mutate_num_synapses_and_location_in_bounds() {
 }
 
 #[test]
+fn mutate_genome_sanitizes_synapse_genes_without_refilling_to_target() {
+    let mut genome = test_genome();
+    genome.num_neurons = 2;
+    genome.inter_biases = vec![0.0; 2];
+    genome.inter_log_time_constants = vec![0.0; 2];
+    genome.interneuron_types = vec![InterNeuronType::Excitatory, InterNeuronType::Inhibitory];
+    genome.inter_locations = vec![BrainLocation { x: 5.0, y: 5.0 }; 2];
+    genome.num_synapses = 99;
+    genome.edges = vec![
+        SynapseEdge {
+            pre_neuron_id: NeuronId(crate::brain::ACTION_ID_BASE),
+            post_neuron_id: NeuronId(crate::brain::INTER_ID_BASE),
+            weight: 0.5,
+            eligibility: 4.0,
+        },
+        SynapseEdge {
+            pre_neuron_id: NeuronId(0),
+            post_neuron_id: NeuronId(crate::brain::INTER_ID_BASE),
+            weight: -0.5,
+            eligibility: 3.0,
+        },
+        SynapseEdge {
+            pre_neuron_id: NeuronId(0),
+            post_neuron_id: NeuronId(crate::brain::INTER_ID_BASE),
+            weight: 0.8,
+            eligibility: 2.0,
+        },
+        SynapseEdge {
+            pre_neuron_id: NeuronId(crate::brain::INTER_ID_BASE + 1),
+            post_neuron_id: NeuronId(crate::brain::ACTION_ID_BASE),
+            weight: 0.7,
+            eligibility: 1.0,
+        },
+        SynapseEdge {
+            pre_neuron_id: NeuronId(crate::brain::INTER_ID_BASE),
+            post_neuron_id: NeuronId(crate::brain::INTER_ID_BASE),
+            weight: 0.3,
+            eligibility: 5.0,
+        },
+    ];
+
+    let mut rng = ChaCha8Rng::seed_from_u64(42);
+    crate::genome::mutate_genome(&mut genome, &mut rng);
+
+    assert_eq!(genome.num_synapses, 2);
+    assert_eq!(genome.edges.len(), 2);
+
+    let first = &genome.edges[0];
+    let second = &genome.edges[1];
+    assert_eq!(first.pre_neuron_id, NeuronId(0));
+    assert_eq!(first.post_neuron_id, NeuronId(crate::brain::INTER_ID_BASE));
+    assert_eq!(first.eligibility, 0.0);
+    assert!(first.weight > 0.0);
+
+    assert_eq!(
+        second.pre_neuron_id,
+        NeuronId(crate::brain::INTER_ID_BASE + 1)
+    );
+    assert_eq!(second.post_neuron_id, NeuronId(crate::brain::ACTION_ID_BASE));
+    assert_eq!(second.eligibility, 0.0);
+    assert!(second.weight < 0.0);
+}
+
+#[test]
+fn seed_synapse_target_is_not_auto_filled() {
+    let mut cfg = stable_test_config();
+    cfg.seed_genome_config.num_neurons = 3;
+    cfg.seed_genome_config.num_synapses = 9_999;
+
+    let mut rng = ChaCha8Rng::seed_from_u64(123);
+    let genome = crate::genome::generate_seed_genome(&cfg.seed_genome_config, &mut rng);
+
+    assert_eq!(genome.num_synapses, 0);
+    assert!(genome.edges.is_empty());
+    assert_eq!(genome.edges.len(), genome.num_synapses as usize);
+}
+
+#[test]
 fn genome_distance_captures_geometry_and_synapse_traits() {
     let mut a = test_genome();
     let mut b = a.clone();
@@ -104,22 +183,6 @@ fn genome_distance_captures_geometry_and_synapse_traits() {
     a.inter_locations[0].y += 4.0;
     let second_distance = crate::genome::genome_distance(&a, &b);
     assert!(second_distance > distance);
-}
-
-#[test]
-fn seed_num_synapses_is_clamped_to_possible_pairs() {
-    let mut cfg = stable_test_config();
-    cfg.seed_genome_config.num_neurons = 3;
-    cfg.seed_genome_config.num_synapses = 9_999;
-
-    let mut rng = ChaCha8Rng::seed_from_u64(123);
-    let genome = crate::genome::generate_seed_genome(&cfg.seed_genome_config, &mut rng);
-
-    let all_pairs = (crate::brain::SENSORY_COUNT + genome.num_neurons)
-        * (genome.num_neurons + crate::brain::ACTION_COUNT_U32);
-    let max_pairs = all_pairs.saturating_sub(genome.num_neurons);
-    assert_eq!(genome.num_synapses, max_pairs);
-    assert_eq!(genome.edges.len(), max_pairs as usize);
 }
 
 #[test]

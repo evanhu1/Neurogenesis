@@ -1,5 +1,5 @@
 use crate::genome::{
-    inter_alpha_from_log_tau, BRAIN_SPACE_MAX, BRAIN_SPACE_MIN, DEFAULT_INTER_LOG_TAU,
+    inter_alpha_from_log_time_constant, BRAIN_SPACE_MAX, BRAIN_SPACE_MIN, DEFAULT_INTER_LOG_TIME_CONSTANT,
     SYNAPSE_STRENGTH_MAX, SYNAPSE_STRENGTH_MIN,
 };
 use crate::grid::{hex_neighbor, rotate_left, rotate_right};
@@ -101,12 +101,12 @@ pub(crate) fn express_genome<R: Rng + ?Sized>(genome: &OrganismGenome, _rng: &mu
     for i in 0..genome.num_neurons {
         let idx = i as usize;
         let bias = genome.inter_biases.get(idx).copied().unwrap_or(0.0);
-        let log_tau = genome
-            .inter_log_taus
+        let log_time_constant = genome
+            .inter_log_time_constants
             .get(idx)
             .copied()
-            .unwrap_or(DEFAULT_INTER_LOG_TAU);
-        let alpha = inter_alpha_from_log_tau(log_tau);
+            .unwrap_or(DEFAULT_INTER_LOG_TIME_CONSTANT);
+        let alpha = inter_alpha_from_log_time_constant(log_time_constant);
         let interneuron_type = genome
             .interneuron_types
             .get(idx)

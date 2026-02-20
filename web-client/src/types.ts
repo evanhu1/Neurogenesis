@@ -14,7 +14,6 @@ export type SeedGenomeConfig = {
   synapse_prune_threshold: number;
   mutation_rate_age_of_maturity: number;
   mutation_rate_vision_distance: number;
-  mutation_rate_num_synapses: number;
   mutation_rate_inter_bias: number;
   mutation_rate_inter_update_rate: number;
   mutation_rate_action_bias: number;
@@ -54,7 +53,6 @@ export type OrganismGenome = {
   synapse_prune_threshold: number;
   mutation_rate_age_of_maturity: number;
   mutation_rate_vision_distance: number;
-  mutation_rate_num_synapses: number;
   mutation_rate_inter_bias: number;
   mutation_rate_inter_update_rate: number;
   mutation_rate_action_bias: number;
@@ -62,7 +60,7 @@ export type OrganismGenome = {
   mutation_rate_synapse_prune_threshold: number;
   mutation_rate_neuron_location: number;
   inter_biases: number[];
-  inter_log_taus: number[];
+  inter_log_time_constants: number[];
   interneuron_types: InterNeuronType[];
   action_biases: number[];
   sensory_locations: BrainLocation[];

@@ -37,7 +37,6 @@ fn stable_perf_config() -> WorldConfig {
             synapse_prune_threshold: 0.01,
             mutation_rate_age_of_maturity: 0.05,
             mutation_rate_vision_distance: 0.04,
-            mutation_rate_num_synapses: 0.03,
             mutation_rate_inter_bias: 0.2,
             mutation_rate_inter_update_rate: 0.12,
             mutation_rate_action_bias: 0.2,

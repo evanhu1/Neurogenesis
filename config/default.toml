@@ -24,7 +24,6 @@ eligibility_retention = 0.95
 synapse_prune_threshold = 0.05
 mutation_rate_age_of_maturity = 0.05
 mutation_rate_vision_distance = 0.05
-mutation_rate_num_synapses = 0.05
 mutation_rate_inter_bias = 0.1
 mutation_rate_inter_update_rate = 0.1
 mutation_rate_action_bias = 0.1
