@@ -20,6 +20,7 @@ export type SeedGenomeConfig = {
   mutation_rate_eligibility_retention: number;
   mutation_rate_synapse_prune_threshold: number;
   mutation_rate_neuron_location: number;
+  mutation_rate_synapse_weight_perturbation: number;
 };
 
 export type WorldConfig = {
@@ -59,6 +60,7 @@ export type OrganismGenome = {
   mutation_rate_eligibility_retention: number;
   mutation_rate_synapse_prune_threshold: number;
   mutation_rate_neuron_location: number;
+  mutation_rate_synapse_weight_perturbation: number;
   inter_biases: number[];
   inter_log_time_constants: number[];
   interneuron_types: InterNeuronType[];

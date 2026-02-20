@@ -1,6 +1,6 @@
 use crate::genome::{
-    inter_alpha_from_log_time_constant, BRAIN_SPACE_MAX, BRAIN_SPACE_MIN, DEFAULT_INTER_LOG_TIME_CONSTANT,
-    SYNAPSE_STRENGTH_MAX, SYNAPSE_STRENGTH_MIN,
+    inter_alpha_from_log_time_constant, BRAIN_SPACE_MAX, BRAIN_SPACE_MIN,
+    DEFAULT_INTER_LOG_TIME_CONSTANT, SYNAPSE_STRENGTH_MAX, SYNAPSE_STRENGTH_MIN,
 };
 use crate::grid::{hex_neighbor, rotate_left, rotate_right};
 #[cfg(feature = "profiling")]

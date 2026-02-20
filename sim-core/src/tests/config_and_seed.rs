@@ -62,7 +62,13 @@ fn mutate_genome_canonicalizes_synapse_count_and_mutates_location_in_bounds() {
     genome.num_synapses = 8;
     genome.mutation_rate_neuron_location = 1.0;
 
-    let original_location = genome.sensory_locations[0];
+    let original_locations: Vec<BrainLocation> = genome
+        .sensory_locations
+        .iter()
+        .chain(genome.inter_locations.iter())
+        .chain(genome.action_locations.iter())
+        .copied()
+        .collect();
     let mut rng = ChaCha8Rng::seed_from_u64(7);
 
     for _ in 0..32 {
@@ -73,7 +79,21 @@ fn mutate_genome_canonicalizes_synapse_count_and_mutates_location_in_bounds() {
     assert_eq!(genome.num_synapses, 0);
     assert!(genome.edges.is_empty());
     assert_eq!(genome.edges.len(), genome.num_synapses as usize);
-    assert_ne!(genome.sensory_locations[0], original_location);
+
+    let current_locations: Vec<BrainLocation> = genome
+        .sensory_locations
+        .iter()
+        .chain(genome.inter_locations.iter())
+        .chain(genome.action_locations.iter())
+        .copied()
+        .collect();
+    assert!(
+        original_locations
+            .iter()
+            .zip(current_locations.iter())
+            .any(|(before, after)| before != after),
+        "expected at least one neuron location to change",
+    );
 
     for location in genome
         .sensory_locations
@@ -149,9 +169,74 @@ fn mutate_genome_sanitizes_synapse_genes_without_refilling_to_target() {
         second.pre_neuron_id,
         NeuronId(crate::brain::INTER_ID_BASE + 1)
     );
-    assert_eq!(second.post_neuron_id, NeuronId(crate::brain::ACTION_ID_BASE));
+    assert_eq!(
+        second.post_neuron_id,
+        NeuronId(crate::brain::ACTION_ID_BASE)
+    );
     assert_eq!(second.eligibility, 0.0);
     assert!(second.weight < 0.0);
+}
+
+#[test]
+fn mutate_genome_can_perturb_inherited_synapse_weights_without_flipping_sign() {
+    let mut genome = test_genome();
+    genome.num_neurons = 2;
+    genome.inter_biases = vec![0.0; 2];
+    genome.inter_log_time_constants = vec![0.0; 2];
+    genome.interneuron_types = vec![InterNeuronType::Excitatory, InterNeuronType::Inhibitory];
+    genome.inter_locations = vec![BrainLocation { x: 5.0, y: 5.0 }; 2];
+    genome.mutation_rate_synapse_weight_perturbation = 1.0;
+    genome.edges = vec![
+        SynapseEdge {
+            pre_neuron_id: NeuronId(0),
+            post_neuron_id: NeuronId(crate::brain::INTER_ID_BASE),
+            weight: 0.3,
+            eligibility: 0.0,
+        },
+        SynapseEdge {
+            pre_neuron_id: NeuronId(crate::brain::INTER_ID_BASE + 1),
+            post_neuron_id: NeuronId(crate::brain::ACTION_ID_BASE),
+            weight: -0.45,
+            eligibility: 0.0,
+        },
+    ];
+    genome.num_synapses = genome.edges.len() as u32;
+
+    let initial_weights: Vec<(NeuronId, NeuronId, f32)> = genome
+        .edges
+        .iter()
+        .map(|edge| (edge.pre_neuron_id, edge.post_neuron_id, edge.weight))
+        .collect();
+
+    let mut rng = ChaCha8Rng::seed_from_u64(17);
+    for _ in 0..16 {
+        crate::genome::mutate_genome(&mut genome, &mut rng);
+    }
+
+    assert_eq!(genome.edges.len(), 2);
+    let mut changed = false;
+    for (pre, post, initial_weight) in initial_weights {
+        let edge = genome
+            .edges
+            .iter()
+            .find(|edge| edge.pre_neuron_id == pre && edge.post_neuron_id == post)
+            .expect("edge should remain present");
+        if (edge.weight - initial_weight).abs() > 1.0e-6 {
+            changed = true;
+        }
+        assert_eq!(
+            edge.weight.is_sign_negative(),
+            initial_weight.is_sign_negative()
+        );
+        assert!(
+            edge.weight.abs() >= crate::genome::SYNAPSE_STRENGTH_MIN
+                && edge.weight.abs() <= crate::genome::SYNAPSE_STRENGTH_MAX
+        );
+    }
+    assert!(
+        changed,
+        "at least one inherited edge weight should be perturbed"
+    );
 }
 
 #[test]

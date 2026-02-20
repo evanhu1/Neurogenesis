@@ -31,6 +31,7 @@ const BIAS_PERTURBATION_STDDEV: f32 = 0.15;
 const INTER_LOG_TIME_CONSTANT_PERTURBATION_STDDEV: f32 = 0.05;
 const ELIGIBILITY_RETENTION_PERTURBATION_STDDEV: f32 = 0.05;
 const SYNAPSE_PRUNE_THRESHOLD_PERTURBATION_STDDEV: f32 = 0.02;
+const SYNAPSE_WEIGHT_PERTURBATION_STDDEV: f32 = 0.15;
 const LOCATION_PERTURBATION_STDDEV: f32 = 0.75;
 pub(crate) const INTER_TIME_CONSTANT_MIN: f32 = 0.1;
 pub(crate) const INTER_TIME_CONSTANT_MAX: f32 = 15.0;
@@ -85,6 +86,7 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         mutation_rate_eligibility_retention: config.mutation_rate_eligibility_retention,
         mutation_rate_synapse_prune_threshold: config.mutation_rate_synapse_prune_threshold,
         mutation_rate_neuron_location: config.mutation_rate_neuron_location,
+        mutation_rate_synapse_weight_perturbation: config.mutation_rate_synapse_weight_perturbation,
         inter_biases,
         inter_log_time_constants,
         interneuron_types,
@@ -116,6 +118,7 @@ fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng:
         genome.mutation_rate_eligibility_retention,
         genome.mutation_rate_synapse_prune_threshold,
         genome.mutation_rate_neuron_location,
+        genome.mutation_rate_synapse_weight_perturbation,
     ];
     let shared_normal = standard_normal(rng) * MUTATION_RATE_ADAPTATION_TIME_CONSTANT;
 
@@ -133,6 +136,7 @@ fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng:
     genome.mutation_rate_eligibility_retention = rates[5];
     genome.mutation_rate_synapse_prune_threshold = rates[6];
     genome.mutation_rate_neuron_location = rates[7];
+    genome.mutation_rate_synapse_weight_perturbation = rates[8];
 }
 
 fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
@@ -149,7 +153,9 @@ fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut 
     genome.inter_biases.truncate(target_inter_len);
 
     while genome.inter_log_time_constants.len() < target_inter_len {
-        genome.inter_log_time_constants.push(sample_uniform_log_time_constant(rng));
+        genome
+            .inter_log_time_constants
+            .push(sample_uniform_log_time_constant(rng));
     }
     genome.inter_log_time_constants.truncate(target_inter_len);
 
@@ -261,6 +267,10 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &
         mutate_random_neuron_location(genome, rng);
     }
 
+    if rng.random::<f32>() < genome.mutation_rate_synapse_weight_perturbation {
+        mutate_random_synapse_weight(genome, rng);
+    }
+
     sync_synapse_genes_to_target(genome);
 }
 
@@ -300,6 +310,24 @@ fn mutate_random_neuron_location<R: Rng + ?Sized>(genome: &mut OrganismGenome, r
             rng,
         );
     }
+}
+
+fn mutate_random_synapse_weight<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
+    if genome.edges.is_empty() {
+        return;
+    }
+
+    let idx = rng.random_range(0..genome.edges.len());
+    let (pre_neuron_id, weight) = {
+        let edge = &genome.edges[idx];
+        (edge.pre_neuron_id, edge.weight)
+    };
+    let magnitude_scale = (SYNAPSE_WEIGHT_PERTURBATION_STDDEV * standard_normal(rng)).exp();
+    let perturbed_weight = weight * magnitude_scale;
+    let required_sign =
+        required_pre_sign(pre_neuron_id, genome.num_neurons, &genome.interneuron_types)
+            .unwrap_or(1.0);
+    genome.edges[idx].weight = constrain_weight_to_sign(perturbed_weight, required_sign);
 }
 
 fn sync_synapse_genes_to_target(genome: &mut OrganismGenome) {
@@ -431,8 +459,11 @@ fn sample_uniform_location<R: Rng + ?Sized>(rng: &mut R) -> BrainLocation {
 }
 
 pub(crate) fn inter_alpha_from_log_time_constant(log_time_constant: f32) -> f32 {
-    let clamped_log_time_constant = log_time_constant.clamp(INTER_LOG_TIME_CONSTANT_MIN, INTER_LOG_TIME_CONSTANT_MAX);
-    let time_constant = clamped_log_time_constant.exp().clamp(INTER_TIME_CONSTANT_MIN, INTER_TIME_CONSTANT_MAX);
+    let clamped_log_time_constant =
+        log_time_constant.clamp(INTER_LOG_TIME_CONSTANT_MIN, INTER_LOG_TIME_CONSTANT_MAX);
+    let time_constant = clamped_log_time_constant
+        .exp()
+        .clamp(INTER_TIME_CONSTANT_MIN, INTER_TIME_CONSTANT_MAX);
     1.0 - (-1.0 / time_constant).exp()
 }
 
@@ -561,6 +592,7 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
         a.mutation_rate_eligibility_retention,
         a.mutation_rate_synapse_prune_threshold,
         a.mutation_rate_neuron_location,
+        a.mutation_rate_synapse_weight_perturbation,
     ];
     let b_rates = [
         b.mutation_rate_age_of_maturity,
@@ -571,6 +603,7 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
         b.mutation_rate_eligibility_retention,
         b.mutation_rate_synapse_prune_threshold,
         b.mutation_rate_neuron_location,
+        b.mutation_rate_synapse_weight_perturbation,
     ];
     for i in 0..a_rates.len() {
         dist += (a_rates[i] - b_rates[i]).abs();
@@ -689,6 +722,10 @@ pub(crate) fn validate_seed_genome_config(config: &SeedGenomeConfig) -> Result<(
     validate_rate(
         "mutation_rate_neuron_location",
         config.mutation_rate_neuron_location,
+    )?;
+    validate_rate(
+        "mutation_rate_synapse_weight_perturbation",
+        config.mutation_rate_synapse_weight_perturbation,
     )?;
 
     if config.vision_distance < MIN_MUTATED_VISION_DISTANCE {

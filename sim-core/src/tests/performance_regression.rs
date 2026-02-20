@@ -43,6 +43,7 @@ fn stable_perf_config() -> WorldConfig {
             mutation_rate_eligibility_retention: 0.05,
             mutation_rate_synapse_prune_threshold: 0.05,
             mutation_rate_neuron_location: 0.02,
+            mutation_rate_synapse_weight_perturbation: 0.1,
         },
     }
 }
