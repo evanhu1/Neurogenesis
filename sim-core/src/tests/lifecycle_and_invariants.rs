@@ -7,7 +7,7 @@ fn starvation_and_reproduction_interact_in_same_turn() {
     cfg.reproduction_energy_cost = 5.0;
     let mut sim = Simulation::new(cfg, 18).expect("simulation should initialize");
     let mut reproducer =
-        make_organism(0, 1, 1, FacingDirection::East, true, false, false, 0.9, 6.0);
+        make_organism(0, 1, 1, FacingDirection::East, true, false, false, 0.9, 7.0);
     enable_reproduce_action(&mut reproducer);
     configure_sim(
         &mut sim,
@@ -71,7 +71,7 @@ fn starvation_and_reproduction_interact_in_same_turn() {
         .expect("reproducer should survive");
     assert_eq!(reproducer.consumptions_count, 0);
     assert_eq!(reproducer.reproductions_count, 1);
-    // 6.0 - 1.0 (turn upkeep: 0.25 * (1 inter + 1 sensory + vision 2)) - 5.0 (reproduction) - 1.0 (single selected action cost) = -1.0
+    // 7.0 - 2.0 (turn upkeep: (food_energy 50 / 100) * (1 inter + 1 sensory + vision 2)) - 5.0 (reproduction) - 1.0 (single selected action cost) = -1.0
     assert_eq!(reproducer.energy, -1.0);
 }
 
@@ -118,8 +118,8 @@ fn move_energy_cost_applies_to_attempted_moves() {
         .iter()
         .find(|organism| organism.id == OrganismId(1))
         .expect("loser should survive");
-    assert_eq!(winner.energy, 8.0);
-    assert_eq!(loser.energy, 8.0);
+    assert_eq!(winner.energy, 7.0);
+    assert_eq!(loser.energy, 7.0);
 }
 
 #[test]

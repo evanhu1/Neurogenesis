@@ -14,6 +14,8 @@ use std::collections::{BTreeMap, HashSet};
 #[cfg(feature = "profiling")]
 use std::time::Instant;
 
+const FOOD_ENERGY_METABOLISM_DIVISOR: f32 = 100.0;
+
 #[derive(Clone, Copy)]
 struct SnapshotOrganismState {
     q: i32,
@@ -611,7 +613,8 @@ fn organism_metabolism_energy_cost(config: &WorldConfig, organism: &OrganismStat
     // `num_neurons` tracks enabled interneurons. Sensory neurons are concrete runtime nodes.
     let neuron_count = organism.genome.num_neurons as f32 + organism.brain.sensory.len() as f32;
     let vision_distance_cost = organism.genome.vision_distance as f32;
-    config.neuron_metabolism_cost * (neuron_count + vision_distance_cost)
+    let neuron_energy_cost = config.food_energy / FOOD_ENERGY_METABOLISM_DIVISOR;
+    neuron_energy_cost * (neuron_count + vision_distance_cost)
 }
 
 impl Simulation {

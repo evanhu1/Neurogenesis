@@ -163,11 +163,12 @@ fn contested_occupied_target_where_occupant_remains_triggers_passive_bite() {
         0.2,
         0,
     );
-    let predator_metabolism = cfg.neuron_metabolism_cost
+    let neuron_energy_cost = cfg.food_energy / 100.0;
+    let predator_metabolism = neuron_energy_cost
         * (predator.genome.num_neurons as f32
             + predator.brain.sensory.len() as f32
             + predator.genome.vision_distance as f32);
-    let prey_metabolism = cfg.neuron_metabolism_cost
+    let prey_metabolism = neuron_energy_cost
         * (prey.genome.num_neurons as f32
             + prey.brain.sensory.len() as f32
             + prey.genome.vision_distance as f32);
@@ -249,7 +250,7 @@ fn move_into_food_consumes_and_schedules_regrowth() {
         .iter()
         .find(|organism| organism.id == OrganismId(0))
         .expect("predator should survive");
-    assert_eq!(predator.energy, 15.0);
+    assert_eq!(predator.energy, 15.72);
 }
 
 #[test]

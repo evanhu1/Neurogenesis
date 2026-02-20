@@ -172,8 +172,8 @@ fn reproduce_action_fails_when_spawn_cell_blocked() {
         .find(|organism| organism.id == OrganismId(0))
         .expect("parent should remain alive");
     assert_eq!(parent_after.reproductions_count, 0);
-    // 30.0 - 1.0 (turn upkeep: 0.25 * (1 inter + 1 sensory + vision 2)) - 1.0 (reproduce action cost) = 28.0
-    assert_eq!(parent_after.energy, 28.0);
+    // 30.0 - 2.0 (turn upkeep: (food_energy 50 / 100) * (1 inter + 1 sensory + vision 2)) - 1.0 (reproduce action cost) = 27.0
+    assert_eq!(parent_after.energy, 27.0);
 }
 
 #[test]
@@ -208,8 +208,8 @@ fn reproduce_action_succeeds_when_energy_and_space_allow_it() {
         .find(|organism| organism.id == OrganismId(0))
         .expect("parent should remain alive");
     assert_eq!(parent_after.reproductions_count, 1);
-    // 30.0 - 1.0 (turn upkeep: 0.25 * (1 inter + 1 sensory + vision 2)) - 20.0 (reproduction) - 1.0 (reproduce action cost) = 8.0
-    assert_eq!(parent_after.energy, 8.0);
+    // 30.0 - 2.0 (turn upkeep: (food_energy 50 / 100) * (1 inter + 1 sensory + vision 2)) - 20.0 (reproduction) - 1.0 (reproduce action cost) = 7.0
+    assert_eq!(parent_after.energy, 7.0);
 }
 
 #[test]
@@ -244,8 +244,8 @@ fn reproduce_action_requires_parent_to_reach_age_of_maturity() {
         .expect("parent should remain alive");
     assert_eq!(parent_after.age_turns, 2);
     assert_eq!(parent_after.reproductions_count, 0);
-    // 30.0 - 1.0 (turn upkeep: 0.25 * (1 inter + 1 sensory + vision 2)) - 1.0 (reproduce action cost) = 28.0
-    assert_eq!(parent_after.energy, 28.0);
+    // 30.0 - 2.0 (turn upkeep: (food_energy 50 / 100) * (1 inter + 1 sensory + vision 2)) - 1.0 (reproduce action cost) = 27.0
+    assert_eq!(parent_after.energy, 27.0);
 }
 
 #[test]
@@ -275,8 +275,8 @@ fn reproduce_action_fails_when_turn_upkeep_leaves_insufficient_energy() {
         .find(|organism| organism.id == OrganismId(0))
         .expect("parent should remain alive");
     assert_eq!(parent_after.reproductions_count, 0);
-    // 100.0 - 1.0 (turn upkeep: 0.25 * (1 inter + 1 sensory + vision 2)) - 1.0 (reproduce action cost) = 98.0
-    assert_eq!(parent_after.energy, 98.0);
+    // 100.0 - 2.0 (turn upkeep: (food_energy 50 / 100) * (1 inter + 1 sensory + vision 2)) - 1.0 (reproduce action cost) = 97.0
+    assert_eq!(parent_after.energy, 97.0);
 }
 
 #[test]

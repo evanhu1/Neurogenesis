@@ -435,11 +435,6 @@ fn validate_world_config(config: &WorldConfig) -> Result<(), SimError> {
             "move_action_energy_cost must be >= 0".to_owned(),
         ));
     }
-    if config.neuron_metabolism_cost < 0.0 {
-        return Err(SimError::InvalidConfig(
-            "neuron_metabolism_cost must be >= 0".to_owned(),
-        ));
-    }
     if !config.plant_growth_speed.is_finite() || config.plant_growth_speed <= 0.0 {
         return Err(SimError::InvalidConfig(
             "plant_growth_speed must be greater than zero".to_owned(),

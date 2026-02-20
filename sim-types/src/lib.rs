@@ -196,7 +196,6 @@ pub struct WorldConfig {
     pub food_energy: f32,
     pub reproduction_energy_cost: f32,
     pub move_action_energy_cost: f32,
-    pub neuron_metabolism_cost: f32,
     pub plant_growth_speed: f32,
     #[serde(default = "default_food_regrowth_interval")]
     pub food_regrowth_interval: u32,
@@ -223,8 +222,6 @@ struct WorldConfigDeserialize {
     food_energy: f32,
     reproduction_energy_cost: f32,
     move_action_energy_cost: f32,
-    #[serde(default = "default_neuron_metabolism_cost")]
-    neuron_metabolism_cost: f32,
     #[serde(default)]
     plant_growth_speed: Option<f32>,
     #[serde(default)]
@@ -257,7 +254,6 @@ impl<'de> Deserialize<'de> for WorldConfig {
         let plant_growth_speed = raw
             .plant_growth_speed
             .unwrap_or_else(default_plant_growth_speed);
-        let neuron_metabolism_cost = raw.neuron_metabolism_cost;
         Ok(Self {
             world_width: raw.world_width,
             steps_per_second: raw.steps_per_second,
@@ -265,7 +261,6 @@ impl<'de> Deserialize<'de> for WorldConfig {
             food_energy: raw.food_energy,
             reproduction_energy_cost: raw.reproduction_energy_cost,
             move_action_energy_cost: raw.move_action_energy_cost,
-            neuron_metabolism_cost,
             plant_growth_speed,
             food_regrowth_interval: raw.food_regrowth_interval,
             food_fertility_noise_scale: raw.food_fertility_noise_scale,
@@ -345,9 +340,6 @@ fn normalize_world_config_toml(value: &mut toml::Value) {
             .entry("max_organism_age")
             .or_insert_with(|| toml::Value::Integer(i64::from(world_width.saturating_mul(10))));
     }
-    table
-        .entry("neuron_metabolism_cost")
-        .or_insert_with(|| toml::Value::Float(default_neuron_metabolism_cost() as f64));
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -397,10 +389,6 @@ fn default_terrain_threshold() -> f32 {
 
 fn default_plant_growth_speed() -> f32 {
     1.0
-}
-
-fn default_neuron_metabolism_cost() -> f32 {
-    0.25
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
