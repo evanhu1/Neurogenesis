@@ -42,6 +42,7 @@ export type WorldConfig = {
   terrain_threshold: number;
   max_organism_age: number;
   speciation_threshold: number;
+  global_mutation_rate_modifier: number;
   seed_genome_config: SeedGenomeConfig;
 };
 

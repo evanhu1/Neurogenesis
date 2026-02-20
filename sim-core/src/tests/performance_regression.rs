@@ -27,6 +27,7 @@ fn stable_perf_config() -> WorldConfig {
         terrain_threshold: 1.0,
         max_organism_age: u32::MAX,
         speciation_threshold: 50.0,
+        global_mutation_rate_modifier: 1.0,
         seed_genome_config: SeedGenomeConfig {
             num_neurons: 20,
             num_synapses: 80,

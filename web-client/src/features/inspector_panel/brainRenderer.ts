@@ -20,7 +20,7 @@ type BrainNode = {
   bias: number;
   gx: number;
   gy: number;
-  alpha?: number;
+  timeConstant?: number;
   interneuronType?: 'Excitatory' | 'Inhibitory';
   isActive: boolean;
 };
@@ -64,7 +64,7 @@ export function computeBrainLayout(
       bias: neuron.neuron.bias,
       gx: finiteOr(neuron.neuron.x, 3.5 + (interIdx % 6) * 0.7),
       gy: finiteOr(neuron.neuron.y, 1 + Math.floor(interIdx / 6) * 0.9),
-      alpha: neuron.alpha,
+      timeConstant: timeConstantFromAlpha(neuron.alpha),
       interneuronType: neuron.interneuron_type,
       isActive: activeNeuronIds?.has(nid) ?? false,
     });
@@ -123,6 +123,24 @@ export function computeBrainLayout(
 
 function finiteOr(value: number, fallback: number): number {
   return Number.isFinite(value) ? value : fallback;
+}
+
+function timeConstantFromAlpha(alpha: number): number {
+  if (!Number.isFinite(alpha)) return Number.POSITIVE_INFINITY;
+
+  const oneMinusAlpha = 1 - alpha;
+  if (oneMinusAlpha <= 0) return 0;
+  if (oneMinusAlpha >= 1) return Number.POSITIVE_INFINITY;
+
+  const logTerm = Math.log(oneMinusAlpha);
+  if (!Number.isFinite(logTerm) || logTerm === 0) return Number.POSITIVE_INFINITY;
+
+  return -1 / logTerm;
+}
+
+function formatTimeConstant(timeConstant: number): string {
+  if (!Number.isFinite(timeConstant)) return '\u221e';
+  return timeConstant.toFixed(2);
 }
 
 function relaxOverlaps(nodes: BrainNodePos[]) {
@@ -422,8 +440,8 @@ export function renderBrain(
         ctx.fillText(`b=${node.bias.toFixed(2)}`, node.x + 12, metricsY + 12);
       }
       if (node.type === 'inter') {
-        if (node.alpha != null) {
-          ctx.fillText(`\u03B1=${node.alpha.toFixed(2)}`, node.x + 12, metricsY + 24);
+        if (node.timeConstant != null) {
+          ctx.fillText(`\u03c4=${formatTimeConstant(node.timeConstant)}`, node.x + 12, metricsY + 24);
         }
       }
     }

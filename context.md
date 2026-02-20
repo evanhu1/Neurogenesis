@@ -49,6 +49,7 @@ const PLASTIC_WEIGHT_DECAY: f32 = 0.001;
 const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
 const MIN_ENERGY_SENSOR_SCALE: f32 = 1.0;
 const ENERGY_SENSOR_CURVE_EXPONENT: f32 = 2.0;
+const MIN_ACTION_TEMPERATURE: f32 = 1.0e-6;
 const LOOK_TARGETS: [EntityType; 3] = [EntityType::Food, EntityType::Organism, EntityType::Wall];
 const LOOK_RAY_COUNT: usize = SensoryReceptor::LOOK_RAY_OFFSETS.len();
 pub(crate) const SENSORY_COUNT: u32 = SensoryReceptor::LOOK_NEURON_COUNT + 1;
@@ -74,8 +75,15 @@ impl Default for ResolvedActions {
 #[derive(Default)]
 pub(crate) struct BrainEvaluation {
     pub(crate) resolved_actions: ResolvedActions,
+    pub(crate) action_logits: Vec<f32>,
     pub(crate) action_activations: [f32; ACTION_COUNT],
     pub(crate) synapse_ops: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ActionSelectionPolicy {
+    pub(crate) temperature: f32,
+    pub(crate) argmax_margin: Option<f32>,
 }
 
 /// Reusable scratch buffers for brain evaluation, avoiding per-tick allocations.
@@ -303,6 +311,8 @@ pub(crate) fn evaluate_brain(
     world_width: i32,
     occupancy: &[Option<Occupant>],
     vision_distance: u32,
+    action_selection: ActionSelectionPolicy,
+    action_rng: &mut impl Rng,
     scratch: &mut BrainScratch,
 ) -> BrainEvaluation {
     let mut result = BrainEvaluation::default();
@@ -420,29 +430,32 @@ pub(crate) fn evaluate_brain(
 
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
+    result.action_logits = action_inputs.to_vec();
     for (idx, action) in brain.action.iter_mut().enumerate() {
         action.neuron.activation = sigmoid(action_inputs[idx]);
         result.action_activations[action_index(action.action_type)] = action.neuron.activation;
     }
 
-    result.resolved_actions = resolve_actions(result.action_activations);
+    result.resolved_actions = ResolvedActions {
+        selected_action: select_action_from_logits(
+            &result.action_logits,
+            action_selection,
+            action_rng,
+        ),
+    };
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::ActionActivationResolve, stage_started.elapsed());
 
     result
 }
 
-pub(crate) fn apply_runtime_plasticity(
+pub(crate) fn update_runtime_eligibility_traces(
     organism: &mut sim_types::OrganismState,
-    passive_energy_baseline: f32,
     scratch: &mut BrainScratch,
 ) {
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     let eligibility_retention = organism.genome.eligibility_retention.clamp(0.0, 1.0);
-    let weight_prune_threshold = organism.genome.synapse_prune_threshold.max(0.0);
-    let should_prune = should_prune_synapses(organism.age_turns, organism.genome.age_of_maturity);
-    let is_mature = organism.age_turns >= u64::from(organism.genome.age_of_maturity);
 
     let brain = &mut organism.brain;
     scratch.inter_activations.clear();
@@ -452,27 +465,16 @@ pub(crate) fn apply_runtime_plasticity(
     for (idx, action) in brain.action.iter().enumerate() {
         scratch.action_activations[idx] = action.neuron.activation;
     }
-    let energy_delta = organism.energy - organism.energy_prev;
-    // Baseline-correct the reward signal so passive metabolism alone is neutral.
-    let corrected_energy_delta = energy_delta + passive_energy_baseline.max(0.0);
-    let dopamine_signal = (corrected_energy_delta / DOPAMINE_ENERGY_DELTA_SCALE).tanh();
-    organism.dopamine = dopamine_signal;
-    organism.energy_prev = organism.energy;
-    let eta = organism.genome.hebb_eta_gain.max(0.0);
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::PlasticitySetup, stage_started.elapsed());
 
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     for sensory in &mut brain.sensory {
-        tune_synapses(
+        update_edge_eligibility(
             &mut sensory.synapses,
             sensory.neuron.activation,
-            1.0,
-            eta,
-            dopamine_signal,
             eligibility_retention,
-            is_mature,
             &scratch.inter_activations,
             &scratch.action_activations,
         );
@@ -483,32 +485,16 @@ pub(crate) fn apply_runtime_plasticity(
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     for inter in &mut brain.inter {
-        let required_sign = match inter.interneuron_type {
-            InterNeuronType::Excitatory => 1.0,
-            InterNeuronType::Inhibitory => -1.0,
-        };
-        tune_synapses(
+        update_edge_eligibility(
             &mut inter.synapses,
             inter.neuron.activation,
-            required_sign,
-            eta,
-            dopamine_signal,
             eligibility_retention,
-            is_mature,
             &scratch.inter_activations,
             &scratch.action_activations,
         );
     }
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::PlasticityInterTuning, stage_started.elapsed());
-
-    if should_prune {
-        #[cfg(feature = "profiling")]
-        let stage_started = Instant::now();
-        prune_low_weight_synapses(brain, weight_prune_threshold);
-        #[cfg(feature = "profiling")]
-        profiling::record_brain_stage(BrainStage::PlasticityPrune, stage_started.elapsed());
-    }
 }
 
 fn should_prune_synapses(age_turns: u64, age_of_maturity: u32) -> bool {
@@ -516,14 +502,60 @@ fn should_prune_synapses(age_turns: u64, age_of_maturity: u32) -> bool {
     age_turns >= maturity_ticks && age_turns % SYNAPSE_PRUNE_INTERVAL_TICKS == 0
 }
 
-fn tune_synapses(
+pub(crate) fn apply_runtime_weight_updates(
+    organism: &mut sim_types::OrganismState,
+    passive_energy_baseline: f32,
+) {
+    #[cfg(feature = "profiling")]
+    let stage_started = Instant::now();
+    let weight_prune_threshold = organism.genome.synapse_prune_threshold.max(0.0);
+    let should_prune = should_prune_synapses(organism.age_turns, organism.genome.age_of_maturity);
+    let is_mature = organism.age_turns >= u64::from(organism.genome.age_of_maturity);
+    let energy_delta = organism.energy - organism.energy_prev;
+    // Baseline-correct the reward signal so passive metabolism alone is neutral.
+    let corrected_energy_delta = energy_delta + passive_energy_baseline.max(0.0);
+    let dopamine_signal = (corrected_energy_delta / DOPAMINE_ENERGY_DELTA_SCALE).tanh();
+    organism.dopamine = dopamine_signal;
+    organism.energy_prev = organism.energy;
+    let eta = organism.genome.hebb_eta_gain.max(0.0);
+    #[cfg(feature = "profiling")]
+    profiling::record_brain_stage(BrainStage::PlasticitySetup, stage_started.elapsed());
+
+    if is_mature {
+        #[cfg(feature = "profiling")]
+        let stage_started = Instant::now();
+        for sensory in &mut organism.brain.sensory {
+            apply_edge_weight_update(&mut sensory.synapses, 1.0, eta, dopamine_signal);
+        }
+        #[cfg(feature = "profiling")]
+        profiling::record_brain_stage(BrainStage::PlasticitySensoryTuning, stage_started.elapsed());
+
+        #[cfg(feature = "profiling")]
+        let stage_started = Instant::now();
+        for inter in &mut organism.brain.inter {
+            let required_sign = match inter.interneuron_type {
+                InterNeuronType::Excitatory => 1.0,
+                InterNeuronType::Inhibitory => -1.0,
+            };
+            apply_edge_weight_update(&mut inter.synapses, required_sign, eta, dopamine_signal);
+        }
+        #[cfg(feature = "profiling")]
+        profiling::record_brain_stage(BrainStage::PlasticityInterTuning, stage_started.elapsed());
+    }
+
+    if should_prune {
+        #[cfg(feature = "profiling")]
+        let stage_started = Instant::now();
+        prune_low_weight_synapses(&mut organism.brain, weight_prune_threshold);
+        #[cfg(feature = "profiling")]
+        profiling::record_brain_stage(BrainStage::PlasticityPrune, stage_started.elapsed());
+    }
+}
+
+fn update_edge_eligibility(
     edges: &mut [SynapseEdge],
     pre_activation: f32,
-    required_sign: f32,
-    eta: f32,
-    dopamine_signal: f32,
     eligibility_retention: f32,
-    is_mature: bool,
     inter_activations: &[f32],
     action_activations: &[f32; ACTION_COUNT],
 ) {
@@ -536,12 +568,18 @@ fn tune_synapses(
 
         edge.eligibility =
             eligibility_retention * edge.eligibility + pre_activation * post_activation;
-        if !is_mature {
-            continue;
-        }
+    }
+}
 
-        let updated_weight = edge.weight + eta * dopamine_signal * edge.eligibility
-            - PLASTIC_WEIGHT_DECAY * edge.weight;
+fn apply_edge_weight_update(
+    edges: &mut [SynapseEdge],
+    required_sign: f32,
+    eta: f32,
+    dopamine: f32,
+) {
+    for edge in edges {
+        let updated_weight =
+            edge.weight + eta * dopamine * edge.eligibility - PLASTIC_WEIGHT_DECAY * edge.weight;
         edge.weight = constrain_weight(updated_weight, required_sign);
     }
 }
@@ -701,18 +739,76 @@ pub fn derive_active_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
 }
 
 fn resolve_actions(activations: [f32; ACTION_COUNT]) -> ResolvedActions {
-    let mut best_idx = 0usize;
-    let mut best_activation = activations[0];
-    for (idx, activation) in activations.iter().copied().enumerate().skip(1) {
-        if activation > best_activation {
-            best_idx = idx;
-            best_activation = activation;
+    ResolvedActions {
+        selected_action: ActionType::ALL[argmax_index(&activations)],
+    }
+}
+
+fn select_action_from_logits(
+    action_logits: &[f32],
+    action_selection: ActionSelectionPolicy,
+    action_rng: &mut impl Rng,
+) -> ActionType {
+    if action_logits.len() != ACTION_COUNT {
+        return ActionType::Idle;
+    }
+
+    let best_idx = argmax_index(action_logits);
+    let best_logit = action_logits[best_idx];
+    let second_logit = second_largest(action_logits, best_idx);
+    if let Some(margin) = action_selection.argmax_margin {
+        if best_logit - second_logit > margin {
+            return ActionType::ALL[best_idx];
         }
     }
 
-    ResolvedActions {
-        selected_action: ActionType::ALL[best_idx],
+    let temperature = action_selection.temperature.max(MIN_ACTION_TEMPERATURE);
+    let mut weights = [0.0_f32; ACTION_COUNT];
+    let mut weight_sum = 0.0_f32;
+    for (idx, logit) in action_logits.iter().copied().enumerate() {
+        let scaled = (logit - best_logit) / temperature;
+        let weight = scaled.exp();
+        if weight.is_finite() {
+            weights[idx] = weight;
+            weight_sum += weight;
+        }
     }
+
+    if !weight_sum.is_finite() || weight_sum <= 0.0 {
+        return ActionType::ALL[best_idx];
+    }
+
+    let sample = action_rng.random::<f32>() * weight_sum;
+    let mut cumulative = 0.0_f32;
+    for (idx, weight) in weights.iter().copied().enumerate() {
+        cumulative += weight;
+        if sample < cumulative {
+            return ActionType::ALL[idx];
+        }
+    }
+    ActionType::ALL[ACTION_COUNT - 1]
+}
+
+fn argmax_index(values: &[f32]) -> usize {
+    let mut best_idx = 0usize;
+    let mut best_value = values[0];
+    for (idx, value) in values.iter().copied().enumerate().skip(1) {
+        if value > best_value {
+            best_idx = idx;
+            best_value = value;
+        }
+    }
+    best_idx
+}
+
+fn second_largest(values: &[f32], best_idx: usize) -> f32 {
+    let mut second = f32::NEG_INFINITY;
+    for (idx, value) in values.iter().copied().enumerate() {
+        if idx != best_idx && value > second {
+            second = value;
+        }
+    }
+    second
 }
 
 /// Accumulates weighted inputs using arithmetic index resolution.
@@ -2258,6 +2354,8 @@ fn lerp(a: f64, b: f64, t: f64) -> f64 {
 
 ```rust
 const FOOD_ENERGY_METABOLISM_DIVISOR: f32 = 1000.0;
+const RNG_TURN_MIX: u64 = 0x9E37_79B9_7F4A_7C15;
+const RNG_ORGANISM_MIX: u64 = 0xBF58_476D_1CE4_E5B9;
 
 #[derive(Clone, Copy)]
 struct SnapshotOrganismState {
@@ -2373,6 +2471,7 @@ impl Simulation {
         #[cfg(feature = "profiling")]
         let phase_started = Instant::now();
         let commit = self.commit_phase(&snapshot, &intents, &resolutions, &successful_reproduction);
+        self.apply_post_commit_runtime_weight_updates();
         #[cfg(feature = "profiling")]
         profiling::record_turn_phase(TurnPhase::Commit, phase_started.elapsed());
 
@@ -2456,32 +2555,12 @@ impl Simulation {
 
     fn build_intents(&mut self, snapshot: &TurnSnapshot) -> Vec<OrganismIntent> {
         let occupancy = &self.occupancy;
-        let food_energy = self.config.food_energy;
-
-        if self.should_parallelize_intents(snapshot.organism_count) {
-            let intent_threads = self.intent_parallelism();
-            let world_width = snapshot.world_width;
-            let organism_ids = &snapshot.organism_ids;
-            let organism_states = &snapshot.organism_states;
-            return crate::install_with_intent_pool(intent_threads, || {
-                self.organisms
-                    .par_iter_mut()
-                    .enumerate()
-                    .map_init(BrainScratch::new, |scratch, (idx, organism)| {
-                        build_intent_for_organism(
-                            idx,
-                            organism,
-                            food_energy,
-                            world_width,
-                            occupancy,
-                            organism_states[idx],
-                            organism_ids[idx],
-                            scratch,
-                        )
-                    })
-                    .collect()
-            });
-        }
+        let action_selection = ActionSelectionPolicy {
+            temperature: self.config.action_temperature,
+            argmax_margin: self.config.action_selection_margin,
+        };
+        let sim_seed = self.seed;
+        let tick = self.turn;
 
         let mut intents = Vec::with_capacity(snapshot.organism_count);
         let mut scratch = BrainScratch::new();
@@ -2489,15 +2568,30 @@ impl Simulation {
             intents.push(build_intent_for_organism(
                 idx,
                 &mut self.organisms[idx],
-                food_energy,
                 snapshot.world_width,
                 occupancy,
                 snapshot.organism_states[idx],
                 snapshot.organism_ids[idx],
+                sim_seed,
+                tick,
+                action_selection,
                 &mut scratch,
             ));
         }
         intents
+    }
+
+    fn apply_post_commit_runtime_weight_updates(&mut self) {
+        let food_energy = self.config.food_energy;
+        for organism in &mut self.organisms {
+            let passive_energy_baseline =
+                organism_metabolism_energy_cost_from_food_energy(food_energy, organism);
+            #[cfg(feature = "profiling")]
+            let plasticity_started = Instant::now();
+            apply_runtime_weight_updates(organism, passive_energy_baseline);
+            #[cfg(feature = "profiling")]
+            profiling::record_brain_plasticity_total(plasticity_started.elapsed());
+        }
     }
 
     fn resolve_moves(
@@ -2902,25 +2996,34 @@ fn compare_move_candidates(a: &MoveCandidate, b: &MoveCandidate) -> Ordering {
 fn build_intent_for_organism(
     idx: usize,
     organism: &mut OrganismState,
-    food_energy: f32,
     world_width: i32,
     occupancy: &[Option<Occupant>],
     snapshot_state: SnapshotOrganismState,
     organism_id: OrganismId,
+    sim_seed: u64,
+    tick: u64,
+    action_selection: ActionSelectionPolicy,
     scratch: &mut BrainScratch,
 ) -> OrganismIntent {
     let vision_distance = organism.genome.vision_distance;
+    let mut action_rng = ChaCha8Rng::seed_from_u64(action_rng_seed(sim_seed, tick, organism_id));
     #[cfg(feature = "profiling")]
     let brain_eval_started = Instant::now();
-    let evaluation = evaluate_brain(organism, world_width, occupancy, vision_distance, scratch);
+    let evaluation = evaluate_brain(
+        organism,
+        world_width,
+        occupancy,
+        vision_distance,
+        action_selection,
+        &mut action_rng,
+        scratch,
+    );
     #[cfg(feature = "profiling")]
     profiling::record_brain_eval_total(brain_eval_started.elapsed());
 
-    let passive_energy_baseline =
-        organism_metabolism_energy_cost_from_food_energy(food_energy, organism);
     #[cfg(feature = "profiling")]
     let plasticity_started = Instant::now();
-    apply_runtime_plasticity(organism, passive_energy_baseline, scratch);
+    update_runtime_eligibility_traces(organism, scratch);
     #[cfg(feature = "profiling")]
     profiling::record_brain_plasticity_total(plasticity_started.elapsed());
 

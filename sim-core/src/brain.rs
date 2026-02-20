@@ -67,7 +67,7 @@ pub(crate) struct BrainScratch {
     inter_inputs: Vec<f32>,
     prev_inter: Vec<f32>,
     inter_activations: Vec<f32>,
-    action_activations: [f32; ACTION_COUNT],
+    action_post_signals: [f32; ACTION_COUNT],
 }
 
 impl BrainScratch {
@@ -76,7 +76,7 @@ impl BrainScratch {
             inter_inputs: Vec::new(),
             prev_inter: Vec::new(),
             inter_activations: Vec::new(),
-            action_activations: [0.0; ACTION_COUNT],
+            action_post_signals: [0.0; ACTION_COUNT],
         }
     }
 }
@@ -407,6 +407,10 @@ pub(crate) fn evaluate_brain(
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     result.action_logits = action_inputs.to_vec();
+    let logit_mean = action_inputs.iter().sum::<f32>() / ACTION_COUNT as f32;
+    for (idx, logit) in action_inputs.iter().copied().enumerate() {
+        scratch.action_post_signals[idx] = logit - logit_mean;
+    }
     for (idx, action) in brain.action.iter_mut().enumerate() {
         action.neuron.activation = sigmoid(action_inputs[idx]);
         result.action_activations[action_index(action.action_type)] = action.neuron.activation;
@@ -438,9 +442,6 @@ pub(crate) fn update_runtime_eligibility_traces(
     scratch
         .inter_activations
         .extend(brain.inter.iter().map(|inter| inter.neuron.activation));
-    for (idx, action) in brain.action.iter().enumerate() {
-        scratch.action_activations[idx] = action.neuron.activation;
-    }
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::PlasticitySetup, stage_started.elapsed());
 
@@ -452,7 +453,7 @@ pub(crate) fn update_runtime_eligibility_traces(
             sensory.neuron.activation,
             eligibility_retention,
             &scratch.inter_activations,
-            &scratch.action_activations,
+            &scratch.action_post_signals,
         );
     }
     #[cfg(feature = "profiling")]
@@ -460,13 +461,14 @@ pub(crate) fn update_runtime_eligibility_traces(
 
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
-    for inter in &mut brain.inter {
-        update_edge_eligibility(
+    for (pre_idx, inter) in brain.inter.iter_mut().enumerate() {
+        update_inter_edge_eligibility(
             &mut inter.synapses,
-            inter.neuron.activation,
+            pre_idx,
             eligibility_retention,
+            &scratch.prev_inter,
             &scratch.inter_activations,
-            &scratch.action_activations,
+            &scratch.action_post_signals,
         );
     }
     #[cfg(feature = "profiling")]
@@ -533,14 +535,48 @@ fn update_edge_eligibility(
     pre_activation: f32,
     eligibility_retention: f32,
     inter_activations: &[f32],
-    action_activations: &[f32; ACTION_COUNT],
+    action_post_signals: &[f32; ACTION_COUNT],
 ) {
     for edge in edges {
         let post_activation =
-            match post_activation(edge.post_neuron_id, inter_activations, action_activations) {
+            match post_signal(edge.post_neuron_id, inter_activations, action_post_signals) {
                 Some(value) => value,
                 None => continue,
             };
+
+        edge.eligibility =
+            eligibility_retention * edge.eligibility + pre_activation * post_activation;
+    }
+}
+
+fn update_inter_edge_eligibility(
+    edges: &mut [SynapseEdge],
+    pre_idx: usize,
+    eligibility_retention: f32,
+    prev_inter_activations: &[f32],
+    inter_activations: &[f32],
+    action_post_signals: &[f32; ACTION_COUNT],
+) {
+    let Some(pre_prev) = prev_inter_activations.get(pre_idx).copied() else {
+        return;
+    };
+    let Some(pre_current) = inter_activations.get(pre_idx).copied() else {
+        return;
+    };
+
+    for edge in edges {
+        let post_activation =
+            match post_signal(edge.post_neuron_id, inter_activations, action_post_signals) {
+                Some(value) => value,
+                None => continue,
+            };
+        let pre_activation = if edge.post_neuron_id.0 >= ACTION_ID_BASE {
+            pre_current
+        } else if edge.post_neuron_id.0 >= INTER_ID_BASE {
+            pre_prev
+        } else {
+            continue;
+        };
 
         edge.eligibility =
             eligibility_retention * edge.eligibility + pre_activation * post_activation;
@@ -560,14 +596,14 @@ fn apply_edge_weight_update(
     }
 }
 
-fn post_activation(
+fn post_signal(
     neuron_id: NeuronId,
     inter_activations: &[f32],
-    action_activations: &[f32; ACTION_COUNT],
+    action_post_signals: &[f32; ACTION_COUNT],
 ) -> Option<f32> {
     if neuron_id.0 >= ACTION_ID_BASE {
         let action_idx = (neuron_id.0 - ACTION_ID_BASE) as usize;
-        return action_activations.get(action_idx).copied();
+        return action_post_signals.get(action_idx).copied();
     }
     if neuron_id.0 >= INTER_ID_BASE {
         let inter_idx = (neuron_id.0 - INTER_ID_BASE) as usize;

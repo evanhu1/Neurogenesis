@@ -180,7 +180,7 @@ fn mutate_genome_adds_synapses_when_below_target() {
     let mut genome = genome_template.clone();
     genome.edges.clear();
     let mut rng = ChaCha8Rng::seed_from_u64(10_000);
-    crate::genome::mutate_genome(&mut genome, &mut rng);
+    crate::genome::mutate_genome(&mut genome, 1.0, &mut rng);
 
     assert_eq!(genome.num_synapses, 8);
     assert_eq!(genome.edges.len(), 8);
@@ -498,6 +498,192 @@ fn runtime_plasticity_neutralizes_passive_metabolism_for_dopamine() {
 
     let expected = before * (1.0 - 0.001);
     assert!((after - expected).abs() < 1.0e-6);
+}
+
+#[test]
+fn inter_recurrent_eligibility_uses_prev_inter_pre_signal_only_for_inter_targets() {
+    let mut genome = test_genome();
+    genome.num_neurons = 2;
+    genome.num_synapses = 0;
+    genome.eligibility_retention = 0.0;
+
+    let inter0 = InterNeuronState {
+        neuron: NeuronState {
+            neuron_id: NeuronId(INTER_ID_BASE),
+            neuron_type: NeuronType::Inter,
+            bias: 0.0,
+            x: 0.0,
+            y: 0.0,
+            activation: 0.8,
+            parent_ids: Vec::new(),
+        },
+        interneuron_type: InterNeuronType::Excitatory,
+        alpha: 1.0,
+        synapses: vec![
+            SynapseEdge {
+                pre_neuron_id: NeuronId(INTER_ID_BASE),
+                post_neuron_id: NeuronId(INTER_ID_BASE + 1),
+                weight: 1.0,
+                eligibility: 0.0,
+            },
+            SynapseEdge {
+                pre_neuron_id: NeuronId(INTER_ID_BASE),
+                post_neuron_id: NeuronId(ACTION_ID_BASE),
+                weight: 1.0,
+                eligibility: 0.0,
+            },
+        ],
+    };
+    let inter1 = InterNeuronState {
+        neuron: NeuronState {
+            neuron_id: NeuronId(INTER_ID_BASE + 1),
+            neuron_type: NeuronType::Inter,
+            bias: 0.0,
+            x: 1.0,
+            y: 0.0,
+            activation: 0.0,
+            parent_ids: Vec::new(),
+        },
+        interneuron_type: InterNeuronType::Excitatory,
+        alpha: 1.0,
+        synapses: Vec::new(),
+    };
+    let action: Vec<_> = ActionType::ALL
+        .into_iter()
+        .enumerate()
+        .map(|(idx, action_type)| {
+            make_action_neuron(
+                ACTION_ID_BASE + idx as u32,
+                action_type,
+                if idx == 0 { 1.5 } else { 0.0 },
+                loc(2.0, idx as f32),
+            )
+        })
+        .collect();
+    let brain = BrainState {
+        sensory: vec![],
+        inter: vec![inter0, inter1],
+        action,
+        synapse_count: 2,
+    };
+    let mut organism = OrganismState {
+        id: OrganismId(0),
+        species_id: SpeciesId(0),
+        q: 0,
+        r: 0,
+        age_turns: 0,
+        facing: FacingDirection::East,
+        energy: 100.0,
+        energy_prev: 100.0,
+        dopamine: 0.0,
+        consumptions_count: 0,
+        reproductions_count: 0,
+        brain,
+        genome,
+    };
+
+    let occupancy = vec![None; 9];
+    let mut scratch = BrainScratch::new();
+    let mut action_rng = ChaCha8Rng::seed_from_u64(16);
+    let vision_distance = organism.genome.vision_distance;
+    let _ = evaluate_brain(
+        &mut organism,
+        3,
+        &occupancy,
+        vision_distance,
+        deterministic_action_policy(),
+        &mut action_rng,
+        &mut scratch,
+    );
+    update_runtime_eligibility_traces(&mut organism, &mut scratch);
+
+    let inter1_current = organism.brain.inter[1].neuron.activation;
+    let recurrent_eligibility = organism.brain.inter[0].synapses[0].eligibility;
+    let action_eligibility = organism.brain.inter[0].synapses[1].eligibility;
+
+    let expected_recurrent = 0.8 * inter1_current;
+    assert!((recurrent_eligibility - expected_recurrent).abs() < 1.0e-6);
+    assert!(action_eligibility.abs() < 1.0e-6);
+}
+
+#[test]
+fn action_target_eligibility_uses_centered_logits_not_sigmoid_activation() {
+    let mut genome = test_genome();
+    genome.num_neurons = 0;
+    genome.num_synapses = 0;
+    genome.eligibility_retention = 0.0;
+    genome.starting_energy = 250.0;
+
+    let energy_id = SENSORY_COUNT - 1;
+    let mut sensory = vec![make_sensory_neuron(
+        energy_id,
+        SensoryReceptor::Energy,
+        loc(1.0, 1.0),
+    )];
+    sensory[0].synapses.push(SynapseEdge {
+        pre_neuron_id: NeuronId(energy_id),
+        post_neuron_id: NeuronId(ACTION_ID_BASE),
+        weight: 1.0,
+        eligibility: 0.0,
+    });
+    let action: Vec<_> = ActionType::ALL
+        .into_iter()
+        .enumerate()
+        .map(|(idx, action_type)| {
+            make_action_neuron(
+                ACTION_ID_BASE + idx as u32,
+                action_type,
+                if idx == 0 { 2.0 } else { 0.0 },
+                loc(2.0, 1.0 + idx as f32),
+            )
+        })
+        .collect();
+    let brain = BrainState {
+        sensory,
+        inter: vec![],
+        action,
+        synapse_count: 1,
+    };
+    let mut organism = OrganismState {
+        id: OrganismId(0),
+        species_id: SpeciesId(0),
+        q: 0,
+        r: 0,
+        age_turns: 0,
+        facing: FacingDirection::East,
+        energy: 250.0,
+        energy_prev: 250.0,
+        dopamine: 0.0,
+        consumptions_count: 0,
+        reproductions_count: 0,
+        brain,
+        genome,
+    };
+
+    let occupancy = vec![None; 9];
+    let mut scratch = BrainScratch::new();
+    let mut action_rng = ChaCha8Rng::seed_from_u64(17);
+    let vision_distance = organism.genome.vision_distance;
+    let eval = evaluate_brain(
+        &mut organism,
+        3,
+        &occupancy,
+        vision_distance,
+        deterministic_action_policy(),
+        &mut action_rng,
+        &mut scratch,
+    );
+    update_runtime_eligibility_traces(&mut organism, &mut scratch);
+
+    let sensory_activation = organism.brain.sensory[0].neuron.activation;
+    let edge_eligibility = organism.brain.sensory[0].synapses[0].eligibility;
+    let logit0 = eval.action_logits[0];
+    let logit_mean = eval.action_logits.iter().sum::<f32>() / eval.action_logits.len() as f32;
+    let expected_centered_logit = sensory_activation * (logit0 - logit_mean);
+    let sigmoid_expected = sensory_activation * (1.0 / (1.0 + (-logit0).exp()));
+
+    assert!((edge_eligibility - expected_centered_logit).abs() < 1.0e-6);
+    assert!((edge_eligibility - sigmoid_expected).abs() > 1.0e-3);
 }
 
 #[test]

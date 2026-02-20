@@ -404,5 +404,12 @@ fn validate_world_config(config: &WorldConfig) -> Result<(), SimError> {
             "terrain_threshold must be in [0.0, 1.0]".to_owned(),
         ));
     }
+    if !config.global_mutation_rate_modifier.is_finite()
+        || config.global_mutation_rate_modifier < 0.0
+    {
+        return Err(SimError::InvalidConfig(
+            "global_mutation_rate_modifier must be finite and >= 0".to_owned(),
+        ));
+    }
     Ok(())
 }

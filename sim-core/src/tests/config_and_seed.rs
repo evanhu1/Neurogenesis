@@ -22,6 +22,14 @@ fn config_validation_rejects_out_of_range_split_edge_mutation_rate() {
 }
 
 #[test]
+fn config_validation_rejects_negative_global_mutation_rate_modifier() {
+    let mut cfg = stable_test_config();
+    cfg.global_mutation_rate_modifier = -0.1;
+    let err = Simulation::new(cfg, 1).expect_err("config should be rejected");
+    assert!(err.to_string().contains("global_mutation_rate_modifier"));
+}
+
+#[test]
 fn config_validation_rejects_non_positive_seed_starting_energy() {
     let mut cfg = stable_test_config();
     cfg.seed_genome_config.starting_energy = 0.0;
@@ -98,7 +106,7 @@ fn mutate_genome_matches_synapse_target_and_mutates_location_in_bounds() {
     let mut rng = ChaCha8Rng::seed_from_u64(7);
 
     for _ in 0..32 {
-        crate::genome::mutate_genome(&mut genome, &mut rng);
+        crate::genome::mutate_genome(&mut genome, 1.0, &mut rng);
     }
 
     assert_eq!(genome.num_synapses, genome.edges.len() as u32);
@@ -178,7 +186,7 @@ fn mutate_genome_sanitizes_synapse_genes_and_does_not_trim_excess() {
     ];
 
     let mut rng = ChaCha8Rng::seed_from_u64(42);
-    crate::genome::mutate_genome(&mut genome, &mut rng);
+    crate::genome::mutate_genome(&mut genome, 1.0, &mut rng);
 
     assert_eq!(genome.num_synapses, 2);
     assert_eq!(genome.edges.len(), 2);
@@ -235,7 +243,7 @@ fn mutate_genome_can_perturb_inherited_synapse_weights_without_flipping_sign() {
 
     let mut rng = ChaCha8Rng::seed_from_u64(17);
     for _ in 0..16 {
-        crate::genome::mutate_genome(&mut genome, &mut rng);
+        crate::genome::mutate_genome(&mut genome, 1.0, &mut rng);
     }
 
     assert_eq!(genome.edges.len(), 2);
@@ -294,7 +302,7 @@ fn mutate_genome_can_apply_add_neuron_split_edge_operator() {
     let initial_neurons = genome.num_neurons;
     let initial_synapses = genome.num_synapses;
     for _ in 0..64 {
-        crate::genome::mutate_genome(&mut genome, &mut rng);
+        crate::genome::mutate_genome(&mut genome, 1.0, &mut rng);
         if genome.num_neurons > initial_neurons {
             break;
         }

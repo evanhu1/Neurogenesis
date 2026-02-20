@@ -47,7 +47,11 @@ impl Simulation {
             let organism = match &request.kind {
                 SpawnRequestKind::Reproduction(reproduction) => {
                     let mut child_genome = reproduction.parent_genome.clone();
-                    mutate_genome(&mut child_genome, &mut self.rng);
+                    mutate_genome(
+                        &mut child_genome,
+                        self.config.global_mutation_rate_modifier,
+                        &mut self.rng,
+                    );
 
                     let threshold = self.config.speciation_threshold;
                     let child_species_id = {
