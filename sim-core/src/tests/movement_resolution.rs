@@ -210,7 +210,8 @@ fn move_resolution_blocks_wall_cells() {
 
 #[test]
 fn dopamine_stays_near_zero_when_idle_without_events() {
-    let cfg = test_config(5, 1);
+    let mut cfg = test_config(5, 1);
+    cfg.action_selection_margin = Some(0.0);
     let mut sim = Simulation::new(cfg, 301).expect("simulation should initialize");
     configure_sim(
         &mut sim,
@@ -285,7 +286,6 @@ fn dopamine_becomes_positive_after_food_consumption() {
     let first = tick_once(&mut sim);
     assert_eq!(first.metrics.consumptions_last_turn, 1);
 
-    let _ = tick_once(&mut sim);
     let dopamine = sim
         .organisms
         .iter()
@@ -333,14 +333,6 @@ fn dopamine_becomes_negative_when_other_organism_bites_prey() {
     let first = tick_once(&mut sim);
     assert_eq!(first.metrics.predations_last_turn, 1);
 
-    if let Some(predator) = sim
-        .organisms
-        .iter_mut()
-        .find(|organism| organism.id == OrganismId(0))
-    {
-        predator.facing = FacingDirection::West;
-    }
-    let _ = tick_once(&mut sim);
     let prey_dopamine = sim
         .organisms
         .iter()

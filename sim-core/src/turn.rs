@@ -1,5 +1,6 @@
 use crate::brain::{
-    action_index, apply_runtime_plasticity, evaluate_brain, ActionSelectionPolicy, BrainScratch,
+    action_index, apply_runtime_weight_updates, evaluate_brain, update_runtime_eligibility_traces,
+    ActionSelectionPolicy, BrainScratch,
 };
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right, wrap_position};
 use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
@@ -135,6 +136,7 @@ impl Simulation {
         #[cfg(feature = "profiling")]
         let phase_started = Instant::now();
         let commit = self.commit_phase(&snapshot, &intents, &resolutions, &successful_reproduction);
+        self.apply_post_commit_runtime_weight_updates();
         #[cfg(feature = "profiling")]
         profiling::record_turn_phase(TurnPhase::Commit, phase_started.elapsed());
 
@@ -218,7 +220,6 @@ impl Simulation {
 
     fn build_intents(&mut self, snapshot: &TurnSnapshot) -> Vec<OrganismIntent> {
         let occupancy = &self.occupancy;
-        let food_energy = self.config.food_energy;
         let action_selection = ActionSelectionPolicy {
             temperature: self.config.action_temperature,
             argmax_margin: self.config.action_selection_margin,
@@ -232,7 +233,6 @@ impl Simulation {
             intents.push(build_intent_for_organism(
                 idx,
                 &mut self.organisms[idx],
-                food_energy,
                 snapshot.world_width,
                 occupancy,
                 snapshot.organism_states[idx],
@@ -244,6 +244,19 @@ impl Simulation {
             ));
         }
         intents
+    }
+
+    fn apply_post_commit_runtime_weight_updates(&mut self) {
+        let food_energy = self.config.food_energy;
+        for organism in &mut self.organisms {
+            let passive_energy_baseline =
+                organism_metabolism_energy_cost_from_food_energy(food_energy, organism);
+            #[cfg(feature = "profiling")]
+            let plasticity_started = Instant::now();
+            apply_runtime_weight_updates(organism, passive_energy_baseline);
+            #[cfg(feature = "profiling")]
+            profiling::record_brain_plasticity_total(plasticity_started.elapsed());
+        }
     }
 
     fn resolve_moves(
@@ -648,7 +661,6 @@ fn compare_move_candidates(a: &MoveCandidate, b: &MoveCandidate) -> Ordering {
 fn build_intent_for_organism(
     idx: usize,
     organism: &mut OrganismState,
-    food_energy: f32,
     world_width: i32,
     occupancy: &[Option<Occupant>],
     snapshot_state: SnapshotOrganismState,
@@ -674,11 +686,9 @@ fn build_intent_for_organism(
     #[cfg(feature = "profiling")]
     profiling::record_brain_eval_total(brain_eval_started.elapsed());
 
-    let passive_energy_baseline =
-        organism_metabolism_energy_cost_from_food_energy(food_energy, organism);
     #[cfg(feature = "profiling")]
     let plasticity_started = Instant::now();
-    apply_runtime_plasticity(organism, passive_energy_baseline, scratch);
+    update_runtime_eligibility_traces(organism, scratch);
     #[cfg(feature = "profiling")]
     profiling::record_brain_plasticity_total(plasticity_started.elapsed());
 

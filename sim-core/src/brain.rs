@@ -425,17 +425,13 @@ pub(crate) fn evaluate_brain(
     result
 }
 
-pub(crate) fn apply_runtime_plasticity(
+pub(crate) fn update_runtime_eligibility_traces(
     organism: &mut sim_types::OrganismState,
-    passive_energy_baseline: f32,
     scratch: &mut BrainScratch,
 ) {
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     let eligibility_retention = organism.genome.eligibility_retention.clamp(0.0, 1.0);
-    let weight_prune_threshold = organism.genome.synapse_prune_threshold.max(0.0);
-    let should_prune = should_prune_synapses(organism.age_turns, organism.genome.age_of_maturity);
-    let is_mature = organism.age_turns >= u64::from(organism.genome.age_of_maturity);
 
     let brain = &mut organism.brain;
     scratch.inter_activations.clear();
@@ -445,27 +441,16 @@ pub(crate) fn apply_runtime_plasticity(
     for (idx, action) in brain.action.iter().enumerate() {
         scratch.action_activations[idx] = action.neuron.activation;
     }
-    let energy_delta = organism.energy - organism.energy_prev;
-    // Baseline-correct the reward signal so passive metabolism alone is neutral.
-    let corrected_energy_delta = energy_delta + passive_energy_baseline.max(0.0);
-    let dopamine_signal = (corrected_energy_delta / DOPAMINE_ENERGY_DELTA_SCALE).tanh();
-    organism.dopamine = dopamine_signal;
-    organism.energy_prev = organism.energy;
-    let eta = organism.genome.hebb_eta_gain.max(0.0);
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::PlasticitySetup, stage_started.elapsed());
 
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     for sensory in &mut brain.sensory {
-        tune_synapses(
+        update_edge_eligibility(
             &mut sensory.synapses,
             sensory.neuron.activation,
-            1.0,
-            eta,
-            dopamine_signal,
             eligibility_retention,
-            is_mature,
             &scratch.inter_activations,
             &scratch.action_activations,
         );
@@ -476,32 +461,16 @@ pub(crate) fn apply_runtime_plasticity(
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     for inter in &mut brain.inter {
-        let required_sign = match inter.interneuron_type {
-            InterNeuronType::Excitatory => 1.0,
-            InterNeuronType::Inhibitory => -1.0,
-        };
-        tune_synapses(
+        update_edge_eligibility(
             &mut inter.synapses,
             inter.neuron.activation,
-            required_sign,
-            eta,
-            dopamine_signal,
             eligibility_retention,
-            is_mature,
             &scratch.inter_activations,
             &scratch.action_activations,
         );
     }
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::PlasticityInterTuning, stage_started.elapsed());
-
-    if should_prune {
-        #[cfg(feature = "profiling")]
-        let stage_started = Instant::now();
-        prune_low_weight_synapses(brain, weight_prune_threshold);
-        #[cfg(feature = "profiling")]
-        profiling::record_brain_stage(BrainStage::PlasticityPrune, stage_started.elapsed());
-    }
 }
 
 fn should_prune_synapses(age_turns: u64, age_of_maturity: u32) -> bool {
@@ -509,14 +478,60 @@ fn should_prune_synapses(age_turns: u64, age_of_maturity: u32) -> bool {
     age_turns >= maturity_ticks && age_turns % SYNAPSE_PRUNE_INTERVAL_TICKS == 0
 }
 
-fn tune_synapses(
+pub(crate) fn apply_runtime_weight_updates(
+    organism: &mut sim_types::OrganismState,
+    passive_energy_baseline: f32,
+) {
+    #[cfg(feature = "profiling")]
+    let stage_started = Instant::now();
+    let weight_prune_threshold = organism.genome.synapse_prune_threshold.max(0.0);
+    let should_prune = should_prune_synapses(organism.age_turns, organism.genome.age_of_maturity);
+    let is_mature = organism.age_turns >= u64::from(organism.genome.age_of_maturity);
+    let energy_delta = organism.energy - organism.energy_prev;
+    // Baseline-correct the reward signal so passive metabolism alone is neutral.
+    let corrected_energy_delta = energy_delta + passive_energy_baseline.max(0.0);
+    let dopamine_signal = (corrected_energy_delta / DOPAMINE_ENERGY_DELTA_SCALE).tanh();
+    organism.dopamine = dopamine_signal;
+    organism.energy_prev = organism.energy;
+    let eta = organism.genome.hebb_eta_gain.max(0.0);
+    #[cfg(feature = "profiling")]
+    profiling::record_brain_stage(BrainStage::PlasticitySetup, stage_started.elapsed());
+
+    if is_mature {
+        #[cfg(feature = "profiling")]
+        let stage_started = Instant::now();
+        for sensory in &mut organism.brain.sensory {
+            apply_edge_weight_update(&mut sensory.synapses, 1.0, eta, dopamine_signal);
+        }
+        #[cfg(feature = "profiling")]
+        profiling::record_brain_stage(BrainStage::PlasticitySensoryTuning, stage_started.elapsed());
+
+        #[cfg(feature = "profiling")]
+        let stage_started = Instant::now();
+        for inter in &mut organism.brain.inter {
+            let required_sign = match inter.interneuron_type {
+                InterNeuronType::Excitatory => 1.0,
+                InterNeuronType::Inhibitory => -1.0,
+            };
+            apply_edge_weight_update(&mut inter.synapses, required_sign, eta, dopamine_signal);
+        }
+        #[cfg(feature = "profiling")]
+        profiling::record_brain_stage(BrainStage::PlasticityInterTuning, stage_started.elapsed());
+    }
+
+    if should_prune {
+        #[cfg(feature = "profiling")]
+        let stage_started = Instant::now();
+        prune_low_weight_synapses(&mut organism.brain, weight_prune_threshold);
+        #[cfg(feature = "profiling")]
+        profiling::record_brain_stage(BrainStage::PlasticityPrune, stage_started.elapsed());
+    }
+}
+
+fn update_edge_eligibility(
     edges: &mut [SynapseEdge],
     pre_activation: f32,
-    required_sign: f32,
-    eta: f32,
-    dopamine_signal: f32,
     eligibility_retention: f32,
-    is_mature: bool,
     inter_activations: &[f32],
     action_activations: &[f32; ACTION_COUNT],
 ) {
@@ -529,12 +544,18 @@ fn tune_synapses(
 
         edge.eligibility =
             eligibility_retention * edge.eligibility + pre_activation * post_activation;
-        if !is_mature {
-            continue;
-        }
+    }
+}
 
-        let updated_weight = edge.weight + eta * dopamine_signal * edge.eligibility
-            - PLASTIC_WEIGHT_DECAY * edge.weight;
+fn apply_edge_weight_update(
+    edges: &mut [SynapseEdge],
+    required_sign: f32,
+    eta: f32,
+    dopamine: f32,
+) {
+    for edge in edges {
+        let updated_weight =
+            edge.weight + eta * dopamine * edge.eligibility - PLASTIC_WEIGHT_DECAY * edge.weight;
         edge.weight = constrain_weight(updated_weight, required_sign);
     }
 }

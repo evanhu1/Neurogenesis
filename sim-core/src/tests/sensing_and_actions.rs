@@ -1,9 +1,9 @@
 use super::support::test_genome;
 use super::*;
 use crate::brain::{
-    action_index, apply_runtime_plasticity, evaluate_brain, express_genome, scan_rays,
-    ActionSelectionPolicy, BrainScratch, ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE,
-    SENSORY_COUNT,
+    action_index, apply_runtime_weight_updates, evaluate_brain, express_genome, scan_rays,
+    update_runtime_eligibility_traces, ActionSelectionPolicy, BrainScratch, ACTION_COUNT_U32,
+    ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT,
 };
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
@@ -413,7 +413,8 @@ fn runtime_plasticity_updates_weights_and_preserves_sign() {
     );
 
     let before = organism.brain.sensory[0].synapses[0].weight;
-    apply_runtime_plasticity(&mut organism, 0.0, &mut scratch);
+    update_runtime_eligibility_traces(&mut organism, &mut scratch);
+    apply_runtime_weight_updates(&mut organism, 0.0);
     let after = organism.brain.sensory[0].synapses[0].weight;
 
     assert_ne!(before, after);
@@ -491,7 +492,8 @@ fn runtime_plasticity_neutralizes_passive_metabolism_for_dopamine() {
 
     let before = organism.brain.sensory[0].synapses[0].weight;
     // Passive drain baseline (1.0) exactly cancels the raw -1.0 energy delta.
-    apply_runtime_plasticity(&mut organism, 1.0, &mut scratch);
+    update_runtime_eligibility_traces(&mut organism, &mut scratch);
+    apply_runtime_weight_updates(&mut organism, 1.0);
     let after = organism.brain.sensory[0].synapses[0].weight;
 
     let expected = before * (1.0 - 0.001);
