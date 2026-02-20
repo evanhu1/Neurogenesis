@@ -355,6 +355,7 @@ pub(super) fn reproduction_request_at(
 pub(super) fn configure_sim(sim: &mut Simulation, mut organisms: Vec<OrganismState>) {
     organisms.sort_by_key(|organism| organism.id);
     sim.organisms = organisms;
+    sim.pending_actions = vec![PendingActionState::default(); sim.organisms.len()];
     sim.foods.clear();
     sim.next_food_id = 0;
     sim.next_organism_id = sim

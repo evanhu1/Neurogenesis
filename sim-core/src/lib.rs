@@ -41,6 +41,8 @@ pub struct Simulation {
     next_organism_id: u64,
     next_food_id: u64,
     organisms: Vec<OrganismState>,
+    #[serde(default)]
+    pending_actions: Vec<PendingActionState>,
     foods: Vec<FoodState>,
     occupancy: Vec<Option<Occupant>>,
     #[serde(default)]
@@ -50,6 +52,20 @@ pub struct Simulation {
     #[serde(default)]
     biomass: Vec<f32>,
     metrics: MetricsSnapshot,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub(crate) enum PendingActionKind {
+    #[default]
+    None,
+    Consume,
+    Reproduce,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub(crate) struct PendingActionState {
+    pub(crate) kind: PendingActionKind,
+    pub(crate) turns_remaining: u8,
 }
 
 impl Simulation {
@@ -68,6 +84,7 @@ impl Simulation {
             next_organism_id: 0,
             next_food_id: 0,
             organisms: Vec::new(),
+            pending_actions: Vec::new(),
             foods: Vec::new(),
             occupancy: vec![None; capacity],
             terrain_map: Vec::new(),
@@ -126,6 +143,7 @@ impl Simulation {
         self.next_organism_id = 0;
         self.next_food_id = 0;
         self.organisms.clear();
+        self.pending_actions.clear();
         self.foods.clear();
         self.occupancy.fill(None);
         self.terrain_map.clear();
@@ -199,6 +217,14 @@ impl Simulation {
             return Err(SimError::InvalidState(
                 "organisms must be sorted by ascending id".to_owned(),
             ));
+        }
+
+        if self.pending_actions.len() != self.organisms.len() {
+            return Err(SimError::InvalidState(format!(
+                "pending_actions length {} does not match organism count {}",
+                self.pending_actions.len(),
+                self.organisms.len()
+            )));
         }
 
         if !self
