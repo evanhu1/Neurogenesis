@@ -379,8 +379,7 @@ pub(super) fn configure_sim(sim: &mut Simulation, mut organisms: Vec<OrganismSta
     }
     sim.turn = 0;
     sim.food_fertility.clear();
-    sim.food_regrowth_generation.clear();
-    sim.food_regrowth_queue.clear();
+    sim.biomass.clear();
     sim.metrics = MetricsSnapshot::default();
     sim.refresh_population_metrics();
 }

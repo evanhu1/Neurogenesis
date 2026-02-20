@@ -1,4 +1,3 @@
-use crate::spawn::FoodRegrowthEvent;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
@@ -6,7 +5,7 @@ use sim_types::{
     FoodState, MetricsSnapshot, OccupancyCell, Occupant, OrganismGenome, OrganismId, OrganismState,
     SpeciesId, TickDelta, WorldConfig, WorldSnapshot,
 };
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use thiserror::Error;
 
 mod brain;
@@ -49,9 +48,7 @@ pub struct Simulation {
     #[serde(default)]
     food_fertility: Vec<u16>,
     #[serde(default)]
-    food_regrowth_generation: Vec<u32>,
-    #[serde(default)]
-    food_regrowth_queue: BTreeSet<FoodRegrowthEvent>,
+    biomass: Vec<f32>,
     metrics: MetricsSnapshot,
 }
 
@@ -75,8 +72,7 @@ impl Simulation {
             occupancy: vec![None; capacity],
             terrain_map: Vec::new(),
             food_fertility: Vec::new(),
-            food_regrowth_generation: Vec::new(),
-            food_regrowth_queue: BTreeSet::new(),
+            biomass: Vec::new(),
             metrics: MetricsSnapshot::default(),
         };
 
@@ -84,7 +80,6 @@ impl Simulation {
         sim.spawn_initial_population();
         sim.initialize_food_ecology();
         sim.seed_initial_food_supply();
-        sim.bootstrap_food_regrowth_queue();
         sim.refresh_population_metrics();
         Ok(sim)
     }
@@ -135,14 +130,12 @@ impl Simulation {
         self.occupancy.fill(None);
         self.terrain_map.clear();
         self.food_fertility.clear();
-        self.food_regrowth_generation.clear();
-        self.food_regrowth_queue.clear();
+        self.biomass.clear();
         self.metrics = MetricsSnapshot::default();
         self.initialize_terrain();
         self.spawn_initial_population();
         self.initialize_food_ecology();
         self.seed_initial_food_supply();
-        self.bootstrap_food_regrowth_queue();
         self.refresh_population_metrics();
     }
 
@@ -187,6 +180,13 @@ impl Simulation {
             return Err(SimError::InvalidState(format!(
                 "terrain_map length {} does not match expected capacity {}",
                 self.terrain_map.len(),
+                expected_capacity
+            )));
+        }
+        if self.biomass.len() != expected_capacity {
+            return Err(SimError::InvalidState(format!(
+                "biomass length {} does not match expected capacity {}",
+                self.biomass.len(),
                 expected_capacity
             )));
         }

@@ -4,22 +4,15 @@ use crate::grid::{opposite_direction, world_capacity};
 use crate::Simulation;
 use rand::seq::SliceRandom;
 use rand::Rng;
-use serde::{Deserialize, Serialize};
 use sim_types::{
     FacingDirection, FoodId, FoodState, Occupant, OrganismGenome, OrganismId, OrganismState,
     SpeciesId,
 };
 
 const DEFAULT_TERRAIN_THRESHOLD: f64 = 0.86;
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct FoodRegrowthEvent {
-    pub(crate) due_turn: u64,
-    #[serde(default)]
-    pub(crate) tie_break: u64,
-    pub(crate) tile_idx: usize,
-    pub(crate) generation: u32,
-}
+const MAX_BIOMASS_PER_TILE: f32 = 1.0;
+const BIOMASS_SPAWN_THRESHOLD: f32 = 1.0;
+const BLOCKED_BIOMASS_DECAY_PER_TICK: f32 = 0.0;
 
 #[derive(Clone)]
 pub(crate) struct ReproductionSpawn {
@@ -196,27 +189,54 @@ impl Simulation {
         let capacity = world_capacity(self.config.world_width);
         self.food_fertility = build_fertility_map(self.config.world_width, self.seed, &self.config);
         debug_assert_eq!(self.food_fertility.len(), capacity);
-        self.food_regrowth_generation = vec![0; capacity];
-        self.food_regrowth_queue.clear();
+        self.biomass = vec![0.0; capacity];
     }
 
     pub(crate) fn seed_initial_food_supply(&mut self) {
         self.ensure_food_ecology_state();
+        let mut spawned_any = false;
         for cell_idx in 0..self.food_fertility.len() {
-            if self.occupancy[cell_idx].is_some() {
+            if matches!(self.occupancy[cell_idx], Some(Occupant::Wall)) {
+                self.biomass[cell_idx] = 0.0;
                 continue;
             }
-            if self.accept_fertility_sample(cell_idx) {
-                let _ = self.spawn_food_at_cell(cell_idx);
+
+            let fertility = self.fertility_value(cell_idx);
+            // Warm-start plant mass so the world is not "bare" at turn zero.
+            let initial_fill =
+                BIOMASS_SPAWN_THRESHOLD * (0.5 * self.rng.random::<f32>() + 0.5 * fertility);
+            self.biomass[cell_idx] = initial_fill.min(MAX_BIOMASS_PER_TILE);
+
+            if self.occupancy[cell_idx].is_none() && self.rng.random::<f32>() <= fertility {
+                if self.spawn_food_at_cell(cell_idx).is_some() {
+                    spawned_any = true;
+                    self.biomass[cell_idx] =
+                        (self.biomass[cell_idx] - BIOMASS_SPAWN_THRESHOLD).max(0.0);
+                }
             }
         }
-    }
 
-    pub(crate) fn bootstrap_food_regrowth_queue(&mut self) {
-        self.ensure_food_ecology_state();
-        for idx in 0..self.food_fertility.len() {
-            let delay = self.regrowth_delay_for_tile(idx);
-            self.schedule_food_regrowth_with_delay(idx, delay);
+        // Ensure at least one food source exists at startup when an empty tile is available.
+        if !spawned_any {
+            let mut best_tile = None;
+            let mut best_fertility = f32::MIN;
+            for cell_idx in 0..self.food_fertility.len() {
+                if self.occupancy[cell_idx].is_some() {
+                    continue;
+                }
+                let fertility = self.fertility_value(cell_idx);
+                if fertility > best_fertility {
+                    best_fertility = fertility;
+                    best_tile = Some(cell_idx);
+                }
+            }
+
+            if let Some(cell_idx) = best_tile {
+                if self.spawn_food_at_cell(cell_idx).is_some() {
+                    self.biomass[cell_idx] =
+                        (self.biomass[cell_idx] - BIOMASS_SPAWN_THRESHOLD).max(0.0);
+                }
+            }
         }
     }
 
@@ -224,29 +244,28 @@ impl Simulation {
         self.ensure_food_ecology_state();
         let mut spawned = Vec::new();
 
-        loop {
-            let Some(next_event) = self.food_regrowth_queue.first().copied() else {
-                break;
-            };
-            if next_event.due_turn > self.turn {
-                break;
-            }
-            let event = self
-                .food_regrowth_queue
-                .pop_first()
-                .expect("first event must still be present");
-            if self.food_regrowth_generation[event.tile_idx] != event.generation {
-                continue;
-            }
-            if self.occupancy[event.tile_idx].is_none()
-                && self.accept_fertility_sample(event.tile_idx)
-            {
-                if let Some(food) = self.spawn_food_at_cell(event.tile_idx) {
-                    spawned.push(food);
+        debug_assert!(BIOMASS_SPAWN_THRESHOLD > 0.0);
+        debug_assert!(MAX_BIOMASS_PER_TILE >= BIOMASS_SPAWN_THRESHOLD);
+
+        for cell_idx in 0..self.food_fertility.len() {
+            if self.occupancy[cell_idx].is_none() {
+                let fertility = self.fertility_value(cell_idx);
+                let grown = (self.biomass[cell_idx] + fertility * self.config.plant_growth_speed)
+                    .min(MAX_BIOMASS_PER_TILE);
+                self.biomass[cell_idx] = grown;
+
+                // Cap to one spawned food per tile per tick by occupancy.
+                if grown >= BIOMASS_SPAWN_THRESHOLD {
+                    if let Some(food) = self.spawn_food_at_cell(cell_idx) {
+                        spawned.push(food);
+                        self.biomass[cell_idx] =
+                            (self.biomass[cell_idx] - BIOMASS_SPAWN_THRESHOLD).max(0.0);
+                    }
                 }
+            } else if BLOCKED_BIOMASS_DECAY_PER_TICK > 0.0 {
+                self.biomass[cell_idx] =
+                    (self.biomass[cell_idx] - BLOCKED_BIOMASS_DECAY_PER_TICK).max(0.0);
             }
-            let delay = self.regrowth_delay_for_tile(event.tile_idx);
-            self.schedule_food_regrowth_with_delay(event.tile_idx, delay);
         }
 
         spawned
@@ -255,16 +274,12 @@ impl Simulation {
     fn ensure_food_ecology_state(&mut self) {
         let capacity = world_capacity(self.config.world_width);
         let valid_fertility = self.food_fertility.len() == capacity;
-        let valid_generations = self.food_regrowth_generation.len() == capacity;
-        if valid_fertility && valid_generations {
+        let valid_biomass = self.biomass.len() == capacity;
+        if valid_fertility && valid_biomass {
             return;
         }
 
         self.initialize_food_ecology();
-        for idx in 0..capacity {
-            let delay = self.regrowth_delay_for_tile(idx);
-            self.schedule_food_regrowth_with_delay(idx, delay);
-        }
     }
 
     fn spawn_food_at_cell(&mut self, cell_idx: usize) -> Option<FoodState> {
@@ -283,28 +298,6 @@ impl Simulation {
         self.occupancy[cell_idx] = Some(Occupant::Food(food.id));
         self.foods.push(food.clone());
         Some(food)
-    }
-
-    fn schedule_food_regrowth_with_delay(&mut self, tile_idx: usize, delay: u64) {
-        let generation = self.food_regrowth_generation[tile_idx].saturating_add(1);
-        self.food_regrowth_generation[tile_idx] = generation;
-        self.food_regrowth_queue.insert(FoodRegrowthEvent {
-            due_turn: self.turn.saturating_add(delay),
-            tie_break: hash_2d(tile_idx as i64, generation as i64, self.seed),
-            tile_idx,
-            generation,
-        });
-    }
-
-    fn regrowth_delay_for_tile(&mut self, _tile_idx: usize) -> u64 {
-        let interval = self.config.food_regrowth_interval.max(1);
-        let base_delay = self.rng.random_range(1..=interval);
-        (f64::from(base_delay) / f64::from(self.config.plant_growth_speed)).ceil() as u64
-    }
-
-    fn accept_fertility_sample(&mut self, tile_idx: usize) -> bool {
-        let chance = self.fertility_value(tile_idx);
-        self.rng.random::<f32>() <= chance
     }
 
     fn fertility_value(&self, tile_idx: usize) -> f32 {
