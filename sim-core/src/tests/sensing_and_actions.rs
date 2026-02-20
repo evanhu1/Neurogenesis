@@ -120,7 +120,7 @@ fn express_genome_uses_stored_synapse_topology() {
 }
 
 #[test]
-fn mutate_genome_does_not_add_synapses_from_spatial_prior_target() {
+fn mutate_genome_adds_synapses_when_below_target() {
     let mut genome_template = test_genome();
     genome_template.num_neurons = 12;
     genome_template.num_synapses = 8;
@@ -134,22 +134,13 @@ fn mutate_genome_does_not_add_synapses_from_spatial_prior_target() {
         .collect();
     genome_template.mutation_rate_neuron_location = 0.0;
 
-    let mut local_genome = genome_template.clone();
-    local_genome.spatial_prior_sigma = 0.25;
-    local_genome.edges.clear();
-    let mut global_genome = genome_template.clone();
-    global_genome.spatial_prior_sigma = 100.0;
-    global_genome.edges.clear();
+    let mut genome = genome_template.clone();
+    genome.edges.clear();
+    let mut rng = ChaCha8Rng::seed_from_u64(10_000);
+    crate::genome::mutate_genome(&mut genome, &mut rng);
 
-    let mut local_rng = ChaCha8Rng::seed_from_u64(10_000);
-    let mut global_rng = ChaCha8Rng::seed_from_u64(10_000);
-    crate::genome::mutate_genome(&mut local_genome, &mut local_rng);
-    crate::genome::mutate_genome(&mut global_genome, &mut global_rng);
-
-    assert_eq!(local_genome.num_synapses, 0);
-    assert!(local_genome.edges.is_empty());
-    assert_eq!(global_genome.num_synapses, 0);
-    assert!(global_genome.edges.is_empty());
+    assert_eq!(genome.num_synapses, 8);
+    assert_eq!(genome.edges.len(), 8);
 }
 
 #[test]
