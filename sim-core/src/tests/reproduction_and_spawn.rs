@@ -157,10 +157,65 @@ fn reproduction_can_create_new_species_via_genome_distance() {
     enable_reproduce_action(&mut parent);
     configure_sim(&mut sim, vec![parent]);
 
-    let delta = tick_once(&mut sim);
-    assert_eq!(delta.metrics.reproductions_last_turn, 1);
-    assert_eq!(delta.spawned.len(), 1);
+    let first = tick_once(&mut sim);
+    assert_eq!(first.metrics.reproductions_last_turn, 0);
+    assert_eq!(first.spawned.len(), 0);
+    let second = tick_once(&mut sim);
+    assert_eq!(second.metrics.reproductions_last_turn, 0);
+    assert_eq!(second.spawned.len(), 0);
+    let third = tick_once(&mut sim);
+    assert_eq!(third.metrics.reproductions_last_turn, 1);
+    assert_eq!(third.spawned.len(), 1);
     // With threshold=0.001 and high mutation pressure, child should be a new species
-    assert_ne!(delta.spawned[0].species_id, SpeciesId(0));
+    assert_ne!(third.spawned[0].species_id, SpeciesId(0));
     assert!(sim.species_registry.len() >= 2);
+}
+
+#[test]
+fn reproduction_commit_locks_parent_for_two_turns_before_spawn() {
+    let mut cfg = test_config(7, 1);
+    cfg.seed_genome_config.starting_energy = 20.0;
+    let mut sim = Simulation::new(cfg, 118).expect("simulation should initialize");
+
+    let mut parent = make_organism(
+        0,
+        3,
+        3,
+        FacingDirection::East,
+        true,
+        false,
+        false,
+        0.7,
+        35.0,
+    );
+    enable_reproduce_action(&mut parent);
+    configure_sim(&mut sim, vec![parent]);
+
+    let first = tick_once(&mut sim);
+    assert!(
+        first.spawned.is_empty(),
+        "commit starts the multi-turn action"
+    );
+    assert_eq!(sim.organisms[0].reproductions_count, 1);
+
+    let second = tick_once(&mut sim);
+    assert!(
+        second.spawned.is_empty(),
+        "first lock tick should not spawn"
+    );
+    assert_eq!(
+        sim.organisms[0].reproductions_count, 1,
+        "parent must remain committed during lock ticks",
+    );
+
+    let third = tick_once(&mut sim);
+    assert_eq!(
+        third.spawned.len(),
+        1,
+        "spawn should complete on lock expiry"
+    );
+    assert_eq!(
+        sim.organisms[0].reproductions_count, 1,
+        "locked parent should not re-trigger reproduction before release",
+    );
 }

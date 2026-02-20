@@ -1,4 +1,4 @@
-use crate::Simulation;
+use crate::{PendingActionState, Simulation};
 use sim_types::FacingDirection;
 use sim_types::{Occupant, OrganismState};
 
@@ -132,6 +132,7 @@ impl Simulation {
         organism.r = r;
         self.occupancy[cell_idx] = Some(Occupant::Organism(organism.id));
         self.organisms.push(organism);
+        self.pending_actions.push(PendingActionState::default());
         true
     }
 

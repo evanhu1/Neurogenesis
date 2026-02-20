@@ -371,6 +371,61 @@ fn plant_consumption_biomass_depletion_has_deterministic_jitter() {
 }
 
 #[test]
+fn food_consumption_locks_organism_for_one_turn() {
+    let mut cfg = test_config(6, 1);
+    cfg.plant_growth_speed = 0.01;
+    cfg.food_fertility_floor = 0.0;
+    cfg.action_selection_margin = Some(0.0);
+    let mut sim = Simulation::new(cfg, 902).expect("simulation should initialize");
+    configure_sim(
+        &mut sim,
+        vec![make_organism(
+            0,
+            1,
+            1,
+            FacingDirection::East,
+            true,
+            false,
+            false,
+            0.95,
+            100.0,
+        )],
+    );
+
+    let food_id = FoodId(0);
+    sim.foods.push(sim_types::FoodState {
+        id: food_id,
+        q: 2,
+        r: 1,
+        energy: 5.0,
+    });
+    let food_idx = sim.cell_index(2, 1);
+    sim.occupancy[food_idx] = Some(Occupant::Food(food_id));
+    sim.next_food_id = 1;
+
+    let first = tick_once(&mut sim);
+    assert_eq!(first.moves.len(), 1);
+    assert_eq!(first.moves[0].from, (1, 1));
+    assert_eq!(first.moves[0].to, (2, 1));
+
+    let second = tick_once(&mut sim);
+    assert!(
+        second.moves.is_empty(),
+        "consume lock should force one full tick of immobility",
+    );
+    let organism_after_second = sim
+        .organisms
+        .iter()
+        .find(|organism| organism.id == OrganismId(0))
+        .expect("organism should survive");
+    assert_eq!((organism_after_second.q, organism_after_second.r), (2, 1));
+
+    let third = tick_once(&mut sim);
+    let moves = move_map(&third);
+    assert_eq!(moves.get(&OrganismId(0)), Some(&((2, 1), (3, 1))));
+}
+
+#[test]
 fn dopamine_becomes_negative_when_other_organism_bites_prey() {
     let cfg = test_config(6, 2);
     let mut sim = Simulation::new(cfg, 303).expect("simulation should initialize");
