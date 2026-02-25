@@ -16,7 +16,7 @@ fn two_organism_swap_resolves_deterministically() {
     let delta = tick_once(&mut sim);
     let moves = move_map(&delta);
     assert!(moves.is_empty());
-    assert_eq!(delta.metrics.consumptions_last_turn, 1);
+    assert_eq!(delta.metrics.consumptions_last_turn, 2);
 }
 
 #[test]
@@ -134,7 +134,7 @@ fn multi_node_cycle_resolves_without_conflict() {
     let delta = tick_once(&mut sim);
     let moves = move_map(&delta);
     assert_eq!(moves.len(), 0);
-    assert_eq!(delta.metrics.consumptions_last_turn, 2);
+    assert_eq!(delta.metrics.consumptions_last_turn, 3);
 }
 
 #[test]
@@ -277,7 +277,7 @@ fn dopamine_becomes_positive_after_food_consumption() {
         id: food_id,
         q: 2,
         r: 1,
-        energy: 5.0,
+        energy: 50.0,
     });
     let food_idx = sim.cell_index(2, 1);
     sim.occupancy[food_idx] = Some(Occupant::Food(food_id));

@@ -25,6 +25,7 @@ const PLANT_BIOMASS_DEPLETION_BASE: f32 = 0.75;
 const PLANT_BIOMASS_DEPLETION_JITTER_FRACTION: f32 = 0.25;
 const CONSUME_LOCK_DURATION_TURNS: u8 = 1;
 const REPRODUCE_LOCK_DURATION_TURNS: u8 = 2;
+const CONSUMPTION_ENERGY_FRACTION: f32 = 0.10;
 
 #[derive(Clone, Copy)]
 struct SnapshotOrganismState {
@@ -432,7 +433,8 @@ impl Simulation {
                         q: food.q,
                         r: food.r,
                     });
-                    self.organisms[resolution.actor_idx].energy += food.energy;
+                    self.organisms[resolution.actor_idx].energy +=
+                        food.energy * CONSUMPTION_ENERGY_FRACTION;
                     if let Some(tile_biomass) = self.biomass.get_mut(to_idx) {
                         let depletion = jittered_plant_biomass_depletion(
                             self.seed,
@@ -486,10 +488,8 @@ impl Simulation {
                         continue;
                     }
 
-                    let drain = self.organisms[prey_idx]
-                        .energy
-                        .min(self.config.food_energy * 2.0)
-                        .max(0.0);
+                    let drain =
+                        (self.organisms[prey_idx].energy * CONSUMPTION_ENERGY_FRACTION).max(0.0);
                     if drain <= 0.0 {
                         continue;
                     }

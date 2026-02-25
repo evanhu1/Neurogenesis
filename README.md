@@ -1,13 +1,92 @@
 # Neurogenesis
 
-Neuromorphic brains grown from scratch with simulated evolution in Rust.
+Neurogenesis is a Rust-based neuroevolution artificial-life simulation.
+
+Its overarching goal is to simulate the real world open-ended evolution of
+cognition, from basic sensory-motor reactions in early bilaterians 600+ million
+years ago to complex intelligence.
+
+It adheres to an emergent design philosophy that combines biological realism
+(i.e. modeling biological evolution along with the most simple and general
+principles underlying life) with extreme computational efficiency (i.e.
+massively compressing the timeline).
+
+Inspirations:
+
+- The starting place of bilaterian organisms/brains and a
+  foraging/navigation-centric environment are directly inspired by Max Bennett’s
+  book A Brief History of Intelligence, which examines the phylogenetic history
+  of human intelligence starting at the very beginning of cellular life.
+- The brain’s design is a mix of ideas from biological and artificial neural
+  networks.
+- The design of the environment and ecological dynamics is heavily inspired by
+  real world evolutionary biology and ecology
+
+The main challenge is creating an evolutionary curriculum that scales
+environment complexity alongside cognitive evolution while avoiding convergence
+to degenerate niches along the way.
+
+## High level design
+
+- Brain:
+  - Each agent's brain is a neural network, without self connections, consisting
+    of 3 types of neurons: sensory, inter, and action.
+  - Inter Neurons are modeled as leaky integrators with time constant, bias term
+    and tanh activation.
+  - Synapses are simple floating weights, initialized with a log-normal
+    distribution
+  - Softmax of action logits are computed each tick to determine the single
+    action output of that tick (one action per tick)
+  - Hebbian plasticity is implemented with EMA coactivation eligibility traces
+    per synapse multiplied by a global neuromodulatory signal hand-computed as
+    energy delta between previous tick and current one.
+  - Synapse weights decay by a small factor each tick, and are pruned if they
+    drop below a threshold (e.g. 0.05) any time after the maturation period
+- Environment:
+  - Plants grow in patches according to a Perlin noise fertility map. These
+    patches migrate over time to introduce seasonal non-stationarity. Plant
+    growth is implemented via biomass accumulation per cell, with rate governed
+    by the fertility value.
+  - Mountains also are placed in patches according a different Perlin noise map
+    to introduce path finding complexity
+  - The world is a 2D hexagon grid and toroidal meaning edges wrap around
+- Algorithms:
+  - World is simulated in discrete time intervals called ticks. Each tick
+    corresponds to one action taken by all organisms, roughly corresponding to 1
+    second
+  - At the highest level of simulation, multiple worlds are simulated in
+    parallel on different CPU cores. These worlds are configured with small
+    variations in fundamental constants, simulating universe fine-tuning for
+    life
+- Evolution:
+  - Organisms asexually reproduce with mutation rates per gene of <5% on average
+  - Mutation rates themselves are genetically encoded and can be mutated (meta
+    mutation)
+  - Mutations on continuous genes are Gaussian N(0, 1) perturbs
+  - Occasionally a batch of random new organisms are injected into the
+    simulation
+  - Speciation bookkeeping happens by comparing genomic distance. A lineage
+    starts with a founder and diverges when an ancestor has a genome of
+    sufficient distance from the founder’s genome
+  - During reproduction the child inherits the genome and starting brain
+    topology. The rules of inheritance are designed to optimize for the Baldwin
+    effect—in which the organism’s ability to learn within its lifetime is
+    strongly selected for.
+- Ecology:
+  - 10% of energy is transferred between trophic levels
+  - Metabolic energy cost is linearly proportional to neuron count in the brain.
+    Actions also cost energy.
+  - Reproduction becomes possible after the organism’s maturation period, and
+    transfers a fixed amount of energy from parent to child, along with a
+    smaller lost overhead energy
 
 ## Layout
 
 - `sim-types/` — shared domain types used across all Rust crates.
 - `sim-core/` — deterministic simulation engine:
   - `lib.rs` — `Simulation` struct, config validation.
-  - `turn.rs` — turn pipeline, categorical action intents, movement/bite resolution.
+  - `turn.rs` — turn pipeline, categorical action intents, movement/bite
+    resolution.
   - `brain.rs` — neural network evaluation and genome expression.
   - `genome.rs` — genome generation, mutation, species assignment.
   - `spawn.rs` — initial population spawn and reproduction placement.
@@ -33,8 +112,8 @@ is a dense `Vec<Option<Occupant>>` indexed by `r * world_width + q`, where
 `Occupant` is `Organism(OrganismId)`, `Food(FoodId)`, or `Wall`. At most one
 entity per cell.
 
-Terrain walls are generated at world creation from Perlin noise and occupy
-cells permanently. Walls block movement, vision rays, food placement, and spawn
+Terrain walls are generated at world creation from Perlin noise and occupy cells
+permanently. Walls block movement, vision rays, food placement, and spawn
 placement.
 
 Six hex directions: `East (q+1,r)`, `NorthEast (q+1,r-1)`, `NorthWest (q,r-1)`,
@@ -50,8 +129,9 @@ World terrain is controlled by `terrain_noise_scale` and `terrain_threshold`.
 
 Phases execute in this order each tick:
 
-1. **Lifecycle** — deduct `neuron_metabolism_cost * (enabled interneuron count)` from all organisms. Remove any with
-   `energy <= 0` or `age_turns >= max_organism_age`. Rebuild occupancy.
+1. **Lifecycle** — deduct `neuron_metabolism_cost * (enabled interneuron count)`
+   from all organisms. Remove any with `energy <= 0` or
+   `age_turns >= max_organism_age`. Rebuild occupancy.
 2. **Snapshot** — freeze occupancy and organism state. Stable ordering by ID.
 3. **Intent** — evaluate each brain against the frozen snapshot. Select exactly
    one action per organism (categorical argmax over action neurons), then derive
@@ -74,7 +154,8 @@ Phases execute in this order each tick:
    energy transfers. Rebuild occupancy. Process due food regrowth events.
 7. **Age** — increment `age_turns` for all survivors.
 8. **Spawn** — process spawn queue in order. Offspring get mutated genome,
-   opposite facing, and genome `starting_energy`. Species assigned by genome distance.
+   opposite facing, and genome `starting_energy`. Species assigned by genome
+   distance.
 9. **Metrics & delta** — prune extinct species, increment turn counter, emit
    `TickDelta`.
 
@@ -100,8 +181,8 @@ Evaluation order: sensory→inter, inter→inter (previous tick activations), th
 sensory→action and inter→action. Inter uses per-neuron leaky integration:
 `h_i(t) = (1 - alpha_i) * h_i(t-1) + alpha_i * tanh(z_i(t))`, where
 `z_i(t) = b_i + sensory_to_inter_i + inter_to_inter_i(h(t-1))` and `alpha_i` is
-derived from a log-time-constant parameterization. Actions are scored and resolved by
-single-choice categorical selection (argmax).
+derived from a log-time-constant parameterization. Actions are scored and
+resolved by single-choice categorical selection (argmax).
 
 Actions: `Idle`, `TurnLeft`, `TurnRight`, `Forward`, `TurnLeftForward`,
 `TurnRightForward`, `Consume`, `Reproduce`.
@@ -122,9 +203,8 @@ After brain evaluation each tick, runtime plasticity is applied:
    `dopamine = tanh((energy - energy_prev + passive_metabolism_baseline) / 10.0)`,
    then `energy_prev` is updated to current energy.
 3. **Mature-only weight update** — once `age_turns >= age_of_maturity`:
-   `w += eta * dopamine * e - 0.001 * w`, where
-   `eta = max(0, hebb_eta_gain)`, with Dale-sign and clamp
-   constraints preserved.
+   `w += eta * dopamine * e - 0.001 * w`, where `eta = max(0, hebb_eta_gain)`,
+   with Dale-sign and clamp constraints preserved.
 4. **Synapse pruning** — once `age_turns >= age_of_maturity`, every 10 ticks
    synapses with `|weight| < threshold` and `|eligibility| < 2 * threshold` are
    removed. `synapse_prune_threshold` is a mutable genome parameter.
@@ -132,15 +212,15 @@ After brain evaluation each tick, runtime plasticity is applied:
 ## Genome & Mutation
 
 `OrganismGenome`: `num_neurons`, `vision_distance`, `age_of_maturity`,
-`hebb_eta_gain`, `eligibility_retention`,
-`synapse_prune_threshold`, `inter_biases` (vec), `inter_log_time_constants` (vec),
-`interneuron_types` (vec), `action_biases` (vec), `edges` (sorted `SynapseEdge`
-list with per-edge `eligibility` trace), and explicit per-operator mutation-rate
-genes.
+`hebb_eta_gain`, `eligibility_retention`, `synapse_prune_threshold`,
+`inter_biases` (vec), `inter_log_time_constants` (vec), `interneuron_types`
+(vec), `action_biases` (vec), `edges` (sorted `SynapseEdge` list with per-edge
+`eligibility` trace), and explicit per-operator mutation-rate genes.
 
 Mutation applies to offspring only. Each operator is gated by its own mutation
 rate gene, and mutation-rate genes self-adapt every mutation step using
-`time_constant = 1 / sqrt(2 * sqrt(n))`, where `n` is the number of mutation-rate genes.
+`time_constant = 1 / sqrt(2 * sqrt(n))`, where `n` is the number of
+mutation-rate genes.
 
 Implemented operators:
 
