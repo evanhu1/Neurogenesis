@@ -15,6 +15,7 @@ terrain_noise_scale = 0.01
 terrain_threshold = 0.70
 speciation_threshold = 100.0
 global_mutation_rate_modifier = 1.0
+runtime_plasticity_enabled = true
 
 [seed_genome_config]
 num_neurons = 0

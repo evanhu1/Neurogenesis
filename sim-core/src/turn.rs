@@ -1,8 +1,6 @@
-use crate::brain::{
-    action_index, apply_runtime_weight_updates, compute_pending_coactivations, evaluate_brain,
-    ActionSelectionPolicy, BrainScratch,
-};
+use crate::brain::{action_index, evaluate_brain, ActionSelectionPolicy, BrainScratch};
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right, wrap_position};
+use crate::plasticity::{apply_runtime_weight_updates, compute_pending_coactivations};
 use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 #[cfg(feature = "profiling")]
 use crate::{profiling, profiling::TurnPhase};
@@ -240,6 +238,7 @@ impl Simulation {
     fn build_intents(&mut self, snapshot: &TurnSnapshot) -> Vec<OrganismIntent> {
         let occupancy = &self.occupancy;
         let pending_actions = &self.pending_actions;
+        let runtime_plasticity_enabled = self.config.runtime_plasticity_enabled;
         let action_selection = ActionSelectionPolicy {
             temperature: self.config.action_temperature,
         };
@@ -263,6 +262,7 @@ impl Simulation {
                     sim_seed,
                     tick,
                     action_selection,
+                    runtime_plasticity_enabled,
                     scratch,
                 )
             })
@@ -273,27 +273,11 @@ impl Simulation {
     }
 
     fn apply_post_commit_runtime_weight_updates(&mut self) {
-        let food_energy = self.config.food_energy;
-        if self
-            .organisms
-            .iter()
-            .all(|organism| organism.genome.hebb_eta_gain <= 0.0)
-        {
-            #[cfg(feature = "profiling")]
-            let plasticity_started = Instant::now();
-            for organism in &mut self.organisms {
-                let passive_energy_baseline =
-                    organism_metabolism_energy_cost_from_food_energy(food_energy, organism);
-                let energy_delta = organism.energy - organism.energy_prev;
-                let corrected_energy_delta = energy_delta + passive_energy_baseline.max(0.0);
-                organism.dopamine = (corrected_energy_delta / 10.0).tanh();
-                organism.energy_prev = organism.energy;
-            }
-            #[cfg(feature = "profiling")]
-            profiling::record_brain_plasticity_total(plasticity_started.elapsed());
+        if !self.config.runtime_plasticity_enabled {
             return;
         }
 
+        let food_energy = self.config.food_energy;
         #[cfg(feature = "profiling")]
         let plasticity_started = Instant::now();
         self.organisms.par_iter_mut().for_each(|organism| {
@@ -761,6 +745,7 @@ fn build_intent_for_organism(
     sim_seed: u64,
     tick: u64,
     action_selection: ActionSelectionPolicy,
+    runtime_plasticity_enabled: bool,
     scratch: &mut BrainScratch,
 ) -> OrganismIntent {
     if pending_action.turns_remaining > 0 {
@@ -791,7 +776,9 @@ fn build_intent_for_organism(
         action_sample,
         scratch,
     );
-    compute_pending_coactivations(organism, scratch);
+    if runtime_plasticity_enabled {
+        compute_pending_coactivations(organism, scratch);
+    }
 
     let selected_action = evaluation.resolved_actions.selected_action;
     organism.last_action_taken = selected_action;

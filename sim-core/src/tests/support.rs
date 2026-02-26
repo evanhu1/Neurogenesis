@@ -81,6 +81,7 @@ pub(super) fn stable_test_config() -> WorldConfig {
         max_organism_age: 500,
         speciation_threshold: 50.0,
         global_mutation_rate_modifier: 1.0,
+        runtime_plasticity_enabled: true,
         seed_genome_config: SeedGenomeConfig {
             num_neurons: 1,
             num_synapses: 0,

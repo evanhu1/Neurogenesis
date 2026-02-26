@@ -1,10 +1,11 @@
 use super::support::test_genome;
 use super::*;
 use crate::brain::{
-    action_index, apply_runtime_weight_updates, compute_pending_coactivations, evaluate_brain,
-    express_genome, scan_rays, ActionSelectionPolicy, BrainScratch, ACTION_COUNT_U32,
-    ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT,
+    action_index, evaluate_brain, express_genome, scan_rays, ActionSelectionPolicy, BrainScratch,
+    ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT,
 };
+use crate::genome::{BRAIN_SPACE_MAX, BRAIN_SPACE_MIN};
+use crate::plasticity::{apply_runtime_weight_updates, compute_pending_coactivations};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
@@ -141,13 +142,16 @@ fn express_genome_uses_stored_synapse_topology() {
     assert_eq!(brain_a.inter, brain_b.inter);
     assert_eq!(brain_a.action, brain_b.action);
 
-    assert_eq!(brain_a.sensory[0].neuron.x, 0.0);
-    assert_eq!(brain_a.sensory[0].neuron.y, 0.0);
+    assert_eq!(brain_a.sensory[0].neuron.x, BRAIN_SPACE_MIN);
+    assert_eq!(
+        brain_a.sensory[0].neuron.y,
+        0.5 * (BRAIN_SPACE_MIN + BRAIN_SPACE_MAX)
+    );
     let reproduce_idx = action_index(ActionType::Reproduce);
-    assert_eq!(brain_a.action[reproduce_idx].neuron.x, 8.0);
+    assert_eq!(brain_a.action[reproduce_idx].neuron.x, BRAIN_SPACE_MAX);
     assert_eq!(
         brain_a.action[reproduce_idx].neuron.y,
-        1.0 + reproduce_idx as f32
+        0.5 * (BRAIN_SPACE_MIN + BRAIN_SPACE_MAX)
     );
 }
 
