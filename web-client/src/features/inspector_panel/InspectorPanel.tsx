@@ -77,7 +77,12 @@ export function InspectorPanel({
     const genome = focusedOrganism.genome;
     const interExcitatoryCount = genome.interneuron_types.filter((v) => v === 'Excitatory').length;
     const interInhibitoryCount = genome.interneuron_types.length - interExcitatoryCount;
-    const activeNeuronCount = activeActionNeuronId === null ? 0 : 1;
+    const fallbackActiveAction = focusedOrganism.brain.action.find(
+      (action) => action.action_type === focusedOrganism.last_action_taken,
+    );
+    const resolvedActiveActionNeuronId =
+      activeActionNeuronId ?? (fallbackActiveAction ? unwrapId(fallbackActiveAction.neuron.neuron_id) : null);
+    const activeNeuronCount = resolvedActiveActionNeuronId === null ? 0 : 1;
 
     const mutationRates: MutationRateItem[] = [
       {
@@ -252,6 +257,7 @@ export function InspectorPanel({
           <BrainCanvas
             focusedBrain={focusedBrain}
             activeActionNeuronId={activeActionNeuronId}
+            lastActionTaken={focusedOrganism?.last_action_taken ?? null}
             focusOrganismId={focusedOrganism ? unwrapId(focusedOrganism.id) : null}
           />
         </div>

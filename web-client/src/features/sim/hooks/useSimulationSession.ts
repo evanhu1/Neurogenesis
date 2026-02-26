@@ -254,7 +254,7 @@ export function useSimulationSession(): SimulationSessionState {
         setFocusedOrganismIdTracked(organismId);
         setFocusedOrganism(organism);
         setActiveActionNeuronId(
-          active_action_neuron_id === null ? null : unwrapId(active_action_neuron_id),
+          active_action_neuron_id == null ? null : unwrapId(active_action_neuron_id),
         );
         break;
       }

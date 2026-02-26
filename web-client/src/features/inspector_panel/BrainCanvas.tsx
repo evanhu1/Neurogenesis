@@ -7,30 +7,41 @@ import {
 } from './brainRenderer';
 import type { BrainState } from '../../types';
 import React from 'react';
+import { unwrapId } from '../../protocol';
 
 type BrainCanvasProps = {
   focusedBrain: BrainState | null;
   activeActionNeuronId: number | null;
+  lastActionTaken: string | null;
   focusOrganismId: number | null;
 };
 
 export function BrainCanvas({
   focusedBrain,
   activeActionNeuronId,
+  lastActionTaken,
   focusOrganismId,
 }: BrainCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const transformRef = useRef<BrainTransform>({ x: 0, y: 0, scale: 1 });
   const dragRef = useRef<{ sx: number; sy: number; tx: number; ty: number } | null>(null);
   const fitKeyRef = useRef<string>('');
+  const resolvedActiveActionNeuronId =
+    activeActionNeuronId ??
+    (focusedBrain && lastActionTaken
+      ? (() => {
+          const match = focusedBrain.action.find((action) => action.action_type === lastActionTaken);
+          return match ? unwrapId(match.neuron.neuron_id) : null;
+        })()
+      : null);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    renderBrain(ctx, canvas, focusedBrain, activeActionNeuronId, transformRef.current);
-  }, [focusedBrain, activeActionNeuronId]);
+    renderBrain(ctx, canvas, focusedBrain, resolvedActiveActionNeuronId, transformRef.current);
+  }, [focusedBrain, resolvedActiveActionNeuronId]);
 
   // Only auto-fit on focus/layout changes, not every tick update.
   useEffect(() => {
@@ -52,12 +63,12 @@ export function BrainCanvas({
       focusedBrain.action.length,
     ].join(':');
     if (fitKeyRef.current !== fitKey) {
-      const layout = computeBrainLayout(focusedBrain, activeActionNeuronId);
+      const layout = computeBrainLayout(focusedBrain, resolvedActiveActionNeuronId);
       transformRef.current = zoomToFitBrain(layout, canvas.width, canvas.height);
       fitKeyRef.current = fitKey;
     }
     draw();
-  }, [focusOrganismId, focusedBrain, activeActionNeuronId, draw]);
+  }, [focusOrganismId, focusedBrain, resolvedActiveActionNeuronId, draw]);
 
   // Wheel zoom (centered on cursor)
   useEffect(() => {

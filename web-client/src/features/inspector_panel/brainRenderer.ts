@@ -422,7 +422,8 @@ export function renderBrain(
     ctx.fill();
     if (node.isActive) {
       ctx.strokeStyle = '#f59e0b';
-      ctx.lineWidth = 2;
+      // Keep highlight visible even when zoomed out.
+      ctx.lineWidth = Math.max(2.0, 2.0 / Math.max(scale, 0.05));
       ctx.stroke();
     }
 
