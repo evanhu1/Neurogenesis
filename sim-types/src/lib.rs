@@ -187,15 +187,14 @@ pub struct WorldConfig {
     pub move_action_energy_cost: f32,
     #[serde(default = "default_action_temperature")]
     pub action_temperature: f32,
-    pub plant_growth_speed: f32,
     #[serde(default = "default_food_regrowth_interval")]
     pub food_regrowth_interval: u32,
+    #[serde(default = "default_food_regrowth_jitter")]
+    pub food_regrowth_jitter: u32,
     #[serde(default = "default_food_fertility_noise_scale")]
     pub food_fertility_noise_scale: f32,
-    #[serde(default = "default_food_fertility_exponent")]
-    pub food_fertility_exponent: f32,
-    #[serde(default = "default_food_fertility_floor")]
-    pub food_fertility_floor: f32,
+    #[serde(default = "default_food_fertility_threshold")]
+    pub food_fertility_threshold: f32,
     #[serde(default = "default_terrain_noise_scale")]
     pub terrain_noise_scale: f32,
     #[serde(default = "default_terrain_threshold")]
@@ -221,20 +220,14 @@ struct WorldConfigDeserialize {
     move_action_energy_cost: f32,
     #[serde(default = "default_action_temperature")]
     action_temperature: f32,
-    #[serde(default)]
-    plant_growth_speed: Option<f32>,
-    #[serde(default)]
-    _legacy_plant_target_coverage: Option<f32>,
-    #[serde(default)]
-    _legacy_food_coverage_divisor: Option<u32>,
     #[serde(default = "default_food_regrowth_interval")]
     food_regrowth_interval: u32,
+    #[serde(default = "default_food_regrowth_jitter")]
+    food_regrowth_jitter: u32,
     #[serde(default = "default_food_fertility_noise_scale")]
     food_fertility_noise_scale: f32,
-    #[serde(default = "default_food_fertility_exponent")]
-    food_fertility_exponent: f32,
-    #[serde(default = "default_food_fertility_floor")]
-    food_fertility_floor: f32,
+    #[serde(default = "default_food_fertility_threshold")]
+    food_fertility_threshold: f32,
     #[serde(default = "default_terrain_noise_scale")]
     terrain_noise_scale: f32,
     #[serde(default = "default_terrain_threshold")]
@@ -253,9 +246,6 @@ impl<'de> Deserialize<'de> for WorldConfig {
         D: serde::Deserializer<'de>,
     {
         let raw = WorldConfigDeserialize::deserialize(deserializer)?;
-        let plant_growth_speed = raw
-            .plant_growth_speed
-            .unwrap_or_else(default_plant_growth_speed);
         Ok(Self {
             world_width: raw.world_width,
             steps_per_second: raw.steps_per_second,
@@ -265,11 +255,10 @@ impl<'de> Deserialize<'de> for WorldConfig {
             food_energy: raw.food_energy,
             move_action_energy_cost: raw.move_action_energy_cost,
             action_temperature: raw.action_temperature,
-            plant_growth_speed,
             food_regrowth_interval: raw.food_regrowth_interval,
+            food_regrowth_jitter: raw.food_regrowth_jitter,
             food_fertility_noise_scale: raw.food_fertility_noise_scale,
-            food_fertility_exponent: raw.food_fertility_exponent,
-            food_fertility_floor: raw.food_fertility_floor,
+            food_fertility_threshold: raw.food_fertility_threshold,
             terrain_noise_scale: raw.terrain_noise_scale,
             terrain_threshold: raw.terrain_threshold,
             max_organism_age: raw.max_organism_age,
@@ -361,6 +350,10 @@ fn default_food_regrowth_interval() -> u32 {
     10
 }
 
+fn default_food_regrowth_jitter() -> u32 {
+    2
+}
+
 fn default_periodic_injection_interval_turns() -> u32 {
     100
 }
@@ -373,12 +366,8 @@ fn default_food_fertility_noise_scale() -> f32 {
     0.045
 }
 
-fn default_food_fertility_exponent() -> f32 {
-    1.8
-}
-
-fn default_food_fertility_floor() -> f32 {
-    0.04
+fn default_food_fertility_threshold() -> f32 {
+    0.83
 }
 
 fn default_terrain_noise_scale() -> f32 {
@@ -387,10 +376,6 @@ fn default_terrain_noise_scale() -> f32 {
 
 fn default_terrain_threshold() -> f32 {
     0.86
-}
-
-fn default_plant_growth_speed() -> f32 {
-    1.0
 }
 
 fn default_action_temperature() -> f32 {
@@ -559,18 +544,17 @@ mod tests {
     }
 
     #[test]
-    fn legacy_coverage_config_deserializes_with_default_growth_speed() {
+    fn legacy_coverage_fields_are_ignored() {
         let cfg = WorldConfig::default();
         let mut value = serde_json::to_value(&cfg).expect("serialize config to value");
         let object = value
             .as_object_mut()
             .expect("world config JSON value must be an object");
-        object.remove("plant_growth_speed");
         object.insert("plant_target_coverage".to_owned(), json!(0.05));
         object.insert("food_coverage_divisor".to_owned(), json!(20));
 
         let parsed: WorldConfig =
             serde_json::from_value(value).expect("deserialize legacy world config");
-        assert!((parsed.plant_growth_speed - 1.0).abs() < f32::EPSILON);
+        assert_eq!(parsed, cfg);
     }
 }

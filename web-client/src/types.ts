@@ -34,11 +34,10 @@ export type WorldConfig = {
   move_action_energy_cost: number;
   action_temperature: number;
   neuron_metabolism_cost: number;
-  plant_growth_speed: number;
   food_regrowth_interval: number;
+  food_regrowth_jitter: number;
   food_fertility_noise_scale: number;
-  food_fertility_exponent: number;
-  food_fertility_floor: number;
+  food_fertility_threshold: number;
   terrain_noise_scale: number;
   terrain_threshold: number;
   max_organism_age: number;

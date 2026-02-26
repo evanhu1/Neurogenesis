@@ -369,7 +369,6 @@ impl Simulation {
         let mut consumptions = 0_u64;
         let mut predations = 0_u64;
         let mut dead_organisms = vec![false; org_count];
-        let plant_threshold = self.plant_biomass_threshold();
         for resolution in resolutions {
             let from_idx =
                 resolution.from.1 as usize * world_width_usize + resolution.from.0 as usize;
@@ -404,42 +403,20 @@ impl Simulation {
                     if removed_food[food_idx] {
                         continue;
                     }
-                    if self.biomass[target_idx] <= plant_threshold {
-                        removed_food[food_idx] = true;
-                        let food = &self.foods[food_idx];
-                        removed_positions.push(RemovedEntityPosition {
-                            entity_id: EntityId::Food(food_id),
-                            q: food.q,
-                            r: food.r,
-                        });
-                        self.occupancy[target_idx] = None;
-                        continue;
-                    }
-
-                    let consumed_biomass = self.biomass[target_idx]
-                        .max(0.0)
-                        .min(self.config.food_energy);
-                    if consumed_biomass <= 0.0 {
-                        continue;
-                    }
-
-                    self.biomass[target_idx] =
-                        (self.biomass[target_idx] - consumed_biomass).max(0.0);
+                    removed_food[food_idx] = true;
+                    self.occupancy[target_idx] = None;
+                    self.schedule_food_regrowth(target_idx);
+                    let consumed_energy = self.config.food_energy;
                     let predator = &mut self.organisms[idx];
-                    predator.energy += consumed_biomass * CONSUMPTION_ENERGY_FRACTION;
+                    predator.energy += consumed_energy * CONSUMPTION_ENERGY_FRACTION;
                     predator.consumptions_count = predator.consumptions_count.saturating_add(1);
                     consumptions += 1;
-
-                    if self.biomass[target_idx] <= plant_threshold {
-                        removed_food[food_idx] = true;
-                        let food = &self.foods[food_idx];
-                        removed_positions.push(RemovedEntityPosition {
-                            entity_id: EntityId::Food(food_id),
-                            q: food.q,
-                            r: food.r,
-                        });
-                        self.occupancy[target_idx] = None;
-                    }
+                    let food = &self.foods[food_idx];
+                    removed_positions.push(RemovedEntityPosition {
+                        entity_id: EntityId::Food(food_id),
+                        q: food.q,
+                        r: food.r,
+                    });
                 }
                 Some(Occupant::Organism(prey_id)) => {
                     let Some(prey_idx) = organism_index_by_id(&self.organisms, prey_id) else {

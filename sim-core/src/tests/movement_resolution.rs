@@ -81,11 +81,11 @@ fn attacker_vs_escaping_target_has_no_consumption_when_target_escapes() {
 }
 
 #[test]
-fn food_regrows_naturally_based_on_fertility_schedule() {
+fn food_regrows_from_scheduled_event() {
     let mut cfg = test_config(5, 1);
     cfg.food_regrowth_interval = 5;
-    cfg.plant_growth_speed = 1.0;
-    cfg.food_fertility_floor = 1.0;
+    cfg.food_regrowth_jitter = 0;
+    cfg.food_fertility_threshold = 0.0;
 
     let mut sim = Simulation::new(cfg, 102).expect("simulation should initialize");
     configure_sim(
@@ -103,20 +103,27 @@ fn food_regrows_naturally_based_on_fertility_schedule() {
         )],
     );
 
-    // No initial food — verify tiles grow food on their own via the
-    // perpetual regrowth cycle without any consumption trigger.
     assert!(sim.foods.is_empty());
+    let regrow_idx = sim.cell_index(4, 4);
+    sim.schedule_food_regrowth(regrow_idx);
 
-    let mut total_spawned = 0;
-    for _ in 0..10 {
+    let mut spawned_turn = None;
+    for _ in 0..8 {
         let delta = tick_once(&mut sim);
-        total_spawned += delta.food_spawned.len();
+        if delta
+            .food_spawned
+            .iter()
+            .any(|food| (food.q, food.r) == (4, 4))
+        {
+            spawned_turn = Some(delta.turn);
+            break;
+        }
     }
     assert!(
-        total_spawned > 0,
-        "food should regrow on empty tiles via the fertility schedule",
+        spawned_turn.is_some(),
+        "scheduled regrowth event should spawn food on the target fertile tile",
     );
-    assert!(!sim.foods.is_empty());
+    assert_eq!(spawned_turn, Some(6));
 }
 
 #[test]

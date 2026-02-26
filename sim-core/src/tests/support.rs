@@ -71,11 +71,10 @@ pub(super) fn stable_test_config() -> WorldConfig {
         food_energy: 50.0,
         move_action_energy_cost: 1.0,
         action_temperature: 0.5,
-        plant_growth_speed: 1.0,
         food_regrowth_interval: 10,
+        food_regrowth_jitter: 2,
         food_fertility_noise_scale: 0.045,
-        food_fertility_exponent: 1.8,
-        food_fertility_floor: 0.04,
+        food_fertility_threshold: 0.83,
         terrain_noise_scale: 0.02,
         terrain_threshold: 1.0,
         max_organism_age: 500,
@@ -300,7 +299,8 @@ pub(super) fn configure_sim(sim: &mut Simulation, mut organisms: Vec<OrganismSta
     }
     sim.turn = 0;
     sim.food_fertility.clear();
-    sim.biomass.clear();
+    sim.food_regrowth_due_turn.clear();
+    sim.food_regrowth_schedule.clear();
     sim.metrics = MetricsSnapshot::default();
     sim.refresh_population_metrics();
 }

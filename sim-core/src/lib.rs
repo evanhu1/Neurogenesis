@@ -5,6 +5,7 @@ use sim_types::{
     FoodState, MetricsSnapshot, OccupancyCell, Occupant, OrganismId, OrganismState, TickDelta,
     WorldConfig, WorldSnapshot,
 };
+use std::collections::BTreeMap;
 use thiserror::Error;
 
 mod brain;
@@ -46,9 +47,11 @@ pub struct Simulation {
     #[serde(default)]
     terrain_map: Vec<bool>,
     #[serde(default)]
-    food_fertility: Vec<u16>,
+    food_fertility: Vec<bool>,
     #[serde(default)]
-    biomass: Vec<f32>,
+    food_regrowth_due_turn: Vec<u64>,
+    #[serde(default)]
+    food_regrowth_schedule: BTreeMap<u64, Vec<usize>>,
     metrics: MetricsSnapshot,
 }
 
@@ -85,7 +88,8 @@ impl Simulation {
             occupancy: vec![None; capacity],
             terrain_map: Vec::new(),
             food_fertility: Vec::new(),
-            biomass: Vec::new(),
+            food_regrowth_due_turn: Vec::new(),
+            food_regrowth_schedule: BTreeMap::new(),
             metrics: MetricsSnapshot::default(),
         };
 
@@ -141,7 +145,8 @@ impl Simulation {
         self.occupancy.fill(None);
         self.terrain_map.clear();
         self.food_fertility.clear();
-        self.biomass.clear();
+        self.food_regrowth_due_turn.clear();
+        self.food_regrowth_schedule.clear();
         self.metrics = MetricsSnapshot::default();
         self.initialize_terrain();
         self.spawn_initial_population();
@@ -194,12 +199,35 @@ impl Simulation {
                 expected_capacity
             )));
         }
-        if self.biomass.len() != expected_capacity {
+        if self.food_fertility.len() != expected_capacity {
             return Err(SimError::InvalidState(format!(
-                "biomass length {} does not match expected capacity {}",
-                self.biomass.len(),
+                "food_fertility length {} does not match expected capacity {}",
+                self.food_fertility.len(),
                 expected_capacity
             )));
+        }
+        if self.food_regrowth_due_turn.len() != expected_capacity {
+            return Err(SimError::InvalidState(format!(
+                "food_regrowth_due_turn length {} does not match expected capacity {}",
+                self.food_regrowth_due_turn.len(),
+                expected_capacity
+            )));
+        }
+        for (due_turn, cell_indices) in &self.food_regrowth_schedule {
+            for &cell_idx in cell_indices {
+                if cell_idx >= expected_capacity {
+                    return Err(SimError::InvalidState(format!(
+                        "food_regrowth_schedule contains out-of-bounds cell index {}",
+                        cell_idx
+                    )));
+                }
+                if self.food_regrowth_due_turn[cell_idx] != *due_turn {
+                    return Err(SimError::InvalidState(format!(
+                        "food regrowth schedule mismatch at cell {}",
+                        cell_idx
+                    )));
+                }
+            }
         }
 
         if !self
@@ -332,9 +360,9 @@ fn validate_world_config(config: &WorldConfig) -> Result<(), SimError> {
             "action_temperature must be finite and greater than zero".to_owned(),
         ));
     }
-    if !config.plant_growth_speed.is_finite() || config.plant_growth_speed <= 0.0 {
+    if config.food_regrowth_interval == 0 {
         return Err(SimError::InvalidConfig(
-            "plant_growth_speed must be greater than zero".to_owned(),
+            "food_regrowth_interval must be greater than zero".to_owned(),
         ));
     }
     if config.food_fertility_noise_scale <= 0.0 {
@@ -342,14 +370,9 @@ fn validate_world_config(config: &WorldConfig) -> Result<(), SimError> {
             "food_fertility_noise_scale must be greater than zero".to_owned(),
         ));
     }
-    if config.food_fertility_exponent <= 0.0 {
+    if !(0.0..=1.0).contains(&config.food_fertility_threshold) {
         return Err(SimError::InvalidConfig(
-            "food_fertility_exponent must be greater than zero".to_owned(),
-        ));
-    }
-    if !(0.0..=1.0).contains(&config.food_fertility_floor) {
-        return Err(SimError::InvalidConfig(
-            "food_fertility_floor must be in [0.0, 1.0]".to_owned(),
+            "food_fertility_threshold must be in [0.0, 1.0]".to_owned(),
         ));
     }
     if config.terrain_noise_scale <= 0.0 {

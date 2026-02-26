@@ -9,10 +9,8 @@ use sim_types::{
 };
 
 const DEFAULT_TERRAIN_THRESHOLD: f64 = 0.86;
-const MAX_BIOMASS_PER_TILE_FOOD_MULTIPLIER: f32 = 4.0;
-const PLANT_BIOMASS_THRESHOLD_FOOD_MULTIPLIER: f32 = 2.0;
-const BLOCKED_BIOMASS_DECAY_PER_TICK: f32 = 0.0;
-const SEASONAL_TRANSLATION_PERIOD_TURNS: u64 = 2048;
+const NO_REGROWTH_SCHEDULED: u64 = u64::MAX;
+const FOOD_FERTILITY_SEED_MIX: u64 = 0x6A09_E667_F3BC_C909;
 
 #[derive(Clone)]
 pub(crate) struct ReproductionSpawn {
@@ -208,15 +206,6 @@ impl Simulation {
         id
     }
 
-    pub(crate) fn plant_biomass_threshold(&self) -> f32 {
-        (self.config.food_energy * PLANT_BIOMASS_THRESHOLD_FOOD_MULTIPLIER).max(f32::EPSILON)
-    }
-
-    fn max_biomass_per_tile(&self) -> f32 {
-        (self.config.food_energy * MAX_BIOMASS_PER_TILE_FOOD_MULTIPLIER)
-            .max(self.plant_biomass_threshold())
-    }
-
     fn target_population(&self) -> usize {
         let max_population = self.config.num_organisms as usize;
         let available_cells = if self.terrain_map.is_empty() {
@@ -259,52 +248,26 @@ impl Simulation {
     pub(crate) fn initialize_food_ecology(&mut self) {
         let capacity = world_capacity(self.config.world_width);
         self.food_fertility = build_fertility_map(self.config.world_width, self.seed, &self.config);
+        for (idx, blocked) in self.terrain_map.iter().copied().enumerate() {
+            if blocked {
+                self.food_fertility[idx] = false;
+            }
+        }
         debug_assert_eq!(self.food_fertility.len(), capacity);
-        self.biomass = vec![0.0; capacity];
+        self.food_regrowth_due_turn = vec![NO_REGROWTH_SCHEDULED; capacity];
+        self.food_regrowth_schedule.clear();
     }
 
     pub(crate) fn seed_initial_food_supply(&mut self) {
         self.ensure_food_ecology_state();
-        let max_biomass_per_tile = self.max_biomass_per_tile();
-        let plant_threshold = self.plant_biomass_threshold();
-        let mut spawned_any = false;
         for cell_idx in 0..self.food_fertility.len() {
-            if matches!(self.occupancy[cell_idx], Some(Occupant::Wall)) {
-                self.biomass[cell_idx] = 0.0;
+            if !self.food_fertility[cell_idx] {
                 continue;
             }
-
-            let fertility = self.fertility_value(cell_idx);
-            // Warm-start below maturity so plants do not instantly carpet the map.
-            let initial_fill = plant_threshold * (0.5 * self.rng.random::<f32>() + 0.5 * fertility);
-            self.biomass[cell_idx] = initial_fill.min(max_biomass_per_tile);
-
-            if self.occupancy[cell_idx].is_none() && self.rng.random::<f32>() <= fertility {
-                self.biomass[cell_idx] = self.biomass[cell_idx].max(plant_threshold);
-                if self.spawn_food_at_cell(cell_idx).is_some() {
-                    spawned_any = true;
-                }
-            }
-        }
-
-        // Ensure at least one food source exists at startup when an empty tile is available.
-        if !spawned_any {
-            let mut best_tile = None;
-            let mut best_fertility = f32::MIN;
-            for cell_idx in 0..self.food_fertility.len() {
-                if self.occupancy[cell_idx].is_some() {
-                    continue;
-                }
-                let fertility = self.fertility_value(cell_idx);
-                if fertility > best_fertility {
-                    best_fertility = fertility;
-                    best_tile = Some(cell_idx);
-                }
-            }
-
-            if let Some(cell_idx) = best_tile {
-                self.biomass[cell_idx] = self.biomass[cell_idx].max(plant_threshold);
+            if self.occupancy[cell_idx].is_none() {
                 let _ = self.spawn_food_at_cell(cell_idx);
+            } else if matches!(self.occupancy[cell_idx], Some(Occupant::Organism(_))) {
+                self.schedule_food_regrowth(cell_idx);
             }
         }
     }
@@ -312,45 +275,90 @@ impl Simulation {
     pub(crate) fn replenish_food_supply(&mut self) -> Vec<FoodState> {
         self.ensure_food_ecology_state();
         let mut spawned = Vec::new();
-        let max_biomass_per_tile = self.max_biomass_per_tile();
-        let plant_threshold = self.plant_biomass_threshold();
+        let due_turns: Vec<u64> = self
+            .food_regrowth_schedule
+            .range(..=self.turn)
+            .map(|(&due_turn, _)| due_turn)
+            .collect();
 
-        debug_assert!(plant_threshold > 0.0);
-        debug_assert!(max_biomass_per_tile >= plant_threshold);
-
-        for cell_idx in 0..self.food_fertility.len() {
-            if self.occupancy[cell_idx].is_none()
-                || matches!(self.occupancy[cell_idx], Some(Occupant::Food(_)))
-            {
-                let fertility = self.fertility_value(cell_idx);
-                let grown = (self.biomass[cell_idx]
-                    + fertility * self.config.plant_growth_speed * self.config.food_energy)
-                    .min(max_biomass_per_tile);
-                self.biomass[cell_idx] = grown;
-
-                if self.occupancy[cell_idx].is_none() && grown >= plant_threshold {
+        for due_turn in due_turns {
+            let Some(cell_indices) = self.food_regrowth_schedule.remove(&due_turn) else {
+                continue;
+            };
+            for cell_idx in cell_indices {
+                if cell_idx >= self.food_regrowth_due_turn.len() {
+                    continue;
+                }
+                if self.food_regrowth_due_turn[cell_idx] != due_turn {
+                    continue;
+                }
+                self.food_regrowth_due_turn[cell_idx] = NO_REGROWTH_SCHEDULED;
+                if !self.food_fertility[cell_idx] {
+                    continue;
+                }
+                if self.occupancy[cell_idx].is_none() {
                     if let Some(food) = self.spawn_food_at_cell(cell_idx) {
                         spawned.push(food);
                     }
+                } else if matches!(self.occupancy[cell_idx], Some(Occupant::Organism(_))) {
+                    self.defer_food_regrowth(cell_idx);
                 }
-            } else if BLOCKED_BIOMASS_DECAY_PER_TICK > 0.0 {
-                self.biomass[cell_idx] =
-                    (self.biomass[cell_idx] - BLOCKED_BIOMASS_DECAY_PER_TICK).max(0.0);
             }
         }
 
         spawned
     }
 
+    pub(crate) fn schedule_food_regrowth(&mut self, cell_idx: usize) {
+        self.ensure_food_ecology_state();
+        if cell_idx >= self.food_fertility.len()
+            || !self.food_fertility[cell_idx]
+            || self.food_regrowth_due_turn[cell_idx] != NO_REGROWTH_SCHEDULED
+        {
+            return;
+        }
+        let due_turn = self.turn.saturating_add(self.regrowth_delay_turns());
+        self.schedule_food_regrowth_for_turn(cell_idx, due_turn);
+    }
+
     fn ensure_food_ecology_state(&mut self) {
         let capacity = world_capacity(self.config.world_width);
         let valid_fertility = self.food_fertility.len() == capacity;
-        let valid_biomass = self.biomass.len() == capacity;
-        if valid_fertility && valid_biomass {
+        let valid_regrowth_due = self.food_regrowth_due_turn.len() == capacity;
+        if valid_fertility && valid_regrowth_due {
             return;
         }
 
         self.initialize_food_ecology();
+    }
+
+    fn regrowth_delay_turns(&mut self) -> u64 {
+        let interval = i64::from(self.config.food_regrowth_interval);
+        let jitter = i64::from(self.config.food_regrowth_jitter);
+        if jitter == 0 {
+            return interval.max(1) as u64;
+        }
+        let offset = self.rng.random_range(-jitter..=jitter);
+        (interval + offset).max(1) as u64
+    }
+
+    fn defer_food_regrowth(&mut self, cell_idx: usize) {
+        let due_turn = self.turn.saturating_add(1);
+        self.schedule_food_regrowth_for_turn(cell_idx, due_turn);
+    }
+
+    fn schedule_food_regrowth_for_turn(&mut self, cell_idx: usize, due_turn: u64) {
+        if cell_idx >= self.food_regrowth_due_turn.len()
+            || !self.food_fertility[cell_idx]
+            || self.food_regrowth_due_turn[cell_idx] != NO_REGROWTH_SCHEDULED
+        {
+            return;
+        }
+        self.food_regrowth_due_turn[cell_idx] = due_turn;
+        self.food_regrowth_schedule
+            .entry(due_turn)
+            .or_default()
+            .push(cell_idx);
     }
 
     fn spawn_food_at_cell(&mut self, cell_idx: usize) -> Option<FoodState> {
@@ -371,16 +379,6 @@ impl Simulation {
         Some(food)
     }
 
-    fn fertility_value(&self, tile_idx: usize) -> f32 {
-        self.seasonal_fertility(tile_idx, self.turn)
-    }
-
-    fn seasonal_fertility(&self, tile_idx: usize, turn: u64) -> f32 {
-        let width = self.config.world_width as usize;
-        let translated_idx = seasonal_translated_tile_idx(width, tile_idx, turn);
-        self.food_fertility[translated_idx] as f32 / u16::MAX as f32
-    }
-
     fn empty_positions(&self) -> Vec<(i32, i32)> {
         let width = self.config.world_width as i32;
         let mut positions = Vec::new();
@@ -395,20 +393,17 @@ impl Simulation {
     }
 }
 
-fn build_fertility_map(world_width: u32, seed: u64, config: &sim_types::WorldConfig) -> Vec<u16> {
+fn build_fertility_map(world_width: u32, seed: u64, config: &sim_types::WorldConfig) -> Vec<bool> {
     let width = world_width as usize;
+    let fertility_seed = seed ^ FOOD_FERTILITY_SEED_MIX;
     let mut fertility = Vec::with_capacity(width * width);
     for r in 0..width {
         for q in 0..width {
             let x = q as f64 * config.food_fertility_noise_scale as f64;
             let y = r as f64 * config.food_fertility_noise_scale as f64;
-            let value = fractal_perlin_2d(x, y, seed);
-            let normalized = ((value + 1.0) * 0.5).clamp(0.0, 1.0) as f32;
-            let shifted = config.food_fertility_floor
-                + (1.0 - config.food_fertility_floor)
-                    * normalized.powf(config.food_fertility_exponent);
-            let encoded = (shifted.clamp(0.0, 1.0) * u16::MAX as f32).round() as u16;
-            fertility.push(encoded);
+            let value = fractal_perlin_2d(x, y, fertility_seed);
+            let normalized = ((value + 1.0) * 0.5).clamp(0.0, 1.0);
+            fertility.push(normalized >= config.food_fertility_threshold as f64);
         }
     }
     fertility
@@ -515,17 +510,4 @@ fn fade(t: f64) -> f64 {
 
 fn lerp(a: f64, b: f64, t: f64) -> f64 {
     a + t * (b - a)
-}
-
-fn seasonal_translated_tile_idx(world_width: usize, tile_idx: usize, turn: u64) -> usize {
-    let q = tile_idx % world_width;
-    let r = tile_idx / world_width;
-    let phase = turn % SEASONAL_TRANSLATION_PERIOD_TURNS;
-    let phase_r =
-        (phase + (SEASONAL_TRANSLATION_PERIOD_TURNS / 3)) % SEASONAL_TRANSLATION_PERIOD_TURNS;
-    let shift_q = (phase as usize * world_width) / SEASONAL_TRANSLATION_PERIOD_TURNS as usize;
-    let shift_r = (phase_r as usize * world_width) / SEASONAL_TRANSLATION_PERIOD_TURNS as usize;
-    let src_q = (q + shift_q) % world_width;
-    let src_r = (r + shift_r) % world_width;
-    src_r * world_width + src_q
 }
