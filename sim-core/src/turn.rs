@@ -26,6 +26,8 @@ const PLANT_BIOMASS_DEPLETION_JITTER_FRACTION: f32 = 0.25;
 const CONSUME_LOCK_DURATION_TURNS: u8 = 1;
 const REPRODUCE_LOCK_DURATION_TURNS: u8 = 2;
 const CONSUMPTION_ENERGY_FRACTION: f32 = 0.10;
+const FAILED_PREDATION_ACTION_COST_MULTIPLIER: f32 = 10.0;
+const RNG_PREY_MIX: u64 = 0xD6E8_FF3A_5A9C_31F1;
 
 #[derive(Clone, Copy)]
 struct SnapshotOrganismState {
@@ -49,8 +51,10 @@ struct OrganismIntent {
     from: (i32, i32),
     facing_after_actions: FacingDirection,
     wants_move: bool,
+    wants_consume: bool,
     wants_reproduce: bool,
     move_target: Option<(i32, i32)>,
+    consume_target: Option<(i32, i32)>,
     move_confidence: f32,
     action_cost_count: u8,
     synapse_ops: u64,
@@ -324,10 +328,7 @@ impl Simulation {
                 continue;
             };
             let cell_idx = target.1 as usize * w + target.0 as usize;
-            if matches!(
-                occupancy[cell_idx],
-                Some(Occupant::Organism(_)) | Some(Occupant::Wall)
-            ) {
+            if occupancy[cell_idx].is_some() {
                 continue;
             }
             let candidate = MoveCandidate {
@@ -390,28 +391,12 @@ impl Simulation {
 
         let org_count = self.organisms.len();
         let food_count = self.foods.len();
-        let mut bite_targets = vec![None; org_count];
-        for (idx, intent) in intents.iter().enumerate() {
-            if !intent.wants_move {
-                continue;
-            }
-            let Some((target_q, target_r)) = intent.move_target else {
-                continue;
-            };
-            let target_idx = target_r as usize * world_width_usize + target_q as usize;
-            if let Some(Occupant::Organism(prey_id)) = self.occupancy[target_idx] {
-                bite_targets[idx] = Some(prey_id);
-            }
-        }
-
-        let mut move_to: Vec<Option<(i32, i32)>> = vec![None; org_count];
         let mut consumed_food = vec![false; food_count];
         let mut removed_positions = Vec::new();
         let mut consumptions = 0_u64;
         let mut predations = 0_u64;
         let mut dead_organisms = vec![false; org_count];
         for resolution in resolutions {
-            move_to[resolution.actor_idx] = Some(resolution.to);
             let from_idx =
                 resolution.from.1 as usize * world_width_usize + resolution.from.0 as usize;
             let to_idx = resolution.to.1 as usize * world_width_usize + resolution.to.0 as usize;
@@ -419,43 +404,7 @@ impl Simulation {
                 self.occupancy[from_idx],
                 Some(Occupant::Organism(resolution.actor_id))
             );
-            debug_assert!(!matches!(
-                self.occupancy[to_idx],
-                Some(Occupant::Organism(_)) | Some(Occupant::Wall)
-            ));
-
-            if let Some(Occupant::Food(food_id)) = self.occupancy[to_idx] {
-                if let Some(food_idx) = food_index_by_id(&self.foods, food_id) {
-                    consumed_food[food_idx] = true;
-                    let food = &self.foods[food_idx];
-                    removed_positions.push(RemovedEntityPosition {
-                        entity_id: EntityId::Food(food_id),
-                        q: food.q,
-                        r: food.r,
-                    });
-                    self.organisms[resolution.actor_idx].energy +=
-                        food.energy * CONSUMPTION_ENERGY_FRACTION;
-                    if let Some(tile_biomass) = self.biomass.get_mut(to_idx) {
-                        let depletion = jittered_plant_biomass_depletion(
-                            self.seed,
-                            self.turn,
-                            resolution.actor_id,
-                            food_id.0,
-                        );
-                        *tile_biomass = (*tile_biomass - depletion).max(0.0);
-                    }
-                    self.organisms[resolution.actor_idx].consumptions_count = self.organisms
-                        [resolution.actor_idx]
-                        .consumptions_count
-                        .saturating_add(1);
-                    self.pending_actions[resolution.actor_idx] = PendingActionState {
-                        kind: PendingActionKind::Consume,
-                        turns_remaining: CONSUME_LOCK_DURATION_TURNS,
-                    };
-                    skip_pending_action_decrement[resolution.actor_idx] = true;
-                    consumptions += 1;
-                }
-            }
+            debug_assert_eq!(self.occupancy[to_idx], None);
 
             self.occupancy[from_idx] = None;
             self.occupancy[to_idx] = Some(Occupant::Organism(resolution.actor_id));
@@ -465,22 +414,51 @@ impl Simulation {
         }
 
         for (idx, intent) in intents.iter().enumerate() {
-            if !intent.wants_move || dead_organisms[idx] {
+            if !intent.wants_consume || dead_organisms[idx] {
                 continue;
             }
-            if move_to[idx].is_some() {
-                continue;
-            }
-            let Some((target_q, target_r)) = intent.move_target else {
-                continue;
-            };
-            let Some(prey_id) = bite_targets[idx] else {
+            let Some((target_q, target_r)) = intent.consume_target else {
                 continue;
             };
             let target_idx = target_r as usize * world_width_usize + target_q as usize;
 
             match self.occupancy[target_idx] {
-                Some(Occupant::Organism(current_prey_id)) if current_prey_id == prey_id => {
+                Some(Occupant::Food(food_id)) => {
+                    let Some(food_idx) = food_index_by_id(&self.foods, food_id) else {
+                        continue;
+                    };
+                    if consumed_food[food_idx] {
+                        continue;
+                    }
+
+                    consumed_food[food_idx] = true;
+                    let food = &self.foods[food_idx];
+                    removed_positions.push(RemovedEntityPosition {
+                        entity_id: EntityId::Food(food_id),
+                        q: food.q,
+                        r: food.r,
+                    });
+                    let predator = &mut self.organisms[idx];
+                    predator.energy += food.energy * CONSUMPTION_ENERGY_FRACTION;
+                    predator.consumptions_count = predator.consumptions_count.saturating_add(1);
+                    self.pending_actions[idx] = PendingActionState {
+                        kind: PendingActionKind::Consume,
+                        turns_remaining: CONSUME_LOCK_DURATION_TURNS,
+                    };
+                    skip_pending_action_decrement[idx] = true;
+                    if let Some(tile_biomass) = self.biomass.get_mut(target_idx) {
+                        let depletion = jittered_plant_biomass_depletion(
+                            self.seed,
+                            self.turn,
+                            predator.id,
+                            food_id.0,
+                        );
+                        *tile_biomass = (*tile_biomass - depletion).max(0.0);
+                    }
+                    self.occupancy[target_idx] = None;
+                    consumptions += 1;
+                }
+                Some(Occupant::Organism(prey_id)) => {
                     let Some(prey_idx) = organism_index_by_id(&self.organisms, prey_id) else {
                         continue;
                     };
@@ -488,46 +466,55 @@ impl Simulation {
                         continue;
                     }
 
-                    let drain =
-                        (self.organisms[prey_idx].energy * CONSUMPTION_ENERGY_FRACTION).max(0.0);
-                    if drain <= 0.0 {
-                        continue;
-                    }
+                    let success_probability =
+                        prey_probability(&self.organisms[idx], &self.organisms[prey_idx]);
+                    let success_sample = deterministic_predation_sample(
+                        self.seed,
+                        self.turn,
+                        self.organisms[idx].id,
+                        prey_id,
+                    );
+                    if success_sample <= success_probability {
+                        let prey_energy = self.organisms[prey_idx].energy.max(0.0);
+                        let gained_energy = prey_energy * CONSUMPTION_ENERGY_FRACTION;
+                        let (prey_q, prey_r) =
+                            (self.organisms[prey_idx].q, self.organisms[prey_idx].r);
 
-                    if idx < prey_idx {
-                        let (left, right) = self.organisms.split_at_mut(prey_idx);
-                        let predator = &mut left[idx];
-                        let prey = &mut right[0];
-                        prey.energy -= drain;
-                        predator.energy += drain;
-                        predator.consumptions_count = predator.consumptions_count.saturating_add(1);
-                    } else if idx > prey_idx {
-                        let (left, right) = self.organisms.split_at_mut(idx);
-                        let prey = &mut left[prey_idx];
-                        let predator = &mut right[0];
-                        prey.energy -= drain;
-                        predator.energy += drain;
-                        predator.consumptions_count = predator.consumptions_count.saturating_add(1);
-                    } else {
-                        continue;
-                    }
+                        if idx < prey_idx {
+                            let (left, _) = self.organisms.split_at_mut(prey_idx);
+                            let predator = &mut left[idx];
+                            predator.energy += gained_energy;
+                            predator.consumptions_count =
+                                predator.consumptions_count.saturating_add(1);
+                        } else {
+                            let (left, right) = self.organisms.split_at_mut(idx);
+                            let predator = &mut right[0];
+                            debug_assert!(prey_idx < left.len());
+                            predator.energy += gained_energy;
+                            predator.consumptions_count =
+                                predator.consumptions_count.saturating_add(1);
+                        }
 
-                    consumptions += 1;
-                    predations += 1;
-
-                    if self.organisms[prey_idx].energy <= 0.0 && !dead_organisms[prey_idx] {
                         dead_organisms[prey_idx] = true;
                         removed_positions.push(RemovedEntityPosition {
                             entity_id: EntityId::Organism(prey_id),
-                            q: self.organisms[prey_idx].q,
-                            r: self.organisms[prey_idx].r,
+                            q: prey_q,
+                            r: prey_r,
                         });
                         self.occupancy[target_idx] = None;
+                        self.pending_actions[idx] = PendingActionState {
+                            kind: PendingActionKind::Consume,
+                            turns_remaining: CONSUME_LOCK_DURATION_TURNS,
+                        };
+                        skip_pending_action_decrement[idx] = true;
+                        consumptions += 1;
+                        predations += 1;
+                    } else {
+                        self.organisms[idx].energy -=
+                            action_energy_cost * (FAILED_PREDATION_ACTION_COST_MULTIPLIER - 1.0);
                     }
                 }
                 None => {}
-                Some(Occupant::Food(_)) => {}
-                Some(Occupant::Organism(_)) => {}
                 Some(Occupant::Wall) => {}
             }
         }
@@ -783,8 +770,10 @@ fn build_intent_for_organism(
             from: (snapshot_state.q, snapshot_state.r),
             facing_after_actions: snapshot_state.facing,
             wants_move: false,
+            wants_consume: false,
             wants_reproduce: false,
             move_target: None,
+            consume_target: None,
             move_confidence: 0.0,
             action_cost_count: 0,
             synapse_ops: 0,
@@ -806,8 +795,14 @@ fn build_intent_for_organism(
 
     let selected_action = evaluation.resolved_actions.selected_action;
     let selected_action_activation = evaluation.action_activations[action_index(selected_action)];
-    let (facing_after_actions, wants_move, wants_reproduce, move_target) =
-        intent_from_selected_action(selected_action, snapshot_state, world_width);
+    let (
+        facing_after_actions,
+        wants_move,
+        wants_consume,
+        wants_reproduce,
+        move_target,
+        consume_target,
+    ) = intent_from_selected_action(selected_action, snapshot_state, world_width);
     let move_confidence = if wants_move {
         selected_action_activation
     } else {
@@ -820,8 +815,10 @@ fn build_intent_for_organism(
         from: (snapshot_state.q, snapshot_state.r),
         facing_after_actions,
         wants_move,
+        wants_consume,
         wants_reproduce,
         move_target,
+        consume_target,
         move_confidence,
         action_cost_count: u8::from(selected_action != ActionType::Idle),
         synapse_ops: evaluation.synapse_ops,
@@ -832,19 +829,35 @@ fn intent_from_selected_action(
     selected_action: ActionType,
     snapshot_state: SnapshotOrganismState,
     world_width: i32,
-) -> (FacingDirection, bool, bool, Option<(i32, i32)>) {
+) -> (
+    FacingDirection,
+    bool,
+    bool,
+    bool,
+    Option<(i32, i32)>,
+    Option<(i32, i32)>,
+) {
     let from = (snapshot_state.q, snapshot_state.r);
     let current_facing = snapshot_state.facing;
 
     match selected_action {
-        ActionType::Idle => (current_facing, false, false, None),
-        ActionType::TurnLeft => (rotate_left(current_facing), false, false, None),
-        ActionType::TurnRight => (rotate_right(current_facing), false, false, None),
+        ActionType::Idle => (current_facing, false, false, false, None, None),
+        ActionType::TurnLeft => (rotate_left(current_facing), false, false, false, None, None),
+        ActionType::TurnRight => (
+            rotate_right(current_facing),
+            false,
+            false,
+            false,
+            None,
+            None,
+        ),
         ActionType::Forward => (
             current_facing,
             true,
             false,
+            false,
             Some(hex_neighbor(from, current_facing, world_width)),
+            None,
         ),
         ActionType::TurnLeftForward => {
             let facing = rotate_left(current_facing);
@@ -852,7 +865,9 @@ fn intent_from_selected_action(
                 facing,
                 true,
                 false,
+                false,
                 Some(hex_neighbor(from, facing, world_width)),
+                None,
             )
         }
         ActionType::TurnRightForward => {
@@ -861,10 +876,20 @@ fn intent_from_selected_action(
                 facing,
                 true,
                 false,
+                false,
                 Some(hex_neighbor(from, facing, world_width)),
+                None,
             )
         }
-        ActionType::Reproduce => (current_facing, false, true, None),
+        ActionType::Consume => (
+            current_facing,
+            false,
+            true,
+            false,
+            None,
+            Some(hex_neighbor(from, current_facing, world_width)),
+        ),
+        ActionType::Reproduce => (current_facing, false, false, true, None, None),
     }
 }
 
@@ -906,6 +931,30 @@ fn action_rng_seed(sim_seed: u64, tick: u64, organism_id: OrganismId) -> u64 {
 fn deterministic_action_sample(sim_seed: u64, tick: u64, organism_id: OrganismId) -> f32 {
     let sample = (action_rng_seed(sim_seed, tick, organism_id) >> 40) as u32;
     sample as f32 / ((1_u32 << 24) - 1) as f32
+}
+
+fn deterministic_predation_sample(
+    sim_seed: u64,
+    tick: u64,
+    predator_id: OrganismId,
+    prey_id: OrganismId,
+) -> f32 {
+    let mixed = sim_seed
+        ^ tick.wrapping_mul(RNG_TURN_MIX)
+        ^ predator_id.0.wrapping_mul(RNG_ORGANISM_MIX)
+        ^ prey_id.0.wrapping_mul(RNG_PREY_MIX);
+    let sample = (mix_u64(mixed) >> 40) as u32;
+    sample as f32 / ((1_u32 << 24) - 1) as f32
+}
+
+fn prey_probability(predator: &OrganismState, prey: &OrganismState) -> f32 {
+    let predator_energy = predator.energy.max(0.0);
+    let prey_energy = prey.energy.max(0.0);
+    let total_energy = predator_energy + prey_energy;
+    if total_energy <= f32::EPSILON {
+        return 0.0;
+    }
+    (predator_energy / total_energy).clamp(0.0, 1.0)
 }
 
 fn jittered_plant_biomass_depletion(
