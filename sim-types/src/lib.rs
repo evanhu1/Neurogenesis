@@ -358,6 +358,8 @@ pub struct SynapseEdge {
     pub weight: f32,
     #[serde(default, skip_serializing)]
     pub eligibility: f32,
+    #[serde(default, skip_serializing)]
+    pub pending_coactivation: f32,
 }
 
 fn default_eligibility_retention() -> f32 {

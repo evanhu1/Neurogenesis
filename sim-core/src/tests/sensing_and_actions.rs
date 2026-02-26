@@ -1,8 +1,8 @@
 use super::support::test_genome;
 use super::*;
 use crate::brain::{
-    action_index, apply_runtime_weight_updates, evaluate_brain, express_genome, scan_rays,
-    update_runtime_eligibility_traces, ActionSelectionPolicy, BrainScratch, ACTION_COUNT_U32,
+    action_index, apply_runtime_weight_updates, compute_pending_coactivations, evaluate_brain,
+    express_genome, scan_rays, ActionSelectionPolicy, BrainScratch, ACTION_COUNT_U32,
     ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT,
 };
 use rand::SeedableRng;
@@ -69,6 +69,7 @@ fn dense_edges(
                 post_neuron_id: NeuronId(INTER_ID_BASE + post_inter),
                 weight: 0.25,
                 eligibility: 0.0,
+                pending_coactivation: 0.0,
             });
             if edges.len() == target {
                 return edges;
@@ -80,6 +81,7 @@ fn dense_edges(
                 post_neuron_id: NeuronId(ACTION_ID_BASE + post_action),
                 weight: 0.25,
                 eligibility: 0.0,
+                pending_coactivation: 0.0,
             });
             if edges.len() == target {
                 return edges;
@@ -106,6 +108,7 @@ fn dense_edges(
                 post_neuron_id: NeuronId(INTER_ID_BASE + post_inter),
                 weight: 0.25 * sign,
                 eligibility: 0.0,
+                pending_coactivation: 0.0,
             });
             if edges.len() == target {
                 return edges;
@@ -117,6 +120,7 @@ fn dense_edges(
                 post_neuron_id: NeuronId(ACTION_ID_BASE + post_action),
                 weight: 0.25 * sign,
                 eligibility: 0.0,
+                pending_coactivation: 0.0,
             });
             if edges.len() == target {
                 return edges;
@@ -201,24 +205,28 @@ fn express_genome_respects_dale_signs_for_inter_outgoing_synapses() {
             post_neuron_id: NeuronId(ACTION_ID_BASE),
             weight: 0.3,
             eligibility: 0.0,
+            pending_coactivation: 0.0,
         },
         SynapseEdge {
             pre_neuron_id: NeuronId(INTER_ID_BASE),
             post_neuron_id: NeuronId(INTER_ID_BASE + 1),
             weight: 0.2,
             eligibility: 0.0,
+            pending_coactivation: 0.0,
         },
         SynapseEdge {
             pre_neuron_id: NeuronId(INTER_ID_BASE + 1),
             post_neuron_id: NeuronId(ACTION_ID_BASE + 1),
             weight: 0.4,
             eligibility: 0.0,
+            pending_coactivation: 0.0,
         },
         SynapseEdge {
             pre_neuron_id: NeuronId(INTER_ID_BASE + 1),
             post_neuron_id: NeuronId(INTER_ID_BASE),
             weight: 0.4,
             eligibility: 0.0,
+            pending_coactivation: 0.0,
         },
     ];
     genome.num_synapses = genome.edges.len() as u32;
@@ -358,6 +366,7 @@ fn runtime_plasticity_updates_weights_and_preserves_sign() {
         post_neuron_id: NeuronId(2000),
         weight: 0.2,
         eligibility: 0.0,
+        pending_coactivation: 0.0,
     });
     let mut action: Vec<_> = ActionType::ALL
         .into_iter()
@@ -410,7 +419,7 @@ fn runtime_plasticity_updates_weights_and_preserves_sign() {
     );
 
     let before = organism.brain.sensory[0].synapses[0].weight;
-    update_runtime_eligibility_traces(&mut organism, &mut scratch);
+    compute_pending_coactivations(&mut organism, &mut scratch);
     apply_runtime_weight_updates(&mut organism, 0.0);
     let after = organism.brain.sensory[0].synapses[0].weight;
 
@@ -437,6 +446,7 @@ fn runtime_plasticity_neutralizes_passive_metabolism_for_dopamine() {
         post_neuron_id: NeuronId(2000),
         weight: 0.2,
         eligibility: 0.0,
+        pending_coactivation: 0.0,
     });
     let action: Vec<_> = ActionType::ALL
         .into_iter()
@@ -489,7 +499,7 @@ fn runtime_plasticity_neutralizes_passive_metabolism_for_dopamine() {
 
     let before = organism.brain.sensory[0].synapses[0].weight;
     // Passive drain baseline (1.0) exactly cancels the raw -1.0 energy delta.
-    update_runtime_eligibility_traces(&mut organism, &mut scratch);
+    compute_pending_coactivations(&mut organism, &mut scratch);
     apply_runtime_weight_updates(&mut organism, 1.0);
     let after = organism.brain.sensory[0].synapses[0].weight;
 
@@ -523,12 +533,14 @@ fn inter_recurrent_eligibility_uses_prev_inter_pre_signal_only_for_inter_targets
                 post_neuron_id: NeuronId(INTER_ID_BASE + 1),
                 weight: 1.0,
                 eligibility: 0.0,
+                pending_coactivation: 0.0,
             },
             SynapseEdge {
                 pre_neuron_id: NeuronId(INTER_ID_BASE),
                 post_neuron_id: NeuronId(ACTION_ID_BASE),
                 weight: 1.0,
                 eligibility: 0.0,
+                pending_coactivation: 0.0,
             },
         ],
     };
@@ -593,15 +605,15 @@ fn inter_recurrent_eligibility_uses_prev_inter_pre_signal_only_for_inter_targets
         0.5,
         &mut scratch,
     );
-    update_runtime_eligibility_traces(&mut organism, &mut scratch);
+    compute_pending_coactivations(&mut organism, &mut scratch);
 
     let inter1_current = organism.brain.inter[1].neuron.activation;
-    let recurrent_eligibility = organism.brain.inter[0].synapses[0].eligibility;
-    let action_eligibility = organism.brain.inter[0].synapses[1].eligibility;
+    let recurrent_pending = organism.brain.inter[0].synapses[0].pending_coactivation;
+    let action_pending = organism.brain.inter[0].synapses[1].pending_coactivation;
 
     let expected_recurrent = 0.8 * inter1_current;
-    assert!((recurrent_eligibility - expected_recurrent).abs() < 1.0e-6);
-    assert!(action_eligibility.abs() < 1.0e-6);
+    assert!((recurrent_pending - expected_recurrent).abs() < 1.0e-6);
+    assert!(action_pending.abs() < 1.0e-6);
 }
 
 #[test]
@@ -624,6 +636,7 @@ fn action_target_eligibility_uses_centered_logits_not_sigmoid_activation() {
         post_neuron_id: NeuronId(ACTION_ID_BASE),
         weight: 1.0,
         eligibility: 0.0,
+        pending_coactivation: 0.0,
     });
     let action: Vec<_> = ActionType::ALL
         .into_iter()
@@ -672,17 +685,17 @@ fn action_target_eligibility_uses_centered_logits_not_sigmoid_activation() {
         0.5,
         &mut scratch,
     );
-    update_runtime_eligibility_traces(&mut organism, &mut scratch);
+    compute_pending_coactivations(&mut organism, &mut scratch);
 
     let sensory_activation = organism.brain.sensory[0].neuron.activation;
-    let edge_eligibility = organism.brain.sensory[0].synapses[0].eligibility;
+    let edge_pending = organism.brain.sensory[0].synapses[0].pending_coactivation;
     let logit0 = eval.action_logits[0];
     let logit_mean = eval.action_logits.iter().sum::<f32>() / eval.action_logits.len() as f32;
     let expected_centered_logit = sensory_activation * (logit0 - logit_mean);
     let sigmoid_expected = sensory_activation * (1.0 / (1.0 + (-logit0).exp()));
 
-    assert!((edge_eligibility - expected_centered_logit).abs() < 1.0e-6);
-    assert!((edge_eligibility - sigmoid_expected).abs() > 1.0e-3);
+    assert!((edge_pending - expected_centered_logit).abs() < 1.0e-6);
+    assert!((edge_pending - sigmoid_expected).abs() > 1.0e-3);
 }
 
 #[test]

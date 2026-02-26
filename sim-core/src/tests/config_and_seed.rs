@@ -158,30 +158,35 @@ fn mutate_genome_sanitizes_synapse_genes_and_does_not_trim_excess() {
             post_neuron_id: NeuronId(crate::brain::INTER_ID_BASE),
             weight: 0.5,
             eligibility: 4.0,
+            pending_coactivation: 0.0,
         },
         SynapseEdge {
             pre_neuron_id: NeuronId(0),
             post_neuron_id: NeuronId(crate::brain::INTER_ID_BASE),
             weight: -0.5,
             eligibility: 3.0,
+            pending_coactivation: 0.0,
         },
         SynapseEdge {
             pre_neuron_id: NeuronId(0),
             post_neuron_id: NeuronId(crate::brain::INTER_ID_BASE),
             weight: 0.8,
             eligibility: 2.0,
+            pending_coactivation: 0.0,
         },
         SynapseEdge {
             pre_neuron_id: NeuronId(crate::brain::INTER_ID_BASE + 1),
             post_neuron_id: NeuronId(crate::brain::ACTION_ID_BASE),
             weight: 0.7,
             eligibility: 1.0,
+            pending_coactivation: 0.0,
         },
         SynapseEdge {
             pre_neuron_id: NeuronId(crate::brain::INTER_ID_BASE),
             post_neuron_id: NeuronId(crate::brain::INTER_ID_BASE),
             weight: 0.3,
             eligibility: 5.0,
+            pending_coactivation: 0.0,
         },
     ];
 
@@ -225,12 +230,14 @@ fn mutate_genome_can_perturb_inherited_synapse_weights_without_flipping_sign() {
             post_neuron_id: NeuronId(crate::brain::INTER_ID_BASE),
             weight: 0.3,
             eligibility: 0.0,
+            pending_coactivation: 0.0,
         },
         SynapseEdge {
             pre_neuron_id: NeuronId(crate::brain::INTER_ID_BASE + 1),
             post_neuron_id: NeuronId(crate::brain::ACTION_ID_BASE),
             weight: -0.45,
             eligibility: 0.0,
+            pending_coactivation: 0.0,
         },
     ];
     genome.num_synapses = genome.edges.len() as u32;
@@ -285,6 +292,7 @@ fn mutate_genome_can_apply_add_neuron_split_edge_operator() {
         post_neuron_id: NeuronId(crate::brain::ACTION_ID_BASE),
         weight: 0.5,
         eligibility: 0.0,
+        pending_coactivation: 0.0,
     }];
     genome.num_synapses = 1;
     genome.mutation_rate_age_of_maturity = 0.0;
@@ -331,6 +339,7 @@ fn mutate_add_neuron_split_edge_replaces_synapse_and_extends_inter_vectors() {
         post_neuron_id: NeuronId(crate::brain::ACTION_ID_BASE),
         weight: 0.6,
         eligibility: 0.7,
+        pending_coactivation: 0.0,
     }];
     genome.num_synapses = 1;
 
@@ -376,6 +385,7 @@ fn mutate_add_neuron_split_edge_respects_required_dale_signs() {
         post_neuron_id: NeuronId(crate::brain::ACTION_ID_BASE + 1),
         weight: -0.45,
         eligibility: 0.2,
+        pending_coactivation: 0.0,
     }];
     genome.num_synapses = genome.edges.len() as u32;
 

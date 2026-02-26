@@ -1,5 +1,5 @@
 use crate::brain::{
-    action_index, apply_runtime_weight_updates, evaluate_brain, update_runtime_eligibility_traces,
+    action_index, apply_runtime_weight_updates, compute_pending_coactivations, evaluate_brain,
     ActionSelectionPolicy, BrainScratch,
 };
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right, wrap_position};
@@ -802,7 +802,7 @@ fn build_intent_for_organism(
         action_sample,
         scratch,
     );
-    update_runtime_eligibility_traces(organism, scratch);
+    compute_pending_coactivations(organism, scratch);
 
     let selected_action = evaluation.resolved_actions.selected_action;
     let selected_action_activation = evaluation.action_activations[action_index(selected_action)];

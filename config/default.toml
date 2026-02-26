@@ -17,8 +17,8 @@ speciation_threshold = 20.0
 global_mutation_rate_modifier = 2.0
 
 [seed_genome_config]
-num_neurons = 40
-num_synapses = 100
+num_neurons = 5
+num_synapses = 20
 spatial_prior_sigma = 3.0
 vision_distance = 10
 starting_energy = 250.0

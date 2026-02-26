@@ -89,12 +89,14 @@ fn reproduction_offspring_brain_topology_matches_child_genome_edges() {
             post_neuron_id: NeuronId(1000),
             weight: 0.2,
             eligibility: 0.0,
+            pending_coactivation: 0.0,
         },
         SynapseEdge {
             pre_neuron_id: NeuronId(1000),
             post_neuron_id: NeuronId(2000),
             weight: 0.3,
             eligibility: 0.0,
+            pending_coactivation: 0.0,
         },
     ];
     configure_sim(&mut sim, vec![parent]);

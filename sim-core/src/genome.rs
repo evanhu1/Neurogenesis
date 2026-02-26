@@ -521,6 +521,7 @@ pub(crate) fn mutate_add_neuron_split_edge<R: Rng + ?Sized>(
         post_neuron_id: new_inter_id,
         weight: constrain_weight_to_sign(selected_edge.weight, pre_to_new_required_sign),
         eligibility: 0.0,
+        pending_coactivation: 0.0,
     });
     genome.edges.push(SynapseEdge {
         pre_neuron_id: new_inter_id,
@@ -534,6 +535,7 @@ pub(crate) fn mutate_add_neuron_split_edge<R: Rng + ?Sized>(
             new_to_post_required_sign,
         ),
         eligibility: 0.0,
+        pending_coactivation: 0.0,
     });
 
     genome.num_synapses = genome.num_synapses.saturating_add(1);
@@ -626,6 +628,7 @@ fn sanitize_synapse_genes(genome: &mut OrganismGenome) {
                 .unwrap_or(1.0);
         edge.weight = constrain_weight_to_sign(edge.weight, required_sign);
         edge.eligibility = 0.0;
+        edge.pending_coactivation = 0.0;
     }
 
     sort_synapse_genes(&mut genome.edges);
@@ -692,6 +695,7 @@ fn add_synapse_genes_with_spatial_prior<R: Rng + ?Sized>(
             post_neuron_id: post_id,
             weight: sample_signed_lognormal_weight(required_sign, rng),
             eligibility: 0.0,
+            pending_coactivation: 0.0,
         });
     }
 }

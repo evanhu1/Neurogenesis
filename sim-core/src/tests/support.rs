@@ -157,6 +157,7 @@ fn forced_brain(
                 -8.0
             },
             eligibility: 0.0,
+            pending_coactivation: 0.0,
         })
         .collect();
     let synapse_count = inter_synapses.len() as u32;
@@ -291,6 +292,7 @@ pub(super) fn enable_reproduce_action(organism: &mut OrganismState) {
                     -8.0
                 },
                 eligibility: 0.0,
+                pending_coactivation: 0.0,
             });
         }
     }

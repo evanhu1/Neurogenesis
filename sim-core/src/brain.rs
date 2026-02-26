@@ -199,6 +199,7 @@ fn wire_birth_synapses_from_genome(
                 post_neuron_id: edge.post_neuron_id,
                 weight: constrain_weight(edge.weight, 1.0),
                 eligibility: 0.0,
+                pending_coactivation: 0.0,
             });
             continue;
         }
@@ -222,6 +223,7 @@ fn wire_birth_synapses_from_genome(
             post_neuron_id: edge.post_neuron_id,
             weight: constrain_weight(edge.weight, required_sign),
             eligibility: 0.0,
+            pending_coactivation: 0.0,
         });
     }
 
@@ -417,7 +419,7 @@ pub(crate) fn evaluate_brain(
     result
 }
 
-pub(crate) fn update_runtime_eligibility_traces(
+pub(crate) fn compute_pending_coactivations(
     organism: &mut sim_types::OrganismState,
     scratch: &mut BrainScratch,
 ) {
@@ -427,8 +429,6 @@ pub(crate) fn update_runtime_eligibility_traces(
 
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
-    let eligibility_retention = organism.genome.eligibility_retention.clamp(0.0, 1.0);
-
     let brain = &mut organism.brain;
     scratch.inter_activations.clear();
     scratch
@@ -440,10 +440,9 @@ pub(crate) fn update_runtime_eligibility_traces(
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     for sensory in &mut brain.sensory {
-        update_sensory_edge_eligibility(
+        compute_pending_sensory_edge_coactivations(
             &mut sensory.synapses,
             sensory.neuron.activation,
-            eligibility_retention,
             &scratch.inter_activations,
             &scratch.action_post_signals,
         );
@@ -454,10 +453,9 @@ pub(crate) fn update_runtime_eligibility_traces(
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     for (pre_idx, inter) in brain.inter.iter_mut().enumerate() {
-        update_inter_edge_eligibility(
+        compute_pending_inter_edge_coactivations(
             &mut inter.synapses,
             pre_idx,
-            eligibility_retention,
             &scratch.prev_inter,
             &scratch.inter_activations,
             &scratch.action_post_signals,
@@ -481,6 +479,7 @@ pub(crate) fn apply_runtime_weight_updates(
     let weight_prune_threshold = organism.genome.synapse_prune_threshold.max(0.0);
     let should_prune = should_prune_synapses(organism.age_turns, organism.genome.age_of_maturity);
     let is_mature = organism.age_turns >= u64::from(organism.genome.age_of_maturity);
+    let eligibility_retention = organism.genome.eligibility_retention.clamp(0.0, 1.0);
     let energy_delta = organism.energy - organism.energy_prev;
     // Baseline-correct the reward signal so passive metabolism alone is neutral.
     let corrected_energy_delta = energy_delta + passive_energy_baseline.max(0.0);
@@ -495,27 +494,39 @@ pub(crate) fn apply_runtime_weight_updates(
         return;
     }
 
-    if is_mature {
-        #[cfg(feature = "profiling")]
-        let stage_started = Instant::now();
-        for sensory in &mut organism.brain.sensory {
-            apply_edge_weight_update(&mut sensory.synapses, 1.0, eta, dopamine_signal);
-        }
-        #[cfg(feature = "profiling")]
-        profiling::record_brain_stage(BrainStage::PlasticitySensoryTuning, stage_started.elapsed());
-
-        #[cfg(feature = "profiling")]
-        let stage_started = Instant::now();
-        for inter in &mut organism.brain.inter {
-            let required_sign = match inter.interneuron_type {
-                InterNeuronType::Excitatory => 1.0,
-                InterNeuronType::Inhibitory => -1.0,
-            };
-            apply_edge_weight_update(&mut inter.synapses, required_sign, eta, dopamine_signal);
-        }
-        #[cfg(feature = "profiling")]
-        profiling::record_brain_stage(BrainStage::PlasticityInterTuning, stage_started.elapsed());
+    #[cfg(feature = "profiling")]
+    let stage_started = Instant::now();
+    for sensory in &mut organism.brain.sensory {
+        apply_edge_weight_update_and_fold_pending(
+            &mut sensory.synapses,
+            1.0,
+            eta,
+            dopamine_signal,
+            is_mature,
+            eligibility_retention,
+        );
     }
+    #[cfg(feature = "profiling")]
+    profiling::record_brain_stage(BrainStage::PlasticitySensoryTuning, stage_started.elapsed());
+
+    #[cfg(feature = "profiling")]
+    let stage_started = Instant::now();
+    for inter in &mut organism.brain.inter {
+        let required_sign = match inter.interneuron_type {
+            InterNeuronType::Excitatory => 1.0,
+            InterNeuronType::Inhibitory => -1.0,
+        };
+        apply_edge_weight_update_and_fold_pending(
+            &mut inter.synapses,
+            required_sign,
+            eta,
+            dopamine_signal,
+            is_mature,
+            eligibility_retention,
+        );
+    }
+    #[cfg(feature = "profiling")]
+    profiling::record_brain_stage(BrainStage::PlasticityInterTuning, stage_started.elapsed());
 
     if should_prune {
         #[cfg(feature = "profiling")]
@@ -526,10 +537,9 @@ pub(crate) fn apply_runtime_weight_updates(
     }
 }
 
-fn update_sensory_edge_eligibility(
+fn compute_pending_sensory_edge_coactivations(
     edges: &mut [SynapseEdge],
     pre_activation: f32,
-    eligibility_retention: f32,
     inter_activations: &[f32],
     action_post_signals: &[f32; ACTION_COUNT],
 ) {
@@ -540,8 +550,7 @@ fn update_sensory_edge_eligibility(
         let Some(post_activation) = inter_activations.get(idx).copied() else {
             continue;
         };
-        edge.eligibility =
-            eligibility_retention * edge.eligibility + pre_activation * post_activation;
+        edge.pending_coactivation = pre_activation * post_activation;
     }
 
     for edge in action_edges {
@@ -549,15 +558,13 @@ fn update_sensory_edge_eligibility(
         let Some(post_activation) = action_post_signals.get(idx).copied() else {
             continue;
         };
-        edge.eligibility =
-            eligibility_retention * edge.eligibility + pre_activation * post_activation;
+        edge.pending_coactivation = pre_activation * post_activation;
     }
 }
 
-fn update_inter_edge_eligibility(
+fn compute_pending_inter_edge_coactivations(
     edges: &mut [SynapseEdge],
     pre_idx: usize,
-    eligibility_retention: f32,
     prev_inter_activations: &[f32],
     inter_activations: &[f32],
     action_post_signals: &[f32; ACTION_COUNT],
@@ -576,7 +583,7 @@ fn update_inter_edge_eligibility(
         let Some(post_activation) = inter_activations.get(idx).copied() else {
             continue;
         };
-        edge.eligibility = eligibility_retention * edge.eligibility + pre_prev * post_activation;
+        edge.pending_coactivation = pre_prev * post_activation;
     }
 
     for edge in action_edges {
@@ -584,20 +591,28 @@ fn update_inter_edge_eligibility(
         let Some(post_activation) = action_post_signals.get(idx).copied() else {
             continue;
         };
-        edge.eligibility = eligibility_retention * edge.eligibility + pre_current * post_activation;
+        edge.pending_coactivation = pre_current * post_activation;
     }
 }
 
-fn apply_edge_weight_update(
+fn apply_edge_weight_update_and_fold_pending(
     edges: &mut [SynapseEdge],
     required_sign: f32,
     eta: f32,
     dopamine: f32,
+    apply_weight_update: bool,
+    eligibility_retention: f32,
 ) {
+    let instantaneous_scale = 1.0 - eligibility_retention;
     for edge in edges {
-        let updated_weight =
-            edge.weight + eta * dopamine * edge.eligibility - PLASTIC_WEIGHT_DECAY * edge.weight;
-        edge.weight = constrain_weight(updated_weight, required_sign);
+        if apply_weight_update {
+            let updated_weight = edge.weight + eta * dopamine * edge.eligibility
+                - PLASTIC_WEIGHT_DECAY * edge.weight;
+            edge.weight = constrain_weight(updated_weight, required_sign);
+        }
+        edge.eligibility = eligibility_retention * edge.eligibility
+            + instantaneous_scale * edge.pending_coactivation;
+        edge.pending_coactivation = 0.0;
     }
 }
 
