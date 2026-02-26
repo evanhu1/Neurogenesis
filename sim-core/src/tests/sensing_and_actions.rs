@@ -269,9 +269,7 @@ fn stochastic_action_selection_is_seed_deterministic() {
     let mut scratch_b = BrainScratch::new();
     let vision_distance_a = organism_a.genome.vision_distance;
     let vision_distance_b = organism_b.genome.vision_distance;
-    let policy = ActionSelectionPolicy {
-        temperature: 1.5,
-    };
+    let policy = ActionSelectionPolicy { temperature: 1.5 };
 
     let eval_a = evaluate_brain(
         &mut organism_a,

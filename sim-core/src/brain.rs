@@ -161,10 +161,8 @@ pub(crate) fn action_index(action: ActionType) -> usize {
         ActionType::TurnLeft => 1,
         ActionType::TurnRight => 2,
         ActionType::Forward => 3,
-        ActionType::TurnLeftForward => 4,
-        ActionType::TurnRightForward => 5,
-        ActionType::Consume => 6,
-        ActionType::Reproduce => 7,
+        ActionType::Consume => 4,
+        ActionType::Reproduce => 5,
     }
 }
 
@@ -741,7 +739,11 @@ pub fn derive_active_action_neuron_id(organism: &OrganismState) -> Option<Neuron
     } else if !brain.action.is_empty() {
         let action_activations: [f32; ACTION_COUNT] =
             std::array::from_fn(|i| brain.action.get(i).map_or(0.0, |n| n.neuron.activation));
-        return Some(brain.action[argmax_index(&action_activations)].neuron.neuron_id);
+        return Some(
+            brain.action[argmax_index(&action_activations)]
+                .neuron
+                .neuron_id,
+        );
     }
     None
 }

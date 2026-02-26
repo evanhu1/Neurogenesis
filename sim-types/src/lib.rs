@@ -19,19 +19,15 @@ pub enum ActionType {
     TurnLeft,
     TurnRight,
     Forward,
-    TurnLeftForward,
-    TurnRightForward,
     Consume,
     Reproduce,
 }
 impl ActionType {
-    pub const ALL: [ActionType; 8] = [
+    pub const ALL: [ActionType; 6] = [
         ActionType::Idle,
         ActionType::TurnLeft,
         ActionType::TurnRight,
         ActionType::Forward,
-        ActionType::TurnLeftForward,
-        ActionType::TurnRightForward,
         ActionType::Consume,
         ActionType::Reproduce,
     ];

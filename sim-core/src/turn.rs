@@ -860,28 +860,6 @@ fn intent_from_selected_action(
             Some(hex_neighbor(from, current_facing, world_width)),
             None,
         ),
-        ActionType::TurnLeftForward => {
-            let facing = rotate_left(current_facing);
-            (
-                facing,
-                true,
-                false,
-                false,
-                Some(hex_neighbor(from, facing, world_width)),
-                None,
-            )
-        }
-        ActionType::TurnRightForward => {
-            let facing = rotate_right(current_facing);
-            (
-                facing,
-                true,
-                false,
-                false,
-                Some(hex_neighbor(from, facing, world_width)),
-                None,
-            )
-        }
         ActionType::Consume => (
             current_facing,
             false,

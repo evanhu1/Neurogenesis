@@ -130,13 +130,7 @@ fn forced_brain(
     let inter_id = NeuronId(1000);
     let inter_bias = confidence;
     let preferred_action = if wants_move {
-        if turn_left && !turn_right {
-            ActionType::TurnLeftForward
-        } else if turn_right && !turn_left {
-            ActionType::TurnRightForward
-        } else {
-            ActionType::Forward
-        }
+        ActionType::Forward
     } else if turn_left && !turn_right {
         ActionType::TurnLeft
     } else if turn_right && !turn_left {
@@ -174,50 +168,21 @@ fn forced_brain(
         alpha: 1.0,
         synapses: inter_synapses,
     }];
-    let mut action = vec![
-        make_action_neuron(
-            2000,
-            ActionType::Idle,
-            0.0,
-            BrainLocation { x: 2.0, y: 0.0 },
-        ),
-        make_action_neuron(
-            2001,
-            ActionType::TurnLeft,
-            0.0,
-            BrainLocation { x: 2.0, y: 1.0 },
-        ),
-        make_action_neuron(
-            2002,
-            ActionType::TurnRight,
-            0.0,
-            BrainLocation { x: 2.0, y: 2.0 },
-        ),
-        make_action_neuron(
-            2003,
-            ActionType::Forward,
-            0.0,
-            BrainLocation { x: 2.0, y: 3.0 },
-        ),
-        make_action_neuron(
-            2004,
-            ActionType::TurnLeftForward,
-            0.0,
-            BrainLocation { x: 2.0, y: 4.0 },
-        ),
-        make_action_neuron(
-            2005,
-            ActionType::TurnRightForward,
-            0.0,
-            BrainLocation { x: 2.0, y: 5.0 },
-        ),
-        make_action_neuron(
-            2006,
-            ActionType::Reproduce,
-            0.0,
-            BrainLocation { x: 2.0, y: 6.0 },
-        ),
-    ];
+    let mut action: Vec<_> = ActionType::ALL
+        .into_iter()
+        .enumerate()
+        .map(|(idx, action_type)| {
+            make_action_neuron(
+                2000 + idx as u32,
+                action_type,
+                0.0,
+                BrainLocation {
+                    x: 2.0,
+                    y: idx as f32,
+                },
+            )
+        })
+        .collect();
     for action_neuron in &mut action {
         action_neuron.neuron.parent_ids = vec![inter_id];
     }
