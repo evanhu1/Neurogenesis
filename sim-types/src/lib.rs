@@ -109,7 +109,7 @@ pub enum SensoryReceptor {
 
 impl SensoryReceptor {
     /// Fixed relative ray offsets around facing direction.
-    pub const LOOK_RAY_OFFSETS: [i8; 5] = [-2, -1, 0, 1, 2];
+    pub const LOOK_RAY_OFFSETS: [i8; 6] = [-2, -1, 0, 1, 2, 3];
     /// Number of entity classes available to look-ray sensors.
     pub const LOOK_TARGET_COUNT: u32 = 3;
     /// Number of look-based sensory neurons (ray count x object type count).

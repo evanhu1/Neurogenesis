@@ -20,10 +20,6 @@ use std::time::Instant;
 const FOOD_ENERGY_METABOLISM_DIVISOR: f32 = 1000.0;
 const RNG_TURN_MIX: u64 = 0x9E37_79B9_7F4A_7C15;
 const RNG_ORGANISM_MIX: u64 = 0xBF58_476D_1CE4_E5B9;
-const RNG_FOOD_MIX: u64 = 0x94D0_49BB_1331_11EB;
-const PLANT_BIOMASS_DEPLETION_BASE: f32 = 0.75;
-const PLANT_BIOMASS_DEPLETION_JITTER_FRACTION: f32 = 0.25;
-const CONSUME_LOCK_DURATION_TURNS: u8 = 1;
 const REPRODUCE_LOCK_DURATION_TURNS: u8 = 2;
 const CONSUMPTION_ENERGY_FRACTION: f32 = 0.10;
 const FAILED_PREDATION_ACTION_COST_MULTIPLIER: f32 = 10.0;
@@ -391,11 +387,12 @@ impl Simulation {
 
         let org_count = self.organisms.len();
         let food_count = self.foods.len();
-        let mut consumed_food = vec![false; food_count];
+        let mut removed_food = vec![false; food_count];
         let mut removed_positions = Vec::new();
         let mut consumptions = 0_u64;
         let mut predations = 0_u64;
         let mut dead_organisms = vec![false; org_count];
+        let plant_presence_threshold = self.plant_biomass_presence_threshold();
         for resolution in resolutions {
             let from_idx =
                 resolution.from.1 as usize * world_width_usize + resolution.from.0 as usize;
@@ -427,36 +424,45 @@ impl Simulation {
                     let Some(food_idx) = food_index_by_id(&self.foods, food_id) else {
                         continue;
                     };
-                    if consumed_food[food_idx] {
+                    if removed_food[food_idx] {
+                        continue;
+                    }
+                    if self.biomass[target_idx] <= plant_presence_threshold {
+                        removed_food[food_idx] = true;
+                        let food = &self.foods[food_idx];
+                        removed_positions.push(RemovedEntityPosition {
+                            entity_id: EntityId::Food(food_id),
+                            q: food.q,
+                            r: food.r,
+                        });
+                        self.occupancy[target_idx] = None;
                         continue;
                     }
 
-                    consumed_food[food_idx] = true;
-                    let food = &self.foods[food_idx];
-                    removed_positions.push(RemovedEntityPosition {
-                        entity_id: EntityId::Food(food_id),
-                        q: food.q,
-                        r: food.r,
-                    });
-                    let predator = &mut self.organisms[idx];
-                    predator.energy += food.energy * CONSUMPTION_ENERGY_FRACTION;
-                    predator.consumptions_count = predator.consumptions_count.saturating_add(1);
-                    self.pending_actions[idx] = PendingActionState {
-                        kind: PendingActionKind::Consume,
-                        turns_remaining: CONSUME_LOCK_DURATION_TURNS,
-                    };
-                    skip_pending_action_decrement[idx] = true;
-                    if let Some(tile_biomass) = self.biomass.get_mut(target_idx) {
-                        let depletion = jittered_plant_biomass_depletion(
-                            self.seed,
-                            self.turn,
-                            predator.id,
-                            food_id.0,
-                        );
-                        *tile_biomass = (*tile_biomass - depletion).max(0.0);
+                    let consumed_biomass = self.biomass[target_idx]
+                        .max(0.0)
+                        .min(self.config.food_energy);
+                    if consumed_biomass <= 0.0 {
+                        continue;
                     }
-                    self.occupancy[target_idx] = None;
+
+                    self.biomass[target_idx] =
+                        (self.biomass[target_idx] - consumed_biomass).max(0.0);
+                    let predator = &mut self.organisms[idx];
+                    predator.energy += consumed_biomass * CONSUMPTION_ENERGY_FRACTION;
+                    predator.consumptions_count = predator.consumptions_count.saturating_add(1);
                     consumptions += 1;
+
+                    if self.biomass[target_idx] <= plant_presence_threshold {
+                        removed_food[food_idx] = true;
+                        let food = &self.foods[food_idx];
+                        removed_positions.push(RemovedEntityPosition {
+                            entity_id: EntityId::Food(food_id),
+                            q: food.q,
+                            r: food.r,
+                        });
+                        self.occupancy[target_idx] = None;
+                    }
                 }
                 Some(Occupant::Organism(prey_id)) => {
                     let Some(prey_idx) = organism_index_by_id(&self.organisms, prey_id) else {
@@ -502,11 +508,6 @@ impl Simulation {
                             r: prey_r,
                         });
                         self.occupancy[target_idx] = None;
-                        self.pending_actions[idx] = PendingActionState {
-                            kind: PendingActionKind::Consume,
-                            turns_remaining: CONSUME_LOCK_DURATION_TURNS,
-                        };
-                        skip_pending_action_decrement[idx] = true;
                         consumptions += 1;
                         predations += 1;
                     } else {
@@ -542,7 +543,7 @@ impl Simulation {
 
         let mut new_foods = Vec::with_capacity(food_count);
         for (idx, food) in self.foods.drain(..).enumerate() {
-            if !consumed_food[idx] {
+            if !removed_food[idx] {
                 new_foods.push(food);
             }
         }
@@ -955,22 +956,6 @@ fn prey_probability(predator: &OrganismState, prey: &OrganismState) -> f32 {
         return 0.0;
     }
     (predator_energy / total_energy).clamp(0.0, 1.0)
-}
-
-fn jittered_plant_biomass_depletion(
-    sim_seed: u64,
-    tick: u64,
-    organism_id: OrganismId,
-    food_id: u64,
-) -> f32 {
-    let mixed = sim_seed
-        ^ tick.wrapping_mul(RNG_TURN_MIX)
-        ^ organism_id.0.wrapping_mul(RNG_ORGANISM_MIX)
-        ^ food_id.wrapping_mul(RNG_FOOD_MIX);
-    let sample = (mix_u64(mixed) >> 40) as u32;
-    let unit = sample as f32 / ((1_u32 << 24) - 1) as f32;
-    let signed_jitter = (unit * 2.0 - 1.0) * PLANT_BIOMASS_DEPLETION_JITTER_FRACTION;
-    PLANT_BIOMASS_DEPLETION_BASE * (1.0 + signed_jitter)
 }
 
 fn mix_u64(mut value: u64) -> u64 {
