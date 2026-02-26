@@ -69,7 +69,6 @@ export type OrganismGenome = {
   mutation_rate_add_neuron_split_edge: number;
   inter_biases: number[];
   inter_log_time_constants: number[];
-  interneuron_types: InterNeuronType[];
   action_biases: number[];
   sensory_locations: BrainLocation[];
   inter_locations: BrainLocation[];
@@ -80,8 +79,6 @@ export type BrainLocation = {
   x: number;
   y: number;
 };
-
-export type InterNeuronType = 'Excitatory' | 'Inhibitory';
 
 export type SynapseEdge = {
   pre_neuron_id: number | { 0: number };
@@ -114,7 +111,6 @@ export type SensoryNeuronState = {
 
 export type InterNeuronState = {
   neuron: NeuronState;
-  interneuron_type: InterNeuronType;
   alpha: number;
   synapses: SynapseEdge[];
 };

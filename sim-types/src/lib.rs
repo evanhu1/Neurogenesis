@@ -67,18 +67,6 @@ pub enum NeuronType {
     Action,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum InterNeuronType {
-    Excitatory,
-    Inhibitory,
-}
-
-impl Default for InterNeuronType {
-    fn default() -> Self {
-        Self::Excitatory
-    }
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct BrainLocation {
     pub x: f32,
@@ -157,8 +145,6 @@ pub struct OrganismGenome {
     pub mutation_rate_add_neuron_split_edge: f32,
     pub inter_biases: Vec<f32>,
     pub inter_log_time_constants: Vec<f32>,
-    #[serde(default)]
-    pub interneuron_types: Vec<InterNeuronType>,
     pub action_biases: Vec<f32>,
     pub sensory_locations: Vec<BrainLocation>,
     pub inter_locations: Vec<BrainLocation>,
@@ -439,8 +425,6 @@ pub struct SensoryNeuronState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct InterNeuronState {
     pub neuron: NeuronState,
-    #[serde(default)]
-    pub interneuron_type: InterNeuronType,
     pub alpha: f32,
     pub synapses: Vec<SynapseEdge>,
 }

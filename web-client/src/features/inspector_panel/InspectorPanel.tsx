@@ -75,8 +75,6 @@ export function InspectorPanel({
   const summary = useMemo(() => {
     if (!focusedOrganism) return null;
     const genome = focusedOrganism.genome;
-    const interExcitatoryCount = genome.interneuron_types.filter((v) => v === 'Excitatory').length;
-    const interInhibitoryCount = genome.interneuron_types.length - interExcitatoryCount;
     const fallbackActiveAction = focusedOrganism.brain.action.find(
       (action) => action.action_type === focusedOrganism.last_action_taken,
     );
@@ -169,8 +167,6 @@ export function InspectorPanel({
           value: String(genome.inter_log_time_constants.length),
         },
         { label: 'Action Bias Genes', value: String(genome.action_biases.length) },
-        { label: 'Inter Excitatory', value: String(interExcitatoryCount) },
-        { label: 'Inter Inhibitory', value: String(interInhibitoryCount) },
       ] satisfies StatItem[],
       mutationRates,
     };

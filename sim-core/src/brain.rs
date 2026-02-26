@@ -8,8 +8,8 @@ use crate::profiling::{self, BrainStage};
 use rand::Rng;
 use sim_types::{
     ActionNeuronState, ActionType, BrainLocation, BrainState, EntityType, InterNeuronState,
-    InterNeuronType, NeuronId, NeuronState, NeuronType, Occupant, OrganismGenome, OrganismId,
-    OrganismState, SensoryNeuronState, SensoryReceptor, SynapseEdge,
+    NeuronId, NeuronState, NeuronType, Occupant, OrganismGenome, OrganismId, OrganismState,
+    SensoryNeuronState, SensoryReceptor, SynapseEdge,
 };
 #[cfg(feature = "profiling")]
 use std::time::Instant;
@@ -114,11 +114,6 @@ pub(crate) fn express_genome<R: Rng + ?Sized>(genome: &OrganismGenome, _rng: &mu
             .copied()
             .unwrap_or(DEFAULT_INTER_LOG_TIME_CONSTANT);
         let alpha = inter_alpha_from_log_time_constant(log_time_constant);
-        let interneuron_type = genome
-            .interneuron_types
-            .get(idx)
-            .copied()
-            .unwrap_or(InterNeuronType::Excitatory);
         inter.push(InterNeuronState {
             neuron: make_neuron(
                 NeuronId(INTER_ID_BASE + i),
@@ -126,7 +121,6 @@ pub(crate) fn express_genome<R: Rng + ?Sized>(genome: &OrganismGenome, _rng: &mu
                 bias,
                 location_or_default(&genome.inter_locations, idx),
             ),
-            interneuron_type,
             alpha,
             synapses: Vec::new(),
         });
@@ -195,7 +189,7 @@ fn wire_birth_synapses_from_genome(
             pre.synapses.push(SynapseEdge {
                 pre_neuron_id: edge.pre_neuron_id,
                 post_neuron_id: edge.post_neuron_id,
-                weight: constrain_weight(edge.weight, 1.0),
+                weight: constrain_weight(edge.weight),
                 eligibility: 0.0,
                 pending_coactivation: 0.0,
             });
@@ -212,14 +206,10 @@ fn wire_birth_synapses_from_genome(
         let Some(pre) = inter.get_mut(pre_idx) else {
             continue;
         };
-        let required_sign = match pre.interneuron_type {
-            InterNeuronType::Excitatory => 1.0,
-            InterNeuronType::Inhibitory => -1.0,
-        };
         pre.synapses.push(SynapseEdge {
             pre_neuron_id: edge.pre_neuron_id,
             post_neuron_id: edge.post_neuron_id,
-            weight: constrain_weight(edge.weight, required_sign),
+            weight: constrain_weight(edge.weight),
             eligibility: 0.0,
             pending_coactivation: 0.0,
         });
@@ -497,7 +487,6 @@ pub(crate) fn apply_runtime_weight_updates(
     for sensory in &mut organism.brain.sensory {
         apply_edge_weight_update_and_fold_pending(
             &mut sensory.synapses,
-            1.0,
             eta,
             dopamine_signal,
             is_mature,
@@ -510,13 +499,8 @@ pub(crate) fn apply_runtime_weight_updates(
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     for inter in &mut organism.brain.inter {
-        let required_sign = match inter.interneuron_type {
-            InterNeuronType::Excitatory => 1.0,
-            InterNeuronType::Inhibitory => -1.0,
-        };
         apply_edge_weight_update_and_fold_pending(
             &mut inter.synapses,
-            required_sign,
             eta,
             dopamine_signal,
             is_mature,
@@ -595,7 +579,6 @@ fn compute_pending_inter_edge_coactivations(
 
 fn apply_edge_weight_update_and_fold_pending(
     edges: &mut [SynapseEdge],
-    required_sign: f32,
     eta: f32,
     dopamine: f32,
     apply_weight_update: bool,
@@ -606,7 +589,7 @@ fn apply_edge_weight_update_and_fold_pending(
         if apply_weight_update {
             let updated_weight = edge.weight + eta * dopamine * edge.eligibility
                 - PLASTIC_WEIGHT_DECAY * edge.weight;
-            edge.weight = constrain_weight(updated_weight, required_sign);
+            edge.weight = constrain_weight(updated_weight);
         }
         edge.eligibility = eligibility_retention * edge.eligibility
             + instantaneous_scale * edge.pending_coactivation;
@@ -614,28 +597,18 @@ fn apply_edge_weight_update_and_fold_pending(
     }
 }
 
-fn constrain_weight(weight: f32, required_sign: f32) -> f32 {
-    if required_sign.is_sign_negative() {
-        if weight >= 0.0 {
-            return -SYNAPSE_STRENGTH_MIN;
-        }
-        let magnitude = if HEBB_WEIGHT_CLAMP_ENABLED {
-            (-weight).clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX)
-        } else {
-            (-weight).max(SYNAPSE_STRENGTH_MIN)
-        };
-        -magnitude
-    } else {
-        if weight <= 0.0 {
-            return SYNAPSE_STRENGTH_MIN;
-        }
-        let magnitude = if HEBB_WEIGHT_CLAMP_ENABLED {
-            weight.clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX)
-        } else {
-            weight.max(SYNAPSE_STRENGTH_MIN)
-        };
-        magnitude
+fn constrain_weight(weight: f32) -> f32 {
+    if weight == 0.0 {
+        return SYNAPSE_STRENGTH_MIN;
     }
+    let magnitude = if HEBB_WEIGHT_CLAMP_ENABLED {
+        weight
+            .abs()
+            .clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX)
+    } else {
+        weight.abs().max(SYNAPSE_STRENGTH_MIN)
+    };
+    weight.signum() * magnitude
 }
 
 fn prune_low_weight_synapses(brain: &mut BrainState, threshold: f32) {

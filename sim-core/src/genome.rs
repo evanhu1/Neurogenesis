@@ -3,8 +3,7 @@ use crate::SimError;
 use rand::Rng;
 use rand_distr::{Distribution, StandardNormal};
 use sim_types::{
-    ActionType, BrainLocation, InterNeuronType, NeuronId, OrganismGenome, SeedGenomeConfig,
-    SynapseEdge,
+    ActionType, BrainLocation, NeuronId, OrganismGenome, SeedGenomeConfig, SynapseEdge,
 };
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -23,7 +22,6 @@ const ELIGIBILITY_RETENTION_MAX: f32 = 1.0;
 const SYNAPSE_PRUNE_THRESHOLD_MIN: f32 = 0.0;
 const SYNAPSE_PRUNE_THRESHOLD_MAX: f32 = 1.0;
 
-const INTER_TYPE_EXCITATORY_PRIOR: f32 = 0.8;
 const MUTATION_RATE_ADAPTATION_TIME_CONSTANT: f32 = 0.25;
 const MUTATION_RATE_MIN: f32 = 1.0e-4;
 const MUTATION_RATE_MAX: f32 = 0.5;
@@ -57,9 +55,6 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     let inter_biases: Vec<f32> = (0..num_neurons).map(|_| sample_initial_bias(rng)).collect();
     let inter_log_time_constants: Vec<f32> = (0..num_neurons)
         .map(|_| sample_uniform_log_time_constant(rng))
-        .collect();
-    let interneuron_types: Vec<InterNeuronType> = (0..num_neurons)
-        .map(|_| sample_interneuron_type(rng))
         .collect();
     let inter_locations: Vec<BrainLocation> = (0..num_neurons)
         .map(|_| sample_uniform_location(rng))
@@ -97,7 +92,6 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         mutation_rate_add_neuron_split_edge: config.mutation_rate_add_neuron_split_edge,
         inter_biases,
         inter_log_time_constants,
-        interneuron_types,
         action_biases,
         sensory_locations,
         inter_locations,
@@ -106,14 +100,6 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     };
     sync_synapse_genes_to_target(&mut genome, rng);
     genome
-}
-
-fn sample_interneuron_type<R: Rng + ?Sized>(rng: &mut R) -> InterNeuronType {
-    if rng.random::<f32>() < INTER_TYPE_EXCITATORY_PRIOR {
-        InterNeuronType::Excitatory
-    } else {
-        InterNeuronType::Inhibitory
-    }
 }
 
 fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
@@ -170,11 +156,6 @@ fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut 
             .push(sample_uniform_log_time_constant(rng));
     }
     genome.inter_log_time_constants.truncate(target_inter_len);
-
-    while genome.interneuron_types.len() < target_inter_len {
-        genome.interneuron_types.push(sample_interneuron_type(rng));
-    }
-    genome.interneuron_types.truncate(target_inter_len);
 
     while genome.inter_locations.len() < target_inter_len {
         genome.inter_locations.push(sample_uniform_location(rng));
@@ -404,16 +385,13 @@ fn mutate_random_synapse_weight<R: Rng + ?Sized>(genome: &mut OrganismGenome, rn
     }
 
     let idx = rng.random_range(0..genome.edges.len());
-    let (pre_neuron_id, weight) = {
+    let weight = {
         let edge = &genome.edges[idx];
-        (edge.pre_neuron_id, edge.weight)
+        edge.weight
     };
     let magnitude_scale = (SYNAPSE_WEIGHT_PERTURBATION_STDDEV * standard_normal(rng)).exp();
     let perturbed_weight = weight * magnitude_scale;
-    let required_sign =
-        required_pre_sign(pre_neuron_id, genome.num_neurons, &genome.interneuron_types)
-            .unwrap_or(1.0);
-    genome.edges[idx].weight = constrain_weight_to_sign(perturbed_weight, required_sign);
+    genome.edges[idx].weight = constrain_weight(perturbed_weight);
 }
 
 pub(crate) fn mutate_add_neuron_split_edge<R: Rng + ?Sized>(
@@ -429,9 +407,6 @@ pub(crate) fn mutate_add_neuron_split_edge<R: Rng + ?Sized>(
     genome
         .inter_log_time_constants
         .resize(target_inter_len, DEFAULT_INTER_LOG_TIME_CONSTANT);
-    genome
-        .interneuron_types
-        .resize(target_inter_len, InterNeuronType::Excitatory);
     genome
         .inter_locations
         .resize(target_inter_len, BrainLocation { x: 5.0, y: 5.0 });
@@ -494,46 +469,26 @@ pub(crate) fn mutate_add_neuron_split_edge<R: Rng + ?Sized>(
         ),
     };
 
-    let new_type = if selected_edge.weight.is_sign_negative() {
-        InterNeuronType::Inhibitory
-    } else {
-        InterNeuronType::Excitatory
-    };
-
     genome.num_neurons = genome.num_neurons.saturating_add(1);
     genome.inter_biases.push(new_bias);
     genome.inter_log_time_constants.push(new_log_tau);
-    genome.interneuron_types.push(new_type);
     genome.inter_locations.push(new_location);
-
-    let pre_to_new_required_sign = required_pre_sign(
-        selected_edge.pre_neuron_id,
-        genome.num_neurons,
-        &genome.interneuron_types,
-    )
-    .unwrap_or(1.0);
-    let new_to_post_required_sign =
-        required_pre_sign(new_inter_id, genome.num_neurons, &genome.interneuron_types)
-            .unwrap_or(1.0);
 
     genome.edges.push(SynapseEdge {
         pre_neuron_id: selected_edge.pre_neuron_id,
         post_neuron_id: new_inter_id,
-        weight: constrain_weight_to_sign(selected_edge.weight, pre_to_new_required_sign),
+        weight: constrain_weight(selected_edge.weight),
         eligibility: 0.0,
         pending_coactivation: 0.0,
     });
     genome.edges.push(SynapseEdge {
         pre_neuron_id: new_inter_id,
         post_neuron_id: selected_edge.post_neuron_id,
-        weight: constrain_weight_to_sign(
-            if selected_edge.weight.is_sign_negative() {
-                -1.0
-            } else {
-                1.0
-            },
-            new_to_post_required_sign,
-        ),
+        weight: if selected_edge.weight.is_sign_negative() {
+            -1.0
+        } else {
+            1.0
+        },
         eligibility: 0.0,
         pending_coactivation: 0.0,
     });
@@ -623,10 +578,7 @@ fn sanitize_synapse_genes(genome: &mut OrganismGenome) {
         .retain(|edge| is_valid_synapse_pair(edge.pre_neuron_id, edge.post_neuron_id, num_neurons));
 
     for edge in &mut genome.edges {
-        let required_sign =
-            required_pre_sign(edge.pre_neuron_id, num_neurons, &genome.interneuron_types)
-                .unwrap_or(1.0);
-        edge.weight = constrain_weight_to_sign(edge.weight, required_sign);
+        edge.weight = constrain_weight(edge.weight);
         edge.eligibility = 0.0;
         edge.pending_coactivation = 0.0;
     }
@@ -688,12 +640,10 @@ fn add_synapse_genes_with_spatial_prior<R: Rng + ?Sized>(
     });
 
     for &(_, pre_id, post_id) in weighted_candidates.iter().take(add_count) {
-        let required_sign =
-            required_pre_sign(pre_id, num_neurons, &genome.interneuron_types).unwrap_or(1.0);
         genome.edges.push(SynapseEdge {
             pre_neuron_id: pre_id,
             post_neuron_id: post_id,
-            weight: sample_signed_lognormal_weight(required_sign, rng),
+            weight: sample_lognormal_weight(rng),
             eligibility: 0.0,
             pending_coactivation: 0.0,
         });
@@ -725,15 +675,15 @@ fn weighted_without_replacement_priority<R: Rng + ?Sized>(weight: f32, rng: &mut
     -u.ln() / clamped_weight
 }
 
-fn sample_signed_lognormal_weight<R: Rng + ?Sized>(required_sign: f32, rng: &mut R) -> f32 {
+fn sample_lognormal_weight<R: Rng + ?Sized>(rng: &mut R) -> f32 {
     let z = standard_normal(rng);
     let magnitude = (SYNAPSE_WEIGHT_LOG_NORMAL_MU + SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA * z)
         .exp()
         .clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX);
-    if required_sign.is_sign_negative() {
-        -magnitude
-    } else {
+    if rng.random::<bool>() {
         magnitude
+    } else {
+        -magnitude
     }
 }
 
@@ -762,28 +712,6 @@ fn is_inter_id(id: NeuronId, num_neurons: u32) -> bool {
     (INTER_ID_BASE..INTER_ID_BASE + num_neurons).contains(&id.0)
 }
 
-fn required_pre_sign(
-    pre: NeuronId,
-    num_neurons: u32,
-    interneuron_types: &[InterNeuronType],
-) -> Option<f32> {
-    if pre.0 < SENSORY_COUNT {
-        return Some(1.0);
-    }
-    if is_inter_id(pre, num_neurons) {
-        let idx = (pre.0 - INTER_ID_BASE) as usize;
-        let inter_type = interneuron_types
-            .get(idx)
-            .copied()
-            .unwrap_or(InterNeuronType::Excitatory);
-        return Some(match inter_type {
-            InterNeuronType::Excitatory => 1.0,
-            InterNeuronType::Inhibitory => -1.0,
-        });
-    }
-    None
-}
-
 fn sort_synapse_genes(edges: &mut [SynapseEdge]) {
     edges.sort_unstable_by(|a, b| {
         synapse_key_cmp(a, b)
@@ -798,18 +726,14 @@ fn synapse_key_cmp(a: &SynapseEdge, b: &SynapseEdge) -> Ordering {
         .then_with(|| a.post_neuron_id.cmp(&b.post_neuron_id))
 }
 
-fn constrain_weight_to_sign(weight: f32, required_sign: f32) -> f32 {
-    if required_sign.is_sign_negative() {
-        if weight >= 0.0 {
-            return -SYNAPSE_STRENGTH_MIN;
-        }
-        -(-weight).clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX)
-    } else {
-        if weight <= 0.0 {
-            return SYNAPSE_STRENGTH_MIN;
-        }
-        weight.clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX)
+fn constrain_weight(weight: f32) -> f32 {
+    if weight == 0.0 {
+        return SYNAPSE_STRENGTH_MIN;
     }
+    weight.signum()
+        * weight
+            .abs()
+            .clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX)
 }
 
 fn step_u32<R: Rng + ?Sized>(value: u32, min: u32, max: u32, rng: &mut R) -> u32 {
@@ -965,23 +889,6 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
         + (a.eligibility_retention - b.eligibility_retention).abs()
         + (a.synapse_prune_threshold - b.synapse_prune_threshold).abs();
 
-    let max_enabled = a.num_neurons.max(b.num_neurons) as usize;
-    for i in 0..max_enabled {
-        let ta = a
-            .interneuron_types
-            .get(i)
-            .copied()
-            .unwrap_or(InterNeuronType::Excitatory);
-        let tb = b
-            .interneuron_types
-            .get(i)
-            .copied()
-            .unwrap_or(InterNeuronType::Excitatory);
-        if ta != tb {
-            dist += 1.0;
-        }
-    }
-
     dist += synapse_gene_distance(&a.edges, &b.edges);
 
     dist += average_location_distance(
@@ -990,6 +897,7 @@ pub(crate) fn genome_distance(a: &OrganismGenome, b: &OrganismGenome) -> f32 {
         SENSORY_COUNT as usize,
     );
     dist += average_location_distance(&a.action_locations, &b.action_locations, ACTION_COUNT);
+    let max_enabled = a.num_neurons.max(b.num_neurons) as usize;
     dist += average_location_distance(&a.inter_locations, &b.inter_locations, max_enabled.max(1));
 
     let a_inter_centroid = centroid(&a.inter_locations, a.num_neurons as usize);

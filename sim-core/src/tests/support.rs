@@ -53,7 +53,6 @@ pub(super) fn test_genome() -> OrganismGenome {
         mutation_rate_add_neuron_split_edge: 0.0,
         inter_biases: vec![0.0],
         inter_log_time_constants: vec![0.0],
-        interneuron_types: vec![InterNeuronType::Excitatory],
         action_biases: vec![0.0; ActionType::ALL.len()],
         sensory_locations: vec![default_loc; crate::brain::SENSORY_COUNT as usize],
         inter_locations: vec![default_loc],
@@ -164,7 +163,6 @@ fn forced_brain(
             activation: confidence,
             parent_ids: Vec::new(),
         },
-        interneuron_type: InterNeuronType::Excitatory,
         alpha: 1.0,
         synapses: inter_synapses,
     }];

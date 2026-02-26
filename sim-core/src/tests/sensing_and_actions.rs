@@ -29,7 +29,6 @@ fn simple_action_bias_organism(
     genome.action_biases[action_index(ActionType::Reproduce)] = reproduce_bias;
     genome.inter_biases.clear();
     genome.inter_log_time_constants.clear();
-    genome.interneuron_types.clear();
     genome.inter_locations.clear();
 
     let mut rng = ChaCha8Rng::seed_from_u64(55);
@@ -53,11 +52,7 @@ fn simple_action_bias_organism(
     }
 }
 
-fn dense_edges(
-    num_neurons: u32,
-    inter_types: &[InterNeuronType],
-    target: usize,
-) -> Vec<SynapseEdge> {
+fn dense_edges(num_neurons: u32, target: usize) -> Vec<SynapseEdge> {
     let mut edges = Vec::new();
 
     for pre_sensory in 0..SENSORY_COUNT {
@@ -89,14 +84,6 @@ fn dense_edges(
 
     for pre_inter in 0..num_neurons {
         let pre_id = NeuronId(INTER_ID_BASE + pre_inter);
-        let sign = match inter_types
-            .get(pre_inter as usize)
-            .copied()
-            .unwrap_or(InterNeuronType::Excitatory)
-        {
-            InterNeuronType::Excitatory => 1.0,
-            InterNeuronType::Inhibitory => -1.0,
-        };
         for post_inter in 0..num_neurons {
             if pre_inter == post_inter {
                 continue;
@@ -104,7 +91,7 @@ fn dense_edges(
             edges.push(SynapseEdge {
                 pre_neuron_id: pre_id,
                 post_neuron_id: NeuronId(INTER_ID_BASE + post_inter),
-                weight: 0.25 * sign,
+                weight: 0.25,
                 eligibility: 0.0,
                 pending_coactivation: 0.0,
             });
@@ -116,7 +103,7 @@ fn dense_edges(
             edges.push(SynapseEdge {
                 pre_neuron_id: pre_id,
                 post_neuron_id: NeuronId(ACTION_ID_BASE + post_action),
-                weight: 0.25 * sign,
+                weight: 0.25,
                 eligibility: 0.0,
                 pending_coactivation: 0.0,
             });
@@ -135,13 +122,12 @@ fn express_genome_uses_stored_synapse_topology() {
     genome.num_neurons = 4;
     genome.inter_biases = vec![0.1; 4];
     genome.inter_log_time_constants = vec![0.0; 4];
-    genome.interneuron_types = vec![InterNeuronType::Excitatory; 4];
     genome.inter_locations = (0..4).map(|i| loc(i as f32, 10.0 - i as f32)).collect();
     genome.sensory_locations = vec![loc(0.0, 0.0); SENSORY_COUNT as usize];
     genome.action_locations = (0..ActionType::ALL.len())
         .map(|i| loc(8.0, 1.0 + i as f32))
         .collect();
-    genome.edges = dense_edges(genome.num_neurons, &genome.interneuron_types, 20);
+    genome.edges = dense_edges(genome.num_neurons, 20);
     genome.num_synapses = genome.edges.len() as u32;
 
     let mut rng_a = ChaCha8Rng::seed_from_u64(11);
@@ -172,7 +158,6 @@ fn mutate_genome_adds_synapses_when_below_target() {
     genome_template.num_synapses = 8;
     genome_template.inter_biases = vec![0.0; 12];
     genome_template.inter_log_time_constants = vec![0.0; 12];
-    genome_template.interneuron_types = vec![InterNeuronType::Excitatory; 12];
     genome_template.sensory_locations = vec![loc(0.0, 0.0); SENSORY_COUNT as usize];
     genome_template.inter_locations = (0..12).map(|i| loc(1.0 + i as f32 * 0.7, 5.0)).collect();
     genome_template.action_locations = (0..ActionType::ALL.len())
@@ -187,57 +172,6 @@ fn mutate_genome_adds_synapses_when_below_target() {
 
     assert_eq!(genome.num_synapses, 8);
     assert_eq!(genome.edges.len(), 8);
-}
-
-#[test]
-fn express_genome_respects_dale_signs_for_inter_outgoing_synapses() {
-    let mut genome = test_genome();
-    genome.num_neurons = 2;
-    genome.inter_biases = vec![0.0, 0.0];
-    genome.inter_log_time_constants = vec![0.0, 0.0];
-    genome.interneuron_types = vec![InterNeuronType::Excitatory, InterNeuronType::Inhibitory];
-    genome.inter_locations = vec![loc(5.0, 5.0), loc(5.5, 5.5)];
-    genome.edges = vec![
-        SynapseEdge {
-            pre_neuron_id: NeuronId(INTER_ID_BASE),
-            post_neuron_id: NeuronId(ACTION_ID_BASE),
-            weight: 0.3,
-            eligibility: 0.0,
-            pending_coactivation: 0.0,
-        },
-        SynapseEdge {
-            pre_neuron_id: NeuronId(INTER_ID_BASE),
-            post_neuron_id: NeuronId(INTER_ID_BASE + 1),
-            weight: 0.2,
-            eligibility: 0.0,
-            pending_coactivation: 0.0,
-        },
-        SynapseEdge {
-            pre_neuron_id: NeuronId(INTER_ID_BASE + 1),
-            post_neuron_id: NeuronId(ACTION_ID_BASE + 1),
-            weight: 0.4,
-            eligibility: 0.0,
-            pending_coactivation: 0.0,
-        },
-        SynapseEdge {
-            pre_neuron_id: NeuronId(INTER_ID_BASE + 1),
-            post_neuron_id: NeuronId(INTER_ID_BASE),
-            weight: 0.4,
-            eligibility: 0.0,
-            pending_coactivation: 0.0,
-        },
-    ];
-    genome.num_synapses = genome.edges.len() as u32;
-
-    let mut rng = ChaCha8Rng::seed_from_u64(1234);
-    let brain = express_genome(&genome, &mut rng);
-
-    let excitatory = &brain.inter[0];
-    let inhibitory = &brain.inter[1];
-    assert!(!excitatory.synapses.is_empty());
-    assert!(!inhibitory.synapses.is_empty());
-    assert!(excitatory.synapses.iter().all(|edge| edge.weight > 0.0));
-    assert!(inhibitory.synapses.iter().all(|edge| edge.weight < 0.0));
 }
 
 #[test]
@@ -320,7 +254,7 @@ fn scan_rays_stops_at_wall_occluders() {
 }
 
 #[test]
-fn runtime_plasticity_updates_weights_and_preserves_sign() {
+fn runtime_plasticity_updates_weights() {
     let mut genome = test_genome();
     genome.num_neurons = 0;
     genome.num_synapses = 0;
@@ -397,7 +331,6 @@ fn runtime_plasticity_updates_weights_and_preserves_sign() {
     let after = organism.brain.sensory[0].synapses[0].weight;
 
     assert_ne!(before, after);
-    assert!(after > 0.0);
 }
 
 #[test]
@@ -499,7 +432,6 @@ fn inter_recurrent_eligibility_uses_prev_inter_pre_signal_only_for_inter_targets
             activation: 0.8,
             parent_ids: Vec::new(),
         },
-        interneuron_type: InterNeuronType::Excitatory,
         alpha: 1.0,
         synapses: vec![
             SynapseEdge {
@@ -528,7 +460,6 @@ fn inter_recurrent_eligibility_uses_prev_inter_pre_signal_only_for_inter_targets
             activation: 0.0,
             parent_ids: Vec::new(),
         },
-        interneuron_type: InterNeuronType::Excitatory,
         alpha: 1.0,
         synapses: Vec::new(),
     };

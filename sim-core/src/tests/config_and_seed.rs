@@ -57,7 +57,6 @@ fn seed_genome_initializes_spatial_vectors_within_brain_space() {
     assert_eq!(genome.num_neurons, 4);
     assert_eq!(genome.inter_biases.len(), 4);
     assert_eq!(genome.inter_log_time_constants.len(), 4);
-    assert_eq!(genome.interneuron_types.len(), 4);
     assert_eq!(genome.inter_locations.len(), 4);
     assert_eq!(
         genome.sensory_locations.len(),
@@ -141,7 +140,6 @@ fn mutate_genome_sanitizes_synapse_genes_and_does_not_trim_excess() {
     genome.num_neurons = 2;
     genome.inter_biases = vec![0.0; 2];
     genome.inter_log_time_constants = vec![0.0; 2];
-    genome.interneuron_types = vec![InterNeuronType::Excitatory, InterNeuronType::Inhibitory];
     genome.inter_locations = vec![BrainLocation { x: 5.0, y: 5.0 }; 2];
     genome.num_synapses = 1;
     genome.edges = vec![
@@ -193,7 +191,10 @@ fn mutate_genome_sanitizes_synapse_genes_and_does_not_trim_excess() {
     assert_eq!(first.pre_neuron_id, NeuronId(0));
     assert_eq!(first.post_neuron_id, NeuronId(crate::brain::INTER_ID_BASE));
     assert_eq!(first.eligibility, 0.0);
-    assert!(first.weight > 0.0);
+    assert!(
+        first.weight.abs() >= crate::genome::SYNAPSE_STRENGTH_MIN
+            && first.weight.abs() <= crate::genome::SYNAPSE_STRENGTH_MAX
+    );
 
     assert_eq!(
         second.pre_neuron_id,
@@ -204,70 +205,9 @@ fn mutate_genome_sanitizes_synapse_genes_and_does_not_trim_excess() {
         NeuronId(crate::brain::ACTION_ID_BASE)
     );
     assert_eq!(second.eligibility, 0.0);
-    assert!(second.weight < 0.0);
-}
-
-#[test]
-fn mutate_genome_can_perturb_inherited_synapse_weights_without_flipping_sign() {
-    let mut genome = test_genome();
-    genome.num_neurons = 2;
-    genome.inter_biases = vec![0.0; 2];
-    genome.inter_log_time_constants = vec![0.0; 2];
-    genome.interneuron_types = vec![InterNeuronType::Excitatory, InterNeuronType::Inhibitory];
-    genome.inter_locations = vec![BrainLocation { x: 5.0, y: 5.0 }; 2];
-    genome.mutation_rate_synapse_weight_perturbation = 1.0;
-    genome.edges = vec![
-        SynapseEdge {
-            pre_neuron_id: NeuronId(0),
-            post_neuron_id: NeuronId(crate::brain::INTER_ID_BASE),
-            weight: 0.3,
-            eligibility: 0.0,
-            pending_coactivation: 0.0,
-        },
-        SynapseEdge {
-            pre_neuron_id: NeuronId(crate::brain::INTER_ID_BASE + 1),
-            post_neuron_id: NeuronId(crate::brain::ACTION_ID_BASE),
-            weight: -0.45,
-            eligibility: 0.0,
-            pending_coactivation: 0.0,
-        },
-    ];
-    genome.num_synapses = genome.edges.len() as u32;
-
-    let initial_weights: Vec<(NeuronId, NeuronId, f32)> = genome
-        .edges
-        .iter()
-        .map(|edge| (edge.pre_neuron_id, edge.post_neuron_id, edge.weight))
-        .collect();
-
-    let mut rng = ChaCha8Rng::seed_from_u64(17);
-    for _ in 0..16 {
-        crate::genome::mutate_genome(&mut genome, 1.0, &mut rng);
-    }
-
-    assert_eq!(genome.edges.len(), 2);
-    let mut changed = false;
-    for (pre, post, initial_weight) in initial_weights {
-        let edge = genome
-            .edges
-            .iter()
-            .find(|edge| edge.pre_neuron_id == pre && edge.post_neuron_id == post)
-            .expect("edge should remain present");
-        if (edge.weight - initial_weight).abs() > 1.0e-6 {
-            changed = true;
-        }
-        assert_eq!(
-            edge.weight.is_sign_negative(),
-            initial_weight.is_sign_negative()
-        );
-        assert!(
-            edge.weight.abs() >= crate::genome::SYNAPSE_STRENGTH_MIN
-                && edge.weight.abs() <= crate::genome::SYNAPSE_STRENGTH_MAX
-        );
-    }
     assert!(
-        changed,
-        "at least one inherited edge weight should be perturbed"
+        second.weight.abs() >= crate::genome::SYNAPSE_STRENGTH_MIN
+            && second.weight.abs() <= crate::genome::SYNAPSE_STRENGTH_MAX
     );
 }
 
@@ -277,7 +217,6 @@ fn mutate_genome_can_apply_add_neuron_split_edge_operator() {
     genome.num_neurons = 1;
     genome.inter_biases = vec![0.0];
     genome.inter_log_time_constants = vec![0.0];
-    genome.interneuron_types = vec![InterNeuronType::Excitatory];
     genome.inter_locations = vec![BrainLocation { x: 5.0, y: 5.0 }];
     genome.edges = vec![SynapseEdge {
         pre_neuron_id: NeuronId(0),
@@ -321,7 +260,6 @@ fn mutate_add_neuron_split_edge_replaces_synapse_and_extends_inter_vectors() {
     genome.num_neurons = 1;
     genome.inter_biases = vec![0.0];
     genome.inter_log_time_constants = vec![0.2];
-    genome.interneuron_types = vec![InterNeuronType::Excitatory];
     genome.inter_locations = vec![BrainLocation { x: 2.0, y: 3.0 }];
     genome.sensory_locations =
         vec![BrainLocation { x: 1.0, y: 1.0 }; crate::brain::SENSORY_COUNT as usize];
@@ -342,11 +280,9 @@ fn mutate_add_neuron_split_edge_replaces_synapse_and_extends_inter_vectors() {
     assert_eq!(genome.num_neurons, 2);
     assert_eq!(genome.inter_biases.len(), 2);
     assert_eq!(genome.inter_log_time_constants.len(), 2);
-    assert_eq!(genome.interneuron_types.len(), 2);
     assert_eq!(genome.inter_locations.len(), 2);
     assert_eq!(genome.num_synapses, 2);
     assert_eq!(genome.edges.len(), 2);
-    assert_eq!(genome.interneuron_types[1], InterNeuronType::Excitatory);
     assert!(genome
         .edges
         .iter()
@@ -359,50 +295,6 @@ fn mutate_add_neuron_split_edge_replaces_synapse_and_extends_inter_vectors() {
         edge.pre_neuron_id == NeuronId(0)
             && edge.post_neuron_id == NeuronId(crate::brain::ACTION_ID_BASE)
     }));
-}
-
-#[test]
-fn mutate_add_neuron_split_edge_respects_required_dale_signs() {
-    let mut genome = test_genome();
-    genome.num_neurons = 2;
-    genome.inter_biases = vec![0.0; 2];
-    genome.inter_log_time_constants = vec![0.0, 0.3];
-    genome.interneuron_types = vec![InterNeuronType::Excitatory, InterNeuronType::Inhibitory];
-    genome.inter_locations = vec![
-        BrainLocation { x: 4.0, y: 4.0 },
-        BrainLocation { x: 6.0, y: 6.0 },
-    ];
-    genome.edges = vec![SynapseEdge {
-        pre_neuron_id: NeuronId(crate::brain::INTER_ID_BASE + 1),
-        post_neuron_id: NeuronId(crate::brain::ACTION_ID_BASE + 1),
-        weight: -0.45,
-        eligibility: 0.2,
-        pending_coactivation: 0.0,
-    }];
-    genome.num_synapses = genome.edges.len() as u32;
-
-    let mut rng = ChaCha8Rng::seed_from_u64(55);
-    crate::genome::mutate_add_neuron_split_edge(&mut genome, &mut rng);
-
-    let old_pre = NeuronId(crate::brain::INTER_ID_BASE + 1);
-    let new_inter_id = NeuronId(crate::brain::INTER_ID_BASE + 2);
-    let old_post = NeuronId(crate::brain::ACTION_ID_BASE + 1);
-
-    assert_eq!(genome.num_neurons, 3);
-    assert_eq!(genome.interneuron_types[2], InterNeuronType::Inhibitory);
-
-    let pre_to_new = genome
-        .edges
-        .iter()
-        .find(|edge| edge.pre_neuron_id == old_pre && edge.post_neuron_id == new_inter_id)
-        .expect("pre->new split edge should exist");
-    let new_to_post = genome
-        .edges
-        .iter()
-        .find(|edge| edge.pre_neuron_id == new_inter_id && edge.post_neuron_id == old_post)
-        .expect("new->post split edge should exist");
-    assert!(pre_to_new.weight < 0.0);
-    assert!(new_to_post.weight < 0.0);
 }
 
 #[test]

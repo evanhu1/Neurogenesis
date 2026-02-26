@@ -21,7 +21,6 @@ type BrainNode = {
   gx: number;
   gy: number;
   timeConstant?: number;
-  interneuronType?: 'Excitatory' | 'Inhibitory';
   isActive: boolean;
 };
 
@@ -65,7 +64,6 @@ export function computeBrainLayout(
       gx: finiteOr(neuron.neuron.x, 3.5 + (interIdx % 6) * 0.7),
       gy: finiteOr(neuron.neuron.y, 1 + Math.floor(interIdx / 6) * 0.9),
       timeConstant: timeConstantFromAlpha(neuron.alpha),
-      interneuronType: neuron.interneuron_type,
       isActive: false,
     });
   });
@@ -414,9 +412,7 @@ export function renderBrain(
       node.type === 'sensory'
         ? '#f59e0b'
         : node.type === 'inter'
-          ? node.interneuronType === 'Inhibitory'
-            ? '#dc2626'
-            : '#2563eb'
+          ? '#2563eb'
           : '#16a34a';
     ctx.arc(node.x, node.y, NODE_RADIUS, 0, Math.PI * 2);
     ctx.fill();
