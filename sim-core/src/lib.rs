@@ -2,10 +2,9 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 use sim_types::{
-    FoodState, MetricsSnapshot, OccupancyCell, Occupant, OrganismGenome, OrganismId, OrganismState,
-    SpeciesId, TickDelta, WorldConfig, WorldSnapshot,
+    FoodState, MetricsSnapshot, OccupancyCell, Occupant, OrganismId, OrganismState, TickDelta,
+    WorldConfig, WorldSnapshot,
 };
-use std::collections::{BTreeMap, HashSet};
 use thiserror::Error;
 
 mod brain;
@@ -34,8 +33,6 @@ pub enum SimError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Simulation {
     config: WorldConfig,
-    species_registry: BTreeMap<SpeciesId, OrganismGenome>,
-    next_species_id: u32,
     turn: u64,
     seed: u64,
     rng: ChaCha8Rng,
@@ -77,8 +74,6 @@ impl Simulation {
         let capacity = grid::world_capacity(config.world_width);
         let mut sim = Self {
             config,
-            species_registry: BTreeMap::new(),
-            next_species_id: 0,
             turn: 0,
             seed,
             rng: ChaCha8Rng::seed_from_u64(seed),
@@ -127,7 +122,6 @@ impl Simulation {
             turn: self.turn,
             rng_seed: self.seed,
             config: self.config.clone(),
-            species_registry: self.species_registry.clone(),
             organisms,
             foods,
             occupancy,
@@ -139,8 +133,6 @@ impl Simulation {
         self.seed = seed.unwrap_or(self.seed);
         self.rng = ChaCha8Rng::seed_from_u64(self.seed);
         self.turn = 0;
-        self.species_registry.clear();
-        self.next_species_id = 0;
         self.next_organism_id = 0;
         self.next_food_id = 0;
         self.organisms.clear();
@@ -302,35 +294,6 @@ impl Simulation {
             )));
         }
 
-        let max_species_id = self
-            .species_registry
-            .keys()
-            .map(|id| id.0)
-            .max()
-            .unwrap_or(0);
-        if !self.species_registry.is_empty() && self.next_species_id <= max_species_id {
-            return Err(SimError::InvalidState(format!(
-                "next_species_id {} must be greater than max species id {}",
-                self.next_species_id, max_species_id
-            )));
-        }
-
-        let living_species: HashSet<SpeciesId> =
-            self.organisms.iter().map(|o| o.species_id).collect();
-        let known_species: HashSet<SpeciesId> = self.species_registry.keys().copied().collect();
-        if !living_species.is_subset(&known_species) {
-            return Err(SimError::InvalidState(
-                "species_registry is missing one or more living species".to_owned(),
-            ));
-        }
-
-        let mut computed_species_counts = BTreeMap::new();
-        for organism in &self.organisms {
-            *computed_species_counts
-                .entry(organism.species_id)
-                .or_insert(0_u32) += 1;
-        }
-
         if self.metrics.organisms != self.organisms.len() as u32 {
             return Err(SimError::InvalidState(format!(
                 "metrics.organisms {} does not match organism count {}",
@@ -339,32 +302,7 @@ impl Simulation {
             )));
         }
 
-        if self.metrics.species_counts != computed_species_counts {
-            return Err(SimError::InvalidState(
-                "metrics.species_counts does not match organism population".to_owned(),
-            ));
-        }
-
-        if self.metrics.total_species_created != self.next_species_id {
-            return Err(SimError::InvalidState(format!(
-                "metrics.total_species_created {} does not match next_species_id {}",
-                self.metrics.total_species_created, self.next_species_id
-            )));
-        }
-
         Ok(())
-    }
-
-    pub(crate) fn alloc_species_id(&mut self) -> SpeciesId {
-        let id = SpeciesId(self.next_species_id);
-        self.next_species_id = self.next_species_id.saturating_add(1);
-        id
-    }
-
-    pub(crate) fn prune_extinct_species(&mut self) {
-        let living: std::collections::HashSet<SpeciesId> =
-            self.organisms.iter().map(|o| o.species_id).collect();
-        self.species_registry.retain(|id, _| living.contains(id));
     }
 }
 

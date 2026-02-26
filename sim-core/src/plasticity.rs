@@ -1,12 +1,13 @@
-use crate::brain::{BrainScratch, ACTION_COUNT, ACTION_ID_BASE, INTER_ID_BASE};
-use crate::genome::{SYNAPSE_STRENGTH_MAX, SYNAPSE_STRENGTH_MIN};
+use crate::brain::{
+    constrain_weight, refresh_parent_ids_and_synapse_count, BrainScratch, ACTION_COUNT,
+    ACTION_ID_BASE, INTER_ID_BASE,
+};
 #[cfg(feature = "profiling")]
 use crate::profiling::{self, BrainStage};
-use sim_types::{BrainState, NeuronId, OrganismState, SynapseEdge};
+use sim_types::{BrainState, OrganismState, SynapseEdge};
 #[cfg(feature = "profiling")]
 use std::time::Instant;
 
-const HEBB_WEIGHT_CLAMP_ENABLED: bool = true;
 const DOPAMINE_ENERGY_DELTA_SCALE: f32 = 10.0;
 const PLASTIC_WEIGHT_DECAY: f32 = 0.001;
 const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
@@ -201,20 +202,6 @@ fn apply_edge_weight_update_and_fold_pending(
     }
 }
 
-fn constrain_weight(weight: f32) -> f32 {
-    if weight == 0.0 {
-        return SYNAPSE_STRENGTH_MIN;
-    }
-    let magnitude = if HEBB_WEIGHT_CLAMP_ENABLED {
-        weight
-            .abs()
-            .clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX)
-    } else {
-        weight.abs().max(SYNAPSE_STRENGTH_MIN)
-    };
-    weight.signum() * magnitude
-}
-
 fn prune_low_weight_synapses(brain: &mut BrainState, threshold: f32) {
     let mut pruned_any = false;
 
@@ -236,72 +223,6 @@ fn prune_low_weight_synapses(brain: &mut BrainState, threshold: f32) {
     if pruned_any {
         refresh_parent_ids_and_synapse_count(brain);
     }
-}
-
-fn refresh_parent_ids_and_synapse_count(brain: &mut BrainState) {
-    let inter_len = brain.inter.len();
-    let action_len = brain.action.len();
-    let mut inter_parent_ids: Vec<Vec<NeuronId>> = vec![Vec::new(); inter_len];
-    let mut action_parent_ids: Vec<Vec<NeuronId>> = vec![Vec::new(); action_len];
-
-    for sensory in &brain.sensory {
-        let pre_id = sensory.neuron.neuron_id;
-        for synapse in &sensory.synapses {
-            if synapse.post_neuron_id.0 >= INTER_ID_BASE {
-                let inter_idx = synapse.post_neuron_id.0.wrapping_sub(INTER_ID_BASE) as usize;
-                if inter_idx < inter_parent_ids.len() {
-                    inter_parent_ids[inter_idx].push(pre_id);
-                    continue;
-                }
-            }
-            if synapse.post_neuron_id.0 >= ACTION_ID_BASE {
-                let action_idx = synapse.post_neuron_id.0.wrapping_sub(ACTION_ID_BASE) as usize;
-                if action_idx < action_parent_ids.len() {
-                    action_parent_ids[action_idx].push(pre_id);
-                }
-            }
-        }
-    }
-
-    for inter in &brain.inter {
-        let pre_id = inter.neuron.neuron_id;
-        for synapse in &inter.synapses {
-            if synapse.post_neuron_id.0 >= INTER_ID_BASE {
-                let inter_idx = synapse.post_neuron_id.0.wrapping_sub(INTER_ID_BASE) as usize;
-                if inter_idx < inter_parent_ids.len() {
-                    inter_parent_ids[inter_idx].push(pre_id);
-                    continue;
-                }
-            }
-            if synapse.post_neuron_id.0 >= ACTION_ID_BASE {
-                let action_idx = synapse.post_neuron_id.0.wrapping_sub(ACTION_ID_BASE) as usize;
-                if action_idx < action_parent_ids.len() {
-                    action_parent_ids[action_idx].push(pre_id);
-                }
-            }
-        }
-    }
-
-    for (idx, inter) in brain.inter.iter_mut().enumerate() {
-        let mut parents = std::mem::take(&mut inter_parent_ids[idx]);
-        parents.sort();
-        parents.dedup();
-        inter.neuron.parent_ids = parents;
-    }
-    for (idx, action) in brain.action.iter_mut().enumerate() {
-        let mut parents = std::mem::take(&mut action_parent_ids[idx]);
-        parents.sort();
-        parents.dedup();
-        action.neuron.parent_ids = parents;
-    }
-
-    let synapse_count = brain
-        .sensory
-        .iter()
-        .map(|n| n.synapses.len())
-        .sum::<usize>()
-        + brain.inter.iter().map(|n| n.synapses.len()).sum::<usize>();
-    brain.synapse_count = synapse_count as u32;
 }
 
 fn split_inter_and_action_edges_mut(

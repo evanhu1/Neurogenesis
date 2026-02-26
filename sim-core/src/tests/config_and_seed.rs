@@ -314,23 +314,6 @@ fn seed_num_synapses_is_clamped_to_possible_pairs() {
 }
 
 #[test]
-fn genome_distance_captures_geometry_and_synapse_traits() {
-    let mut a = test_genome();
-    let mut b = a.clone();
-
-    assert_eq!(crate::genome::genome_distance(&a, &b), 0.0);
-
-    b.num_synapses = b.num_synapses.saturating_add(3);
-    b.sensory_locations[0].x += 2.0;
-    let distance = crate::genome::genome_distance(&a, &b);
-    assert!(distance > 0.0);
-
-    a.inter_locations[0].y += 4.0;
-    let second_distance = crate::genome::genome_distance(&a, &b);
-    assert!(second_distance > distance);
-}
-
-#[test]
 fn global_mutation_rate_modifier_does_not_change_inherited_mutation_rate_genes() {
     let mut genome_a = test_genome();
 

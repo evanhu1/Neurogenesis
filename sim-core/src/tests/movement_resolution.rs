@@ -194,3 +194,62 @@ fn dopamine_stays_near_zero_when_idle_without_events() {
         "idle baseline dopamine should stay near zero, got {dopamine_t2}"
     );
 }
+
+#[test]
+fn disabling_runtime_plasticity_keeps_weights_traces_and_dopamine_static() {
+    let mut cfg = test_config(5, 1);
+    cfg.runtime_plasticity_enabled = false;
+    let mut sim = Simulation::new(cfg, 302).expect("simulation should initialize");
+
+    let mut organism = make_organism(
+        0,
+        1,
+        1,
+        FacingDirection::East,
+        false,
+        false,
+        false,
+        0.9,
+        100.0,
+    );
+    organism.genome.hebb_eta_gain = 0.5;
+    organism.genome.synapse_prune_threshold = 0.5;
+    organism.genome.age_of_maturity = 0;
+    for synapse in &mut organism.brain.inter[0].synapses {
+        synapse.weight = 0.2;
+        synapse.eligibility = 0.0;
+        synapse.pending_coactivation = 0.0;
+    }
+    let initial_weights: Vec<f32> = organism.brain.inter[0]
+        .synapses
+        .iter()
+        .map(|synapse| synapse.weight)
+        .collect();
+    let initial_synapse_count = organism.brain.synapse_count;
+    let initial_energy_prev = organism.energy_prev;
+    configure_sim(&mut sim, vec![organism]);
+
+    let _ = tick_once(&mut sim);
+    let organism = sim
+        .organisms
+        .iter()
+        .find(|item| item.id == OrganismId(0))
+        .expect("organism should exist");
+
+    let after_weights: Vec<f32> = organism.brain.inter[0]
+        .synapses
+        .iter()
+        .map(|synapse| synapse.weight)
+        .collect();
+    assert_eq!(after_weights, initial_weights);
+    assert_eq!(organism.brain.synapse_count, initial_synapse_count);
+    assert!(
+        organism.brain.inter[0]
+            .synapses
+            .iter()
+            .all(|synapse| synapse.eligibility == 0.0 && synapse.pending_coactivation == 0.0),
+        "plasticity-off mode should not compute eligibility or pending coactivations"
+    );
+    assert_eq!(organism.dopamine, 0.0);
+    assert_eq!(organism.energy_prev, initial_energy_prev);
+}

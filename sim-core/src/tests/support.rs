@@ -79,7 +79,6 @@ pub(super) fn stable_test_config() -> WorldConfig {
         terrain_noise_scale: 0.02,
         terrain_threshold: 1.0,
         max_organism_age: 500,
-        speciation_threshold: 50.0,
         global_mutation_rate_modifier: 1.0,
         runtime_plasticity_enabled: true,
         seed_genome_config: SeedGenomeConfig {
@@ -210,7 +209,6 @@ pub(super) fn make_organism(
     let initial_energy = if energy <= 0.0 { 10.0 } else { energy };
     OrganismState {
         id: OrganismId(id),
-        species_id: SpeciesId(0),
         q,
         r,
         generation: 0,
@@ -244,7 +242,6 @@ pub(super) fn reproduction_request_from_parent(
     SpawnRequest {
         kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
             parent_genome: parent.genome.clone(),
-            parent_species_id: parent.species_id,
             parent_generation: parent.generation,
             parent_facing: parent.facing,
             q,
@@ -267,7 +264,6 @@ pub(super) fn reproduction_request_at(
     SpawnRequest {
         kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
             parent_genome: parent.genome.clone(),
-            parent_species_id: parent.species_id,
             parent_generation: parent.generation,
             parent_facing: parent.facing,
             q,
@@ -278,20 +274,6 @@ pub(super) fn reproduction_request_at(
 
 pub(super) fn configure_sim(sim: &mut Simulation, mut organisms: Vec<OrganismState>) {
     organisms.sort_by_key(|organism| organism.id);
-    sim.species_registry.clear();
-    let mut max_species_id = None;
-    for organism in &organisms {
-        sim.species_registry
-            .entry(organism.species_id)
-            .or_insert_with(|| organism.genome.clone());
-        max_species_id = Some(
-            max_species_id.map_or(organism.species_id.0, |current: u32| {
-                current.max(organism.species_id.0)
-            }),
-        );
-    }
-    sim.next_species_id = max_species_id.map_or(0, |max_id| max_id.saturating_add(1));
-
     sim.organisms = organisms;
     sim.pending_actions = vec![PendingActionState::default(); sim.organisms.len()];
     sim.foods.clear();

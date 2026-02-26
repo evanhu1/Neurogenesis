@@ -1,14 +1,10 @@
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct OrganismId(pub u64);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NeuronId(pub u32);
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct SpeciesId(pub u32);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FoodId(pub u64);
@@ -205,7 +201,6 @@ pub struct WorldConfig {
     #[serde(default = "default_terrain_threshold")]
     pub terrain_threshold: f32,
     pub max_organism_age: u32,
-    pub speciation_threshold: f32,
     #[serde(default = "default_global_mutation_rate_modifier")]
     pub global_mutation_rate_modifier: f32,
     #[serde(default = "default_runtime_plasticity_enabled")]
@@ -245,7 +240,6 @@ struct WorldConfigDeserialize {
     #[serde(default = "default_terrain_threshold")]
     terrain_threshold: f32,
     max_organism_age: u32,
-    speciation_threshold: f32,
     #[serde(default = "default_global_mutation_rate_modifier")]
     global_mutation_rate_modifier: f32,
     #[serde(default = "default_runtime_plasticity_enabled")]
@@ -279,7 +273,6 @@ impl<'de> Deserialize<'de> for WorldConfig {
             terrain_noise_scale: raw.terrain_noise_scale,
             terrain_threshold: raw.terrain_threshold,
             max_organism_age: raw.max_organism_age,
-            speciation_threshold: raw.speciation_threshold,
             global_mutation_rate_modifier: raw.global_mutation_rate_modifier,
             runtime_plasticity_enabled: raw.runtime_plasticity_enabled,
             seed_genome_config: raw.seed_genome_config,
@@ -455,7 +448,6 @@ pub struct BrainState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OrganismState {
     pub id: OrganismId,
-    pub species_id: SpeciesId,
     pub q: i32,
     pub r: i32,
     #[serde(default)]
@@ -494,8 +486,6 @@ pub struct MetricsSnapshot {
     pub total_consumptions: u64,
     pub reproductions_last_turn: u64,
     pub starvations_last_turn: u64,
-    pub total_species_created: u32,
-    pub species_counts: BTreeMap<SpeciesId, u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -503,7 +493,6 @@ pub struct WorldSnapshot {
     pub turn: u64,
     pub rng_seed: u64,
     pub config: WorldConfig,
-    pub species_registry: BTreeMap<SpeciesId, OrganismGenome>,
     pub organisms: Vec<OrganismState>,
     pub foods: Vec<FoodState>,
     pub occupancy: Vec<OccupancyCell>,

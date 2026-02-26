@@ -8,10 +8,10 @@ use crate::{PendingActionKind, PendingActionState, Simulation};
 use rayon::prelude::*;
 use sim_types::{
     ActionType, EntityId, FacingDirection, FoodState, Occupant, OrganismFacing, OrganismId,
-    OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId, TickDelta, WorldConfig,
+    OrganismMove, OrganismState, RemovedEntityPosition, TickDelta, WorldConfig,
 };
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 #[cfg(feature = "profiling")]
 use std::time::Instant;
 
@@ -161,12 +161,6 @@ impl Simulation {
         #[cfg(feature = "profiling")]
         profiling::record_turn_phase(TurnPhase::Spawn, phase_started.elapsed());
         let reproductions = spawned.len() as u64;
-
-        #[cfg(feature = "profiling")]
-        let phase_started = Instant::now();
-        self.prune_extinct_species();
-        #[cfg(feature = "profiling")]
-        profiling::record_turn_phase(TurnPhase::PruneSpecies, phase_started.elapsed());
 
         #[cfg(feature = "profiling")]
         let phase_started = Instant::now();
@@ -630,7 +624,6 @@ impl Simulation {
                     spawn_requests.push(SpawnRequest {
                         kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
                             parent_genome: parent.genome.clone(),
-                            parent_species_id: parent.species_id,
                             parent_generation: parent.generation,
                             parent_facing: parent.facing,
                             q,
@@ -714,17 +707,6 @@ impl Simulation {
 
     pub(crate) fn refresh_population_metrics(&mut self) {
         self.metrics.organisms = self.organisms.len() as u32;
-        self.metrics.total_species_created = self.next_species_id;
-        self.metrics.species_counts = self.compute_species_counts();
-    }
-
-    fn compute_species_counts(&self) -> BTreeMap<SpeciesId, u32> {
-        let mut species_counts = BTreeMap::new();
-        for organism in &self.organisms {
-            let count = species_counts.entry(organism.species_id).or_insert(0_u32);
-            *count = count.saturating_add(1);
-        }
-        species_counts
     }
 }
 

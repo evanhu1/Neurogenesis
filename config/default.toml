@@ -13,7 +13,6 @@ food_fertility_exponent = 5.0
 food_fertility_floor = 0.001
 terrain_noise_scale = 0.01
 terrain_threshold = 0.70
-speciation_threshold = 100.0
 global_mutation_rate_modifier = 1.0
 runtime_plasticity_enabled = true
 

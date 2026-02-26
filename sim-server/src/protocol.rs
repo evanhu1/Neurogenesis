@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use sim_types::{
     FacingDirection, FoodState, MetricsSnapshot, NeuronId, OccupancyCell, OrganismFacing,
-    OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId, TickDelta,
-    WorldConfig, WorldSnapshot,
+    OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, TickDelta, WorldConfig,
+    WorldSnapshot,
 };
 use uuid::Uuid;
 
@@ -53,13 +53,9 @@ pub enum BatchRunStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BatchAggregateStats {
     pub total_organisms_alive: u64,
-    pub total_species_alive: u64,
     pub mean_organisms_alive: f64,
-    pub mean_species_alive: f64,
     pub min_organisms_alive: u32,
     pub max_organisms_alive: u32,
-    pub min_species_alive: u32,
-    pub max_species_alive: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -83,7 +79,6 @@ pub struct ArchivedWorldSummary {
     pub created_at_unix_ms: u128,
     pub turn: u64,
     pub organisms_alive: u32,
-    pub species_alive: u32,
     pub source: ArchivedWorldSource,
 }
 
@@ -149,7 +144,6 @@ pub struct StepProgressData {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorldOrganismState {
     pub id: OrganismId,
-    pub species_id: SpeciesId,
     pub q: i32,
     pub r: i32,
     pub generation: u64,
@@ -164,7 +158,6 @@ impl From<&OrganismState> for WorldOrganismState {
     fn from(organism: &OrganismState) -> Self {
         Self {
             id: organism.id,
-            species_id: organism.species_id,
             q: organism.q,
             r: organism.r,
             generation: organism.generation,

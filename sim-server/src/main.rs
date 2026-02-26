@@ -165,31 +165,21 @@ fn compute_batch_aggregate(worlds: &[ArchivedWorldSummary]) -> Option<BatchAggre
     }
 
     let mut total_organisms_alive = 0_u64;
-    let mut total_species_alive = 0_u64;
     let mut min_organisms_alive = u32::MAX;
     let mut max_organisms_alive = 0_u32;
-    let mut min_species_alive = u32::MAX;
-    let mut max_species_alive = 0_u32;
 
     for world in worlds {
         total_organisms_alive = total_organisms_alive.saturating_add(world.organisms_alive as u64);
-        total_species_alive = total_species_alive.saturating_add(world.species_alive as u64);
         min_organisms_alive = min_organisms_alive.min(world.organisms_alive);
         max_organisms_alive = max_organisms_alive.max(world.organisms_alive);
-        min_species_alive = min_species_alive.min(world.species_alive);
-        max_species_alive = max_species_alive.max(world.species_alive);
     }
 
     let world_count = worlds.len() as f64;
     Some(BatchAggregateStats {
         total_organisms_alive,
-        total_species_alive,
         mean_organisms_alive: total_organisms_alive as f64 / world_count,
-        mean_species_alive: total_species_alive as f64 / world_count,
         min_organisms_alive,
         max_organisms_alive,
-        min_species_alive,
-        max_species_alive,
     })
 }
 
@@ -317,13 +307,11 @@ impl WorldArchiveStore {
         let world_id = Uuid::new_v4();
         let created_at_unix_ms = now_unix_ms()?;
         let snapshot = simulation.snapshot();
-        let species_alive = snapshot.metrics.species_counts.len() as u32;
         let summary = ArchivedWorldSummary {
             world_id,
             created_at_unix_ms,
             turn: snapshot.turn,
             organisms_alive: snapshot.metrics.organisms,
-            species_alive,
             source: ArchivedWorldSource::BatchRun {
                 run_id,
                 world_index,
@@ -383,13 +371,11 @@ impl WorldArchiveStore {
         let world_id = Uuid::new_v4();
         let created_at_unix_ms = now_unix_ms()?;
         let snapshot = simulation.snapshot();
-        let species_alive = snapshot.metrics.species_counts.len() as u32;
         let summary = ArchivedWorldSummary {
             world_id,
             created_at_unix_ms,
             turn: snapshot.turn,
             organisms_alive: snapshot.metrics.organisms,
-            species_alive,
             source: ArchivedWorldSource::Session { session_id },
         };
         let archived_world = ArchivedWorldFile {

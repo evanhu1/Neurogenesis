@@ -20,7 +20,6 @@ fn stable_perf_config() -> WorldConfig {
         terrain_noise_scale: 0.02,
         terrain_threshold: 1.0,
         max_organism_age: u32::MAX,
-        speciation_threshold: 50.0,
         global_mutation_rate_modifier: 1.0,
         runtime_plasticity_enabled: true,
         seed_genome_config: sim_types::SeedGenomeConfig {
