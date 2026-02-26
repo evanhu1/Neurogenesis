@@ -8,12 +8,10 @@ move_action_energy_cost = 1.0
 action_temperature = 0.1
 food_regrowth_interval = 100
 food_regrowth_jitter = 20
-food_fertility_noise_scale = 0.012
-food_fertility_threshold = 0.83
 terrain_noise_scale = 0.01
 terrain_threshold = 0.70
 global_mutation_rate_modifier = 1.0
-runtime_plasticity_enabled = true
+runtime_plasticity_enabled = false
 
 [seed_genome_config]
 num_neurons = 0

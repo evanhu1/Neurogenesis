@@ -36,8 +36,6 @@ export type WorldConfig = {
   neuron_metabolism_cost: number;
   food_regrowth_interval: number;
   food_regrowth_jitter: number;
-  food_fertility_noise_scale: number;
-  food_fertility_threshold: number;
   terrain_noise_scale: number;
   terrain_threshold: number;
   max_organism_age: number;

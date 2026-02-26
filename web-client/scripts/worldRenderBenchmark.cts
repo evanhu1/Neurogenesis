@@ -102,8 +102,6 @@ function createSnapshot(worldWidth: number, organismCount: number, foodCount: nu
       neuron_metabolism_cost: 0,
       food_regrowth_interval: 10,
       food_regrowth_jitter: 2,
-      food_fertility_noise_scale: 1,
-      food_fertility_threshold: 0.5,
       terrain_noise_scale: 1,
       terrain_threshold: 0.5,
       max_organism_age: 1000,

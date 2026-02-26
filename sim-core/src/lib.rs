@@ -365,16 +365,6 @@ fn validate_world_config(config: &WorldConfig) -> Result<(), SimError> {
             "food_regrowth_interval must be greater than zero".to_owned(),
         ));
     }
-    if config.food_fertility_noise_scale <= 0.0 {
-        return Err(SimError::InvalidConfig(
-            "food_fertility_noise_scale must be greater than zero".to_owned(),
-        ));
-    }
-    if !(0.0..=1.0).contains(&config.food_fertility_threshold) {
-        return Err(SimError::InvalidConfig(
-            "food_fertility_threshold must be in [0.0, 1.0]".to_owned(),
-        ));
-    }
     if config.terrain_noise_scale <= 0.0 {
         return Err(SimError::InvalidConfig(
             "terrain_noise_scale must be greater than zero".to_owned(),

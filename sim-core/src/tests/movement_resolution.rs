@@ -82,10 +82,9 @@ fn attacker_vs_escaping_target_has_no_consumption_when_target_escapes() {
 
 #[test]
 fn food_regrows_from_scheduled_event() {
-    let mut cfg = test_config(5, 1);
+    let mut cfg = test_config(20, 1);
     cfg.food_regrowth_interval = 5;
     cfg.food_regrowth_jitter = 0;
-    cfg.food_fertility_threshold = 0.0;
 
     let mut sim = Simulation::new(cfg, 102).expect("simulation should initialize");
     configure_sim(
@@ -103,8 +102,13 @@ fn food_regrows_from_scheduled_event() {
         )],
     );
 
+    sim.initialize_food_ecology();
     assert!(sim.foods.is_empty());
     let regrow_idx = sim.cell_index(4, 4);
+    sim.food_fertility[regrow_idx] = true;
+    let width = sim.config.world_width as usize;
+    let regrow_q = (regrow_idx % width) as i32;
+    let regrow_r = (regrow_idx / width) as i32;
     sim.schedule_food_regrowth(regrow_idx);
 
     let mut spawned_turn = None;
@@ -113,7 +117,7 @@ fn food_regrows_from_scheduled_event() {
         if delta
             .food_spawned
             .iter()
-            .any(|food| (food.q, food.r) == (4, 4))
+            .any(|food| (food.q, food.r) == (regrow_q, regrow_r))
         {
             spawned_turn = Some(delta.turn);
             break;

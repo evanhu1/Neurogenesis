@@ -11,6 +11,8 @@ use sim_types::{
 const DEFAULT_TERRAIN_THRESHOLD: f64 = 0.86;
 const NO_REGROWTH_SCHEDULED: u64 = u64::MAX;
 const FOOD_FERTILITY_SEED_MIX: u64 = 0x6A09_E667_F3BC_C909;
+const FOOD_FERTILITY_NOISE_SCALE: f64 = 0.012;
+const FOOD_FERTILITY_THRESHOLD: f64 = 0.83;
 
 #[derive(Clone)]
 pub(crate) struct ReproductionSpawn {
@@ -247,7 +249,7 @@ impl Simulation {
 
     pub(crate) fn initialize_food_ecology(&mut self) {
         let capacity = world_capacity(self.config.world_width);
-        self.food_fertility = build_fertility_map(self.config.world_width, self.seed, &self.config);
+        self.food_fertility = build_fertility_map(self.config.world_width, self.seed);
         for (idx, blocked) in self.terrain_map.iter().copied().enumerate() {
             if blocked {
                 self.food_fertility[idx] = false;
@@ -393,17 +395,17 @@ impl Simulation {
     }
 }
 
-fn build_fertility_map(world_width: u32, seed: u64, config: &sim_types::WorldConfig) -> Vec<bool> {
+fn build_fertility_map(world_width: u32, seed: u64) -> Vec<bool> {
     let width = world_width as usize;
     let fertility_seed = seed ^ FOOD_FERTILITY_SEED_MIX;
     let mut fertility = Vec::with_capacity(width * width);
     for r in 0..width {
         for q in 0..width {
-            let x = q as f64 * config.food_fertility_noise_scale as f64;
-            let y = r as f64 * config.food_fertility_noise_scale as f64;
+            let x = q as f64 * FOOD_FERTILITY_NOISE_SCALE;
+            let y = r as f64 * FOOD_FERTILITY_NOISE_SCALE;
             let value = fractal_perlin_2d(x, y, fertility_seed);
             let normalized = ((value + 1.0) * 0.5).clamp(0.0, 1.0);
-            fertility.push(normalized >= config.food_fertility_threshold as f64);
+            fertility.push(normalized >= FOOD_FERTILITY_THRESHOLD);
         }
     }
     fertility

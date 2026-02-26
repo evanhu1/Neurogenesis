@@ -191,10 +191,6 @@ pub struct WorldConfig {
     pub food_regrowth_interval: u32,
     #[serde(default = "default_food_regrowth_jitter")]
     pub food_regrowth_jitter: u32,
-    #[serde(default = "default_food_fertility_noise_scale")]
-    pub food_fertility_noise_scale: f32,
-    #[serde(default = "default_food_fertility_threshold")]
-    pub food_fertility_threshold: f32,
     #[serde(default = "default_terrain_noise_scale")]
     pub terrain_noise_scale: f32,
     #[serde(default = "default_terrain_threshold")]
@@ -224,10 +220,6 @@ struct WorldConfigDeserialize {
     food_regrowth_interval: u32,
     #[serde(default = "default_food_regrowth_jitter")]
     food_regrowth_jitter: u32,
-    #[serde(default = "default_food_fertility_noise_scale")]
-    food_fertility_noise_scale: f32,
-    #[serde(default = "default_food_fertility_threshold")]
-    food_fertility_threshold: f32,
     #[serde(default = "default_terrain_noise_scale")]
     terrain_noise_scale: f32,
     #[serde(default = "default_terrain_threshold")]
@@ -257,8 +249,6 @@ impl<'de> Deserialize<'de> for WorldConfig {
             action_temperature: raw.action_temperature,
             food_regrowth_interval: raw.food_regrowth_interval,
             food_regrowth_jitter: raw.food_regrowth_jitter,
-            food_fertility_noise_scale: raw.food_fertility_noise_scale,
-            food_fertility_threshold: raw.food_fertility_threshold,
             terrain_noise_scale: raw.terrain_noise_scale,
             terrain_threshold: raw.terrain_threshold,
             max_organism_age: raw.max_organism_age,
@@ -360,14 +350,6 @@ fn default_periodic_injection_interval_turns() -> u32 {
 
 fn default_periodic_injection_count() -> u32 {
     100
-}
-
-fn default_food_fertility_noise_scale() -> f32 {
-    0.045
-}
-
-fn default_food_fertility_threshold() -> f32 {
-    0.83
 }
 
 fn default_terrain_noise_scale() -> f32 {

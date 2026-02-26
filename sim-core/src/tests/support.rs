@@ -73,8 +73,6 @@ pub(super) fn stable_test_config() -> WorldConfig {
         action_temperature: 0.5,
         food_regrowth_interval: 10,
         food_regrowth_jitter: 2,
-        food_fertility_noise_scale: 0.045,
-        food_fertility_threshold: 0.83,
         terrain_noise_scale: 0.02,
         terrain_threshold: 1.0,
         max_organism_age: 500,
