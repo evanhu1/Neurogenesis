@@ -4,10 +4,9 @@ import type { BrainState, OrganismState } from '../../types';
 import { BrainCanvas } from './BrainCanvas';
 
 type InspectorPanelProps = {
-  focusMetaText: string;
   focusedOrganism: OrganismState | null;
   focusedBrain: BrainState | null;
-  activeNeuronIds: Set<number> | null;
+  activeActionNeuronId: number | null;
   onDefocus: () => void;
 };
 
@@ -55,10 +54,9 @@ function statList(stats: StatItem[]) {
 }
 
 export function InspectorPanel({
-  focusMetaText,
   focusedOrganism,
   focusedBrain,
-  activeNeuronIds,
+  activeActionNeuronId,
   onDefocus,
 }: InspectorPanelProps) {
   const [expandedSections, setExpandedSections] = useState<Record<SectionKey, boolean>>({
@@ -79,7 +77,7 @@ export function InspectorPanel({
     const genome = focusedOrganism.genome;
     const interExcitatoryCount = genome.interneuron_types.filter((v) => v === 'Excitatory').length;
     const interInhibitoryCount = genome.interneuron_types.length - interExcitatoryCount;
-    const activeNeuronCount = activeNeuronIds?.size ?? 0;
+    const activeNeuronCount = activeActionNeuronId === null ? 0 : 1;
 
     const mutationRates: MutationRateItem[] = [
       {
@@ -143,6 +141,7 @@ export function InspectorPanel({
         { label: 'Facing', value: focusedOrganism.facing },
         { label: 'Age (turns)', value: String(focusedOrganism.age_turns) },
         { label: 'Energy', value: formatFloat(focusedOrganism.energy, 2) },
+        { label: 'Last Action Taken', value: focusedOrganism.last_action_taken },
         { label: 'Dopamine', value: formatFloat(focusedOrganism.dopamine, 3) },
         { label: 'Consumptions', value: String(focusedOrganism.consumptions_count) },
         { label: 'Reproductions', value: String(focusedOrganism.reproductions_count) },
@@ -170,7 +169,7 @@ export function InspectorPanel({
       ] satisfies StatItem[],
       mutationRates,
     };
-  }, [activeNeuronIds, focusedOrganism]);
+  }, [activeActionNeuronId, focusedOrganism]);
 
   return (
     <aside className="h-full overflow-auto rounded-2xl border border-accent/20 bg-gradient-to-b from-white/95 to-slate-50/90 p-4 shadow-panel">
@@ -185,9 +184,6 @@ export function InspectorPanel({
             <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
           </svg>
         </button>
-      </div>
-      <div className="mt-2 rounded-xl border border-accent/15 bg-slate-100/70 p-3 font-mono text-[11px] text-ink/80">
-        {focusMetaText}
       </div>
 
       {!summary ? (
@@ -250,12 +246,12 @@ export function InspectorPanel({
         </div>
       )}
 
-          <section className="mt-3 rounded-xl border border-accent/20 bg-white/85 p-3">
+      <section className="mt-3 rounded-xl border border-accent/20 bg-white/85 p-3">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-ink/80">Brain</h3>
         <div className="mt-2 h-[440px]">
           <BrainCanvas
             focusedBrain={focusedBrain}
-            activeNeuronIds={activeNeuronIds}
+            activeActionNeuronId={activeActionNeuronId}
             focusOrganismId={focusedOrganism ? unwrapId(focusedOrganism.id) : null}
           />
         </div>

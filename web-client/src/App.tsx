@@ -3,11 +3,7 @@ import { unwrapId } from './protocol';
 import { ControlPanel } from './features/control_panel/ControlPanel';
 import { InspectorPanel } from './features/inspector_panel/InspectorPanel';
 import { useSimulationSession } from './features/sim/hooks/useSimulationSession';
-import {
-  formatFocusMeta,
-  formatMetrics,
-  formatSessionMeta,
-} from './features/sim/selectors';
+import { formatMetrics, formatSessionMeta } from './features/sim/selectors';
 import { WorldCanvas } from './features/world/components/WorldCanvas';
 
 export default function App() {
@@ -16,10 +12,6 @@ export default function App() {
 
   const sessionMeta = useMemo(() => formatSessionMeta(simulation.session), [simulation.session]);
   const metricsText = useMemo(() => formatMetrics(simulation.snapshot), [simulation.snapshot]);
-  const focusMetaText = useMemo(
-    () => formatFocusMeta(simulation.focusedOrganismId, simulation.focusedOrganism),
-    [simulation.focusedOrganism, simulation.focusedOrganismId],
-  );
   const focusedSpeciesId = useMemo(
     () =>
       simulation.focusedOrganism ? String(unwrapId(simulation.focusedOrganism.species_id)) : null,
@@ -70,10 +62,9 @@ export default function App() {
         </main>
 
         <InspectorPanel
-          focusMetaText={focusMetaText}
           focusedOrganism={simulation.focusedOrganism}
           focusedBrain={simulation.focusedOrganism?.brain ?? null}
-          activeNeuronIds={simulation.activeNeuronIds}
+          activeActionNeuronId={simulation.activeActionNeuronId}
           onDefocus={simulation.defocusOrganism}
         />
       </div>

@@ -9,7 +9,7 @@ use rand::Rng;
 use sim_types::{
     ActionNeuronState, ActionType, BrainLocation, BrainState, EntityType, InterNeuronState,
     InterNeuronType, NeuronId, NeuronState, NeuronType, Occupant, OrganismGenome, OrganismId,
-    SensoryNeuronState, SensoryReceptor, SynapseEdge,
+    OrganismState, SensoryNeuronState, SensoryReceptor, SynapseEdge,
 };
 #[cfg(feature = "profiling")]
 use std::time::Instant;
@@ -59,7 +59,6 @@ pub(crate) struct BrainEvaluation {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ActionSelectionPolicy {
     pub(crate) temperature: f32,
-    pub(crate) argmax_margin: Option<f32>,
 }
 
 /// Reusable scratch buffers for brain evaluation, avoiding per-tick allocations.
@@ -730,35 +729,21 @@ fn refresh_parent_ids_and_synapse_count(brain: &mut BrainState) {
     brain.synapse_count = synapse_count as u32;
 }
 
-/// Derives the set of active neuron IDs from a brain's current activation state.
-/// Sensory/Inter neurons are active when activation > 0.0.
-/// Action neurons use policy-based categorical argmax resolution.
-pub fn derive_active_neuron_ids(brain: &BrainState) -> Vec<NeuronId> {
-    let mut active = Vec::new();
-
-    for sensory in &brain.sensory {
-        if sensory.neuron.activation > 0.0 {
-            active.push(sensory.neuron.neuron_id);
-        }
+/// Derives the active action neuron ID from an organism's current brain state.
+pub fn derive_active_action_neuron_id(organism: &OrganismState) -> Option<NeuronId> {
+    let brain = &organism.brain;
+    if let Some(action_neuron) = brain
+        .action
+        .iter()
+        .find(|action| action.action_type == organism.last_action_taken)
+    {
+        return Some(action_neuron.neuron.neuron_id);
+    } else if !brain.action.is_empty() {
+        let action_activations: [f32; ACTION_COUNT] =
+            std::array::from_fn(|i| brain.action.get(i).map_or(0.0, |n| n.neuron.activation));
+        return Some(brain.action[argmax_index(&action_activations)].neuron.neuron_id);
     }
-
-    let action_activations: [f32; ACTION_COUNT] =
-        std::array::from_fn(|i| brain.action.get(i).map_or(0.0, |n| n.neuron.activation));
-
-    let resolved = resolve_actions(action_activations);
-    active.push(
-        brain.action[action_index(resolved.selected_action)]
-            .neuron
-            .neuron_id,
-    );
-
-    active
-}
-
-fn resolve_actions(activations: [f32; ACTION_COUNT]) -> ResolvedActions {
-    ResolvedActions {
-        selected_action: ActionType::ALL[argmax_index(&activations)],
-    }
+    None
 }
 
 fn select_action_from_logits(
@@ -768,12 +753,6 @@ fn select_action_from_logits(
 ) -> ActionType {
     let best_idx = argmax_index(&action_logits);
     let best_logit = action_logits[best_idx];
-    let second_logit = second_largest(&action_logits, best_idx);
-    if let Some(margin) = action_selection.argmax_margin {
-        if best_logit - second_logit > margin {
-            return ActionType::ALL[best_idx];
-        }
-    }
 
     let temperature = action_selection.temperature.max(MIN_ACTION_TEMPERATURE);
     let mut weights = [0.0_f32; ACTION_COUNT];
@@ -812,16 +791,6 @@ fn argmax_index(values: &[f32]) -> usize {
         }
     }
     best_idx
-}
-
-fn second_largest(values: &[f32], best_idx: usize) -> f32 {
-    let mut second = f32::NEG_INFINITY;
-    for (idx, value) in values.iter().copied().enumerate() {
-        if idx != best_idx && value > second {
-            second = value;
-        }
-    }
-    second
 }
 
 fn split_inter_and_action_edges(edges: &[SynapseEdge]) -> (&[SynapseEdge], &[SynapseEdge]) {

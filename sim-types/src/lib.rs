@@ -37,6 +37,12 @@ impl ActionType {
     ];
 }
 
+impl Default for ActionType {
+    fn default() -> Self {
+        Self::Idle
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum FacingDirection {
     East,
@@ -203,8 +209,6 @@ pub struct WorldConfig {
     pub move_action_energy_cost: f32,
     #[serde(default = "default_action_temperature")]
     pub action_temperature: f32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub action_selection_margin: Option<f32>,
     pub plant_growth_speed: f32,
     #[serde(default = "default_food_regrowth_interval")]
     pub food_regrowth_interval: u32,
@@ -238,8 +242,6 @@ struct WorldConfigDeserialize {
     move_action_energy_cost: f32,
     #[serde(default = "default_action_temperature")]
     action_temperature: f32,
-    #[serde(default)]
-    action_selection_margin: Option<f32>,
     #[serde(default)]
     plant_growth_speed: Option<f32>,
     #[serde(default)]
@@ -283,7 +285,6 @@ impl<'de> Deserialize<'de> for WorldConfig {
             food_energy: raw.food_energy,
             move_action_energy_cost: raw.move_action_energy_cost,
             action_temperature: raw.action_temperature,
-            action_selection_margin: raw.action_selection_margin,
             plant_growth_speed,
             food_regrowth_interval: raw.food_regrowth_interval,
             food_fertility_noise_scale: raw.food_fertility_noise_scale,
@@ -479,6 +480,8 @@ pub struct OrganismState {
     pub dopamine: f32,
     pub consumptions_count: u64,
     pub reproductions_count: u64,
+    #[serde(default)]
+    pub last_action_taken: ActionType,
     pub brain: BrainState,
     pub genome: OrganismGenome,
 }

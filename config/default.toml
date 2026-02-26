@@ -13,15 +13,15 @@ food_fertility_exponent = 5.0
 food_fertility_floor = 0.001
 terrain_noise_scale = 0.01
 terrain_threshold = 0.70
-speciation_threshold = 20.0
-global_mutation_rate_modifier = 2.0
+speciation_threshold = 100.0
+global_mutation_rate_modifier = 1.0
 
 [seed_genome_config]
-num_neurons = 5
-num_synapses = 20
+num_neurons = 10
+num_synapses = 40
 spatial_prior_sigma = 3.0
 vision_distance = 10
-starting_energy = 250.0
+starting_energy = 500.0
 age_of_maturity = 50
 hebb_eta_gain = 0.01
 eligibility_retention = 0.95

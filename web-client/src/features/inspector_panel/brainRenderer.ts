@@ -34,7 +34,7 @@ export type BrainLayout = {
 
 export function computeBrainLayout(
   brain: BrainState,
-  activeNeuronIds: Set<number> | null,
+  activeActionNeuronId: number | null,
 ): BrainLayout {
   const nodes: BrainNode[] = [];
 
@@ -51,7 +51,7 @@ export function computeBrainLayout(
       bias: neuron.neuron.bias,
       gx: finiteOr(neuron.neuron.x, sensoryIdx),
       gy: finiteOr(neuron.neuron.y, sensoryIdx * 0.9),
-      isActive: activeNeuronIds?.has(nid) ?? false,
+      isActive: false,
     });
   });
 
@@ -66,7 +66,7 @@ export function computeBrainLayout(
       gy: finiteOr(neuron.neuron.y, 1 + Math.floor(interIdx / 6) * 0.9),
       timeConstant: timeConstantFromAlpha(neuron.alpha),
       interneuronType: neuron.interneuron_type,
-      isActive: activeNeuronIds?.has(nid) ?? false,
+      isActive: false,
     });
   });
 
@@ -80,7 +80,7 @@ export function computeBrainLayout(
       bias: neuron.neuron.bias,
       gx: finiteOr(neuron.neuron.x, 8.5),
       gy: finiteOr(neuron.neuron.y, actionIdx * 1.2 + 2),
-      isActive: activeNeuronIds?.has(nid) ?? false,
+      isActive: activeActionNeuronId === nid,
     });
   });
 
@@ -209,7 +209,7 @@ export function renderBrain(
   ctx: CanvasRenderingContext2D,
   canvas: HTMLCanvasElement,
   focusedBrain: BrainState | null,
-  activeNeuronIds: Set<number> | null,
+  activeActionNeuronId: number | null,
   transform: BrainTransform,
 ) {
   const width = canvas.width;
@@ -223,7 +223,7 @@ export function renderBrain(
     return;
   }
 
-  const layout = computeBrainLayout(focusedBrain, activeNeuronIds);
+  const layout = computeBrainLayout(focusedBrain, activeActionNeuronId);
   const { positions } = layout;
   const { scale } = transform;
 

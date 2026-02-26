@@ -42,7 +42,6 @@ pub(crate) struct BrainEvaluation {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ActionSelectionPolicy {
     pub(crate) temperature: f32,
-    pub(crate) argmax_margin: Option<f32>,
 }
 
 /// Reusable scratch buffers for brain evaluation, avoiding per-tick allocations.
@@ -2154,7 +2153,6 @@ impl Simulation {
         let pending_actions = &self.pending_actions;
         let action_selection = ActionSelectionPolicy {
             temperature: self.config.action_temperature,
-            argmax_margin: self.config.action_selection_margin,
         };
         let sim_seed = self.seed;
         let tick = self.turn;

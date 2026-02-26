@@ -72,7 +72,6 @@ pub(super) fn stable_test_config() -> WorldConfig {
         food_energy: 50.0,
         move_action_energy_cost: 1.0,
         action_temperature: 0.5,
-        action_selection_margin: None,
         plant_growth_speed: 1.0,
         food_regrowth_interval: 10,
         food_fertility_noise_scale: 0.045,
@@ -258,55 +257,9 @@ pub(super) fn make_organism(
         dopamine: 0.0,
         consumptions_count: 0,
         reproductions_count: 0,
+        last_action_taken: ActionType::Idle,
         brain: forced_brain(wants_move, turn_left, turn_right, confidence),
         genome: test_genome(),
-    }
-}
-
-pub(super) fn enable_reproduce_action(organism: &mut OrganismState) {
-    let inter_id = organism.brain.inter[0].neuron.neuron_id;
-    let reproduce_action_id =
-        NeuronId(2000 + crate::brain::action_index(ActionType::Reproduce) as u32);
-    let action_id_upper_bound = 2000 + ActionType::ALL.len() as u32;
-    let mut found = false;
-    for synapse in &mut organism.brain.inter[0].synapses {
-        if !(2000..action_id_upper_bound).contains(&synapse.post_neuron_id.0) {
-            continue;
-        }
-        if synapse.post_neuron_id == reproduce_action_id {
-            synapse.weight = 8.0;
-            found = true;
-        } else {
-            synapse.weight = -8.0;
-        }
-    }
-    if !found {
-        for action_type in ActionType::ALL {
-            let action_id = NeuronId(2000 + crate::brain::action_index(action_type) as u32);
-            organism.brain.inter[0].synapses.push(SynapseEdge {
-                pre_neuron_id: inter_id,
-                post_neuron_id: action_id,
-                weight: if action_type == ActionType::Reproduce {
-                    8.0
-                } else {
-                    -8.0
-                },
-                eligibility: 0.0,
-                pending_coactivation: 0.0,
-            });
-        }
-    }
-    organism.brain.inter[0]
-        .synapses
-        .sort_by(|a, b| a.post_neuron_id.cmp(&b.post_neuron_id));
-    organism.brain.synapse_count = organism.brain.inter[0].synapses.len() as u32;
-    if let Some(action) = organism
-        .brain
-        .action
-        .iter_mut()
-        .find(|action| action.action_type == ActionType::Reproduce)
-    {
-        action.neuron.parent_ids = vec![inter_id];
     }
 }
 

@@ -13,10 +13,7 @@ fn loc(x: f32, y: f32) -> BrainLocation {
 }
 
 fn deterministic_action_policy() -> ActionSelectionPolicy {
-    ActionSelectionPolicy {
-        temperature: 0.5,
-        argmax_margin: Some(0.0),
-    }
+    ActionSelectionPolicy { temperature: 0.5 }
 }
 
 fn simple_action_bias_organism(
@@ -50,6 +47,7 @@ fn simple_action_bias_organism(
         dopamine: 0.0,
         consumptions_count: 0,
         reproductions_count: 0,
+        last_action_taken: ActionType::Idle,
         brain,
         genome,
     }
@@ -273,7 +271,6 @@ fn stochastic_action_selection_is_seed_deterministic() {
     let vision_distance_b = organism_b.genome.vision_distance;
     let policy = ActionSelectionPolicy {
         temperature: 1.5,
-        argmax_margin: None,
     };
 
     let eval_a = evaluate_brain(
@@ -297,29 +294,6 @@ fn stochastic_action_selection_is_seed_deterministic() {
 
     assert_eq!(eval_a.action_logits, eval_b.action_logits);
     assert_eq!(eval_a.resolved_actions, eval_b.resolved_actions);
-}
-
-#[test]
-fn action_selection_margin_forces_argmax_when_gap_is_large() {
-    let occupancy = vec![None; 9];
-    for seed in 0..32_u64 {
-        let mut organism = simple_action_bias_organism(2.5, 0.2, 10.0);
-        let mut scratch = BrainScratch::new();
-        let vision_distance = organism.genome.vision_distance;
-        let eval = evaluate_brain(
-            &mut organism,
-            3,
-            &occupancy,
-            vision_distance,
-            ActionSelectionPolicy {
-                temperature: 2.0,
-                argmax_margin: Some(0.5),
-            },
-            seed as f32 / 32.0,
-            &mut scratch,
-        );
-        assert_eq!(eval.resolved_actions.selected_action, ActionType::Forward);
-    }
 }
 
 #[test]
@@ -401,6 +375,7 @@ fn runtime_plasticity_updates_weights_and_preserves_sign() {
         dopamine: 0.0,
         consumptions_count: 0,
         reproductions_count: 0,
+        last_action_taken: ActionType::Idle,
         brain,
         genome,
     };
@@ -480,6 +455,7 @@ fn runtime_plasticity_neutralizes_passive_metabolism_for_dopamine() {
         dopamine: 0.0,
         consumptions_count: 0,
         reproductions_count: 0,
+        last_action_taken: ActionType::Idle,
         brain,
         genome,
     };
@@ -589,6 +565,7 @@ fn inter_recurrent_eligibility_uses_prev_inter_pre_signal_only_for_inter_targets
         dopamine: 0.0,
         consumptions_count: 0,
         reproductions_count: 0,
+        last_action_taken: ActionType::Idle,
         brain,
         genome,
     };
@@ -669,6 +646,7 @@ fn action_target_eligibility_uses_centered_logits_not_sigmoid_activation() {
         dopamine: 0.0,
         consumptions_count: 0,
         reproductions_count: 0,
+        last_action_taken: ActionType::Idle,
         brain,
         genome,
     };
@@ -741,6 +719,7 @@ fn energy_sensor_clamps_and_scales_with_starting_energy() {
         dopamine: 0.0,
         consumptions_count: 0,
         reproductions_count: 0,
+        last_action_taken: ActionType::Idle,
         brain,
         genome,
     };

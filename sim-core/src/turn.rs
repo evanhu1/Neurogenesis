@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, HashSet};
 #[cfg(feature = "profiling")]
 use std::time::Instant;
 
-const FOOD_ENERGY_METABOLISM_DIVISOR: f32 = 1000.0;
+const FOOD_ENERGY_METABOLISM_DIVISOR: f32 = 10000.0;
 const RNG_TURN_MIX: u64 = 0x9E37_79B9_7F4A_7C15;
 const RNG_ORGANISM_MIX: u64 = 0xBF58_476D_1CE4_E5B9;
 const REPRODUCE_LOCK_DURATION_TURNS: u8 = 2;
@@ -242,7 +242,6 @@ impl Simulation {
         let pending_actions = &self.pending_actions;
         let action_selection = ActionSelectionPolicy {
             temperature: self.config.action_temperature,
-            argmax_margin: self.config.action_selection_margin,
         };
         let sim_seed = self.seed;
         let tick = self.turn;
@@ -392,7 +391,7 @@ impl Simulation {
         let mut consumptions = 0_u64;
         let mut predations = 0_u64;
         let mut dead_organisms = vec![false; org_count];
-        let plant_presence_threshold = self.plant_biomass_presence_threshold();
+        let plant_threshold = self.plant_biomass_threshold();
         for resolution in resolutions {
             let from_idx =
                 resolution.from.1 as usize * world_width_usize + resolution.from.0 as usize;
@@ -427,7 +426,7 @@ impl Simulation {
                     if removed_food[food_idx] {
                         continue;
                     }
-                    if self.biomass[target_idx] <= plant_presence_threshold {
+                    if self.biomass[target_idx] <= plant_threshold {
                         removed_food[food_idx] = true;
                         let food = &self.foods[food_idx];
                         removed_positions.push(RemovedEntityPosition {
@@ -453,7 +452,7 @@ impl Simulation {
                     predator.consumptions_count = predator.consumptions_count.saturating_add(1);
                     consumptions += 1;
 
-                    if self.biomass[target_idx] <= plant_presence_threshold {
+                    if self.biomass[target_idx] <= plant_threshold {
                         removed_food[food_idx] = true;
                         let food = &self.foods[food_idx];
                         removed_positions.push(RemovedEntityPosition {
@@ -795,6 +794,7 @@ fn build_intent_for_organism(
     compute_pending_coactivations(organism, scratch);
 
     let selected_action = evaluation.resolved_actions.selected_action;
+    organism.last_action_taken = selected_action;
     let selected_action_activation = evaluation.action_activations[action_index(selected_action)];
     let (
         facing_after_actions,

@@ -137,7 +137,7 @@ pub enum ClientCommand {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FocusBrainData {
     pub organism: OrganismState,
-    pub active_neuron_ids: Vec<NeuronId>,
+    pub active_action_neuron_id: Option<NeuronId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

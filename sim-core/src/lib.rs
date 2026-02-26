@@ -17,7 +17,7 @@ pub mod profiling;
 mod spawn;
 mod turn;
 
-pub use brain::derive_active_neuron_ids;
+pub use brain::derive_active_action_neuron_id;
 
 #[cfg(test)]
 mod tests;
@@ -392,13 +392,6 @@ fn validate_world_config(config: &WorldConfig) -> Result<(), SimError> {
         return Err(SimError::InvalidConfig(
             "action_temperature must be finite and greater than zero".to_owned(),
         ));
-    }
-    if let Some(margin) = config.action_selection_margin {
-        if !margin.is_finite() || margin < 0.0 {
-            return Err(SimError::InvalidConfig(
-                "action_selection_margin must be finite and >= 0 when set".to_owned(),
-            ));
-        }
     }
     if !config.plant_growth_speed.is_finite() || config.plant_growth_speed <= 0.0 {
         return Err(SimError::InvalidConfig(

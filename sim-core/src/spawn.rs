@@ -11,7 +11,7 @@ use sim_types::{
 
 const DEFAULT_TERRAIN_THRESHOLD: f64 = 0.86;
 const MAX_BIOMASS_PER_TILE_FOOD_MULTIPLIER: f32 = 4.0;
-const PLANT_PRESENCE_THRESHOLD_FOOD_FRACTION: f32 = 0.25;
+const PLANT_BIOMASS_THRESHOLD_FOOD_MULTIPLIER: f32 = 2.0;
 const BLOCKED_BIOMASS_DECAY_PER_TICK: f32 = 0.0;
 const SEASONAL_TRANSLATION_PERIOD_TURNS: u64 = 2048;
 
@@ -105,6 +105,7 @@ impl Simulation {
                         dopamine: 0.0,
                         consumptions_count: 0,
                         reproductions_count: 0,
+                        last_action_taken: sim_types::ActionType::Idle,
                         brain,
                         genome: child_genome,
                     }
@@ -128,6 +129,7 @@ impl Simulation {
                         dopamine: 0.0,
                         consumptions_count: 0,
                         reproductions_count: 0,
+                        last_action_taken: sim_types::ActionType::Idle,
                         brain,
                         genome,
                     }
@@ -213,6 +215,7 @@ impl Simulation {
                 dopamine: 0.0,
                 consumptions_count: 0,
                 reproductions_count: 0,
+                last_action_taken: sim_types::ActionType::Idle,
                 brain,
                 genome,
             };
@@ -237,13 +240,13 @@ impl Simulation {
         id
     }
 
-    pub(crate) fn plant_biomass_presence_threshold(&self) -> f32 {
-        (self.config.food_energy * PLANT_PRESENCE_THRESHOLD_FOOD_FRACTION).max(f32::EPSILON)
+    pub(crate) fn plant_biomass_threshold(&self) -> f32 {
+        (self.config.food_energy * PLANT_BIOMASS_THRESHOLD_FOOD_MULTIPLIER).max(f32::EPSILON)
     }
 
     fn max_biomass_per_tile(&self) -> f32 {
         (self.config.food_energy * MAX_BIOMASS_PER_TILE_FOOD_MULTIPLIER)
-            .max(self.plant_biomass_presence_threshold())
+            .max(self.plant_biomass_threshold())
     }
 
     fn target_population(&self) -> usize {
@@ -295,7 +298,7 @@ impl Simulation {
     pub(crate) fn seed_initial_food_supply(&mut self) {
         self.ensure_food_ecology_state();
         let max_biomass_per_tile = self.max_biomass_per_tile();
-        let plant_presence_threshold = self.plant_biomass_presence_threshold();
+        let plant_threshold = self.plant_biomass_threshold();
         let mut spawned_any = false;
         for cell_idx in 0..self.food_fertility.len() {
             if matches!(self.occupancy[cell_idx], Some(Occupant::Wall)) {
@@ -304,16 +307,12 @@ impl Simulation {
             }
 
             let fertility = self.fertility_value(cell_idx);
-            // Warm-start plant mass so the world is not "bare" at turn zero.
-            let initial_fill = plant_presence_threshold
-                + (max_biomass_per_tile - plant_presence_threshold)
-                    * (0.5 * self.rng.random::<f32>() + 0.5 * fertility);
+            // Warm-start below maturity so plants do not instantly carpet the map.
+            let initial_fill = plant_threshold * (0.5 * self.rng.random::<f32>() + 0.5 * fertility);
             self.biomass[cell_idx] = initial_fill.min(max_biomass_per_tile);
 
-            if self.occupancy[cell_idx].is_none()
-                && self.biomass[cell_idx] >= plant_presence_threshold
-                && self.rng.random::<f32>() <= fertility
-            {
+            if self.occupancy[cell_idx].is_none() && self.rng.random::<f32>() <= fertility {
+                self.biomass[cell_idx] = self.biomass[cell_idx].max(plant_threshold);
                 if self.spawn_food_at_cell(cell_idx).is_some() {
                     spawned_any = true;
                 }
@@ -336,6 +335,7 @@ impl Simulation {
             }
 
             if let Some(cell_idx) = best_tile {
+                self.biomass[cell_idx] = self.biomass[cell_idx].max(plant_threshold);
                 let _ = self.spawn_food_at_cell(cell_idx);
             }
         }
@@ -345,10 +345,10 @@ impl Simulation {
         self.ensure_food_ecology_state();
         let mut spawned = Vec::new();
         let max_biomass_per_tile = self.max_biomass_per_tile();
-        let plant_presence_threshold = self.plant_biomass_presence_threshold();
+        let plant_threshold = self.plant_biomass_threshold();
 
-        debug_assert!(plant_presence_threshold > 0.0);
-        debug_assert!(max_biomass_per_tile >= plant_presence_threshold);
+        debug_assert!(plant_threshold > 0.0);
+        debug_assert!(max_biomass_per_tile >= plant_threshold);
 
         for cell_idx in 0..self.food_fertility.len() {
             if self.occupancy[cell_idx].is_none()
@@ -360,7 +360,7 @@ impl Simulation {
                     .min(max_biomass_per_tile);
                 self.biomass[cell_idx] = grown;
 
-                if self.occupancy[cell_idx].is_none() && grown >= plant_presence_threshold {
+                if self.occupancy[cell_idx].is_none() && grown >= plant_threshold {
                     if let Some(food) = self.spawn_food_at_cell(cell_idx) {
                         spawned.push(food);
                     }

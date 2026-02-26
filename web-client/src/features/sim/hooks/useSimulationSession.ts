@@ -130,7 +130,7 @@ export type SimulationSessionState = {
   speciesPopulationHistory: SpeciesPopulationPoint[];
   focusedOrganismId: number | null;
   focusedOrganism: OrganismState | null;
-  activeNeuronIds: Set<number> | null;
+  activeActionNeuronId: number | null;
   isRunning: boolean;
   isStepPending: boolean;
   stepProgress: StepProgressData | null;
@@ -172,7 +172,7 @@ export function useSimulationSession(): SimulationSessionState {
   >([]);
   const [focusedOrganismId, setFocusedOrganismId] = useState<number | null>(null);
   const [focusedOrganism, setFocusedOrganism] = useState<OrganismState | null>(null);
-  const [activeNeuronIds, setActiveNeuronIds] = useState<Set<number> | null>(null);
+  const [activeActionNeuronId, setActiveActionNeuronId] = useState<number | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [isStepPending, setIsStepPending] = useState(false);
   const [stepProgress, setStepProgress] = useState<StepProgressData | null>(null);
@@ -249,11 +249,13 @@ export function useSimulationSession(): SimulationSessionState {
         break;
       }
       case 'FocusBrain': {
-        const { organism, active_neuron_ids } = event.data as FocusBrainData;
+        const { organism, active_action_neuron_id } = event.data as FocusBrainData;
         const organismId = unwrapId(organism.id);
         setFocusedOrganismIdTracked(organismId);
         setFocusedOrganism(organism);
-        setActiveNeuronIds(new Set(active_neuron_ids.map((id) => unwrapId(id))));
+        setActiveActionNeuronId(
+          active_action_neuron_id === null ? null : unwrapId(active_action_neuron_id),
+        );
         break;
       }
       case 'Metrics': {
@@ -300,7 +302,7 @@ export function useSimulationSession(): SimulationSessionState {
       setSnapshot(loadedSnapshot);
       setFocusedOrganismIdTracked(null);
       setFocusedOrganism(null);
-      setActiveNeuronIds(null);
+      setActiveActionNeuronId(null);
       setIsRunning(metadata.running);
       setIsStepPending(false);
       setStepProgress(null);
@@ -511,7 +513,7 @@ export function useSimulationSession(): SimulationSessionState {
         ]);
         setFocusedOrganismIdTracked(null);
         setFocusedOrganism(null);
-        setActiveNeuronIds(null);
+        setActiveActionNeuronId(null);
       })
       .catch((err) => {
         setErrorText(err instanceof Error ? err.message : 'Failed to reset session');
@@ -525,7 +527,7 @@ export function useSimulationSession(): SimulationSessionState {
       setFocusedOrganism((current) =>
         current && unwrapId(current.id) === organismId ? current : null,
       );
-      setActiveNeuronIds(null);
+      setActiveActionNeuronId(null);
       if (!session) return;
       void request(`/v1/sessions/${session.id}/focus`, 'POST', {
         organism_id: organismId,
@@ -539,13 +541,13 @@ export function useSimulationSession(): SimulationSessionState {
   const defocusOrganism = useCallback(() => {
     setFocusedOrganismIdTracked(null);
     setFocusedOrganism(null);
-    setActiveNeuronIds(null);
+    setActiveActionNeuronId(null);
   }, [setFocusedOrganismIdTracked]);
 
   useEffect(() => {
     if (!snapshot || focusedOrganismId === null) {
       setFocusedOrganism(null);
-      setActiveNeuronIds(null);
+      setActiveActionNeuronId(null);
       return;
     }
 
@@ -553,7 +555,7 @@ export function useSimulationSession(): SimulationSessionState {
     if (!worldFocusedOrganism) {
       setFocusedOrganismIdTracked(null);
       setFocusedOrganism(null);
-      setActiveNeuronIds(null);
+      setActiveActionNeuronId(null);
       return;
     }
     setFocusedOrganism((current) => syncFocusedOrganismFromWorld(current, worldFocusedOrganism));
@@ -645,7 +647,7 @@ export function useSimulationSession(): SimulationSessionState {
     speciesPopulationHistory,
     focusedOrganismId,
     focusedOrganism,
-    activeNeuronIds,
+    activeActionNeuronId,
     isRunning,
     isStepPending,
     stepProgress,
