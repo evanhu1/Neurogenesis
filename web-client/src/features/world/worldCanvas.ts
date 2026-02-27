@@ -85,10 +85,27 @@ type OrganismLayerCache = {
   focusedOrganismId: number | null;
 };
 
+type LayoutGeometryCache = {
+  width: number;
+  height: number;
+  worldWidth: number;
+  layout: HexLayout;
+  centerXs: Float32Array;
+  centerYs: Float32Array;
+};
+
+type HexSprite = {
+  surface: LayerSurface;
+  anchorX: number;
+  anchorY: number;
+};
+
 export type WorldRenderCache = {
   terrain: TerrainLayerCache;
   plants: PlantLayerCache;
   organisms: OrganismLayerCache;
+  geometry: LayoutGeometryCache | null;
+  hexSprites: Map<string, HexSprite>;
 };
 
 export function createWorldRenderCache(): WorldRenderCache {
@@ -115,6 +132,8 @@ export function createWorldRenderCache(): WorldRenderCache {
       organisms: null,
       focusedOrganismId: null,
     },
+    geometry: null,
+    hexSprites: new Map(),
   };
 }
 
@@ -212,23 +231,101 @@ function traceHex(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: n
   ctx.closePath();
 }
 
-function drawWorldGrid(ctx: CanvasRenderingContext2D, layout: HexLayout) {
-  const size = layout.size;
-  const worldWidth = layout.worldWidth;
-  if (size <= 0 || worldWidth <= 0) return;
+function getLayoutGeometry(
+  cache: WorldRenderCache,
+  width: number,
+  height: number,
+  worldWidth: number,
+) {
+  const cachedGeometry = cache.geometry;
+  if (
+    cachedGeometry &&
+    cachedGeometry.width === width &&
+    cachedGeometry.height === height &&
+    cachedGeometry.worldWidth === worldWidth
+  ) {
+    return cachedGeometry;
+  }
 
-  ctx.beginPath();
+  const layout = buildHexLayout(width, height, worldWidth);
+  const cellCount = worldWidth * worldWidth;
+  const centerXs = new Float32Array(cellCount);
+  const centerYs = new Float32Array(cellCount);
+  const rowStepX = layout.size * SQRT_3;
+  const rowStepY = layout.size * 1.5;
+
+  let index = 0;
   for (let r = 0; r < worldWidth; r += 1) {
+    const rowX = layout.originX + rowStepX * (r / 2);
+    const rowY = layout.originY + rowStepY * r;
     for (let q = 0; q < worldWidth; q += 1) {
-      const center = hexCenter(layout, q, r);
-      traceHex(ctx, center.x, center.y, size);
+      centerXs[index] = rowX + rowStepX * q;
+      centerYs[index] = rowY;
+      index += 1;
     }
   }
-  ctx.fillStyle = EARTH_COLOR;
-  ctx.fill();
-  ctx.strokeStyle = GRID_STROKE_COLOR;
-  ctx.lineWidth = GRID_STROKE_WIDTH;
-  ctx.stroke();
+
+  const geometry = {
+    width,
+    height,
+    worldWidth,
+    layout,
+    centerXs,
+    centerYs,
+  };
+  cache.geometry = geometry;
+  return geometry;
+}
+
+function getHexSprite(
+  cache: WorldRenderCache,
+  canvas: HTMLCanvasElement,
+  size: number,
+  fillColor: string,
+  strokeColor: string,
+  lineWidth: number,
+) {
+  const key = `${size}|${fillColor}|${strokeColor}|${lineWidth}`;
+  const cachedSprite = cache.hexSprites.get(key);
+  if (cachedSprite) {
+    return cachedSprite;
+  }
+
+  const padding = Math.max(2, Math.ceil(lineWidth * 2));
+  const spriteWidth = Math.max(1, Math.ceil(SQRT_3 * size + padding * 2));
+  const spriteHeight = Math.max(1, Math.ceil(size * 2 + padding * 2));
+  const surface = canvas.ownerDocument.createElement('canvas');
+  surface.width = spriteWidth;
+  surface.height = spriteHeight;
+  const context = surface.getContext('2d');
+  if (!context) return null;
+
+  const anchorX = spriteWidth / 2;
+  const anchorY = spriteHeight / 2;
+  context.beginPath();
+  traceHex(context, anchorX, anchorY, size);
+  context.fillStyle = fillColor;
+  context.fill();
+  context.strokeStyle = strokeColor;
+  context.lineWidth = lineWidth;
+  context.stroke();
+
+  const sprite = { surface, anchorX, anchorY };
+  cache.hexSprites.set(key, sprite);
+  return sprite;
+}
+
+function drawHexSpriteAt(
+  ctx: CanvasRenderingContext2D,
+  sprite: HexSprite,
+  centerX: number,
+  centerY: number,
+) {
+  ctx.drawImage(sprite.surface, centerX - sprite.anchorX, centerY - sprite.anchorY);
+}
+
+function cellIndex(worldWidth: number, q: number, r: number) {
+  return r * worldWidth + q;
 }
 
 function ensureLayerSurface(
@@ -249,76 +346,77 @@ function ensureLayerSurface(
 
 function renderTerrainLayer(
   ctx: CanvasRenderingContext2D,
+  canvas: HTMLCanvasElement,
+  cache: WorldRenderCache,
   width: number,
   height: number,
   snapshot: WorldSnapshot,
 ) {
   ctx.clearRect(0, 0, width, height);
+  const geometry = getLayoutGeometry(cache, width, height, snapshot.config.world_width);
+  const earthHex = getHexSprite(cache, canvas, geometry.layout.size, EARTH_COLOR, GRID_STROKE_COLOR, GRID_STROKE_WIDTH);
+  const wallHex = getHexSprite(cache, canvas, geometry.layout.size, WALL_COLOR, WALL_STROKE_COLOR, GRID_STROKE_WIDTH);
+  if (!earthHex || !wallHex) return;
 
-  const layout = buildHexLayout(width, height, snapshot.config.world_width);
-  drawWorldGrid(ctx, layout);
+  for (let index = 0; index < geometry.centerXs.length; index += 1) {
+    drawHexSpriteAt(ctx, earthHex, geometry.centerXs[index], geometry.centerYs[index]);
+  }
 
   const occupancy = Array.isArray(snapshot.occupancy) ? snapshot.occupancy : [];
-  ctx.beginPath();
   for (const cell of occupancy) {
     if (cell.occupant.type !== 'Wall') continue;
-    const center = hexCenter(layout, cell.q, cell.r);
-    traceHex(ctx, center.x, center.y, layout.size);
+    const index = cellIndex(geometry.worldWidth, cell.q, cell.r);
+    drawHexSpriteAt(ctx, wallHex, geometry.centerXs[index], geometry.centerYs[index]);
   }
-  ctx.fillStyle = WALL_COLOR;
-  ctx.fill();
-  ctx.strokeStyle = WALL_STROKE_COLOR;
-  ctx.lineWidth = GRID_STROKE_WIDTH;
-  ctx.stroke();
 }
 
 function renderPlantLayer(
   ctx: CanvasRenderingContext2D,
+  canvas: HTMLCanvasElement,
+  cache: WorldRenderCache,
   width: number,
   height: number,
   snapshot: WorldSnapshot,
 ) {
   ctx.clearRect(0, 0, width, height);
-
-  const layout = buildHexLayout(width, height, snapshot.config.world_width);
+  const geometry = getLayoutGeometry(cache, width, height, snapshot.config.world_width);
+  const plantHex = getHexSprite(cache, canvas, geometry.layout.size, PLANT_COLOR, GRID_STROKE_COLOR, GRID_STROKE_WIDTH);
+  if (!plantHex) return;
 
   const plants = Array.isArray(snapshot.foods) ? snapshot.foods : [];
-  ctx.beginPath();
   for (const plant of plants) {
-    const center = hexCenter(layout, plant.q, plant.r);
-    traceHex(ctx, center.x, center.y, layout.size);
+    const index = cellIndex(geometry.worldWidth, plant.q, plant.r);
+    drawHexSpriteAt(ctx, plantHex, geometry.centerXs[index], geometry.centerYs[index]);
   }
-  ctx.fillStyle = PLANT_COLOR;
-  ctx.fill();
-  ctx.strokeStyle = GRID_STROKE_COLOR;
-  ctx.lineWidth = GRID_STROKE_WIDTH;
-  ctx.stroke();
 }
 
 function renderOrganismLayer(
   ctx: CanvasRenderingContext2D,
+  cache: WorldRenderCache,
   width: number,
   height: number,
   snapshot: WorldSnapshot,
   focusedOrganismId: number | null,
 ) {
   ctx.clearRect(0, 0, width, height);
-
-  const layout = buildHexLayout(width, height, snapshot.config.world_width);
+  const geometry = getLayoutGeometry(cache, width, height, snapshot.config.world_width);
+  const { layout } = geometry;
 
   for (const org of snapshot.organisms) {
     const id = unwrapId(org.id);
     const speciesId = unwrapId(org.species_id);
-    const center = hexCenter(layout, org.q, org.r);
+    const index = cellIndex(geometry.worldWidth, org.q, org.r);
+    const centerX = geometry.centerXs[index];
+    const centerY = geometry.centerYs[index];
 
     const radius = Math.max(3, layout.size * ORGANISM_RADIUS_SCALE);
     const { x: ux, y: uy } = FACING_UNIT_VECTORS[org.facing];
 
     // Triangle pointing in facing direction
-    const tipX = center.x + ux * radius;
-    const tipY = center.y + uy * radius;
-    const backX = center.x - ux * radius * ORGANISM_TAIL_LENGTH_SCALE;
-    const backY = center.y - uy * radius * ORGANISM_TAIL_LENGTH_SCALE;
+    const tipX = centerX + ux * radius;
+    const tipY = centerY + uy * radius;
+    const backX = centerX - ux * radius * ORGANISM_TAIL_LENGTH_SCALE;
+    const backY = centerY - uy * radius * ORGANISM_TAIL_LENGTH_SCALE;
     const perpX = -uy * radius * ORGANISM_SIDE_SPAN_SCALE;
     const perpY = ux * radius * ORGANISM_SIDE_SPAN_SCALE;
 
@@ -363,7 +461,7 @@ function getTerrainLayer(
   const context = surface.getContext('2d');
   if (!context) return null;
 
-  renderTerrainLayer(context, width, height, snapshot);
+  renderTerrainLayer(context, canvas, cache, width, height, snapshot);
   cache.terrain = {
     surface,
     width,
@@ -398,7 +496,7 @@ function getPlantLayer(
   const context = surface.getContext('2d');
   if (!context) return null;
 
-  renderPlantLayer(context, width, height, snapshot);
+  renderPlantLayer(context, canvas, cache, width, height, snapshot);
   cache.plants = {
     surface,
     width,
@@ -435,7 +533,7 @@ function getOrganismLayer(
   const context = surface.getContext('2d');
   if (!context) return null;
 
-  renderOrganismLayer(context, width, height, snapshot, focusedOrganismId);
+  renderOrganismLayer(context, cache, width, height, snapshot, focusedOrganismId);
   cache.organisms = {
     surface,
     width,
