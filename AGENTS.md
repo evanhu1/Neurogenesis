@@ -33,7 +33,15 @@
   prefer zero-cost abstractions.
 - TypeScript: strict mode, `camelCase` vars/functions, `PascalCase` types.
 - Use Tailwind for frontend styling.
-- Keep field names aligned between Rust structs and `web-client/src/types.ts`.
+- Keep Rust and web data models synchronized using this split:
+  - `web-client/src/types.ts` `Api*` types must match Rust wire schema
+    (`sim-types/src/lib.rs` + `sim-server/src/protocol.rs`) exactly.
+  - UI-only types in `web-client/src/types.ts` may extend/derive fields, but
+    must be produced by normalization in `web-client/src/protocol.ts`.
+  - Do not read raw API payloads directly in feature code; normalize at the
+    HTTP/WS boundary first.
+  - When changing wire fields, update Rust structs, TS `Api*` types, and
+    normalizers in the same change.
 - DO NOT CARE ABOUT backwards compatibility
 
 ## Testing

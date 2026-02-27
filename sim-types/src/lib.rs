@@ -4,7 +4,9 @@ use strum::VariantArray;
 
 macro_rules! id_newtype {
     ($name:ident, $inner:ty) => {
-        #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        #[derive(
+            Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord,
+        )]
         pub struct $name(pub $inner);
     };
 }

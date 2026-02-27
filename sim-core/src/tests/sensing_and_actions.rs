@@ -279,6 +279,7 @@ fn runtime_plasticity_updates_weights() {
     });
     let mut action: Vec<_> = ActionType::ALL
         .into_iter()
+        .copied()
         .enumerate()
         .map(|(idx, action_type)| {
             make_action_neuron(
@@ -358,6 +359,7 @@ fn runtime_plasticity_neutralizes_passive_metabolism_for_dopamine() {
     });
     let action: Vec<_> = ActionType::ALL
         .into_iter()
+        .copied()
         .enumerate()
         .map(|(idx, action_type)| {
             make_action_neuron(
@@ -466,6 +468,7 @@ fn inter_recurrent_eligibility_uses_prev_inter_pre_signal_only_for_inter_targets
     };
     let action: Vec<_> = ActionType::ALL
         .into_iter()
+        .copied()
         .enumerate()
         .map(|(idx, action_type)| {
             make_action_neuron(
@@ -546,6 +549,7 @@ fn action_target_eligibility_uses_centered_logits_not_sigmoid_activation() {
     });
     let action: Vec<_> = ActionType::ALL
         .into_iter()
+        .copied()
         .enumerate()
         .map(|(idx, action_type)| {
             make_action_neuron(
@@ -617,6 +621,7 @@ fn energy_sensor_clamps_and_scales_with_starting_energy() {
     )];
     let action: Vec<_> = ActionType::ALL
         .into_iter()
+        .copied()
         .enumerate()
         .map(|(idx, action_type)| {
             make_action_neuron(

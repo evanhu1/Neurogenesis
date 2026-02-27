@@ -141,6 +141,7 @@ fn forced_brain(
     };
     let inter_synapses: Vec<SynapseEdge> = ActionType::ALL
         .into_iter()
+        .copied()
         .enumerate()
         .map(|(idx, action_type)| SynapseEdge {
             pre_neuron_id: inter_id,
@@ -170,6 +171,7 @@ fn forced_brain(
     }];
     let mut action: Vec<_> = ActionType::ALL
         .into_iter()
+        .copied()
         .enumerate()
         .map(|(idx, action_type)| {
             make_action_neuron(

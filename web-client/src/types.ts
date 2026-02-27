@@ -73,6 +73,7 @@ export type WorldConfig = {
   max_organism_age: number;
   speciation_threshold: number;
   global_mutation_rate_modifier: number;
+  meta_mutation_enabled: boolean;
   seed_genome_config: SeedGenomeConfig;
 };
 
