@@ -28,6 +28,7 @@ export function WorldCanvas({
   const frameRequestRef = useRef<number | null>(null);
   const needsRenderRef = useRef(true);
   const requestRenderCallbackRef = useRef<() => void>(() => {});
+  const displaySizeRef = useRef({ width: 0, height: 0, dpr: 0 });
   const snapshotRef = useRef<WorldSnapshot | null>(snapshot);
   const focusedOrganismIdRef = useRef<number | null>(focusedOrganismId);
   const onOrganismSelectRef = useRef(onOrganismSelect);
@@ -36,6 +37,9 @@ export function WorldCanvas({
   const [showPlants, setShowPlants] = useState(true);
   const showOrganismsRef = useRef(showOrganisms);
   const showPlantsRef = useRef(showPlants);
+  const onViewportChange = useCallback(() => {
+    requestRenderCallbackRef.current();
+  }, []);
   const {
     viewportRef,
     isSpacePressed,
@@ -47,20 +51,30 @@ export function WorldCanvas({
     onCanvasMouseMove,
     onCanvasMouseUp,
     consumeSuppressedClick,
-  } = useWorldViewport({ onViewportChange: () => requestRenderCallbackRef.current() });
+  } = useWorldViewport({ onViewportChange });
+  const syncCanvasDisplaySize = useCallback((canvas: HTMLCanvasElement) => {
+    const dpr = window.devicePixelRatio || 1;
+    const displayWidth = Math.max(1, Math.floor(canvas.clientWidth * dpr));
+    const displayHeight = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+    const previous = displaySizeRef.current;
+    const changed =
+      previous.width !== displayWidth || previous.height !== displayHeight || previous.dpr !== dpr;
+
+    if (!changed) return false;
+
+    displaySizeRef.current = { width: displayWidth, height: displayHeight, dpr };
+    if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+      canvas.width = displayWidth;
+      canvas.height = displayHeight;
+    }
+    return true;
+  }, []);
   const drawCurrentFrame = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas || !needsRenderRef.current) return;
 
     needsRenderRef.current = false;
-
-    const dpr = window.devicePixelRatio || 1;
-    const displayWidth = Math.max(1, Math.floor(canvas.clientWidth * dpr));
-    const displayHeight = Math.max(1, Math.floor(canvas.clientHeight * dpr));
-    if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
-      canvas.width = displayWidth;
-      canvas.height = displayHeight;
-    }
+    syncCanvasDisplaySize(canvas);
 
     const context = canvas.getContext('2d');
     if (!context) return;
@@ -69,7 +83,7 @@ export function WorldCanvas({
       organisms: showOrganismsRef.current,
       plants: showPlantsRef.current,
     });
-  }, [viewportRef]);
+  }, [syncCanvasDisplaySize, viewportRef]);
   const requestRender = useCallback(() => {
     needsRenderRef.current = true;
     if (frameRequestRef.current != null || document.visibilityState === 'hidden') return;
@@ -104,17 +118,11 @@ export function WorldCanvas({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const dpr = window.devicePixelRatio || 1;
-    const displayWidth = Math.max(1, Math.floor(canvas.clientWidth * dpr));
-    const displayHeight = Math.max(1, Math.floor(canvas.clientHeight * dpr));
-    if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
-      canvas.width = displayWidth;
-      canvas.height = displayHeight;
-    }
+    syncCanvasDisplaySize(canvas);
 
     fitWorldToCanvas(canvas, snapshot.config.world_width);
     hasAutoFitRef.current = true;
-  }, [fitWorldToCanvas, snapshot]);
+  }, [fitWorldToCanvas, snapshot, syncCanvasDisplaySize]);
 
   useEffect(() => {
     if (!panToHexRef) return;
@@ -195,11 +203,13 @@ export function WorldCanvas({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const observedElement = canvas.parentElement ?? canvas;
 
     const resizeObserver = new ResizeObserver(() => {
+      if (!syncCanvasDisplaySize(canvas)) return;
       requestRender();
     });
-    resizeObserver.observe(canvas);
+    resizeObserver.observe(observedElement);
 
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
@@ -218,7 +228,7 @@ export function WorldCanvas({
         frameRequestRef.current = null;
       }
     };
-  }, [requestRender]);
+  }, [requestRender, syncCanvasDisplaySize]);
 
   return (
     <div className="relative h-full w-full">
