@@ -25,6 +25,9 @@ export function WorldCanvas({
   panToHexRef,
 }: WorldCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const frameRequestRef = useRef<number | null>(null);
+  const needsRenderRef = useRef(true);
+  const requestRenderCallbackRef = useRef<() => void>(() => {});
   const snapshotRef = useRef<WorldSnapshot | null>(snapshot);
   const focusedOrganismIdRef = useRef<number | null>(focusedOrganismId);
   const onOrganismSelectRef = useRef(onOrganismSelect);
@@ -44,7 +47,42 @@ export function WorldCanvas({
     onCanvasMouseMove,
     onCanvasMouseUp,
     consumeSuppressedClick,
-  } = useWorldViewport();
+  } = useWorldViewport({ onViewportChange: () => requestRenderCallbackRef.current() });
+  const drawCurrentFrame = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !needsRenderRef.current) return;
+
+    needsRenderRef.current = false;
+
+    const dpr = window.devicePixelRatio || 1;
+    const displayWidth = Math.max(1, Math.floor(canvas.clientWidth * dpr));
+    const displayHeight = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+    if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+      canvas.width = displayWidth;
+      canvas.height = displayHeight;
+    }
+
+    const context = canvas.getContext('2d');
+    if (!context) return;
+
+    renderWorld(context, canvas, snapshotRef.current, focusedOrganismIdRef.current, viewportRef.current, {
+      organisms: showOrganismsRef.current,
+      plants: showPlantsRef.current,
+    });
+  }, [viewportRef]);
+  const requestRender = useCallback(() => {
+    needsRenderRef.current = true;
+    if (frameRequestRef.current != null || document.visibilityState === 'hidden') return;
+
+    frameRequestRef.current = requestAnimationFrame(() => {
+      frameRequestRef.current = null;
+      drawCurrentFrame();
+      if (needsRenderRef.current) {
+        requestRender();
+      }
+    });
+  }, [drawCurrentFrame]);
+  requestRenderCallbackRef.current = requestRender;
 
   // Keep refs synchronized during render so the RAF draw loop sees latest props immediately.
   snapshotRef.current = snapshot;
@@ -56,6 +94,10 @@ export function WorldCanvas({
   useEffect(() => {
     hasAutoFitRef.current = false;
   }, [snapshot?.config.world_width]);
+
+  useEffect(() => {
+    requestRender();
+  }, [requestRender, snapshot, focusedOrganismId, showOrganisms, showPlants]);
 
   useEffect(() => {
     if (!snapshot || hasAutoFitRef.current) return;
@@ -151,37 +193,32 @@ export function WorldCanvas({
   }, [zoomAtPointer]);
 
   useEffect(() => {
-    let frameId = 0;
-    const draw = () => {
-      const canvas = canvasRef.current;
-      if (canvas) {
-        const dpr = window.devicePixelRatio || 1;
-        const displayWidth = Math.max(1, Math.floor(canvas.clientWidth * dpr));
-        const displayHeight = Math.max(1, Math.floor(canvas.clientHeight * dpr));
-        if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
-          canvas.width = displayWidth;
-          canvas.height = displayHeight;
-        }
-        const context = canvas.getContext('2d');
-        if (context) {
-          renderWorld(
-            context,
-            canvas,
-            snapshotRef.current,
-            focusedOrganismIdRef.current,
-            viewportRef.current,
-            {
-              organisms: showOrganismsRef.current,
-              plants: showPlantsRef.current,
-            },
-          );
-        }
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const resizeObserver = new ResizeObserver(() => {
+      requestRender();
+    });
+    resizeObserver.observe(canvas);
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        requestRender();
       }
-      frameId = requestAnimationFrame(draw);
     };
-    draw();
-    return () => cancelAnimationFrame(frameId);
-  }, [viewportRef]);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    requestRender();
+
+    return () => {
+      resizeObserver.disconnect();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      if (frameRequestRef.current != null) {
+        cancelAnimationFrame(frameRequestRef.current);
+        frameRequestRef.current = null;
+      }
+    };
+  }, [requestRender]);
 
   return (
     <div className="relative h-full w-full">

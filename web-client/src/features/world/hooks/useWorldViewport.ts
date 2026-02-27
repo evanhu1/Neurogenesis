@@ -51,7 +51,11 @@ type PanState = {
   dragged: boolean;
 };
 
-export function useWorldViewport() {
+type UseWorldViewportOptions = {
+  onViewportChange?: () => void;
+};
+
+export function useWorldViewport({ onViewportChange }: UseWorldViewportOptions = {}) {
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const [isPanningWorld, setIsPanningWorld] = useState(false);
   const viewportRef = useRef<WorldViewport>(DEFAULT_WORLD_VIEWPORT);
@@ -63,7 +67,8 @@ export function useWorldViewport() {
     const next = updater(prev);
     if (viewportEqual(prev, next)) return;
     viewportRef.current = next;
-  }, []);
+    onViewportChange?.();
+  }, [onViewportChange]);
 
   const zoomAtPointer = useCallback(
     (
