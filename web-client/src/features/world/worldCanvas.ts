@@ -16,6 +16,16 @@ const HEX_VERTEX_OFFSETS = Array.from({ length: 6 }, (_, index) => {
     y: Math.sin(angle),
   };
 });
+const HEX_DIAGONAL_UNIT_X = 0.5;
+const HEX_DIAGONAL_UNIT_Y = SQRT_3 / 2;
+const FACING_UNIT_VECTORS: Record<FacingDirection, { x: number; y: number }> = {
+  East: { x: 1, y: 0 },
+  NorthEast: { x: HEX_DIAGONAL_UNIT_X, y: -HEX_DIAGONAL_UNIT_Y },
+  NorthWest: { x: -HEX_DIAGONAL_UNIT_X, y: -HEX_DIAGONAL_UNIT_Y },
+  West: { x: -1, y: 0 },
+  SouthWest: { x: -HEX_DIAGONAL_UNIT_X, y: HEX_DIAGONAL_UNIT_Y },
+  SouthEast: { x: HEX_DIAGONAL_UNIT_X, y: HEX_DIAGONAL_UNIT_Y },
+};
 
 type HexLayout = {
   size: number;
@@ -154,23 +164,6 @@ function drawVisibleGrid(
   ctx.stroke();
 }
 
-function facingDelta(direction: FacingDirection): [number, number] {
-  switch (direction) {
-    case 'East':
-      return [1, 0];
-    case 'NorthEast':
-      return [1, -1];
-    case 'NorthWest':
-      return [0, -1];
-    case 'West':
-      return [-1, 0];
-    case 'SouthWest':
-      return [-1, 1];
-    case 'SouthEast':
-      return [0, 1];
-  }
-}
-
 export function renderWorld(
   ctx: CanvasRenderingContext2D,
   canvas: HTMLCanvasElement,
@@ -239,13 +232,7 @@ export function renderWorld(
       const center = hexCenter(layout, org.q, org.r);
 
       const radius = Math.max(3, layout.size * 0.6);
-      const [dq, dr] = facingDelta(org.facing);
-      const neighbor = hexCenter(layout, org.q + dq, org.r + dr);
-      const vx = neighbor.x - center.x;
-      const vy = neighbor.y - center.y;
-      const norm = Math.hypot(vx, vy) || 1;
-      const ux = vx / norm;
-      const uy = vy / norm;
+      const { x: ux, y: uy } = FACING_UNIT_VECTORS[org.facing];
 
       // Triangle pointing in facing direction
       const tipX = center.x + ux * radius;
