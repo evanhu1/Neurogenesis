@@ -161,17 +161,43 @@ export function useSimulationSession(): SimulationSessionState {
     return sendCommandRef.current(command);
   }, []);
 
-  const controls = useSimulationControls(sendCommand);
-  const focus = useSimulationFocus({ snapshot, session, request, setErrorText });
+  const {
+    isRunning,
+    isStepPending,
+    stepProgress,
+    speedLevels,
+    speedLevelIndex,
+    clearPendingStep,
+    handleSocketClose,
+    handleStepProgress,
+    syncSessionState,
+    toggleRun,
+    setSpeedLevelIndex,
+    step,
+  } = useSimulationControls(sendCommand);
+  const {
+    focusedOrganismId,
+    focusedOrganism,
+    activeActionNeuronId,
+    focusedOrganismIdRef,
+    nextFocusPollAtMsRef,
+    handleFocusBrain,
+    focusOrganism,
+    defocusOrganism,
+    resetFocusState,
+  } = useSimulationFocus({ snapshot, session, request, setErrorText });
 
   const handleServerEvent = useCallback(
     (event: ApiServerEvent) => {
       switch (event.type) {
         case 'StateSnapshot': {
           const nextSnapshot = normalizeWorldSnapshot(event.data);
+          if (nextSnapshot.turn <= latestSnapshotTurnRef.current) {
+            break;
+          }
           latestSnapshotTurnRef.current = nextSnapshot.turn;
           snapshotRef.current = nextSnapshot;
-          controls.clearPendingStep();
+          clearPendingStep();
           setSnapshot(nextSnapshot);
           setSpeciesPopulationHistory((previous) =>
             upsertSpeciesPopulationHistory(previous, {
@@ -179,7 +205,7 @@ export function useSimulationSession(): SimulationSessionState {
               speciesCounts: cloneSpeciesCounts(nextSnapshot.metrics.species_counts),
             }),
           );
-          const trackedFocusedId = focus.focusedOrganismIdRef.current;
+          const trackedFocusedId = focusedOrganismIdRef.current;
           if (trackedFocusedId !== null) {
             sendCommand({ type: 'SetFocus', data: { organism_id: trackedFocusedId } });
           }
@@ -188,7 +214,7 @@ export function useSimulationSession(): SimulationSessionState {
         case 'TickDelta': {
           const delta = normalizeTickDelta(event.data);
           latestSnapshotTurnRef.current = delta.turn;
-          controls.clearPendingStep();
+          clearPendingStep();
           const previousSnapshot = snapshotRef.current;
           if (!previousSnapshot) {
             break;
@@ -203,11 +229,11 @@ export function useSimulationSession(): SimulationSessionState {
             }),
           );
 
-          const trackedFocusedId = focus.focusedOrganismIdRef.current;
+          const trackedFocusedId = focusedOrganismIdRef.current;
           if (trackedFocusedId !== null) {
             const now = Date.now();
-            if (now >= focus.nextFocusPollAtMsRef.current) {
-              focus.nextFocusPollAtMsRef.current = now + FOCUS_POLL_INTERVAL_MS;
+            if (now >= nextFocusPollAtMsRef.current) {
+              nextFocusPollAtMsRef.current = now + FOCUS_POLL_INTERVAL_MS;
               sendCommand({ type: 'SetFocus', data: { organism_id: trackedFocusedId } });
             }
           }
@@ -216,19 +242,19 @@ export function useSimulationSession(): SimulationSessionState {
         case 'StepProgress': {
           const progress = parseStepProgressData(event.data);
           if (progress) {
-            controls.handleStepProgress(progress);
+            handleStepProgress(progress);
           }
           break;
         }
         case 'FocusBrain': {
-          focus.handleFocusBrain(normalizeFocusBrainData(event.data), latestSnapshotTurnRef.current);
+          handleFocusBrain(normalizeFocusBrainData(event.data), latestSnapshotTurnRef.current);
           break;
         }
         case 'Metrics': {
           break;
         }
         case 'Error': {
-          controls.clearPendingStep();
+          clearPendingStep();
           const message = event.data.message || 'Simulation server reported an error';
           setErrorText(message);
           break;
@@ -237,14 +263,21 @@ export function useSimulationSession(): SimulationSessionState {
           break;
       }
     },
-    [controls, focus, sendCommand],
+    [
+      clearPendingStep,
+      focusedOrganismIdRef,
+      handleFocusBrain,
+      handleStepProgress,
+      nextFocusPollAtMsRef,
+      sendCommand,
+    ],
   );
 
-  const connection = useSimulationConnection({
+  const { connectWs, sendCommand: sendSocketCommand } = useSimulationConnection({
     onServerEvent: handleServerEvent,
-    onSocketClose: controls.handleSocketClose,
+    onSocketClose: handleSocketClose,
   });
-  sendCommandRef.current = connection.sendCommand;
+  sendCommandRef.current = sendSocketCommand;
 
   const applyLoadedSession = useCallback(
     (metadata: SessionMetadata, loadedSnapshot: WorldSnapshot) => {
@@ -253,8 +286,8 @@ export function useSimulationSession(): SimulationSessionState {
       latestSnapshotTurnRef.current = loadedSnapshot.turn;
       snapshotRef.current = loadedSnapshot;
       setSnapshot(loadedSnapshot);
-      focus.resetFocusState(true);
-      controls.syncSessionState(metadata.running, metadata.ticks_per_second);
+      resetFocusState(true);
+      syncSessionState(metadata.running, metadata.ticks_per_second);
       setSpeciesPopulationHistory([
         {
           turn: loadedSnapshot.turn,
@@ -262,9 +295,9 @@ export function useSimulationSession(): SimulationSessionState {
         },
       ]);
       persistSessionId(metadata.id);
-      connection.connectWs(metadata.id);
+      connectWs(metadata.id);
     },
-    [connection, controls, focus],
+    [connectWs, resetFocusState, syncSessionState],
   );
 
   const archive = useSimulationArchive({
@@ -322,7 +355,7 @@ export function useSimulationSession(): SimulationSessionState {
         return;
       }
       setErrorText(null);
-      if (controls.isRunning) {
+      if (isRunning) {
         sendCommand({ type: 'Pause' });
       }
       void request<ApiWorldSnapshot>(`/v1/sessions/${session.id}/reset`, 'POST', { seed })
@@ -330,7 +363,7 @@ export function useSimulationSession(): SimulationSessionState {
           const normalized = normalizeWorldSnapshot(nextSnapshot);
           latestSnapshotTurnRef.current = normalized.turn;
           snapshotRef.current = normalized;
-          controls.syncSessionState(false, 0);
+          syncSessionState(false, 0);
           setSnapshot(normalized);
           setSpeciesPopulationHistory([
             {
@@ -338,13 +371,13 @@ export function useSimulationSession(): SimulationSessionState {
               speciesCounts: cloneSpeciesCounts(normalized.metrics.species_counts),
             },
           ]);
-          focus.resetFocusState(true);
+          resetFocusState(true);
         })
         .catch((err) => {
           captureError(setErrorText, err, 'Failed to reset session');
         });
     },
-    [controls, focus, request, sendCommand, session],
+    [isRunning, request, resetFocusState, sendCommand, session, syncSessionState],
   );
 
   useEffect(() => {
@@ -373,22 +406,22 @@ export function useSimulationSession(): SimulationSessionState {
     batchRunStatus: archive.batchRunStatus,
     archivedWorlds: archive.archivedWorlds,
     speciesPopulationHistory,
-    focusedOrganismId: focus.focusedOrganismId,
-    focusedOrganism: focus.focusedOrganism,
-    activeActionNeuronId: focus.activeActionNeuronId,
-    isRunning: controls.isRunning,
-    isStepPending: controls.isStepPending,
-    stepProgress: controls.stepProgress,
-    speedLevels: controls.speedLevels,
-    speedLevelIndex: controls.speedLevelIndex,
+    focusedOrganismId,
+    focusedOrganism,
+    activeActionNeuronId,
+    isRunning,
+    isStepPending,
+    stepProgress,
+    speedLevels,
+    speedLevelIndex,
     errorText,
     createSession,
     resetSession,
-    toggleRun: controls.toggleRun,
-    setSpeedLevelIndex: controls.setSpeedLevelIndex,
-    step: controls.step,
-    focusOrganism: focus.focusOrganism,
-    defocusOrganism: focus.defocusOrganism,
+    toggleRun,
+    setSpeedLevelIndex,
+    step,
+    focusOrganism,
+    defocusOrganism,
     saveCurrentWorld: archive.saveCurrentWorld,
     deleteArchivedWorld: archive.deleteArchivedWorld,
     deleteAllArchivedWorlds: archive.deleteAllArchivedWorlds,
