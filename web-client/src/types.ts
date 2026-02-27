@@ -58,7 +58,6 @@ export type ApiSeedGenomeConfig = GenomeHyperparams;
 
 export type WorldConfig = {
   world_width: number;
-  steps_per_second: number;
   num_organisms: number;
   periodic_injection_interval_turns: number;
   periodic_injection_count: number;

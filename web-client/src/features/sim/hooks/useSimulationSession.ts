@@ -315,7 +315,11 @@ export function useSimulationSession(): SimulationSessionState {
       setIsRunning(metadata.running);
       setIsStepPending(false);
       setStepProgress(null);
-      setSpeedLevelIndex(nearestSpeedLevelIndex(metadata.ticks_per_second));
+      setSpeedLevelIndex((current) =>
+        metadata.ticks_per_second > 0
+          ? nearestSpeedLevelIndex(metadata.ticks_per_second)
+          : current,
+      );
       setSpeciesPopulationHistory([
         {
           turn: loadedSnapshot.turn,

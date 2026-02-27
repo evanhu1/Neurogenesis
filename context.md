@@ -2783,7 +2783,6 @@ fn intent_from_selected_action(
 
 ```toml
 world_width = 500
-steps_per_second = 5
 num_organisms = 5000
 periodic_injection_interval_turns = 100
 periodic_injection_count = 100

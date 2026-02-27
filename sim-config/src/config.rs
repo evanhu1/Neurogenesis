@@ -37,7 +37,6 @@ pub struct SeedGenomeConfig {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct WorldConfig {
     pub world_width: u32,
-    pub steps_per_second: u32,
     pub num_organisms: u32,
     #[serde(default = "default_periodic_injection_interval_turns")]
     pub periodic_injection_interval_turns: u32,
@@ -68,7 +67,6 @@ pub struct WorldConfig {
 #[derive(Debug, Clone, Deserialize)]
 struct WorldConfigDeserialize {
     world_width: u32,
-    steps_per_second: u32,
     num_organisms: u32,
     #[serde(default = "default_periodic_injection_interval_turns")]
     periodic_injection_interval_turns: u32,
@@ -104,7 +102,6 @@ impl<'de> Deserialize<'de> for WorldConfig {
         let raw = WorldConfigDeserialize::deserialize(deserializer)?;
         Ok(Self {
             world_width: raw.world_width,
-            steps_per_second: raw.steps_per_second,
             num_organisms: raw.num_organisms,
             periodic_injection_interval_turns: raw.periodic_injection_interval_turns,
             periodic_injection_count: raw.periodic_injection_count,

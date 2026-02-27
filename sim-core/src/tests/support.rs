@@ -66,7 +66,6 @@ pub(super) fn test_genome() -> OrganismGenome {
 pub(super) fn stable_test_config() -> WorldConfig {
     WorldConfig {
         world_width: 10,
-        steps_per_second: 5,
         num_organisms: 10,
         periodic_injection_interval_turns: 0,
         periodic_injection_count: 0,

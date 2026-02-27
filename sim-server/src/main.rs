@@ -94,6 +94,7 @@ const STEP_PROGRESS_MIN_BATCH_SIZE: u32 = 32;
 const STEP_PROGRESS_MAX_BATCH_SIZE: u32 = 2_048;
 const STEP_PROGRESS_TARGET_UPDATES: u32 = 64;
 const DEFAULT_BATCH_TICKS_PER_WORLD: u64 = 1_000;
+const UNBOUNDED_TICKS_PER_SECOND: u32 = 0;
 
 fn step_batch_size(total_count: u32) -> u32 {
     let target = (total_count / STEP_PROGRESS_TARGET_BATCHES).max(1);
@@ -681,7 +682,7 @@ async fn create_runtime_session(
     let now_ms = now_unix_ms()?;
     let id = Uuid::new_v4();
     let snapshot = simulation.snapshot();
-    let ticks_per_second = simulation.config().steps_per_second;
+    let ticks_per_second = UNBOUNDED_TICKS_PER_SECOND;
     let metadata = SessionMetadata {
         id,
         created_at_unix_ms: now_ms,
@@ -998,7 +999,7 @@ async fn socket_loop(socket: WebSocket, session: Arc<Session>) {
 async fn handle_command(command: ClientCommand, session: Arc<Session>) -> Result<(), String> {
     match command {
         ClientCommand::Start { ticks_per_second } => {
-            session_start(session, ticks_per_second.max(1)).await;
+            session_start(session, ticks_per_second).await;
             Ok(())
         }
         ClientCommand::Pause => {
@@ -1060,7 +1061,7 @@ async fn handle_command(command: ClientCommand, session: Arc<Session>) -> Result
 
 async fn session_start(session: Arc<Session>, ticks_per_second: u32) {
     let mut runtime = session.runtime.lock().await;
-    runtime.ticks_per_second = ticks_per_second.max(1);
+    runtime.ticks_per_second = ticks_per_second;
 
     if runtime.running {
         return;
@@ -1075,7 +1076,7 @@ async fn session_start(session: Arc<Session>, ticks_per_second: u32) {
                 if !rt.running {
                     break;
                 }
-                rt.ticks_per_second.max(1)
+                rt.ticks_per_second
             };
 
             let delta = {
@@ -1089,7 +1090,11 @@ async fn session_start(session: Arc<Session>, ticks_per_second: u32) {
                     .send(ServerEvent::TickDelta(delta.into()));
             }
 
-            tokio::time::sleep(Duration::from_millis((1000_u64 / tps as u64).max(1))).await;
+            if tps > 0 {
+                tokio::time::sleep(Duration::from_millis((1000_u64 / tps as u64).max(1))).await;
+            } else {
+                tokio::task::yield_now().await;
+            }
         }
 
         let mut rt = session_for_task.runtime.lock().await;

@@ -267,7 +267,6 @@ fn duration_to_ns(duration: Duration) -> u64 {
 fn stable_perf_config() -> WorldConfig {
     WorldConfig {
         world_width: 100,
-        steps_per_second: 5,
         num_organisms: 2_000,
         periodic_injection_interval_turns: 0,
         periodic_injection_count: 0,

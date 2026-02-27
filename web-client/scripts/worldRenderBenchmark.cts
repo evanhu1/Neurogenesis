@@ -92,7 +92,6 @@ function createSnapshot(worldWidth: number, organismCount: number, foodCount: nu
     rng_seed: 42,
     config: {
       world_width: worldWidth,
-      steps_per_second: 24,
       num_organisms: organismCount,
       periodic_injection_interval_turns: 10,
       periodic_injection_count: 5,

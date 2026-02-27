@@ -253,8 +253,8 @@ REST:
 - Archived worlds: list/delete/instantiate session (`/v1/worlds*`)
 - Sessions: create/get state/step/reset/archive/focus/stream (`/v1/sessions*`)
 
-WS commands: `Start { ticks_per_second }`, `Pause`, `Step { count }`,
-`SetFocus { organism_id }`.
+WS commands: `Start { ticks_per_second }` (`0` means unbounded/headless speed),
+`Pause`, `Step { count }`, `SetFocus { organism_id }`.
 
 `TickDelta`: `turn`, `moves`, `facing_updates`, `removed_positions` (unified
 `RemovedEntityPosition[]` with `entity_id: EntityId` tagged `Organism` or
