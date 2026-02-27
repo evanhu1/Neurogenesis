@@ -518,6 +518,7 @@ function computeStableVisibleSpeciesIds(
   }
 
   const visibleSpeciesIds: number[] = [];
+  const visibleSpeciesSet = new Set<number>();
   const zeroStreakBySpecies = new Map<number, number>();
 
   for (const point of history) {
@@ -534,23 +535,26 @@ function computeStableVisibleSpeciesIds(
       if (protectedSpeciesSet.has(speciesId)) continue;
       if ((zeroStreakBySpecies.get(speciesId) ?? 0) >= SPECIES_ZERO_GRACE_POINTS) {
         visibleSpeciesIds.splice(idx, 1);
+        visibleSpeciesSet.delete(speciesId);
         zeroStreakBySpecies.delete(speciesId);
       }
     }
 
     for (const speciesId of protectedSpeciesSet) {
-      if (!visibleSpeciesIds.includes(speciesId)) {
+      if (!visibleSpeciesSet.has(speciesId)) {
         visibleSpeciesIds.push(speciesId);
+        visibleSpeciesSet.add(speciesId);
         zeroStreakBySpecies.set(speciesId, 0);
       }
     }
 
     const rankedSpeciesIds = rankSpeciesIdsByCount(point.speciesCounts);
     for (const speciesId of rankedSpeciesIds) {
-      if (visibleSpeciesIds.includes(speciesId)) continue;
+      if (visibleSpeciesSet.has(speciesId)) continue;
 
       if (visibleSpeciesIds.length < MAX_VISIBLE_SPECIES) {
         visibleSpeciesIds.push(speciesId);
+        visibleSpeciesSet.add(speciesId);
         zeroStreakBySpecies.set(speciesId, 0);
         continue;
       }
@@ -568,8 +572,11 @@ function computeStableVisibleSpeciesIds(
       }
 
       if (replacementIndex === -1) continue;
-      zeroStreakBySpecies.delete(visibleSpeciesIds[replacementIndex]);
+      const replacedSpeciesId = visibleSpeciesIds[replacementIndex];
+      zeroStreakBySpecies.delete(replacedSpeciesId);
+      visibleSpeciesSet.delete(replacedSpeciesId);
       visibleSpeciesIds[replacementIndex] = speciesId;
+      visibleSpeciesSet.add(speciesId);
       zeroStreakBySpecies.set(speciesId, 0);
     }
   }
