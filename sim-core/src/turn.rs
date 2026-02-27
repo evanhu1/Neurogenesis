@@ -1,4 +1,4 @@
-use crate::brain::{action_index, evaluate_brain, ActionSelectionPolicy, BrainScratch};
+use crate::brain::{action_index, evaluate_brain, BrainScratch};
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right, wrap_position};
 use crate::plasticity::{apply_runtime_weight_updates, compute_pending_coactivations};
 use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
@@ -233,9 +233,7 @@ impl Simulation {
         let occupancy = &self.occupancy;
         let pending_actions = &self.pending_actions;
         let runtime_plasticity_enabled = self.config.runtime_plasticity_enabled;
-        let action_selection = ActionSelectionPolicy {
-            temperature: self.config.action_temperature,
-        };
+        let action_temperature = self.config.action_temperature;
         let sim_seed = self.seed;
         let tick = self.turn;
         #[cfg(feature = "profiling")]
@@ -255,7 +253,7 @@ impl Simulation {
                     snapshot.organism_ids[idx],
                     sim_seed,
                     tick,
-                    action_selection,
+                    action_temperature,
                     runtime_plasticity_enabled,
                     scratch,
                 )
@@ -703,7 +701,7 @@ fn build_intent_for_organism(
     organism_id: OrganismId,
     sim_seed: u64,
     tick: u64,
-    action_selection: ActionSelectionPolicy,
+    action_temperature: f32,
     runtime_plasticity_enabled: bool,
     scratch: &mut BrainScratch,
 ) -> OrganismIntent {
@@ -731,7 +729,7 @@ fn build_intent_for_organism(
         world_width,
         occupancy,
         vision_distance,
-        action_selection,
+        action_temperature,
         action_sample,
         scratch,
     );
@@ -739,7 +737,7 @@ fn build_intent_for_organism(
         compute_pending_coactivations(organism, scratch);
     }
 
-    let selected_action = evaluation.resolved_actions.selected_action;
+    let selected_action = evaluation.selected_action;
     organism.last_action_taken = selected_action;
     let selected_action_activation = evaluation.action_activations[action_index(selected_action)];
     let (

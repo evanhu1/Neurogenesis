@@ -1,8 +1,8 @@
 use super::support::test_genome;
 use super::*;
 use crate::brain::{
-    action_index, evaluate_brain, express_genome, scan_rays, ActionSelectionPolicy, BrainScratch,
-    ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT,
+    action_index, evaluate_brain, express_genome, scan_rays, BrainScratch, ACTION_COUNT_U32,
+    ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT,
 };
 use crate::genome::{BRAIN_SPACE_MAX, BRAIN_SPACE_MIN};
 use crate::plasticity::{apply_runtime_weight_updates, compute_pending_coactivations};
@@ -13,8 +13,8 @@ fn loc(x: f32, y: f32) -> BrainLocation {
     BrainLocation { x, y }
 }
 
-fn deterministic_action_policy() -> ActionSelectionPolicy {
-    ActionSelectionPolicy { temperature: 0.5 }
+fn deterministic_action_policy() -> f32 {
+    0.5
 }
 
 fn simple_action_bias_organism(
@@ -194,7 +194,7 @@ fn action_biases_drive_actions_without_incoming_synapses() {
         &mut scratch,
     );
 
-    assert_eq!(eval.resolved_actions.selected_action, ActionType::Reproduce);
+    assert_eq!(eval.selected_action, ActionType::Reproduce);
 }
 
 #[test]
@@ -206,14 +206,14 @@ fn stochastic_action_selection_is_seed_deterministic() {
     let mut scratch_b = BrainScratch::new();
     let vision_distance_a = organism_a.genome.vision_distance;
     let vision_distance_b = organism_b.genome.vision_distance;
-    let policy = ActionSelectionPolicy { temperature: 1.5 };
+    let action_temperature = 1.5;
 
     let eval_a = evaluate_brain(
         &mut organism_a,
         3,
         &occupancy,
         vision_distance_a,
-        policy,
+        action_temperature,
         0.25,
         &mut scratch_a,
     );
@@ -222,13 +222,13 @@ fn stochastic_action_selection_is_seed_deterministic() {
         3,
         &occupancy,
         vision_distance_b,
-        policy,
+        action_temperature,
         0.25,
         &mut scratch_b,
     );
 
     assert_eq!(eval_a.action_logits, eval_b.action_logits);
-    assert_eq!(eval_a.resolved_actions, eval_b.resolved_actions);
+    assert_eq!(eval_a.selected_action, eval_b.selected_action);
 }
 
 #[test]

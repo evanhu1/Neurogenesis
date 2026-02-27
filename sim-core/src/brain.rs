@@ -32,30 +32,12 @@ pub(crate) const ACTION_COUNT_U32: u32 = ACTION_COUNT as u32;
 pub(crate) const INTER_ID_BASE: u32 = 1000;
 pub(crate) const ACTION_ID_BASE: u32 = 2000;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ResolvedActions {
-    pub(crate) selected_action: ActionType,
-}
-
-impl Default for ResolvedActions {
-    fn default() -> Self {
-        Self {
-            selected_action: ActionType::Idle,
-        }
-    }
-}
-
 #[derive(Default)]
 pub(crate) struct BrainEvaluation {
-    pub(crate) resolved_actions: ResolvedActions,
+    pub(crate) selected_action: ActionType,
     pub(crate) action_logits: [f32; ACTION_COUNT],
     pub(crate) action_activations: [f32; ACTION_COUNT],
     pub(crate) synapse_ops: u64,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct ActionSelectionPolicy {
-    pub(crate) temperature: f32,
 }
 
 /// Reusable scratch buffers for brain evaluation, avoiding per-tick allocations.
@@ -291,7 +273,7 @@ pub(crate) fn evaluate_brain(
     world_width: i32,
     occupancy: &[Option<Occupant>],
     vision_distance: u32,
-    action_selection: ActionSelectionPolicy,
+    action_temperature: f32,
     action_sample: f32,
     scratch: &mut BrainScratch,
 ) -> BrainEvaluation {
@@ -408,13 +390,8 @@ pub(crate) fn evaluate_brain(
         result.action_activations[action_index(action.action_type)] = action.neuron.activation;
     }
 
-    result.resolved_actions = ResolvedActions {
-        selected_action: select_action_from_logits(
-            result.action_logits,
-            action_selection,
-            action_sample,
-        ),
-    };
+    result.selected_action =
+        select_action_from_logits(result.action_logits, action_temperature, action_sample);
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::ActionActivationResolve, stage_started.elapsed());
 
@@ -444,13 +421,13 @@ pub fn derive_active_action_neuron_id(organism: &OrganismState) -> Option<Neuron
 
 fn select_action_from_logits(
     action_logits: [f32; ACTION_COUNT],
-    action_selection: ActionSelectionPolicy,
+    action_temperature: f32,
     action_sample: f32,
 ) -> ActionType {
     let best_idx = argmax_index(&action_logits);
     let best_logit = action_logits[best_idx];
 
-    let temperature = action_selection.temperature.max(MIN_ACTION_TEMPERATURE);
+    let temperature = action_temperature.max(MIN_ACTION_TEMPERATURE);
     let mut weights = [0.0_f32; ACTION_COUNT];
     let mut weight_sum = 0.0_f32;
     for (idx, logit) in action_logits.iter().copied().enumerate() {

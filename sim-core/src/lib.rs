@@ -72,7 +72,6 @@ pub(crate) struct PendingActionState {
 impl Simulation {
     pub fn new(config: WorldConfig, seed: u64) -> Result<Self, SimError> {
         sim_config::validate_world_config(&config).map_err(SimError::InvalidConfig)?;
-        genome::validate_seed_genome_config(&config.seed_genome_config)?;
 
         let capacity = grid::world_capacity(config.world_width);
         let mut sim = Self {
@@ -182,7 +181,6 @@ impl Simulation {
 
     pub fn validate_state(&self) -> Result<(), SimError> {
         sim_config::validate_world_config(&self.config).map_err(SimError::InvalidConfig)?;
-        genome::validate_seed_genome_config(&self.config.seed_genome_config)?;
 
         let expected_capacity = grid::world_capacity(self.config.world_width);
         if self.occupancy.len() != expected_capacity {
