@@ -400,23 +400,12 @@ pub(crate) fn evaluate_brain(
 
 /// Derives the active action neuron ID from an organism's current brain state.
 pub fn derive_active_action_neuron_id(organism: &OrganismState) -> Option<NeuronId> {
-    let brain = &organism.brain;
-    if let Some(action_neuron) = brain
+    organism
+        .brain
         .action
         .iter()
         .find(|action| action.action_type == organism.last_action_taken)
-    {
-        return Some(action_neuron.neuron.neuron_id);
-    } else if !brain.action.is_empty() {
-        let action_activations: [f32; ACTION_COUNT] =
-            std::array::from_fn(|i| brain.action.get(i).map_or(0.0, |n| n.neuron.activation));
-        return Some(
-            brain.action[argmax_index(&action_activations)]
-                .neuron
-                .neuron_id,
-        );
-    }
-    None
+        .map(|action_neuron| action_neuron.neuron.neuron_id)
 }
 
 fn select_action_from_logits(

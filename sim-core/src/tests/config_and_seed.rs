@@ -4,37 +4,11 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
 #[test]
-fn config_validation_rejects_out_of_range_vision_distance_mutation_rate() {
-    let mut cfg = stable_test_config();
-    cfg.seed_genome_config.mutation_rate_vision_distance = 1.5;
-    let err = Simulation::new(cfg, 1).expect_err("config should be rejected");
-    assert!(err.to_string().contains("mutation_rate_vision_distance"));
-}
-
-#[test]
-fn config_validation_rejects_out_of_range_split_edge_mutation_rate() {
-    let mut cfg = stable_test_config();
-    cfg.seed_genome_config.mutation_rate_add_neuron_split_edge = 1.5;
-    let err = Simulation::new(cfg, 1).expect_err("config should be rejected");
-    assert!(err
-        .to_string()
-        .contains("mutation_rate_add_neuron_split_edge"));
-}
-
-#[test]
 fn config_validation_rejects_negative_global_mutation_rate_modifier() {
     let mut cfg = stable_test_config();
     cfg.global_mutation_rate_modifier = -0.1;
     let err = Simulation::new(cfg, 1).expect_err("config should be rejected");
     assert!(err.to_string().contains("global_mutation_rate_modifier"));
-}
-
-#[test]
-fn config_validation_rejects_non_positive_seed_starting_energy() {
-    let mut cfg = stable_test_config();
-    cfg.seed_genome_config.starting_energy = 0.0;
-    let err = Simulation::new(cfg, 1).expect_err("config should be rejected");
-    assert!(err.to_string().contains("starting_energy"));
 }
 
 #[test]

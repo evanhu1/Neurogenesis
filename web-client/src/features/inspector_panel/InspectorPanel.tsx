@@ -75,12 +75,7 @@ export function InspectorPanel({
   const summary = useMemo(() => {
     if (!focusedOrganism) return null;
     const genome = focusedOrganism.genome;
-    const fallbackActiveAction = focusedOrganism.brain.action.find(
-      (action) => action.action_type === focusedOrganism.last_action_taken,
-    );
-    const resolvedActiveActionNeuronId =
-      activeActionNeuronId ?? (fallbackActiveAction ? unwrapId(fallbackActiveAction.neuron.neuron_id) : null);
-    const activeNeuronCount = resolvedActiveActionNeuronId === null ? 0 : 1;
+    const activeNeuronCount = activeActionNeuronId === null ? 0 : 1;
 
     const mutationRates: MutationRateItem[] = [
       {
@@ -253,7 +248,6 @@ export function InspectorPanel({
           <BrainCanvas
             focusedBrain={focusedBrain}
             activeActionNeuronId={activeActionNeuronId}
-            lastActionTaken={focusedOrganism?.last_action_taken ?? null}
             focusOrganismId={focusedOrganism ? unwrapId(focusedOrganism.id) : null}
           />
         </div>
