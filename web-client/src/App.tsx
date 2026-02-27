@@ -20,33 +20,43 @@ export default function App() {
     <div className="h-screen bg-page px-4 py-4 text-ink sm:px-6 lg:px-8">
       <div className="mx-auto grid h-full max-w-[1720px] gap-4 xl:grid-cols-[320px_minmax(480px,1fr)_450px]">
         <ControlPanel
-          sessionMeta={sessionMeta}
-          speciesPopulationHistory={simulation.speciesPopulationHistory}
-          focusedSpeciesId={focusedSpeciesId}
-          snapshot={simulation.snapshot}
-          metricsText={metricsText}
+          overview={{
+            sessionMeta,
+            metricsText,
+          }}
+          species={{
+            history: simulation.speciesPopulationHistory,
+            focusedSpeciesId,
+            snapshot: simulation.snapshot,
+            onFocusOrganism: simulation.focusOrganism,
+            panToHexRef,
+          }}
+          controls={{
+            snapshot: simulation.snapshot,
+            isRunning: simulation.isRunning,
+            isStepPending: simulation.isStepPending,
+            stepProgress: simulation.stepProgress,
+            speedLevelIndex: simulation.speedLevelIndex,
+            speedLevelCount: simulation.speedLevels.length,
+            onNewSession: (seedInput) => void simulation.createSession(seedInput),
+            onReset: (seedInput) => simulation.resetSession(seedInput),
+            onToggleRun: simulation.toggleRun,
+            onSpeedLevelChange: simulation.setSpeedLevelIndex,
+            onStep: simulation.step,
+            onSaveCurrentWorld: () => void simulation.saveCurrentWorld(),
+          }}
+          batch={{
+            batchRunStatus: simulation.batchRunStatus,
+            onStartBatchRun: (worldCount, ticksPerWorld) =>
+              void simulation.startBatchRun(worldCount, ticksPerWorld),
+          }}
+          archive={{
+            archivedWorlds: simulation.archivedWorlds,
+            onLoadArchivedWorld: (worldId) => void simulation.loadArchivedWorld(worldId),
+            onDeleteArchivedWorld: (worldId) => void simulation.deleteArchivedWorld(worldId),
+            onDeleteAllArchivedWorlds: () => void simulation.deleteAllArchivedWorlds(),
+          }}
           errorText={simulation.errorText}
-          batchRunStatus={simulation.batchRunStatus}
-          archivedWorlds={simulation.archivedWorlds}
-          isRunning={simulation.isRunning}
-          isStepPending={simulation.isStepPending}
-          stepProgress={simulation.stepProgress}
-          speedLevelIndex={simulation.speedLevelIndex}
-          speedLevelCount={simulation.speedLevels.length}
-          onNewSession={(seedInput) => void simulation.createSession(seedInput)}
-          onReset={(seedInput) => simulation.resetSession(seedInput)}
-          onToggleRun={simulation.toggleRun}
-          onSpeedLevelChange={simulation.setSpeedLevelIndex}
-          onStep={simulation.step}
-          onFocusOrganism={simulation.focusOrganism}
-          onSaveCurrentWorld={() => void simulation.saveCurrentWorld()}
-          onDeleteArchivedWorld={(worldId) => void simulation.deleteArchivedWorld(worldId)}
-          onDeleteAllArchivedWorlds={() => void simulation.deleteAllArchivedWorlds()}
-          onStartBatchRun={(worldCount, ticksPerWorld) =>
-            void simulation.startBatchRun(worldCount, ticksPerWorld)
-          }
-          onLoadArchivedWorld={(worldId) => void simulation.loadArchivedWorld(worldId)}
-          panToHexRef={panToHexRef}
         />
 
         <main className="flex h-full items-center justify-center overflow-hidden rounded-2xl border border-accent/15 bg-panel/70 p-3 shadow-panel">
