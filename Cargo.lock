@@ -1531,6 +1531,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sim-config"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "sim-core"
 version = "0.1.0"
 dependencies = [
@@ -1541,6 +1550,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "sim-config",
  "sim-types",
  "thiserror",
 ]
@@ -1555,6 +1565,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sim-config",
  "sim-core",
  "sim-types",
  "tokio",
@@ -1572,7 +1583,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
- "toml",
+ "sim-config",
 ]
 
 [[package]]

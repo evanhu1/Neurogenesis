@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "sim-config",
   "sim-core",
   "sim-types",
   "sim-server",

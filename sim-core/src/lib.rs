@@ -71,7 +71,7 @@ pub(crate) struct PendingActionState {
 
 impl Simulation {
     pub fn new(config: WorldConfig, seed: u64) -> Result<Self, SimError> {
-        validate_world_config(&config)?;
+        sim_config::validate_world_config(&config).map_err(SimError::InvalidConfig)?;
         genome::validate_seed_genome_config(&config.seed_genome_config)?;
 
         let capacity = grid::world_capacity(config.world_width);
@@ -181,7 +181,7 @@ impl Simulation {
     }
 
     pub fn validate_state(&self) -> Result<(), SimError> {
-        validate_world_config(&self.config)?;
+        sim_config::validate_world_config(&self.config).map_err(SimError::InvalidConfig)?;
         genome::validate_seed_genome_config(&self.config.seed_genome_config)?;
 
         let expected_capacity = grid::world_capacity(self.config.world_width);
@@ -332,55 +332,4 @@ impl Simulation {
 
         Ok(())
     }
-}
-
-fn validate_world_config(config: &WorldConfig) -> Result<(), SimError> {
-    if config.world_width == 0 {
-        return Err(SimError::InvalidConfig(
-            "world_width must be greater than zero".to_owned(),
-        ));
-    }
-    if config.num_organisms == 0 {
-        return Err(SimError::InvalidConfig(
-            "num_organisms must be greater than zero".to_owned(),
-        ));
-    }
-    if config.food_energy <= 0.0 {
-        return Err(SimError::InvalidConfig(
-            "food_energy must be greater than zero".to_owned(),
-        ));
-    }
-    if config.move_action_energy_cost < 0.0 {
-        return Err(SimError::InvalidConfig(
-            "move_action_energy_cost must be >= 0".to_owned(),
-        ));
-    }
-    if !config.action_temperature.is_finite() || config.action_temperature <= 0.0 {
-        return Err(SimError::InvalidConfig(
-            "action_temperature must be finite and greater than zero".to_owned(),
-        ));
-    }
-    if config.food_regrowth_interval == 0 {
-        return Err(SimError::InvalidConfig(
-            "food_regrowth_interval must be greater than zero".to_owned(),
-        ));
-    }
-    if config.terrain_noise_scale <= 0.0 {
-        return Err(SimError::InvalidConfig(
-            "terrain_noise_scale must be greater than zero".to_owned(),
-        ));
-    }
-    if !(0.0..=1.0).contains(&config.terrain_threshold) {
-        return Err(SimError::InvalidConfig(
-            "terrain_threshold must be in [0.0, 1.0]".to_owned(),
-        ));
-    }
-    if !config.global_mutation_rate_modifier.is_finite()
-        || config.global_mutation_rate_modifier < 0.0
-    {
-        return Err(SimError::InvalidConfig(
-            "global_mutation_rate_modifier must be finite and >= 0".to_owned(),
-        ));
-    }
-    Ok(())
 }

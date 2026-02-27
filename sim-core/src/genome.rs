@@ -1,5 +1,4 @@
 use crate::brain::{ACTION_COUNT, ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT};
-use crate::SimError;
 use rand::Rng;
 use rand_distr::{Distribution, StandardNormal};
 use sim_types::{
@@ -15,8 +14,6 @@ const MAX_MUTATED_AGE_OF_MATURITY: u32 = 10_000;
 pub(crate) const SYNAPSE_STRENGTH_MAX: f32 = 1.0;
 pub(crate) const SYNAPSE_STRENGTH_MIN: f32 = 0.001;
 const BIAS_MAX: f32 = 1.0;
-const ETA_GAIN_MIN: f32 = -1.0;
-const ETA_GAIN_MAX: f32 = 1.0;
 const ELIGIBILITY_RETENTION_MIN: f32 = 0.0;
 const ELIGIBILITY_RETENTION_MAX: f32 = 1.0;
 const SYNAPSE_PRUNE_THRESHOLD_MIN: f32 = 0.0;
@@ -798,118 +795,10 @@ fn standard_normal<R: Rng + ?Sized>(rng: &mut R) -> f32 {
     StandardNormal.sample(rng)
 }
 
-fn validate_rate(name: &str, rate: f32) -> Result<(), SimError> {
-    if (0.0..=1.0).contains(&rate) {
-        Ok(())
-    } else {
-        Err(SimError::InvalidConfig(format!(
-            "{name} must be within [0, 1]"
-        )))
-    }
-}
-
 fn max_possible_synapses(num_neurons: u32) -> u32 {
     let pre_count = u64::from(SENSORY_COUNT + num_neurons);
     let post_count = u64::from(num_neurons + ACTION_COUNT_U32);
     let all_pairs = pre_count.saturating_mul(post_count);
     let max = all_pairs.saturating_sub(u64::from(num_neurons));
     max.min(u64::from(u32::MAX)) as u32
-}
-
-pub(crate) fn validate_seed_genome_config(config: &SeedGenomeConfig) -> Result<(), SimError> {
-    if !(ETA_GAIN_MIN..=ETA_GAIN_MAX).contains(&config.hebb_eta_gain) {
-        return Err(SimError::InvalidConfig(format!(
-            "hebb_eta_gain must be within [{ETA_GAIN_MIN}, {ETA_GAIN_MAX}]"
-        )));
-    }
-    if !(ELIGIBILITY_RETENTION_MIN..=ELIGIBILITY_RETENTION_MAX)
-        .contains(&config.eligibility_retention)
-    {
-        return Err(SimError::InvalidConfig(format!(
-            "eligibility_retention must be within [{ELIGIBILITY_RETENTION_MIN}, {ELIGIBILITY_RETENTION_MAX}]"
-        )));
-    }
-    if !(SYNAPSE_PRUNE_THRESHOLD_MIN..=SYNAPSE_PRUNE_THRESHOLD_MAX)
-        .contains(&config.synapse_prune_threshold)
-    {
-        return Err(SimError::InvalidConfig(format!(
-            "synapse_prune_threshold must be within [{SYNAPSE_PRUNE_THRESHOLD_MIN}, {SYNAPSE_PRUNE_THRESHOLD_MAX}]"
-        )));
-    }
-
-    if config.age_of_maturity > MAX_MUTATED_AGE_OF_MATURITY {
-        return Err(SimError::InvalidConfig(format!(
-            "age_of_maturity must be <= {MAX_MUTATED_AGE_OF_MATURITY}"
-        )));
-    }
-    if !config.starting_energy.is_finite() || config.starting_energy <= 0.0 {
-        return Err(SimError::InvalidConfig(
-            "starting_energy must be greater than zero".to_owned(),
-        ));
-    }
-    validate_rate(
-        "mutation_rate_age_of_maturity",
-        config.mutation_rate_age_of_maturity,
-    )?;
-    validate_rate(
-        "mutation_rate_vision_distance",
-        config.mutation_rate_vision_distance,
-    )?;
-    validate_rate("mutation_rate_inter_bias", config.mutation_rate_inter_bias)?;
-    validate_rate(
-        "mutation_rate_inter_update_rate",
-        config.mutation_rate_inter_update_rate,
-    )?;
-    validate_rate(
-        "mutation_rate_action_bias",
-        config.mutation_rate_action_bias,
-    )?;
-    validate_rate(
-        "mutation_rate_eligibility_retention",
-        config.mutation_rate_eligibility_retention,
-    )?;
-    validate_rate(
-        "mutation_rate_synapse_prune_threshold",
-        config.mutation_rate_synapse_prune_threshold,
-    )?;
-    validate_rate(
-        "mutation_rate_neuron_location",
-        config.mutation_rate_neuron_location,
-    )?;
-    validate_rate(
-        "mutation_rate_synapse_weight_perturbation",
-        config.mutation_rate_synapse_weight_perturbation,
-    )?;
-    validate_rate(
-        "mutation_rate_add_neuron_split_edge",
-        config.mutation_rate_add_neuron_split_edge,
-    )?;
-
-    if config.vision_distance < MIN_MUTATED_VISION_DISTANCE {
-        return Err(SimError::InvalidConfig(
-            "vision_distance must be >= 1".to_owned(),
-        ));
-    }
-    if config.vision_distance > MAX_MUTATED_VISION_DISTANCE {
-        return Err(SimError::InvalidConfig(format!(
-            "vision_distance must be <= {}",
-            MAX_MUTATED_VISION_DISTANCE
-        )));
-    }
-
-    if !config.spatial_prior_sigma.is_finite() || config.spatial_prior_sigma <= 0.0 {
-        return Err(SimError::InvalidConfig(
-            "spatial_prior_sigma must be > 0".to_owned(),
-        ));
-    }
-
-    let max_synapses = max_possible_synapses(config.num_neurons);
-    if config.num_synapses > max_synapses {
-        return Err(SimError::InvalidConfig(format!(
-            "num_synapses must be <= {max_synapses} for num_neurons={}",
-            config.num_neurons
-        )));
-    }
-
-    Ok(())
 }

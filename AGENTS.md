@@ -13,7 +13,7 @@
 - `sim-server/`: Axum HTTP + WebSocket server (`src/main.rs`), with server-only
   API types in `src/protocol.rs`.
 - `web-client/`: React + TailwindCSS + Vite canvas UI (`src/`).
-- `config/default.toml`: baseline simulation configuration.
+- `sim-config/default.toml`: baseline simulation configuration.
 
 ## Build & Test
 

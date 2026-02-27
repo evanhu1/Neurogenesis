@@ -94,7 +94,7 @@ to degenerate niches along the way.
 - `sim-server/` — Axum HTTP + WebSocket server. Server-only API types live in
   `src/protocol.rs`.
 - `web-client/` — React + TailwindCSS + Vite canvas UI.
-- `config/default.toml` — baseline simulation configuration.
+- `sim-config/default.toml` — baseline simulation configuration.
 
 ## Quickstart
 
@@ -121,7 +121,7 @@ Six hex directions: `East (q+1,r)`, `NorthEast (q+1,r-1)`, `NorthWest (q,r-1)`,
 
 ## Config
 
-All hyperparameters are configured in `config/default.toml`. Parameters
+All hyperparameters are configured in `sim-config/default.toml`. Parameters
 configure either the World, or set default values for the first Species Genome.
 World terrain is controlled by `terrain_noise_scale` and `terrain_threshold`.
 
