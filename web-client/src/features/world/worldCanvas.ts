@@ -58,6 +58,66 @@ export type RenderVisibility = {
   plants: boolean;
 };
 
+type LayerSurface = HTMLCanvasElement;
+
+type TerrainLayerCache = {
+  surface: LayerSurface | null;
+  width: number;
+  height: number;
+  worldWidth: number;
+  terrainSeed: number;
+};
+
+type PlantLayerCache = {
+  surface: LayerSurface | null;
+  width: number;
+  height: number;
+  worldWidth: number;
+  foods: WorldSnapshot['foods'] | null;
+};
+
+type OrganismLayerCache = {
+  surface: LayerSurface | null;
+  width: number;
+  height: number;
+  worldWidth: number;
+  organisms: WorldSnapshot['organisms'] | null;
+  focusedOrganismId: number | null;
+};
+
+export type WorldRenderCache = {
+  terrain: TerrainLayerCache;
+  plants: PlantLayerCache;
+  organisms: OrganismLayerCache;
+};
+
+export function createWorldRenderCache(): WorldRenderCache {
+  return {
+    terrain: {
+      surface: null,
+      width: 0,
+      height: 0,
+      worldWidth: 0,
+      terrainSeed: Number.NaN,
+    },
+    plants: {
+      surface: null,
+      width: 0,
+      height: 0,
+      worldWidth: 0,
+      foods: null,
+    },
+    organisms: {
+      surface: null,
+      width: 0,
+      height: 0,
+      worldWidth: 0,
+      organisms: null,
+      focusedOrganismId: null,
+    },
+  };
+}
+
 function toWorldSpace(
   xPx: number,
   yPx: number,
@@ -152,31 +212,14 @@ function traceHex(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: n
   ctx.closePath();
 }
 
-function drawVisibleGrid(
-  ctx: CanvasRenderingContext2D,
-  layout: HexLayout,
-  minX: number,
-  maxX: number,
-  minY: number,
-  maxY: number,
-) {
+function drawWorldGrid(ctx: CanvasRenderingContext2D, layout: HexLayout) {
   const size = layout.size;
   const worldWidth = layout.worldWidth;
   if (size <= 0 || worldWidth <= 0) return;
 
-  const rMinEstimate = (minY - layout.originY) / (1.5 * size) - 1;
-  const rMaxEstimate = (maxY - layout.originY) / (1.5 * size) + 1;
-  const rStart = Math.max(0, Math.floor(rMinEstimate));
-  const rEnd = Math.min(worldWidth - 1, Math.ceil(rMaxEstimate));
-
   ctx.beginPath();
-  for (let r = rStart; r <= rEnd; r += 1) {
-    const qMinEstimate = (minX - layout.originX) / (SQRT_3 * size) - r / 2 - 1;
-    const qMaxEstimate = (maxX - layout.originX) / (SQRT_3 * size) - r / 2 + 1;
-    const qStart = Math.max(0, Math.floor(qMinEstimate));
-    const qEnd = Math.min(worldWidth - 1, Math.ceil(qMaxEstimate));
-
-    for (let q = qStart; q <= qEnd; q += 1) {
+  for (let r = 0; r < worldWidth; r += 1) {
+    for (let q = 0; q < worldWidth; q += 1) {
       const center = hexCenter(layout, q, r);
       traceHex(ctx, center.x, center.y, size);
     }
@@ -188,39 +231,32 @@ function drawVisibleGrid(
   ctx.stroke();
 }
 
-export function renderWorld(
-  ctx: CanvasRenderingContext2D,
+function ensureLayerSurface(
+  existingSurface: LayerSurface | null,
   canvas: HTMLCanvasElement,
-  snapshot: WorldSnapshot | null,
-  focusedOrganismId: number | null,
-  viewport: WorldViewport,
-  visibility: RenderVisibility = { organisms: true, plants: true },
+  width: number,
+  height: number,
 ) {
-  const width = canvas.width;
-  const height = canvas.height;
+  const surface = existingSurface ?? canvas.ownerDocument.createElement('canvas');
+  if (surface.width !== width) {
+    surface.width = width;
+  }
+  if (surface.height !== height) {
+    surface.height = height;
+  }
+  return surface;
+}
+
+function renderTerrainLayer(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  snapshot: WorldSnapshot,
+) {
   ctx.clearRect(0, 0, width, height);
 
-  if (!snapshot) {
-    ctx.fillStyle = '#1b2638';
-    ctx.font = '20px Space Grotesk';
-    ctx.fillText('Create a session to begin', 24, 40);
-    return;
-  }
-
-  ctx.save();
-  ctx.translate(width / 2 + viewport.panX, height / 2 + viewport.panY);
-  ctx.scale(viewport.zoom, viewport.zoom);
-  ctx.translate(-width / 2, -height / 2);
-
-  const worldWidth = snapshot.config.world_width;
-  const layout = buildHexLayout(width, height, worldWidth);
-  const topLeft = toWorldSpace(0, 0, width, height, viewport);
-  const bottomRight = toWorldSpace(width, height, width, height, viewport);
-  const minX = Math.min(topLeft.x, bottomRight.x) - layout.size * 2;
-  const maxX = Math.max(topLeft.x, bottomRight.x) + layout.size * 2;
-  const minY = Math.min(topLeft.y, bottomRight.y) - layout.size * 2;
-  const maxY = Math.max(topLeft.y, bottomRight.y) + layout.size * 2;
-  drawVisibleGrid(ctx, layout, minX, maxX, minY, maxY);
+  const layout = buildHexLayout(width, height, snapshot.config.world_width);
+  drawWorldGrid(ctx, layout);
 
   const occupancy = Array.isArray(snapshot.occupancy) ? snapshot.occupancy : [];
   ctx.beginPath();
@@ -234,57 +270,224 @@ export function renderWorld(
   ctx.strokeStyle = WALL_STROKE_COLOR;
   ctx.lineWidth = GRID_STROKE_WIDTH;
   ctx.stroke();
+}
 
-  if (visibility.plants) {
-    const plants = Array.isArray(snapshot.foods) ? snapshot.foods : [];
+function renderPlantLayer(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  snapshot: WorldSnapshot,
+) {
+  ctx.clearRect(0, 0, width, height);
+
+  const layout = buildHexLayout(width, height, snapshot.config.world_width);
+
+  const plants = Array.isArray(snapshot.foods) ? snapshot.foods : [];
+  ctx.beginPath();
+  for (const plant of plants) {
+    const center = hexCenter(layout, plant.q, plant.r);
+    traceHex(ctx, center.x, center.y, layout.size);
+  }
+  ctx.fillStyle = PLANT_COLOR;
+  ctx.fill();
+  ctx.strokeStyle = GRID_STROKE_COLOR;
+  ctx.lineWidth = GRID_STROKE_WIDTH;
+  ctx.stroke();
+}
+
+function renderOrganismLayer(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  snapshot: WorldSnapshot,
+  focusedOrganismId: number | null,
+) {
+  ctx.clearRect(0, 0, width, height);
+
+  const layout = buildHexLayout(width, height, snapshot.config.world_width);
+
+  for (const org of snapshot.organisms) {
+    const id = unwrapId(org.id);
+    const speciesId = unwrapId(org.species_id);
+    const center = hexCenter(layout, org.q, org.r);
+
+    const radius = Math.max(3, layout.size * ORGANISM_RADIUS_SCALE);
+    const { x: ux, y: uy } = FACING_UNIT_VECTORS[org.facing];
+
+    // Triangle pointing in facing direction
+    const tipX = center.x + ux * radius;
+    const tipY = center.y + uy * radius;
+    const backX = center.x - ux * radius * ORGANISM_TAIL_LENGTH_SCALE;
+    const backY = center.y - uy * radius * ORGANISM_TAIL_LENGTH_SCALE;
+    const perpX = -uy * radius * ORGANISM_SIDE_SPAN_SCALE;
+    const perpY = ux * radius * ORGANISM_SIDE_SPAN_SCALE;
+
     ctx.beginPath();
-    for (const plant of plants) {
-      const center = hexCenter(layout, plant.q, plant.r);
-      traceHex(ctx, center.x, center.y, layout.size);
-    }
-    ctx.fillStyle = PLANT_COLOR;
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(backX + perpX, backY + perpY);
+    ctx.lineTo(backX - perpX, backY - perpY);
+    ctx.closePath();
+    ctx.fillStyle = colorForSpeciesId(String(speciesId));
     ctx.fill();
-    ctx.strokeStyle = GRID_STROKE_COLOR;
-    ctx.lineWidth = GRID_STROKE_WIDTH;
+    ctx.lineWidth =
+      id === focusedOrganismId
+        ? Math.max(FOCUSED_ORGANISM_MIN_STROKE_PX, layout.size * FOCUSED_ORGANISM_STROKE_SCALE)
+        : Math.max(ORGANISM_MIN_STROKE_PX, layout.size * ORGANISM_STROKE_SCALE);
+    ctx.strokeStyle =
+      id === focusedOrganismId ? FOCUSED_ORGANISM_STROKE_COLOR : ORGANISM_STROKE_COLOR;
     ctx.stroke();
   }
+}
 
-  if (visibility.organisms) {
-    for (const org of snapshot.organisms) {
-      const id = unwrapId(org.id);
-      const speciesId = unwrapId(org.species_id);
-      const center = hexCenter(layout, org.q, org.r);
+function getTerrainLayer(
+  cache: WorldRenderCache,
+  canvas: HTMLCanvasElement,
+  snapshot: WorldSnapshot,
+) {
+  const width = canvas.width;
+  const height = canvas.height;
+  const worldWidth = snapshot.config.world_width;
+  const terrainSeed = snapshot.rng_seed;
+  const shouldReuse =
+    cache.terrain.surface != null &&
+    cache.terrain.width === width &&
+    cache.terrain.height === height &&
+    cache.terrain.worldWidth === worldWidth &&
+    cache.terrain.terrainSeed === terrainSeed;
 
-      const radius = Math.max(3, layout.size * ORGANISM_RADIUS_SCALE);
-      const { x: ux, y: uy } = FACING_UNIT_VECTORS[org.facing];
+  if (shouldReuse) {
+    return cache.terrain.surface;
+  }
 
-      // Triangle pointing in facing direction
-      const tipX = center.x + ux * radius;
-      const tipY = center.y + uy * radius;
-      const backX = center.x - ux * radius * ORGANISM_TAIL_LENGTH_SCALE;
-      const backY = center.y - uy * radius * ORGANISM_TAIL_LENGTH_SCALE;
-      const perpX = -uy * radius * ORGANISM_SIDE_SPAN_SCALE;
-      const perpY = ux * radius * ORGANISM_SIDE_SPAN_SCALE;
+  const surface = ensureLayerSurface(cache.terrain.surface, canvas, width, height);
+  const context = surface.getContext('2d');
+  if (!context) return null;
 
-      ctx.beginPath();
-      ctx.moveTo(tipX, tipY);
-      ctx.lineTo(backX + perpX, backY + perpY);
-      ctx.lineTo(backX - perpX, backY - perpY);
-      ctx.closePath();
-      ctx.fillStyle = colorForSpeciesId(String(speciesId));
-      ctx.fill();
-      ctx.lineWidth =
-        id === focusedOrganismId
-          ? Math.max(FOCUSED_ORGANISM_MIN_STROKE_PX, layout.size * FOCUSED_ORGANISM_STROKE_SCALE)
-          : Math.max(ORGANISM_MIN_STROKE_PX, layout.size * ORGANISM_STROKE_SCALE);
-      ctx.strokeStyle =
-        id === focusedOrganismId ? FOCUSED_ORGANISM_STROKE_COLOR : ORGANISM_STROKE_COLOR;
-      ctx.stroke();
-    }
+  renderTerrainLayer(context, width, height, snapshot);
+  cache.terrain = {
+    surface,
+    width,
+    height,
+    worldWidth,
+    terrainSeed,
+  };
+  return surface;
+}
+
+function getPlantLayer(
+  cache: WorldRenderCache,
+  canvas: HTMLCanvasElement,
+  snapshot: WorldSnapshot,
+) {
+  const width = canvas.width;
+  const height = canvas.height;
+  const worldWidth = snapshot.config.world_width;
+  const foods = snapshot.foods;
+  const shouldReuse =
+    cache.plants.surface != null &&
+    cache.plants.width === width &&
+    cache.plants.height === height &&
+    cache.plants.worldWidth === worldWidth &&
+    cache.plants.foods === foods;
+
+  if (shouldReuse) {
+    return cache.plants.surface;
+  }
+
+  const surface = ensureLayerSurface(cache.plants.surface, canvas, width, height);
+  const context = surface.getContext('2d');
+  if (!context) return null;
+
+  renderPlantLayer(context, width, height, snapshot);
+  cache.plants = {
+    surface,
+    width,
+    height,
+    worldWidth,
+    foods,
+  };
+  return surface;
+}
+
+function getOrganismLayer(
+  cache: WorldRenderCache,
+  canvas: HTMLCanvasElement,
+  snapshot: WorldSnapshot,
+  focusedOrganismId: number | null,
+) {
+  const width = canvas.width;
+  const height = canvas.height;
+  const worldWidth = snapshot.config.world_width;
+  const organisms = snapshot.organisms;
+  const shouldReuse =
+    cache.organisms.surface != null &&
+    cache.organisms.width === width &&
+    cache.organisms.height === height &&
+    cache.organisms.worldWidth === worldWidth &&
+    cache.organisms.organisms === organisms &&
+    cache.organisms.focusedOrganismId === focusedOrganismId;
+
+  if (shouldReuse) {
+    return cache.organisms.surface;
+  }
+
+  const surface = ensureLayerSurface(cache.organisms.surface, canvas, width, height);
+  const context = surface.getContext('2d');
+  if (!context) return null;
+
+  renderOrganismLayer(context, width, height, snapshot, focusedOrganismId);
+  cache.organisms = {
+    surface,
+    width,
+    height,
+    worldWidth,
+    organisms,
+    focusedOrganismId,
+  };
+  return surface;
+}
+
+export function renderWorld(
+  ctx: CanvasRenderingContext2D,
+  canvas: HTMLCanvasElement,
+  snapshot: WorldSnapshot | null,
+  focusedOrganismId: number | null,
+  viewport: WorldViewport,
+  visibility: RenderVisibility = { organisms: true, plants: true },
+  cache: WorldRenderCache = createWorldRenderCache(),
+) {
+  const width = canvas.width;
+  const height = canvas.height;
+  ctx.clearRect(0, 0, width, height);
+
+  if (!snapshot) {
+    ctx.fillStyle = '#1b2638';
+    ctx.font = '20px Space Grotesk';
+    ctx.fillText('Create a session to begin', 24, 40);
+    return;
+  }
+
+  const terrainLayer = getTerrainLayer(cache, canvas, snapshot);
+  const plantLayer = visibility.plants ? getPlantLayer(cache, canvas, snapshot) : null;
+  const organismLayer = visibility.organisms
+    ? getOrganismLayer(cache, canvas, snapshot, focusedOrganismId)
+    : null;
+
+  ctx.save();
+  ctx.translate(width / 2 + viewport.panX, height / 2 + viewport.panY);
+  ctx.scale(viewport.zoom, viewport.zoom);
+  ctx.translate(-width / 2, -height / 2);
+  if (terrainLayer) {
+    ctx.drawImage(terrainLayer, 0, 0);
+  }
+  if (plantLayer) {
+    ctx.drawImage(plantLayer, 0, 0);
+  }
+  if (organismLayer) {
+    ctx.drawImage(organismLayer, 0, 0);
   }
 
   ctx.restore();
-
 }
 
 export function pickOrganismAtCanvasPoint(

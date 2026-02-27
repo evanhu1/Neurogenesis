@@ -359,9 +359,12 @@ export function applyTickDelta(snapshot: WorldSnapshot, delta: TickDelta): World
     })
     .concat(delta.spawned);
 
-  const foods = snapshot.foods
-    .filter((food) => !removedFoods.has(food.id))
-    .concat(delta.food_spawned);
+  const foods =
+    removedFoods.size === 0 && delta.food_spawned.length === 0
+      ? snapshot.foods
+      : snapshot.foods
+          .filter((food) => !removedFoods.has(food.id))
+          .concat(delta.food_spawned);
 
   return {
     ...snapshot,

@@ -6,7 +6,13 @@ import {
   type MouseEvent,
   type RefObject,
 } from 'react';
-import { buildHexLayout, hexCenter, pickOrganismAtCanvasPoint, renderWorld } from '../worldCanvas';
+import {
+  buildHexLayout,
+  createWorldRenderCache,
+  hexCenter,
+  pickOrganismAtCanvasPoint,
+  renderWorld,
+} from '../worldCanvas';
 import { unwrapId } from '../../../protocol';
 import type { WorldOrganismState, WorldSnapshot } from '../../../types';
 import { useWorldViewport } from '../hooks/useWorldViewport';
@@ -29,6 +35,7 @@ export function WorldCanvas({
   const needsRenderRef = useRef(true);
   const requestRenderCallbackRef = useRef<() => void>(() => {});
   const displaySizeRef = useRef({ width: 0, height: 0, dpr: 0 });
+  const renderCacheRef = useRef(createWorldRenderCache());
   const snapshotRef = useRef<WorldSnapshot | null>(snapshot);
   const focusedOrganismIdRef = useRef<number | null>(focusedOrganismId);
   const onOrganismSelectRef = useRef(onOrganismSelect);
@@ -82,7 +89,7 @@ export function WorldCanvas({
     renderWorld(context, canvas, snapshotRef.current, focusedOrganismIdRef.current, viewportRef.current, {
       organisms: showOrganismsRef.current,
       plants: showPlantsRef.current,
-    });
+    }, renderCacheRef.current);
   }, [syncCanvasDisplaySize, viewportRef]);
   const requestRender = useCallback(() => {
     needsRenderRef.current = true;
