@@ -34,7 +34,7 @@ export type SpeciesPopulationPoint = {
 const MAX_SPECIES_HISTORY_POINTS = 2048;
 const FOCUS_POLL_INTERVAL_MS = 100;
 
-function normalizeSpeciesCounts(speciesCounts: Record<string, number>): Record<string, number> {
+function cloneSpeciesCounts(speciesCounts: Record<string, number>): Record<string, number> {
   return { ...speciesCounts };
 }
 
@@ -175,7 +175,7 @@ export function useSimulationSession(): SimulationSessionState {
           setSpeciesPopulationHistory((previous) =>
             upsertSpeciesPopulationHistory(previous, {
               turn: nextSnapshot.turn,
-              speciesCounts: normalizeSpeciesCounts(nextSnapshot.metrics.species_counts),
+              speciesCounts: cloneSpeciesCounts(nextSnapshot.metrics.species_counts),
             }),
           );
           const trackedFocusedId = focus.focusedOrganismIdRef.current;
@@ -198,7 +198,7 @@ export function useSimulationSession(): SimulationSessionState {
           setSpeciesPopulationHistory((previous) =>
             upsertSpeciesPopulationHistory(previous, {
               turn: nextSnapshot.turn,
-              speciesCounts: normalizeSpeciesCounts(nextSnapshot.metrics.species_counts),
+              speciesCounts: cloneSpeciesCounts(nextSnapshot.metrics.species_counts),
             }),
           );
 
@@ -257,7 +257,7 @@ export function useSimulationSession(): SimulationSessionState {
       setSpeciesPopulationHistory([
         {
           turn: loadedSnapshot.turn,
-          speciesCounts: normalizeSpeciesCounts(loadedSnapshot.metrics.species_counts),
+          speciesCounts: cloneSpeciesCounts(loadedSnapshot.metrics.species_counts),
         },
       ]);
       persistSessionId(metadata.id);
@@ -334,7 +334,7 @@ export function useSimulationSession(): SimulationSessionState {
           setSpeciesPopulationHistory([
             {
               turn: normalized.turn,
-              speciesCounts: normalizeSpeciesCounts(normalized.metrics.species_counts),
+              speciesCounts: cloneSpeciesCounts(normalized.metrics.species_counts),
             },
           ]);
           focus.resetFocusState(true);
