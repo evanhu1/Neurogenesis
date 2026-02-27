@@ -265,6 +265,11 @@ fn duration_to_ns(duration: Duration) -> u64 {
 
 #[cfg(feature = "profiling")]
 fn stable_perf_config() -> WorldConfig {
+    let intent_parallel_threads = std::env::var("SIM_CORE_INTENT_PARALLEL_THREADS")
+        .ok()
+        .and_then(|raw| raw.parse::<u32>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(8);
     WorldConfig {
         world_width: 100,
         num_organisms: 2_000,
@@ -273,6 +278,7 @@ fn stable_perf_config() -> WorldConfig {
         food_energy: 50.0,
         move_action_energy_cost: 0.0,
         action_temperature: 0.5,
+        intent_parallel_threads,
         food_regrowth_interval: 10,
         food_regrowth_jitter: 2,
         terrain_noise_scale: 0.02,

@@ -113,6 +113,10 @@ configure world dynamics and the seed genome. Config parsing/validation lives in
 the `sim-config` crate and normalizes legacy defaults (`starting_energy`,
 `max_organism_age`) at load time.
 
+`intent_parallel_threads` controls the per-simulation Rayon worker count used by
+intent/brain evaluation and post-commit runtime plasticity. This is
+machine-specific; tune it to your CPU core budget.
+
 ## Turn Pipeline
 
 Phases execute in this order each tick:

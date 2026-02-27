@@ -5,6 +5,7 @@ periodic_injection_count = 100
 food_energy = 100
 move_action_energy_cost = 1.0
 action_temperature = 0.1
+intent_parallel_threads = 8
 food_regrowth_interval = 100
 food_regrowth_jitter = 20
 terrain_noise_scale = 0.01

@@ -6,12 +6,14 @@ use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 use crate::{profiling, profiling::TurnPhase};
 use crate::{PendingActionKind, PendingActionState, Simulation};
 use rayon::prelude::*;
+use rayon::{ThreadPool, ThreadPoolBuilder};
 use sim_types::{
     ActionType, EntityId, FacingDirection, FoodState, Occupant, OrganismFacing, OrganismId,
     OrganismMove, OrganismState, RemovedEntityPosition, TickDelta, WorldConfig,
 };
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex, OnceLock};
 #[cfg(feature = "profiling")]
 use std::time::Instant;
 
@@ -22,6 +24,7 @@ const REPRODUCE_LOCK_DURATION_TURNS: u8 = 2;
 const CONSUMPTION_ENERGY_FRACTION: f32 = 0.10;
 const FAILED_PREDATION_ACTION_COST_MULTIPLIER: f32 = 10.0;
 const RNG_PREY_MIX: u64 = 0xD6E8_FF3A_5A9C_31F1;
+const INTENT_PARALLEL_MIN_LEN: usize = 64;
 
 #[derive(Clone, Copy)]
 struct SnapshotOrganismState {
@@ -80,6 +83,27 @@ struct CommitResult {
     consumptions: u64,
     predations: u64,
     actions_applied: u64,
+}
+
+fn sim_parallel_pool(thread_count: u32) -> Arc<ThreadPool> {
+    static POOLS: OnceLock<Mutex<HashMap<usize, Arc<ThreadPool>>>> = OnceLock::new();
+    let requested_threads = thread_count.max(1) as usize;
+    let mut pools = POOLS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .expect("sim-core thread pool cache lock poisoned");
+    pools
+        .entry(requested_threads)
+        .or_insert_with(|| {
+            Arc::new(
+                ThreadPoolBuilder::new()
+                    .num_threads(requested_threads)
+                    .thread_name(|idx| format!("sim-core-worker-{idx}"))
+                    .build()
+                    .expect("failed to build sim-core rayon thread pool"),
+            )
+        })
+        .clone()
 }
 
 impl Simulation {
@@ -234,31 +258,34 @@ impl Simulation {
         let pending_actions = &self.pending_actions;
         let runtime_plasticity_enabled = self.config.runtime_plasticity_enabled;
         let action_temperature = self.config.action_temperature;
+        let thread_pool = sim_parallel_pool(self.config.intent_parallel_threads);
         let sim_seed = self.seed;
         let tick = self.turn;
         #[cfg(feature = "profiling")]
         let brain_eval_started = Instant::now();
-        let intents = self
-            .organisms
-            .par_iter_mut()
-            .enumerate()
-            .map_init(BrainScratch::new, |scratch, (idx, organism)| {
-                build_intent_for_organism(
-                    idx,
-                    organism,
-                    pending_actions[idx],
-                    snapshot.world_width,
-                    occupancy,
-                    snapshot.organism_states[idx],
-                    snapshot.organism_ids[idx],
-                    sim_seed,
-                    tick,
-                    action_temperature,
-                    runtime_plasticity_enabled,
-                    scratch,
-                )
-            })
-            .collect();
+        let intents = thread_pool.install(|| {
+            self.organisms
+                .par_iter_mut()
+                .with_min_len(INTENT_PARALLEL_MIN_LEN)
+                .enumerate()
+                .map_init(BrainScratch::new, |scratch, (idx, organism)| {
+                    build_intent_for_organism(
+                        idx,
+                        organism,
+                        pending_actions[idx],
+                        snapshot.world_width,
+                        occupancy,
+                        snapshot.organism_states[idx],
+                        snapshot.organism_ids[idx],
+                        sim_seed,
+                        tick,
+                        action_temperature,
+                        runtime_plasticity_enabled,
+                        scratch,
+                    )
+                })
+                .collect()
+        });
         #[cfg(feature = "profiling")]
         profiling::record_brain_eval_total(brain_eval_started.elapsed());
         intents
@@ -270,12 +297,21 @@ impl Simulation {
         }
 
         let food_energy = self.config.food_energy;
+        let thread_pool = sim_parallel_pool(self.config.intent_parallel_threads);
         #[cfg(feature = "profiling")]
         let plasticity_started = Instant::now();
-        self.organisms.par_iter_mut().for_each(|organism| {
-            let passive_energy_baseline =
-                organism_passive_metabolic_energy_cost_from_food_energy(food_energy, organism);
-            apply_runtime_weight_updates(organism, passive_energy_baseline);
+        thread_pool.install(|| {
+            self.organisms
+                .par_iter_mut()
+                .with_min_len(INTENT_PARALLEL_MIN_LEN)
+                .for_each(|organism| {
+                    let passive_energy_baseline =
+                        organism_passive_metabolic_energy_cost_from_food_energy(
+                            food_energy,
+                            organism,
+                        );
+                    apply_runtime_weight_updates(organism, passive_energy_baseline);
+                });
         });
         #[cfg(feature = "profiling")]
         profiling::record_brain_plasticity_total(plasticity_started.elapsed());

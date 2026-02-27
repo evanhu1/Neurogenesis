@@ -20,6 +20,14 @@ fn config_validation_rejects_non_positive_action_temperature() {
 }
 
 #[test]
+fn config_validation_rejects_zero_intent_parallel_threads() {
+    let mut cfg = stable_test_config();
+    cfg.intent_parallel_threads = 0;
+    let err = Simulation::new(cfg, 1).expect_err("config should be rejected");
+    assert!(err.to_string().contains("intent_parallel_threads"));
+}
+
+#[test]
 fn seed_genome_initializes_spatial_vectors_within_brain_space() {
     let mut cfg = stable_test_config();
     cfg.seed_genome_config.num_neurons = 4;

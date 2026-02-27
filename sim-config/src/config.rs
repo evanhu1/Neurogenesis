@@ -46,6 +46,8 @@ pub struct WorldConfig {
     pub move_action_energy_cost: f32,
     #[serde(default = "default_action_temperature")]
     pub action_temperature: f32,
+    #[serde(default = "default_intent_parallel_threads")]
+    pub intent_parallel_threads: u32,
     #[serde(default = "default_food_regrowth_interval")]
     pub food_regrowth_interval: u32,
     #[serde(default = "default_food_regrowth_jitter")]
@@ -76,6 +78,8 @@ struct WorldConfigDeserialize {
     move_action_energy_cost: f32,
     #[serde(default = "default_action_temperature")]
     action_temperature: f32,
+    #[serde(default = "default_intent_parallel_threads")]
+    intent_parallel_threads: u32,
     #[serde(default = "default_food_regrowth_interval")]
     food_regrowth_interval: u32,
     #[serde(default = "default_food_regrowth_jitter")]
@@ -108,6 +112,7 @@ impl<'de> Deserialize<'de> for WorldConfig {
             food_energy: raw.food_energy,
             move_action_energy_cost: raw.move_action_energy_cost,
             action_temperature: raw.action_temperature,
+            intent_parallel_threads: raw.intent_parallel_threads,
             food_regrowth_interval: raw.food_regrowth_interval,
             food_regrowth_jitter: raw.food_regrowth_jitter,
             terrain_noise_scale: raw.terrain_noise_scale,
@@ -169,6 +174,9 @@ pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
     }
     if !config.action_temperature.is_finite() || config.action_temperature <= 0.0 {
         return Err("action_temperature must be finite and greater than zero".to_owned());
+    }
+    if config.intent_parallel_threads == 0 {
+        return Err("intent_parallel_threads must be greater than zero".to_owned());
     }
     if config.food_regrowth_interval == 0 {
         return Err("food_regrowth_interval must be greater than zero".to_owned());
@@ -254,6 +262,10 @@ fn default_terrain_threshold() -> f32 {
 
 fn default_action_temperature() -> f32 {
     0.5
+}
+
+fn default_intent_parallel_threads() -> u32 {
+    8
 }
 
 fn default_global_mutation_rate_modifier() -> f32 {
