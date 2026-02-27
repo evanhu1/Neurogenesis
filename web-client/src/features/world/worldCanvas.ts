@@ -98,7 +98,6 @@ export function hexCenter(layout: HexLayout, q: number, r: number) {
 }
 
 function traceHex(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number) {
-  ctx.beginPath();
   for (let i = 0; i < 6; i += 1) {
     const angle = (Math.PI / 180) * (60 * i - 30);
     const x = cx + size * Math.cos(angle);
@@ -129,6 +128,7 @@ function drawVisibleGrid(
   const rStart = Math.max(0, Math.floor(rMinEstimate));
   const rEnd = Math.min(worldWidth - 1, Math.ceil(rMaxEstimate));
 
+  ctx.beginPath();
   for (let r = rStart; r <= rEnd; r += 1) {
     const qMinEstimate = (minX - layout.originX) / (SQRT_3 * size) - r / 2 - 1;
     const qMaxEstimate = (maxX - layout.originX) / (SQRT_3 * size) - r / 2 + 1;
@@ -138,13 +138,13 @@ function drawVisibleGrid(
     for (let q = qStart; q <= qEnd; q += 1) {
       const center = hexCenter(layout, q, r);
       traceHex(ctx, center.x, center.y, size);
-      ctx.fillStyle = EARTH_COLOR;
-      ctx.fill();
-      ctx.strokeStyle = '#8a94a8';
-      ctx.lineWidth = 0.4;
-      ctx.stroke();
     }
   }
+  ctx.fillStyle = EARTH_COLOR;
+  ctx.fill();
+  ctx.strokeStyle = '#8a94a8';
+  ctx.lineWidth = 0.4;
+  ctx.stroke();
 }
 
 function facingDelta(direction: FacingDirection): [number, number] {
@@ -199,28 +199,30 @@ export function renderWorld(
   drawVisibleGrid(ctx, layout, minX, maxX, minY, maxY);
 
   const occupancy = Array.isArray(snapshot.occupancy) ? snapshot.occupancy : [];
+  ctx.beginPath();
   for (const cell of occupancy) {
     if (cell.occupant.type !== 'Wall') continue;
     const center = hexCenter(layout, cell.q, cell.r);
     traceHex(ctx, center.x, center.y, layout.size);
-    ctx.fillStyle = WALL_COLOR;
-    ctx.fill();
-    ctx.strokeStyle = '#4d5360';
-    ctx.lineWidth = 0.4;
-    ctx.stroke();
   }
+  ctx.fillStyle = WALL_COLOR;
+  ctx.fill();
+  ctx.strokeStyle = '#4d5360';
+  ctx.lineWidth = 0.4;
+  ctx.stroke();
 
   if (visibility.plants) {
     const plants = Array.isArray(snapshot.foods) ? snapshot.foods : [];
+    ctx.beginPath();
     for (const plant of plants) {
       const center = hexCenter(layout, plant.q, plant.r);
       traceHex(ctx, center.x, center.y, layout.size);
-      ctx.fillStyle = PLANT_COLOR;
-      ctx.fill();
-      ctx.strokeStyle = '#8a94a8';
-      ctx.lineWidth = 0.4;
-      ctx.stroke();
     }
+    ctx.fillStyle = PLANT_COLOR;
+    ctx.fill();
+    ctx.strokeStyle = '#8a94a8';
+    ctx.lineWidth = 0.4;
+    ctx.stroke();
   }
 
   if (visibility.organisms) {
