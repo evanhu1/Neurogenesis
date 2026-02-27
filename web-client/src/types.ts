@@ -480,11 +480,13 @@ export type ApiStepProgressData = {
 export type StepProgressData = ApiStepProgressData;
 
 export type ApiFocusBrainData = {
+  turn: number;
   organism: ApiOrganismState;
   active_action_neuron_id: ApiNeuronId | null;
 };
 
 export type FocusBrainData = {
+  turn: number;
   organism: OrganismState;
   active_action_neuron_id: NeuronId | null;
 };

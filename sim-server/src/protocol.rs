@@ -132,6 +132,7 @@ pub enum ClientCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FocusBrainData {
+    pub turn: u64,
     pub organism: OrganismState,
     pub active_action_neuron_id: Option<NeuronId>,
 }

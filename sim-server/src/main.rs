@@ -901,6 +901,7 @@ async fn set_focus(
     if let Some(org) = sim.focused_organism(req.organism_id) {
         let active = derive_active_action_neuron_id(&org);
         let _ = session.events.send(ServerEvent::FocusBrain(FocusBrainData {
+            turn: sim.turn(),
             organism: org,
             active_action_neuron_id: active,
         }));
@@ -1050,6 +1051,7 @@ async fn handle_command(command: ClientCommand, session: Arc<Session>) -> Result
             if let Some(organism) = sim.focused_organism(organism_id) {
                 let active = derive_active_action_neuron_id(&organism);
                 let _ = session.events.send(ServerEvent::FocusBrain(FocusBrainData {
+                    turn: sim.turn(),
                     organism,
                     active_action_neuron_id: active,
                 }));

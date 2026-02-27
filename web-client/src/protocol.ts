@@ -284,6 +284,7 @@ export function normalizeTickDelta(delta: ApiTickDelta): TickDelta {
 
 export function normalizeFocusBrainData(data: ApiFocusBrainData): FocusBrainData {
   return {
+    turn: data.turn,
     organism: normalizeOrganismState(data.organism),
     active_action_neuron_id:
       data.active_action_neuron_id == null ? null : (unwrapId(data.active_action_neuron_id) as NeuronId),

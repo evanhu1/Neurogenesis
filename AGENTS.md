@@ -59,6 +59,16 @@
 - For evolution-loop benchmarking and regression checks, run `sim-validation`
   (prefer release mode) and compare outputs across seeds/configs.
 
+## Frontend Browser Testing
+
+- For frontend changes, verify behavior with `agent-browser` against the local app.
+- Start the backend with `cargo run -p sim-server` and the frontend with
+  `cd web-client && npm run dev`.
+- If needed, install once with `npm install -g agent-browser && agent-browser install`.
+- Typical flow: `agent-browser open http://127.0.0.1:5173`, then use
+  `snapshot`, `click`, `fill`, `get text`, and `screenshot` to exercise the UI.
+- Stop any background `sim-server` or Vite processes when finished.
+
 ## Architecture Context
 
 ### World

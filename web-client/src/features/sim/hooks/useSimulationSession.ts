@@ -39,6 +39,8 @@ export type SpeciesPopulationPoint = {
 const MAX_SPECIES_HISTORY_POINTS = 2048;
 const FOCUS_POLL_INTERVAL_MS = 100;
 const BATCH_RUN_POLL_INTERVAL_MS = 500;
+const NO_FOCUS_TURN = -1;
+const DEFAULT_SPEED_LEVEL_INDEX = 1;
 
 function normalizeSpeciesCounts(speciesCounts: Record<string, number>): Record<string, number> {
   return { ...speciesCounts };
@@ -113,12 +115,16 @@ function nearestSpeedLevelIndex(ticksPerSecond: number): number {
   return bestIndex;
 }
 
-function syncFocusedOrganismFromWorld(
-  focused: OrganismState | null,
+function speedLevelIndexForTicksPerSecond(ticksPerSecond: number): number {
+  return ticksPerSecond > 0
+    ? nearestSpeedLevelIndex(ticksPerSecond)
+    : DEFAULT_SPEED_LEVEL_INDEX;
+}
+
+function mergeFocusedOrganismWithWorld(
+  focused: OrganismState,
   worldOrganism: WorldOrganismState,
-): OrganismState | null {
-  if (!focused) return focused;
-  if (unwrapId(focused.id) !== unwrapId(worldOrganism.id)) return focused;
+): OrganismState {
   return {
     ...focused,
     species_id: worldOrganism.species_id,
@@ -127,9 +133,6 @@ function syncFocusedOrganismFromWorld(
     generation: worldOrganism.generation,
     age_turns: worldOrganism.age_turns,
     facing: worldOrganism.facing,
-    energy: worldOrganism.energy,
-    consumptions_count: worldOrganism.consumptions_count,
-    reproductions_count: worldOrganism.reproductions_count,
   };
 }
 
@@ -203,20 +206,29 @@ export function useSimulationSession(): SimulationSessionState {
     SpeciesPopulationPoint[]
   >([]);
   const [focusedOrganismId, setFocusedOrganismId] = useState<number | null>(null);
-  const [focusedOrganism, setFocusedOrganism] = useState<OrganismState | null>(null);
+  const [focusedOrganismDetails, setFocusedOrganismDetails] = useState<OrganismState | null>(null);
+  const [focusedOrganismTurn, setFocusedOrganismTurn] = useState<number>(NO_FOCUS_TURN);
   const [activeActionNeuronId, setActiveActionNeuronId] = useState<number | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [isStepPending, setIsStepPending] = useState(false);
   const [stepProgress, setStepProgress] = useState<StepProgressData | null>(null);
-  const [speedLevelIndex, setSpeedLevelIndex] = useState(1);
+  const [speedLevelIndex, setSpeedLevelIndex] = useState(DEFAULT_SPEED_LEVEL_INDEX);
   const [errorText, setErrorText] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const focusedOrganismIdRef = useRef<number | null>(null);
+  const latestSnapshotTurnRef = useRef<number>(NO_FOCUS_TURN);
+  const latestFocusedTurnRef = useRef<number>(NO_FOCUS_TURN);
   const nextFocusPollAtMsRef = useRef(0);
   const request = useMemo(() => createSimHttpClient(apiBase), []);
-  const setFocusedOrganismIdTracked = useCallback((organismId: number | null) => {
+  const setFocusedOrganismIdTracked = useCallback((organismId: number | null, resetPoll = false) => {
+    const changed = focusedOrganismIdRef.current !== organismId;
     focusedOrganismIdRef.current = organismId;
-    nextFocusPollAtMsRef.current = 0;
+    if (changed) {
+      latestFocusedTurnRef.current = NO_FOCUS_TURN;
+    }
+    if (resetPoll) {
+      nextFocusPollAtMsRef.current = 0;
+    }
     setFocusedOrganismId(organismId);
   }, []);
 
@@ -224,6 +236,7 @@ export function useSimulationSession(): SimulationSessionState {
     switch (event.type) {
       case 'StateSnapshot': {
         const nextSnapshot = normalizeWorldSnapshot(event.data);
+        latestSnapshotTurnRef.current = nextSnapshot.turn;
         setIsStepPending(false);
         setStepProgress(null);
         setSnapshot(nextSnapshot);
@@ -244,6 +257,7 @@ export function useSimulationSession(): SimulationSessionState {
       }
       case 'TickDelta': {
         const delta = normalizeTickDelta(event.data);
+        latestSnapshotTurnRef.current = delta.turn;
         setIsStepPending(false);
         setStepProgress(null);
         setSnapshot((prev) => {
@@ -281,11 +295,23 @@ export function useSimulationSession(): SimulationSessionState {
         break;
       }
       case 'FocusBrain': {
-        const { organism, active_action_neuron_id }: FocusBrainData =
+        const { turn, organism, active_action_neuron_id }: FocusBrainData =
           normalizeFocusBrainData(event.data);
         const organismId = unwrapId(organism.id);
-        setFocusedOrganismIdTracked(organismId);
-        setFocusedOrganism(organism);
+        const trackedFocusedId = focusedOrganismIdRef.current;
+        if (trackedFocusedId === null || trackedFocusedId !== organismId) {
+          break;
+        }
+        const minimumAcceptedTurn = Math.max(
+          latestSnapshotTurnRef.current,
+          latestFocusedTurnRef.current,
+        );
+        if (turn < minimumAcceptedTurn) {
+          break;
+        }
+        latestFocusedTurnRef.current = turn;
+        setFocusedOrganismDetails(organism);
+        setFocusedOrganismTurn(turn);
         setActiveActionNeuronId(active_action_neuron_id);
         break;
       }
@@ -325,22 +351,25 @@ export function useSimulationSession(): SimulationSessionState {
     [handleServerEvent],
   );
 
+  const resetTransientUiState = useCallback((running: boolean, ticksPerSecond: number) => {
+    setIsRunning(running);
+    setIsStepPending(false);
+    setStepProgress(null);
+    setSpeedLevelIndex(speedLevelIndexForTicksPerSecond(ticksPerSecond));
+  }, []);
+
   const applyLoadedSession = useCallback(
     (metadata: SessionMetadata, loadedSnapshot: WorldSnapshot) => {
       setErrorText(null);
       setSession(metadata);
+      latestSnapshotTurnRef.current = loadedSnapshot.turn;
+      latestFocusedTurnRef.current = NO_FOCUS_TURN;
       setSnapshot(loadedSnapshot);
-      setFocusedOrganismIdTracked(null);
-      setFocusedOrganism(null);
+      setFocusedOrganismIdTracked(null, true);
+      setFocusedOrganismDetails(null);
+      setFocusedOrganismTurn(NO_FOCUS_TURN);
       setActiveActionNeuronId(null);
-      setIsRunning(metadata.running);
-      setIsStepPending(false);
-      setStepProgress(null);
-      setSpeedLevelIndex((current) =>
-        metadata.ticks_per_second > 0
-          ? nearestSpeedLevelIndex(metadata.ticks_per_second)
-          : current,
-      );
+      resetTransientUiState(metadata.running, metadata.ticks_per_second);
       setSpeciesPopulationHistory([
         {
           turn: loadedSnapshot.turn,
@@ -350,7 +379,7 @@ export function useSimulationSession(): SimulationSessionState {
       persistSessionId(metadata.id);
       connectWs(metadata.id);
     },
-    [connectWs, setFocusedOrganismIdTracked],
+    [connectWs, resetTransientUiState, setFocusedOrganismIdTracked],
   );
 
   const createSession = useCallback(async (seedInput?: string) => {
@@ -547,11 +576,16 @@ export function useSimulationSession(): SimulationSessionState {
       setErrorText(error);
       return;
     }
+    setErrorText(null);
+    if (isRunning) {
+      sendCommand({ type: 'Pause' });
+    }
     void request<ApiWorldSnapshot>(`/v1/sessions/${session.id}/reset`, 'POST', { seed })
       .then((nextSnapshot) => {
         const normalized = normalizeWorldSnapshot(nextSnapshot);
-        setIsStepPending(false);
-        setStepProgress(null);
+        latestSnapshotTurnRef.current = normalized.turn;
+        latestFocusedTurnRef.current = NO_FOCUS_TURN;
+        resetTransientUiState(false, 0);
         setSnapshot(normalized);
         setSpeciesPopulationHistory([
           {
@@ -559,23 +593,26 @@ export function useSimulationSession(): SimulationSessionState {
             speciesCounts: normalizeSpeciesCounts(normalized.metrics.species_counts),
           },
         ]);
-        setFocusedOrganismIdTracked(null);
-        setFocusedOrganism(null);
+        setFocusedOrganismIdTracked(null, true);
+        setFocusedOrganismDetails(null);
+        setFocusedOrganismTurn(NO_FOCUS_TURN);
         setActiveActionNeuronId(null);
       })
       .catch((err) => {
         setErrorText(err instanceof Error ? err.message : 'Failed to reset session');
       });
-  }, [request, session, setFocusedOrganismIdTracked]);
+  }, [isRunning, request, resetTransientUiState, sendCommand, session, setFocusedOrganismIdTracked]);
 
   const focusOrganism = useCallback(
     (organism: WorldOrganismState) => {
       const organismId = unwrapId(organism.id);
-      setFocusedOrganismIdTracked(organismId);
-      setFocusedOrganism((current) =>
-        current && unwrapId(current.id) === organismId ? current : null,
-      );
-      setActiveActionNeuronId(null);
+      const isSameFocus = focusedOrganismIdRef.current === organismId;
+      setFocusedOrganismIdTracked(organismId, true);
+      if (!isSameFocus) {
+        setFocusedOrganismDetails(null);
+        setFocusedOrganismTurn(NO_FOCUS_TURN);
+        setActiveActionNeuronId(null);
+      }
       if (!session) return;
       void request(`/v1/sessions/${session.id}/focus`, 'POST', {
         organism_id: organismId,
@@ -587,27 +624,51 @@ export function useSimulationSession(): SimulationSessionState {
   );
 
   const defocusOrganism = useCallback(() => {
-    setFocusedOrganismIdTracked(null);
-    setFocusedOrganism(null);
+    setFocusedOrganismIdTracked(null, true);
+    setFocusedOrganismDetails(null);
+    setFocusedOrganismTurn(NO_FOCUS_TURN);
     setActiveActionNeuronId(null);
   }, [setFocusedOrganismIdTracked]);
 
-  useEffect(() => {
+  const focusedWorldOrganism = useMemo(() => {
     if (!snapshot || focusedOrganismId === null) {
-      setFocusedOrganism(null);
-      setActiveActionNeuronId(null);
-      return;
+      return null;
     }
+    return findOrganism(snapshot, focusedOrganismId);
+  }, [snapshot, focusedOrganismId]);
 
-    const worldFocusedOrganism = findOrganism(snapshot, focusedOrganismId);
-    if (!worldFocusedOrganism) {
-      setFocusedOrganismIdTracked(null);
-      setFocusedOrganism(null);
-      setActiveActionNeuronId(null);
+  const focusedOrganism = useMemo(() => {
+    if (!focusedOrganismDetails || focusedOrganismId === null) {
+      return null;
+    }
+    if (unwrapId(focusedOrganismDetails.id) !== focusedOrganismId) {
+      return null;
+    }
+    if (
+      snapshot &&
+      focusedWorldOrganism &&
+      snapshot.turn >= focusedOrganismTurn
+    ) {
+      return mergeFocusedOrganismWithWorld(focusedOrganismDetails, focusedWorldOrganism);
+    }
+    return focusedOrganismDetails;
+  }, [
+    focusedOrganismDetails,
+    focusedOrganismId,
+    focusedOrganismTurn,
+    focusedWorldOrganism,
+    snapshot,
+  ]);
+
+  useEffect(() => {
+    if (!snapshot || focusedOrganismId === null || focusedWorldOrganism) {
       return;
     }
-    setFocusedOrganism((current) => syncFocusedOrganismFromWorld(current, worldFocusedOrganism));
-  }, [snapshot, focusedOrganismId, setFocusedOrganismIdTracked]);
+    setFocusedOrganismIdTracked(null, true);
+    setFocusedOrganismDetails(null);
+    setFocusedOrganismTurn(NO_FOCUS_TURN);
+    setActiveActionNeuronId(null);
+  }, [focusedOrganismId, focusedWorldOrganism, setFocusedOrganismIdTracked, snapshot]);
 
   useEffect(() => {
     let cancelled = false;

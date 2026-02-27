@@ -111,6 +111,10 @@ impl Simulation {
         &self.config
     }
 
+    pub fn turn(&self) -> u64 {
+        self.turn
+    }
+
     pub fn snapshot(&self) -> WorldSnapshot {
         let mut organisms = self.organisms.clone();
         organisms.sort_by_key(|o| o.id);
