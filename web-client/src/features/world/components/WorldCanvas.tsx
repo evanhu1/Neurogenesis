@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
   type MouseEvent,
@@ -91,7 +90,7 @@ export function WorldCanvas({
   }, [panToHexRef, panToWorldPoint]);
 
   // Track focused organism across ticks
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!snapshot || focusedOrganismId == null) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
