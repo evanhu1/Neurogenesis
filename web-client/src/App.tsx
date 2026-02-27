@@ -1,5 +1,4 @@
 import { useMemo, useRef } from 'react';
-import { unwrapId } from './protocol';
 import { ControlPanel } from './features/control_panel/ControlPanel';
 import { InspectorPanel } from './features/inspector_panel/InspectorPanel';
 import { useSimulationSession } from './features/sim/hooks/useSimulationSession';
@@ -13,8 +12,7 @@ export default function App() {
   const sessionMeta = useMemo(() => formatSessionMeta(simulation.session), [simulation.session]);
   const metricsText = useMemo(() => formatMetrics(simulation.snapshot), [simulation.snapshot]);
   const focusedSpeciesId = useMemo(
-    () =>
-      simulation.focusedOrganism ? String(unwrapId(simulation.focusedOrganism.species_id)) : null,
+    () => simulation.focusedOrganism?.species_id ?? null,
     [simulation.focusedOrganism],
   );
 

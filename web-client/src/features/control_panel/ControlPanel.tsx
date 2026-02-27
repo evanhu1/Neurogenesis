@@ -7,7 +7,6 @@ import {
   type ChangeEvent,
   type MutableRefObject,
 } from 'react';
-import { unwrapId } from '../../protocol';
 import { colorForSpeciesId } from '../../speciesColor';
 import type {
   ArchivedWorldSummary,
@@ -21,7 +20,7 @@ import type { SpeciesPopulationPoint } from '../sim/hooks/useSimulationSession';
 type ControlPanelProps = {
   sessionMeta: string;
   speciesPopulationHistory: SpeciesPopulationPoint[];
-  focusedSpeciesId: string | null;
+  focusedSpeciesId: number | null;
   snapshot: WorldSnapshot | null;
   metricsText: string;
   errorText: string | null;
@@ -178,12 +177,14 @@ export function ControlPanel({
         onSpeciesClick={(speciesId) => {
           if (!snapshot) return;
           const candidates = snapshot.organisms
-            .filter((o) => String(unwrapId(o.species_id)) === speciesId)
+            .filter((o) => o.species_id === speciesId)
             .sort((a, b) => b.energy - a.energy);
           if (candidates.length === 0) return;
           const prev = speciesCycleRef.current;
-          const index = prev && prev.speciesId === speciesId ? (prev.index + 1) % candidates.length : 0;
-          speciesCycleRef.current = { speciesId, index };
+          const speciesIdKey = String(speciesId);
+          const index =
+            prev && prev.speciesId === speciesIdKey ? (prev.index + 1) % candidates.length : 0;
+          speciesCycleRef.current = { speciesId: speciesIdKey, index };
           const organism = candidates[index];
           onFocusOrganism(organism);
           panToHexRef.current?.(organism.q, organism.r);
@@ -480,7 +481,7 @@ function downsampleHistoryPreserveSpikes(history: SpeciesPopulationPoint[]): Spe
 }
 
 type ChartSeries = {
-  id: string;
+  id: number;
   label: string;
   color: string;
   latestCount: number;
@@ -495,29 +496,33 @@ type ChartData = {
   turnEnd: number;
 };
 
-function rankSpeciesIdsByCount(speciesCounts: Record<string, number>): string[] {
+function rankSpeciesIdsByCount(speciesCounts: Record<string, number>): number[] {
   return Object.entries(speciesCounts)
     .filter(([, count]) => count > 0)
     .sort((a, b) => b[1] - a[1] || Number(a[0]) - Number(b[0]))
-    .map(([speciesId]) => speciesId);
+    .map(([speciesId]) => Number(speciesId));
+}
+
+function speciesCountAt(point: SpeciesPopulationPoint, speciesId: number): number {
+  return point.speciesCounts[String(speciesId)] ?? 0;
 }
 
 function computeStableVisibleSpeciesIds(
   history: SpeciesPopulationPoint[],
-  pinnedSpeciesIds: string[],
-  focusedSpeciesId: string | null,
-): string[] {
-  const protectedSpeciesSet = new Set<string>(pinnedSpeciesIds);
-  if (focusedSpeciesId) {
+  pinnedSpeciesIds: number[],
+  focusedSpeciesId: number | null,
+): number[] {
+  const protectedSpeciesSet = new Set<number>(pinnedSpeciesIds);
+  if (focusedSpeciesId !== null) {
     protectedSpeciesSet.add(focusedSpeciesId);
   }
 
-  const visibleSpeciesIds: string[] = [];
-  const zeroStreakBySpecies = new Map<string, number>();
+  const visibleSpeciesIds: number[] = [];
+  const zeroStreakBySpecies = new Map<number, number>();
 
   for (const point of history) {
     for (const speciesId of visibleSpeciesIds) {
-      const count = point.speciesCounts[speciesId] ?? 0;
+      const count = speciesCountAt(point, speciesId);
       zeroStreakBySpecies.set(
         speciesId,
         count > 0 ? 0 : (zeroStreakBySpecies.get(speciesId) ?? 0) + 1,
@@ -571,16 +576,16 @@ function computeStableVisibleSpeciesIds(
 
   const latest = history[history.length - 1];
   return visibleSpeciesIds.sort((a, b) => {
-    const countDiff = (latest.speciesCounts[b] ?? 0) - (latest.speciesCounts[a] ?? 0);
+    const countDiff = speciesCountAt(latest, b) - speciesCountAt(latest, a);
     if (countDiff !== 0) return countDiff;
-    return Number(a) - Number(b);
+    return a - b;
   });
 }
 
 function computeChartData(
   history: SpeciesPopulationPoint[],
-  pinnedSpeciesIds: string[],
-  focusedSpeciesId: string | null,
+  pinnedSpeciesIds: number[],
+  focusedSpeciesId: number | null,
 ): ChartData | null {
   if (history.length === 0) return null;
 
@@ -590,7 +595,7 @@ function computeChartData(
 
   if (visibleSpeciesIds.length === 0) return null;
 
-  const countsBySeries = new Map<string, number[]>();
+  const countsBySeries = new Map<number, number[]>();
   for (const speciesId of visibleSpeciesIds) {
     countsBySeries.set(speciesId, []);
   }
@@ -598,7 +603,7 @@ function computeChartData(
 
   for (const point of displayPoints) {
     for (const speciesId of visibleSpeciesIds) {
-      const count = point.speciesCounts[speciesId] ?? 0;
+      const count = speciesCountAt(point, speciesId);
       countsBySeries.get(speciesId)?.push(count);
       if (count > maxCount) maxCount = count;
     }
@@ -606,9 +611,9 @@ function computeChartData(
 
   const series: ChartSeries[] = visibleSpeciesIds.map((speciesId) => ({
     id: speciesId,
-    label: speciesId,
-    color: colorForSpeciesId(speciesId),
-    latestCount: latest.speciesCounts[speciesId] ?? 0,
+    label: String(speciesId),
+    color: colorForSpeciesId(String(speciesId)),
+    latestCount: speciesCountAt(latest, speciesId),
     counts: countsBySeries.get(speciesId) ?? [],
   }));
 
@@ -627,17 +632,17 @@ function SpeciesPopulationChart({
   onSpeciesClick,
 }: {
   history: SpeciesPopulationPoint[];
-  focusedSpeciesId: string | null;
-  onSpeciesClick: (speciesId: string) => void;
+  focusedSpeciesId: number | null;
+  onSpeciesClick: (speciesId: number) => void;
 }) {
-  const [pinnedSpeciesIds, setPinnedSpeciesIds] = useState<string[]>([]);
+  const [pinnedSpeciesIds, setPinnedSpeciesIds] = useState<number[]>([]);
   const chartData = useMemo(
     () => computeChartData(history, pinnedSpeciesIds, focusedSpeciesId),
     [focusedSpeciesId, history, pinnedSpeciesIds],
   );
 
   const onSpeciesSeriesClick = useCallback(
-    (speciesId: string) => {
+    (speciesId: number) => {
       setPinnedSpeciesIds((previous) =>
         previous.includes(speciesId) ? previous : previous.concat(speciesId),
       );

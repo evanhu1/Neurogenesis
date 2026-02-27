@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import { unwrapId } from '../../protocol';
 import type { BrainState, OrganismState } from '../../types';
 import { BrainCanvas } from './BrainCanvas';
 
@@ -132,8 +131,8 @@ export function InspectorPanel({
 
     return {
       coreStats: [
-        { label: 'Organism ID', value: String(unwrapId(focusedOrganism.id)) },
-        { label: 'Species ID', value: String(unwrapId(focusedOrganism.species_id)) },
+        { label: 'Organism ID', value: String(focusedOrganism.id) },
+        { label: 'Species ID', value: String(focusedOrganism.species_id) },
         { label: 'Generation', value: String(focusedOrganism.generation) },
         { label: 'Position', value: `(${focusedOrganism.q}, ${focusedOrganism.r})` },
         { label: 'Facing', value: focusedOrganism.facing },
@@ -248,7 +247,7 @@ export function InspectorPanel({
           <BrainCanvas
             focusedBrain={focusedBrain}
             activeActionNeuronId={activeActionNeuronId}
-            focusOrganismId={focusedOrganism ? unwrapId(focusedOrganism.id) : null}
+            focusOrganismId={focusedOrganism?.id ?? null}
           />
         </div>
       </section>

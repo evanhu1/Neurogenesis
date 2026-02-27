@@ -475,6 +475,34 @@ fn terrain_map_is_seed_deterministic_and_threshold_controlled() {
 }
 
 #[test]
+fn fertility_map_is_seed_deterministic_with_cell_jitter() {
+    let mut cfg = stable_test_config();
+    cfg.world_width = 48;
+    cfg.num_organisms = 1;
+    cfg.terrain_noise_scale = 0.02;
+    cfg.terrain_threshold = 1.0;
+
+    let sim_a = Simulation::new(cfg.clone(), 2026).expect("simulation should init");
+    let sim_b = Simulation::new(cfg, 2026).expect("simulation should init");
+    let sim_other_seed = Simulation::new(stable_test_config_with_terrain(1.0), 2027)
+        .expect("simulation should init");
+
+    assert_eq!(sim_a.food_fertility, sim_b.food_fertility);
+    assert_ne!(sim_a.food_fertility, sim_other_seed.food_fertility);
+
+    let fertile_count = sim_a
+        .food_fertility
+        .iter()
+        .filter(|fertile| **fertile)
+        .count();
+    assert!(
+        fertile_count > 0 && fertile_count < sim_a.food_fertility.len(),
+        "fertility map should contain both fertile and infertile cells: fertile={fertile_count} total={}",
+        sim_a.food_fertility.len(),
+    );
+}
+
+#[test]
 fn stochastic_action_sampling_is_deterministic_for_repeated_runs() {
     let mut cfg = stable_test_config();
     cfg.world_width = 30;

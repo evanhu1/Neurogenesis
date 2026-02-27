@@ -12,6 +12,7 @@ use sim_types::{
 const DEFAULT_TERRAIN_THRESHOLD: f64 = 0.86;
 const NO_REGROWTH_SCHEDULED: u64 = u64::MAX;
 const FOOD_FERTILITY_SEED_MIX: u64 = 0x6A09_E667_F3BC_C909;
+const FOOD_FERTILITY_JITTER_SEED_MIX: u64 = 0x510E_527F_9B05_688C;
 const FOOD_FERTILITY_NOISE_SCALE: f64 = 0.012;
 const FOOD_FERTILITY_THRESHOLD: f64 = 0.6;
 
@@ -409,6 +410,7 @@ fn founder_species_id(id: OrganismId) -> SpeciesId {
 fn build_fertility_map(world_width: u32, seed: u64) -> Vec<bool> {
     let width = world_width as usize;
     let fertility_seed = seed ^ FOOD_FERTILITY_SEED_MIX;
+    let jitter_seed = fertility_seed ^ FOOD_FERTILITY_JITTER_SEED_MIX;
     let mut fertility = Vec::with_capacity(width * width);
     for r in 0..width {
         for q in 0..width {
@@ -416,7 +418,9 @@ fn build_fertility_map(world_width: u32, seed: u64) -> Vec<bool> {
             let y = r as f64 * FOOD_FERTILITY_NOISE_SCALE;
             let value = fractal_perlin_2d(x, y, fertility_seed);
             let normalized = ((value + 1.0) * 0.5).clamp(0.0, 1.0);
-            fertility.push(normalized >= FOOD_FERTILITY_THRESHOLD);
+            let jitter = cell_jitter(q as i64, r as i64, jitter_seed);
+            let jittered = (normalized * jitter).clamp(0.0, 1.0);
+            fertility.push(jittered >= FOOD_FERTILITY_THRESHOLD);
         }
     }
     fertility
@@ -502,6 +506,12 @@ fn hash_2d(x: i64, y: i64, seed: u64) -> u64 {
     z = z.wrapping_mul(0x94D0_49BB_1331_11EB);
     z ^= z >> 31;
     z
+}
+
+fn cell_jitter(x: i64, y: i64, seed: u64) -> f64 {
+    const MAX_U53: f64 = ((1_u64 << 53) - 1) as f64;
+    let sample = (hash_2d(x, y, seed) >> 11) as f64 / MAX_U53;
+    0.5 + sample
 }
 
 fn grad(hash: u64, x: f64, y: f64) -> f64 {
