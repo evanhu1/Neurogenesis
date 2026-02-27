@@ -2779,7 +2779,7 @@ fn intent_from_selected_action(
 }
 ```
 
-## config/default.toml
+## sim-config/config.toml
 
 ```toml
 world_width = 500

@@ -81,7 +81,7 @@ to degenerate niches along the way.
 - `sim-server/` — Axum HTTP + WebSocket server. Server-only API types live in
   `src/protocol.rs`.
 - `web-client/` — React + TailwindCSS + Vite canvas UI.
-- `sim-config/default.toml` — baseline simulation configuration.
+- `sim-config/config.toml` — baseline simulation configuration.
 
 ## Quickstart
 
@@ -108,7 +108,7 @@ Six hex directions: `East (q+1,r)`, `NorthEast (q+1,r-1)`, `NorthWest (q,r-1)`,
 
 ## Config
 
-All hyperparameters are configured in `sim-config/default.toml`. Parameters
+All hyperparameters are configured in `sim-config/config.toml`. Parameters
 configure world dynamics and the seed genome. Config parsing/validation lives in
 the `sim-config` crate and normalizes legacy defaults (`starting_energy`,
 `max_organism_age`) at load time.

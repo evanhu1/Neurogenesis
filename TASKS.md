@@ -49,7 +49,7 @@ Brain model changes:
 
 2. **Propagate schema changes everywhere they are serialized/deserialized.**
    - Update `sim-types/src/lib.rs` structs and serde compatibility.
-   - Update `config/default.toml` with all individual mutation-rate config keys.
+   - Update `sim-config/config.toml` with all individual mutation-rate config keys.
    - Update `web-client/src/types.ts` and default TOML parser to match new
      config/genome fields.
    - Update any UI selectors that still reference the removed

@@ -3,7 +3,7 @@
 ## Project Structure
 
 - `sim-types/`: shared domain types used across all Rust crates.
-- `sim-config/`: world + seed-genome config crate (`default.toml`, typed loader/validation).
+- `sim-config/`: world + seed-genome config crate (`config.toml`, typed loader/validation).
 - `sim-core/`: deterministic simulation engine:
   - `lib.rs`: `Simulation` struct, config validation.
   - `turn.rs`: turn pipeline, intent resolution, movement, consume/predation, commit.
@@ -15,7 +15,7 @@
 - `sim-server/`: Axum HTTP + WebSocket server (`src/main.rs`), with server-only
   API types in `src/protocol.rs`.
 - `web-client/`: React + TailwindCSS + Vite canvas UI (`src/`).
-- `sim-config/default.toml`: baseline simulation configuration.
+- `sim-config/config.toml`: baseline simulation configuration.
 
 ## Build & Test
 

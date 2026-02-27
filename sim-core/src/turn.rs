@@ -11,7 +11,7 @@ use sim_types::{
     OrganismMove, OrganismState, RemovedEntityPosition, TickDelta, WorldConfig,
 };
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 #[cfg(feature = "profiling")]
 use std::time::Instant;
 
@@ -288,8 +288,8 @@ impl Simulation {
         intents: &[OrganismIntent],
     ) -> Vec<MoveResolution> {
         let w = snapshot.world_width as usize;
-        let world_cells = occupancy.len();
-        let mut best_by_cell: Vec<Option<MoveCandidate>> = vec![None; world_cells];
+        let mut best_by_cell: HashMap<usize, MoveCandidate> =
+            HashMap::with_capacity(intents.len().saturating_div(2).max(1));
 
         for intent in intents {
             if !intent.wants_move {
@@ -309,14 +309,20 @@ impl Simulation {
                 target,
                 confidence: intent.move_confidence,
             };
-            match &best_by_cell[cell_idx] {
+            match best_by_cell.get_mut(&cell_idx) {
                 Some(current)
-                    if compare_move_candidates(&candidate, current) != Ordering::Greater => {}
-                _ => best_by_cell[cell_idx] = Some(candidate),
+                    if compare_move_candidates(&candidate, current) == Ordering::Greater =>
+                {
+                    *current = candidate;
+                }
+                Some(_) => {}
+                None => {
+                    best_by_cell.insert(cell_idx, candidate);
+                }
             }
         }
 
-        let mut winners: Vec<MoveCandidate> = best_by_cell.into_iter().flatten().collect();
+        let mut winners: Vec<MoveCandidate> = best_by_cell.into_values().collect();
         winners.sort_by_key(|w| w.actor_idx);
 
         winners

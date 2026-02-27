@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-const DEFAULT_WORLD_CONFIG_REL_PATH: &str = "default.toml";
+const DEFAULT_WORLD_CONFIG_REL_PATH: &str = "config.toml";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SeedGenomeConfig {
@@ -137,7 +137,7 @@ pub fn world_config_from_toml_str(raw: &str) -> Result<WorldConfig, toml::de::Er
 }
 
 pub fn default_world_config() -> WorldConfig {
-    world_config_from_toml_str(include_str!("../default.toml"))
+    world_config_from_toml_str(include_str!("../config.toml"))
         .expect("default world config TOML must deserialize")
 }
 
