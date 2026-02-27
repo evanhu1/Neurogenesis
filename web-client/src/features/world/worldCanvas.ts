@@ -9,6 +9,9 @@ const BASE_HEX_SIZE_AT_900PX = 8;
 const BASE_HEX_MIN_SIZE_PX = 6;
 const BASE_HEX_REFERENCE_CANVAS_PX = 900;
 const EARTH_COLOR = '#d4c4a8';
+const GRID_STROKE_COLOR = '#8a94a8';
+const WALL_STROKE_COLOR = '#4d5360';
+const GRID_STROKE_WIDTH = 0.4;
 const HEX_VERTEX_OFFSETS = Array.from({ length: 6 }, (_, index) => {
   const angle = (Math.PI / 180) * (60 * index - 30);
   return {
@@ -26,6 +29,16 @@ const FACING_UNIT_VECTORS: Record<FacingDirection, { x: number; y: number }> = {
   SouthWest: { x: -HEX_DIAGONAL_UNIT_X, y: HEX_DIAGONAL_UNIT_Y },
   SouthEast: { x: HEX_DIAGONAL_UNIT_X, y: HEX_DIAGONAL_UNIT_Y },
 };
+const ORGANISM_RADIUS_SCALE = 0.6;
+const ORGANISM_PICK_RADIUS_SCALE = 0.42;
+const ORGANISM_TAIL_LENGTH_SCALE = 0.7;
+const ORGANISM_SIDE_SPAN_SCALE = 0.65;
+const FOCUSED_ORGANISM_STROKE_SCALE = 0.14;
+const FOCUSED_ORGANISM_MIN_STROKE_PX = 1.5;
+const ORGANISM_STROKE_SCALE = 0.06;
+const ORGANISM_MIN_STROKE_PX = 0.8;
+const FOCUSED_ORGANISM_STROKE_COLOR = '#0b1730';
+const ORGANISM_STROKE_COLOR = 'rgba(15, 23, 42, 0.6)';
 
 type HexLayout = {
   size: number;
@@ -170,8 +183,8 @@ function drawVisibleGrid(
   }
   ctx.fillStyle = EARTH_COLOR;
   ctx.fill();
-  ctx.strokeStyle = '#8a94a8';
-  ctx.lineWidth = 0.4;
+  ctx.strokeStyle = GRID_STROKE_COLOR;
+  ctx.lineWidth = GRID_STROKE_WIDTH;
   ctx.stroke();
 }
 
@@ -218,8 +231,8 @@ export function renderWorld(
   }
   ctx.fillStyle = WALL_COLOR;
   ctx.fill();
-  ctx.strokeStyle = '#4d5360';
-  ctx.lineWidth = 0.4;
+  ctx.strokeStyle = WALL_STROKE_COLOR;
+  ctx.lineWidth = GRID_STROKE_WIDTH;
   ctx.stroke();
 
   if (visibility.plants) {
@@ -231,8 +244,8 @@ export function renderWorld(
     }
     ctx.fillStyle = PLANT_COLOR;
     ctx.fill();
-    ctx.strokeStyle = '#8a94a8';
-    ctx.lineWidth = 0.4;
+    ctx.strokeStyle = GRID_STROKE_COLOR;
+    ctx.lineWidth = GRID_STROKE_WIDTH;
     ctx.stroke();
   }
 
@@ -242,16 +255,16 @@ export function renderWorld(
       const speciesId = unwrapId(org.species_id);
       const center = hexCenter(layout, org.q, org.r);
 
-      const radius = Math.max(3, layout.size * 0.6);
+      const radius = Math.max(3, layout.size * ORGANISM_RADIUS_SCALE);
       const { x: ux, y: uy } = FACING_UNIT_VECTORS[org.facing];
 
       // Triangle pointing in facing direction
       const tipX = center.x + ux * radius;
       const tipY = center.y + uy * radius;
-      const backX = center.x - ux * radius * 0.7;
-      const backY = center.y - uy * radius * 0.7;
-      const perpX = -uy * radius * 0.65;
-      const perpY = ux * radius * 0.65;
+      const backX = center.x - ux * radius * ORGANISM_TAIL_LENGTH_SCALE;
+      const backY = center.y - uy * radius * ORGANISM_TAIL_LENGTH_SCALE;
+      const perpX = -uy * radius * ORGANISM_SIDE_SPAN_SCALE;
+      const perpY = ux * radius * ORGANISM_SIDE_SPAN_SCALE;
 
       ctx.beginPath();
       ctx.moveTo(tipX, tipY);
@@ -260,8 +273,12 @@ export function renderWorld(
       ctx.closePath();
       ctx.fillStyle = colorForSpeciesId(String(speciesId));
       ctx.fill();
-      ctx.lineWidth = id === focusedOrganismId ? Math.max(1.5, layout.size * 0.14) : Math.max(0.8, layout.size * 0.06);
-      ctx.strokeStyle = id === focusedOrganismId ? '#0b1730' : 'rgba(15, 23, 42, 0.6)';
+      ctx.lineWidth =
+        id === focusedOrganismId
+          ? Math.max(FOCUSED_ORGANISM_MIN_STROKE_PX, layout.size * FOCUSED_ORGANISM_STROKE_SCALE)
+          : Math.max(ORGANISM_MIN_STROKE_PX, layout.size * ORGANISM_STROKE_SCALE);
+      ctx.strokeStyle =
+        id === focusedOrganismId ? FOCUSED_ORGANISM_STROKE_COLOR : ORGANISM_STROKE_COLOR;
       ctx.stroke();
     }
   }
@@ -286,7 +303,7 @@ export function pickOrganismAtCanvasPoint(
   for (const organism of snapshot.organisms) {
     const center = hexCenter(layout, organism.q, organism.r);
     const distance = Math.hypot(center.x - point.x, center.y - point.y);
-    if (distance > layout.size * 0.42) continue;
+    if (distance > layout.size * ORGANISM_PICK_RADIUS_SCALE) continue;
     if (!best || distance < best.distance) {
       best = { organism, distance };
     }
