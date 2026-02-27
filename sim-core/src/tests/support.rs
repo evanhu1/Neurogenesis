@@ -81,6 +81,7 @@ pub(super) fn stable_test_config() -> WorldConfig {
         global_mutation_rate_modifier: 1.0,
         meta_mutation_enabled: true,
         runtime_plasticity_enabled: true,
+        force_random_actions: false,
         seed_genome_config: SeedGenomeConfig {
             num_neurons: 1,
             num_synapses: 0,

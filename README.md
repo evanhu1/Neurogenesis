@@ -78,6 +78,8 @@ to degenerate niches along the way.
   - `genome.rs` — genome generation and mutation operators.
   - `spawn.rs` — initial population spawn and reproduction placement.
   - `grid.rs` — hex-grid geometry and occupancy helpers.
+- `sim-validation/` — headless validation harness for benchmarking whether the
+  evolutionary loop is producing adaptive behavior.
 - `sim-server/` — Axum HTTP + WebSocket server. Server-only API types live in
   `src/protocol.rs`.
 - `web-client/` — React + TailwindCSS + Vite canvas UI.
@@ -90,6 +92,23 @@ to degenerate niches along the way.
 3. Start server: `cargo run -p sim-server`
 4. In another shell: `cd web-client && npm install && npm run dev`
 5. Open `http://127.0.0.1:5173`
+
+## Validation Harness
+
+Use `sim-validation` to benchmark the evolution loop and inspect whether
+behavioral adaptation is emerging.
+
+- Cargo command (release):
+  - `cargo run -p sim-validation --release -- --seed 42`
+- Make command:
+  - `make validate ARGS="--seed 42"`
+- Baseline/random-action control:
+  - `cargo run -p sim-validation --release -- --seed 42 --baseline`
+- Faster smoke run:
+  - `cargo run -p sim-validation --release -- --seed 42 --ticks 1000 --report-every 250`
+
+Each run writes artifacts under `artifacts/validation/...` including
+`timeseries.csv`, `summary.json`, and `report.html`.
 
 ## World Model
 

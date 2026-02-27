@@ -1,4 +1,6 @@
-use crate::brain::{action_index, evaluate_brain, BrainScratch};
+#[cfg(feature = "instrumentation")]
+use crate::brain::scan_rays;
+use crate::brain::{action_index, evaluate_brain, BrainScratch, ACTION_COUNT};
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right, wrap_position};
 use crate::plasticity::{apply_runtime_weight_updates, compute_pending_coactivations};
 use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
@@ -7,10 +9,14 @@ use crate::{profiling, profiling::TurnPhase};
 use crate::{PendingActionKind, PendingActionState, Simulation};
 use rayon::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuilder};
+#[cfg(feature = "instrumentation")]
+use sim_types::ActionRecord;
 use sim_types::{
     ActionType, EntityId, FacingDirection, FoodState, Occupant, OrganismFacing, OrganismId,
     OrganismMove, OrganismState, RemovedEntityPosition, TickDelta, WorldConfig,
 };
+#[cfg(feature = "instrumentation")]
+use sim_types::{EntityType, SensoryReceptor};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -55,6 +61,12 @@ struct OrganismIntent {
     move_confidence: f32,
     action_cost_count: u8,
     synapse_ops: u64,
+}
+
+struct BuiltIntent {
+    intent: OrganismIntent,
+    #[cfg(feature = "instrumentation")]
+    action_record: Option<ActionRecord>,
 }
 
 #[derive(Clone, Copy)]
@@ -107,7 +119,7 @@ fn sim_parallel_pool(thread_count: u32) -> Arc<ThreadPool> {
 }
 
 impl Simulation {
-    pub(crate) fn tick(&mut self) -> TickDelta {
+    pub fn tick(&mut self) -> TickDelta {
         self.reconcile_pending_actions();
 
         #[cfg(feature = "profiling")]
@@ -257,13 +269,14 @@ impl Simulation {
         let occupancy = &self.occupancy;
         let pending_actions = &self.pending_actions;
         let runtime_plasticity_enabled = self.config.runtime_plasticity_enabled;
+        let force_random_actions = self.config.force_random_actions;
         let action_temperature = self.config.action_temperature;
         let thread_pool = sim_parallel_pool(self.config.intent_parallel_threads);
         let sim_seed = self.seed;
         let tick = self.turn;
         #[cfg(feature = "profiling")]
         let brain_eval_started = Instant::now();
-        let intents = thread_pool.install(|| {
+        let built_intents: Vec<BuiltIntent> = thread_pool.install(|| {
             self.organisms
                 .par_iter_mut()
                 .with_min_len(INTENT_PARALLEL_MIN_LEN)
@@ -281,6 +294,7 @@ impl Simulation {
                         tick,
                         action_temperature,
                         runtime_plasticity_enabled,
+                        force_random_actions,
                         scratch,
                     )
                 })
@@ -288,6 +302,26 @@ impl Simulation {
         });
         #[cfg(feature = "profiling")]
         profiling::record_brain_eval_total(brain_eval_started.elapsed());
+
+        #[cfg(feature = "instrumentation")]
+        let mut action_records = Vec::with_capacity(built_intents.len());
+
+        let intents = built_intents
+            .into_iter()
+            .map(|built| {
+                #[cfg(feature = "instrumentation")]
+                {
+                    if let Some(action_record) = built.action_record {
+                        action_records.push(action_record);
+                    }
+                }
+                built.intent
+            })
+            .collect();
+        #[cfg(feature = "instrumentation")]
+        {
+            self.action_records = action_records;
+        }
         intents
     }
 
@@ -749,43 +783,99 @@ fn build_intent_for_organism(
     tick: u64,
     action_temperature: f32,
     runtime_plasticity_enabled: bool,
+    force_random_actions: bool,
     scratch: &mut BrainScratch,
-) -> OrganismIntent {
+) -> BuiltIntent {
     if pending_action.turns_remaining > 0 {
-        return OrganismIntent {
-            idx,
-            id: organism_id,
-            from: (snapshot_state.q, snapshot_state.r),
-            facing_after_actions: snapshot_state.facing,
-            wants_move: false,
-            wants_consume: false,
-            wants_reproduce: false,
-            move_target: None,
-            consume_target: None,
-            move_confidence: 0.0,
-            action_cost_count: 0,
-            synapse_ops: 0,
+        return BuiltIntent {
+            intent: OrganismIntent {
+                idx,
+                id: organism_id,
+                from: (snapshot_state.q, snapshot_state.r),
+                facing_after_actions: snapshot_state.facing,
+                wants_move: false,
+                wants_consume: false,
+                wants_reproduce: false,
+                move_target: None,
+                consume_target: None,
+                move_confidence: 0.0,
+                action_cost_count: 0,
+                synapse_ops: 0,
+            },
+            #[cfg(feature = "instrumentation")]
+            action_record: None,
         };
     }
 
     let vision_distance = organism.genome.vision_distance;
     let action_sample = deterministic_action_sample(sim_seed, tick, organism_id);
-    let evaluation = evaluate_brain(
-        organism,
-        world_width,
-        occupancy,
-        vision_distance,
-        action_temperature,
-        action_sample,
-        scratch,
-    );
-    if runtime_plasticity_enabled {
-        compute_pending_coactivations(organism, scratch);
+    let mut selected_action = uniform_random_action(action_sample);
+    let mut selected_action_activation = 1.0;
+    let mut synapse_ops = 0;
+    #[cfg(feature = "instrumentation")]
+    let food_flags: (bool, bool, bool, bool);
+
+    if force_random_actions {
+        #[cfg(feature = "instrumentation")]
+        {
+            let ray_scans = scan_rays(
+                (organism.q, organism.r),
+                organism.facing,
+                organism.id,
+                world_width,
+                occupancy,
+                vision_distance,
+            );
+            let food_at_offset = |offset: i8| -> bool {
+                let Some(ray_idx) = SensoryReceptor::LOOK_RAY_OFFSETS
+                    .iter()
+                    .position(|candidate| *candidate == offset)
+                else {
+                    return false;
+                };
+                matches!(
+                    ray_scans[ray_idx].as_ref(),
+                    Some(hit) if hit.target == EntityType::Food
+                )
+            };
+            food_flags = (
+                food_at_offset(0),
+                food_at_offset(-1),
+                food_at_offset(1),
+                food_at_offset(3),
+            );
+        }
+    } else {
+        let evaluation = evaluate_brain(
+            organism,
+            world_width,
+            occupancy,
+            vision_distance,
+            action_temperature,
+            action_sample,
+            scratch,
+        );
+        if runtime_plasticity_enabled {
+            compute_pending_coactivations(organism, scratch);
+        }
+        selected_action = evaluation.selected_action;
+        selected_action_activation = evaluation.action_activations[action_index(selected_action)];
+        synapse_ops = evaluation.synapse_ops;
+        #[cfg(feature = "instrumentation")]
+        {
+            food_flags = (
+                evaluation.food_ahead,
+                evaluation.food_left,
+                evaluation.food_right,
+                evaluation.food_behind,
+            );
+        }
     }
 
-    let selected_action = evaluation.selected_action;
+    #[cfg(feature = "instrumentation")]
+    let (food_ahead, food_left, food_right, food_behind) = food_flags;
+
     organism.last_action_taken = selected_action;
-    let selected_action_activation = evaluation.action_activations[action_index(selected_action)];
     let (
         facing_after_actions,
         wants_move,
@@ -800,19 +890,37 @@ fn build_intent_for_organism(
         0.0
     };
 
-    OrganismIntent {
-        idx,
-        id: organism_id,
-        from: (snapshot_state.q, snapshot_state.r),
-        facing_after_actions,
-        wants_move,
-        wants_consume,
-        wants_reproduce,
-        move_target,
-        consume_target,
-        move_confidence,
-        action_cost_count: u8::from(selected_action != ActionType::Idle),
-        synapse_ops: evaluation.synapse_ops,
+    BuiltIntent {
+        intent: OrganismIntent {
+            idx,
+            id: organism_id,
+            from: (snapshot_state.q, snapshot_state.r),
+            facing_after_actions,
+            wants_move,
+            wants_consume,
+            wants_reproduce,
+            move_target,
+            consume_target,
+            move_confidence,
+            action_cost_count: u8::from(selected_action != ActionType::Idle),
+            synapse_ops,
+        },
+        #[cfg(feature = "instrumentation")]
+        action_record: Some(ActionRecord {
+            organism_id,
+            selected_action,
+            food_ahead,
+            food_left,
+            food_right,
+            food_behind,
+            inter_activations: organism
+                .brain
+                .inter
+                .iter()
+                .map(|inter| inter.neuron.activation)
+                .collect(),
+            consumptions_count: organism.consumptions_count,
+        }),
     }
 }
 
@@ -900,6 +1008,12 @@ fn action_rng_seed(sim_seed: u64, tick: u64, organism_id: OrganismId) -> u64 {
 fn deterministic_action_sample(sim_seed: u64, tick: u64, organism_id: OrganismId) -> f32 {
     let sample = (action_rng_seed(sim_seed, tick, organism_id) >> 40) as u32;
     sample as f32 / ((1_u32 << 24) - 1) as f32
+}
+
+fn uniform_random_action(action_sample: f32) -> ActionType {
+    let scaled = action_sample.clamp(0.0, 1.0 - f32::EPSILON) * ACTION_COUNT as f32;
+    let idx = scaled.floor() as usize;
+    ActionType::ALL[idx.min(ACTION_COUNT - 1)]
 }
 
 fn deterministic_predation_sample(

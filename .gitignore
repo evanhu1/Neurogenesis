@@ -3,3 +3,4 @@ web-client/node_modules/
 web-client/dist/
 .DS_Store
 sim-server/worlds/
+artifacts/

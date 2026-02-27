@@ -12,6 +12,8 @@
   - `genome.rs`: genome generation and mutation operators.
   - `spawn.rs`: initial population spawn and reproduction placement.
   - `grid.rs`: hex-grid geometry and occupancy helpers.
+- `sim-validation/`: headless validation harness for benchmarking the
+  evolutionary loop and reporting adaptation metrics.
 - `sim-server/`: Axum HTTP + WebSocket server (`src/main.rs`), with server-only
   API types in `src/protocol.rs`.
 - `web-client/`: React + TailwindCSS + Vite canvas UI (`src/`).
@@ -23,6 +25,9 @@
 - `cargo test --workspace`: run all Rust tests.
 - `make fmt`: format Rust code.
 - `make lint`: clippy with warnings as errors.
+- `cargo run -p sim-validation --release -- --seed <u64>`: run evolution-loop
+  validation harness and generate `report.html`/`timeseries.csv`/`summary.json`.
+- `make validate ARGS="--seed <u64>"`: same harness via Makefile wrapper.
 - `cargo run -p sim-server`: start backend on `127.0.0.1:8080`.
 - `cd web-client && npm run dev`: run frontend (Vite).
 - `cd web-client && npm run build && npm run typecheck`: production build + TS.
@@ -51,6 +56,8 @@
 - Primary runner: `cargo test --workspace`.
 - Add deterministic tests for simulation behavior changes (fixed seeds, snapshot
   assertions).
+- For evolution-loop benchmarking and regression checks, run `sim-validation`
+  (prefer release mode) and compare outputs across seeds/configs.
 
 ## Architecture Context
 

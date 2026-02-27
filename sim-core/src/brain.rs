@@ -38,6 +38,14 @@ pub(crate) struct BrainEvaluation {
     pub(crate) action_logits: [f32; ACTION_COUNT],
     pub(crate) action_activations: [f32; ACTION_COUNT],
     pub(crate) synapse_ops: u64,
+    #[cfg(feature = "instrumentation")]
+    pub(crate) food_ahead: bool,
+    #[cfg(feature = "instrumentation")]
+    pub(crate) food_left: bool,
+    #[cfg(feature = "instrumentation")]
+    pub(crate) food_right: bool,
+    #[cfg(feature = "instrumentation")]
+    pub(crate) food_behind: bool,
 }
 
 /// Reusable scratch buffers for brain evaluation, avoiding per-tick allocations.
@@ -289,6 +297,13 @@ pub(crate) fn evaluate_brain(
         occupancy,
         vision_distance,
     );
+    #[cfg(feature = "instrumentation")]
+    {
+        result.food_ahead = look_ray_signal(&ray_scans, 0, EntityType::Food) > 0.0;
+        result.food_left = look_ray_signal(&ray_scans, -1, EntityType::Food) > 0.0;
+        result.food_right = look_ray_signal(&ray_scans, 1, EntityType::Food) > 0.0;
+        result.food_behind = look_ray_signal(&ray_scans, 3, EntityType::Food) > 0.0;
+    }
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::ScanAhead, stage_started.elapsed());
 

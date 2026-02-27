@@ -34,6 +34,19 @@ impl Default for ActionType {
     }
 }
 
+#[cfg(feature = "instrumentation")]
+#[derive(Debug, Clone)]
+pub struct ActionRecord {
+    pub organism_id: OrganismId,
+    pub selected_action: ActionType,
+    pub food_ahead: bool,
+    pub food_left: bool,
+    pub food_right: bool,
+    pub food_behind: bool,
+    pub inter_activations: Vec<f32>,
+    pub consumptions_count: u64,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, VariantArray)]
 pub enum FacingDirection {
     East,

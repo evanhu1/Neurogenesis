@@ -20,6 +20,7 @@ fn stable_perf_config() -> WorldConfig {
         global_mutation_rate_modifier: 1.0,
         meta_mutation_enabled: true,
         runtime_plasticity_enabled: true,
+        force_random_actions: false,
         seed_genome_config: sim_types::SeedGenomeConfig {
             num_neurons: 20,
             num_synapses: 80,

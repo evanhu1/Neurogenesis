@@ -63,6 +63,8 @@ pub struct WorldConfig {
     pub meta_mutation_enabled: bool,
     #[serde(default = "default_runtime_plasticity_enabled")]
     pub runtime_plasticity_enabled: bool,
+    #[serde(default = "default_force_random_actions")]
+    pub force_random_actions: bool,
     pub seed_genome_config: SeedGenomeConfig,
 }
 
@@ -95,6 +97,8 @@ struct WorldConfigDeserialize {
     meta_mutation_enabled: bool,
     #[serde(default = "default_runtime_plasticity_enabled")]
     runtime_plasticity_enabled: bool,
+    #[serde(default = "default_force_random_actions")]
+    force_random_actions: bool,
     seed_genome_config: SeedGenomeConfig,
 }
 
@@ -121,6 +125,7 @@ impl<'de> Deserialize<'de> for WorldConfig {
             global_mutation_rate_modifier: raw.global_mutation_rate_modifier,
             meta_mutation_enabled: raw.meta_mutation_enabled,
             runtime_plasticity_enabled: raw.runtime_plasticity_enabled,
+            force_random_actions: raw.force_random_actions,
             seed_genome_config: raw.seed_genome_config,
         })
     }
@@ -228,7 +233,7 @@ fn normalize_world_config_toml(value: &mut toml::Value) {
     if let Some(world_width) = world_width {
         table
             .entry("max_organism_age")
-            .or_insert_with(|| toml::Value::Integer(i64::from(world_width.saturating_mul(10))));
+            .or_insert_with(|| toml::Value::Integer(i64::from(world_width.saturating_mul(5))));
     }
 }
 
@@ -278,4 +283,8 @@ fn default_meta_mutation_enabled() -> bool {
 
 fn default_runtime_plasticity_enabled() -> bool {
     true
+}
+
+fn default_force_random_actions() -> bool {
+    false
 }

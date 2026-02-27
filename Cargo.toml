@@ -2,6 +2,7 @@
 members = [
   "sim-config",
   "sim-core",
+  "sim-validation",
   "sim-types",
   "sim-server",
 ]

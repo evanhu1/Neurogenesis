@@ -1,6 +1,8 @@
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "instrumentation")]
+use sim_types::ActionRecord;
 use sim_types::{
     FoodState, MetricsSnapshot, OccupancyCell, Occupant, OrganismId, OrganismState, TickDelta,
     WorldConfig, WorldSnapshot,
@@ -52,6 +54,9 @@ pub struct Simulation {
     food_regrowth_due_turn: Vec<u64>,
     #[serde(default)]
     food_regrowth_schedule: BTreeMap<u64, Vec<usize>>,
+    #[cfg(feature = "instrumentation")]
+    #[serde(skip)]
+    action_records: Vec<ActionRecord>,
     metrics: MetricsSnapshot,
 }
 
@@ -89,6 +94,8 @@ impl Simulation {
             food_fertility: Vec::new(),
             food_regrowth_due_turn: Vec::new(),
             food_regrowth_schedule: BTreeMap::new(),
+            #[cfg(feature = "instrumentation")]
+            action_records: Vec::new(),
             metrics: MetricsSnapshot::default(),
         };
 
@@ -146,6 +153,8 @@ impl Simulation {
         self.food_fertility.clear();
         self.food_regrowth_due_turn.clear();
         self.food_regrowth_schedule.clear();
+        #[cfg(feature = "instrumentation")]
+        self.action_records.clear();
         self.metrics = MetricsSnapshot::default();
         self.initialize_terrain();
         self.spawn_initial_population();
@@ -175,8 +184,17 @@ impl Simulation {
             .cloned()
     }
 
+    pub fn organisms(&self) -> &[OrganismState] {
+        &self.organisms
+    }
+
     pub fn metrics(&self) -> &MetricsSnapshot {
         &self.metrics
+    }
+
+    #[cfg(feature = "instrumentation")]
+    pub fn drain_action_records(&mut self) -> Vec<ActionRecord> {
+        std::mem::take(&mut self.action_records)
     }
 
     pub fn validate_state(&self) -> Result<(), SimError> {

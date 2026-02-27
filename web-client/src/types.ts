@@ -73,6 +73,8 @@ export type WorldConfig = {
   speciation_threshold: number;
   global_mutation_rate_modifier: number;
   meta_mutation_enabled: boolean;
+  runtime_plasticity_enabled: boolean;
+  force_random_actions: boolean;
   seed_genome_config: SeedGenomeConfig;
 };
 
