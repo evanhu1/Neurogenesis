@@ -13,7 +13,7 @@ const EARTH_COLOR = '#d4c4a8';
 const GRID_STROKE_COLOR = '#8a94a8';
 const WALL_STROKE_COLOR = '#4d5360';
 const GRID_STROKE_WIDTH = 0.18;
-const HIGH_DETAIL_MIN_SCREEN_HEX_PX = 12;
+const HIGH_DETAIL_MIN_SCREEN_HEX_PX = 15;
 const HEX_VERTEX_OFFSETS = Array.from({ length: 6 }, (_, index) => {
   const angle = (Math.PI / 180) * (60 * index - 30);
   return {
@@ -32,9 +32,12 @@ const FACING_UNIT_VECTORS: Record<FacingDirection, { x: number; y: number }> = {
   SouthEast: { x: HEX_DIAGONAL_UNIT_X, y: HEX_DIAGONAL_UNIT_Y },
 };
 const ORGANISM_RADIUS_SCALE = 0.26;
+const ORGANISM_MIN_RADIUS_PX = 1.2;
 const ORGANISM_PICK_RADIUS_SCALE = 0.42;
-const ORGANISM_TAIL_LENGTH_SCALE = 0.7;
-const ORGANISM_SIDE_SPAN_SCALE = 0.34;
+const ORGANISM_FORWARD_SCALE = 1.5;
+const ORGANISM_TAIL_LENGTH_SCALE = 0.95;
+const ORGANISM_SIDE_SPAN_SCALE = 1.0;
+const ORGANISM_CENTER_OFFSET_SCALE = 0.12;
 const FOCUSED_ORGANISM_STROKE_SCALE = 0.035;
 const FOCUSED_ORGANISM_MIN_STROKE_PX = 0.35;
 const ORGANISM_STROKE_SCALE = 0.012;
@@ -530,14 +533,16 @@ function renderOrganismLayer(
     const centerX = geometry.centerXs[index];
     const centerY = geometry.centerYs[index];
 
-    const radius = Math.max(3, layout.size * ORGANISM_RADIUS_SCALE);
+    const radius = Math.max(ORGANISM_MIN_RADIUS_PX, layout.size * ORGANISM_RADIUS_SCALE);
     const { x: ux, y: uy } = FACING_UNIT_VECTORS[org.facing];
+    const anchorX = centerX - ux * radius * ORGANISM_CENTER_OFFSET_SCALE;
+    const anchorY = centerY - uy * radius * ORGANISM_CENTER_OFFSET_SCALE;
 
     // Triangle pointing in facing direction
-    const tipX = centerX + ux * radius;
-    const tipY = centerY + uy * radius;
-    const backX = centerX - ux * radius * ORGANISM_TAIL_LENGTH_SCALE;
-    const backY = centerY - uy * radius * ORGANISM_TAIL_LENGTH_SCALE;
+    const tipX = anchorX + ux * radius * ORGANISM_FORWARD_SCALE;
+    const tipY = anchorY + uy * radius * ORGANISM_FORWARD_SCALE;
+    const backX = anchorX - ux * radius * ORGANISM_TAIL_LENGTH_SCALE;
+    const backY = anchorY - uy * radius * ORGANISM_TAIL_LENGTH_SCALE;
     const perpX = -uy * radius * ORGANISM_SIDE_SPAN_SCALE;
     const perpY = ux * radius * ORGANISM_SIDE_SPAN_SCALE;
 
@@ -749,12 +754,14 @@ function renderVisibleOrganisms(
       continue;
     }
 
-    const radius = Math.max(3, geometry.layout.size * ORGANISM_RADIUS_SCALE);
+    const radius = Math.max(ORGANISM_MIN_RADIUS_PX, geometry.layout.size * ORGANISM_RADIUS_SCALE);
     const { x: ux, y: uy } = FACING_UNIT_VECTORS[org.facing];
-    const tipX = centerX + ux * radius;
-    const tipY = centerY + uy * radius;
-    const backX = centerX - ux * radius * ORGANISM_TAIL_LENGTH_SCALE;
-    const backY = centerY - uy * radius * ORGANISM_TAIL_LENGTH_SCALE;
+    const anchorX = centerX - ux * radius * ORGANISM_CENTER_OFFSET_SCALE;
+    const anchorY = centerY - uy * radius * ORGANISM_CENTER_OFFSET_SCALE;
+    const tipX = anchorX + ux * radius * ORGANISM_FORWARD_SCALE;
+    const tipY = anchorY + uy * radius * ORGANISM_FORWARD_SCALE;
+    const backX = anchorX - ux * radius * ORGANISM_TAIL_LENGTH_SCALE;
+    const backY = anchorY - uy * radius * ORGANISM_TAIL_LENGTH_SCALE;
     const perpX = -uy * radius * ORGANISM_SIDE_SPAN_SCALE;
     const perpY = ux * radius * ORGANISM_SIDE_SPAN_SCALE;
 
