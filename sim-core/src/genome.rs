@@ -86,6 +86,8 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         mutation_rate_synapse_prune_threshold: config.mutation_rate_synapse_prune_threshold,
         mutation_rate_neuron_location: config.mutation_rate_neuron_location,
         mutation_rate_synapse_weight_perturbation: config.mutation_rate_synapse_weight_perturbation,
+        mutation_rate_add_synapse: config.mutation_rate_add_synapse,
+        mutation_rate_remove_synapse: config.mutation_rate_remove_synapse,
         mutation_rate_add_neuron_split_edge: config.mutation_rate_add_neuron_split_edge,
         inter_biases,
         inter_log_time_constants,
@@ -110,6 +112,8 @@ fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng:
         genome.mutation_rate_synapse_prune_threshold,
         genome.mutation_rate_neuron_location,
         genome.mutation_rate_synapse_weight_perturbation,
+        genome.mutation_rate_add_synapse,
+        genome.mutation_rate_remove_synapse,
         genome.mutation_rate_add_neuron_split_edge,
     ];
     let shared_normal = standard_normal(rng) * MUTATION_RATE_ADAPTATION_TIME_CONSTANT;
@@ -131,7 +135,9 @@ fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng:
     genome.mutation_rate_synapse_prune_threshold = rates[6];
     genome.mutation_rate_neuron_location = rates[7];
     genome.mutation_rate_synapse_weight_perturbation = rates[8];
-    genome.mutation_rate_add_neuron_split_edge = rates[9];
+    genome.mutation_rate_add_synapse = rates[9];
+    genome.mutation_rate_remove_synapse = rates[10];
+    genome.mutation_rate_add_neuron_split_edge = rates[11];
 }
 
 fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
@@ -247,6 +253,14 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
         genome.mutation_rate_synapse_weight_perturbation,
         global_mutation_rate_modifier,
     );
+    let mutation_rate_add_synapse = effective_mutation_rate(
+        genome.mutation_rate_add_synapse,
+        global_mutation_rate_modifier,
+    );
+    let mutation_rate_remove_synapse = effective_mutation_rate(
+        genome.mutation_rate_remove_synapse,
+        global_mutation_rate_modifier,
+    );
     let mutation_rate_add_neuron_split_edge = effective_mutation_rate(
         genome.mutation_rate_add_neuron_split_edge,
         global_mutation_rate_modifier,
@@ -331,6 +345,14 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
         mutate_random_synapse_weight(genome, rng);
     }
 
+    if rng.random::<f32>() < mutation_rate_add_synapse {
+        mutate_add_synapse(genome, rng);
+    }
+
+    if rng.random::<f32>() < mutation_rate_remove_synapse {
+        mutate_remove_synapse(genome, rng);
+    }
+
     if rng.random::<f32>() < mutation_rate_add_neuron_split_edge {
         mutate_add_neuron_split_edge(genome, rng);
     }
@@ -389,6 +411,33 @@ fn mutate_random_synapse_weight<R: Rng + ?Sized>(genome: &mut OrganismGenome, rn
     let magnitude_scale = (SYNAPSE_WEIGHT_PERTURBATION_STDDEV * standard_normal(rng)).exp();
     let perturbed_weight = weight * magnitude_scale;
     genome.edges[idx].weight = constrain_weight(perturbed_weight);
+}
+
+pub(crate) fn mutate_add_synapse<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
+    let max_synapses = max_possible_synapses(genome.num_neurons) as usize;
+    if genome.edges.len() >= max_synapses {
+        genome.num_synapses = genome.edges.len() as u32;
+        return;
+    }
+
+    let before_len = genome.edges.len();
+    add_synapse_genes_with_spatial_prior(genome, 1, rng);
+    if genome.edges.len() > before_len {
+        genome.num_synapses = genome.num_synapses.saturating_add(1);
+        sort_synapse_genes(&mut genome.edges);
+    }
+}
+
+pub(crate) fn mutate_remove_synapse<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
+    if genome.edges.is_empty() {
+        genome.num_synapses = 0;
+        return;
+    }
+
+    let idx = rng.random_range(0..genome.edges.len());
+    genome.edges.swap_remove(idx);
+    genome.num_synapses = genome.num_synapses.saturating_sub(1);
+    sort_synapse_genes(&mut genome.edges);
 }
 
 pub(crate) fn mutate_add_neuron_split_edge<R: Rng + ?Sized>(
@@ -474,18 +523,14 @@ pub(crate) fn mutate_add_neuron_split_edge<R: Rng + ?Sized>(
     genome.edges.push(SynapseEdge {
         pre_neuron_id: selected_edge.pre_neuron_id,
         post_neuron_id: new_inter_id,
-        weight: constrain_weight(selected_edge.weight),
+        weight: 1.0,
         eligibility: 0.0,
         pending_coactivation: 0.0,
     });
     genome.edges.push(SynapseEdge {
         pre_neuron_id: new_inter_id,
         post_neuron_id: selected_edge.post_neuron_id,
-        weight: if selected_edge.weight.is_sign_negative() {
-            -1.0
-        } else {
-            1.0
-        },
+        weight: constrain_weight(selected_edge.weight),
         eligibility: 0.0,
         pending_coactivation: 0.0,
     });

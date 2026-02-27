@@ -274,7 +274,7 @@ impl Simulation {
         let plasticity_started = Instant::now();
         self.organisms.par_iter_mut().for_each(|organism| {
             let passive_energy_baseline =
-                organism_metabolism_energy_cost_from_food_energy(food_energy, organism);
+                organism_passive_metabolic_energy_cost_from_food_energy(food_energy, organism);
             apply_runtime_weight_updates(organism, passive_energy_baseline);
         });
         #[cfg(feature = "profiling")]
@@ -619,8 +619,9 @@ impl Simulation {
         let mut starved_positions = Vec::new();
 
         for (idx, organism) in self.organisms.iter_mut().enumerate() {
-            let metabolism_energy_cost = organism_metabolism_energy_cost(&self.config, organism);
-            organism.energy -= metabolism_energy_cost;
+            let passive_metabolic_energy_cost =
+                organism_passive_metabolic_energy_cost(&self.config, organism);
+            organism.energy -= passive_metabolic_energy_cost;
             if organism.energy <= 0.0 || organism.age_turns >= max_age {
                 dead[idx] = true;
                 let cell_idx = organism.r as usize * world_width + organism.q as usize;
@@ -658,19 +659,22 @@ impl Simulation {
     }
 }
 
-fn organism_metabolism_energy_cost(config: &WorldConfig, organism: &OrganismState) -> f32 {
-    organism_metabolism_energy_cost_from_food_energy(config.food_energy, organism)
+fn organism_passive_metabolic_energy_cost(config: &WorldConfig, organism: &OrganismState) -> f32 {
+    organism_passive_metabolic_energy_cost_from_food_energy(config.food_energy, organism)
 }
 
-fn organism_metabolism_energy_cost_from_food_energy(
+fn organism_passive_metabolic_energy_cost_from_food_energy(
     food_energy: f32,
     organism: &OrganismState,
 ) -> f32 {
-    // `num_neurons` tracks enabled interneurons. Sensory neurons are concrete runtime nodes.
-    let neuron_count = organism.genome.num_neurons as f32 + organism.brain.sensory.len() as f32;
-    let vision_distance_cost = organism.genome.vision_distance as f32 / 3.0;
-    let neuron_energy_cost = food_energy / FOOD_ENERGY_METABOLISM_DIVISOR;
-    neuron_energy_cost * (neuron_count + vision_distance_cost)
+    // `num_neurons` tracks enabled interneurons; sensory neurons are explicit runtime nodes.
+    let inter_neuron_count = organism.genome.num_neurons as f32;
+    let sensory_neuron_count = organism.brain.sensory.len() as f32;
+    let synapse_count = organism.brain.synapse_count as f32;
+    let vision_distance_cost_units = organism.genome.vision_distance as f32 / 3.0;
+    let metabolic_cost_per_unit = food_energy / FOOD_ENERGY_METABOLISM_DIVISOR;
+    metabolic_cost_per_unit
+        * (inter_neuron_count + sensory_neuron_count + synapse_count + vision_distance_cost_units)
 }
 
 impl Simulation {

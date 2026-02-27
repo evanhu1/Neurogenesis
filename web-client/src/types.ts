@@ -21,6 +21,8 @@ export type SeedGenomeConfig = {
   mutation_rate_synapse_prune_threshold: number;
   mutation_rate_neuron_location: number;
   mutation_rate_synapse_weight_perturbation: number;
+  mutation_rate_add_synapse: number;
+  mutation_rate_remove_synapse: number;
   mutation_rate_add_neuron_split_edge: number;
 };
 
@@ -63,6 +65,8 @@ export type OrganismGenome = {
   mutation_rate_synapse_prune_threshold: number;
   mutation_rate_neuron_location: number;
   mutation_rate_synapse_weight_perturbation: number;
+  mutation_rate_add_synapse: number;
+  mutation_rate_remove_synapse: number;
   mutation_rate_add_neuron_split_edge: number;
   inter_biases: number[];
   inter_log_time_constants: number[];

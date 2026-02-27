@@ -209,6 +209,8 @@ fn mutate_genome_can_apply_add_neuron_split_edge_operator() {
     genome.mutation_rate_synapse_prune_threshold = 0.0;
     genome.mutation_rate_neuron_location = 0.0;
     genome.mutation_rate_synapse_weight_perturbation = 0.0;
+    genome.mutation_rate_add_synapse = 0.0;
+    genome.mutation_rate_remove_synapse = 0.0;
     genome.mutation_rate_add_neuron_split_edge = 1.0;
 
     let mut rng = ChaCha8Rng::seed_from_u64(12345);
@@ -257,18 +259,86 @@ fn mutate_add_neuron_split_edge_replaces_synapse_and_extends_inter_vectors() {
     assert_eq!(genome.inter_locations.len(), 2);
     assert_eq!(genome.num_synapses, 2);
     assert_eq!(genome.edges.len(), 2);
-    assert!(genome
+    let incoming = genome
         .edges
         .iter()
-        .any(|edge| edge.pre_neuron_id == NeuronId(0) && edge.post_neuron_id == new_inter_id));
-    assert!(genome.edges.iter().any(|edge| {
-        edge.pre_neuron_id == new_inter_id
-            && edge.post_neuron_id == NeuronId(crate::brain::ACTION_ID_BASE)
-    }));
+        .find(|edge| edge.pre_neuron_id == NeuronId(0) && edge.post_neuron_id == new_inter_id)
+        .expect("split mutation should create pre->new edge");
+    let outgoing = genome
+        .edges
+        .iter()
+        .find(|edge| {
+            edge.pre_neuron_id == new_inter_id
+                && edge.post_neuron_id == NeuronId(crate::brain::ACTION_ID_BASE)
+        })
+        .expect("split mutation should create new->post edge");
+    assert_eq!(incoming.weight, 1.0);
+    assert_eq!(outgoing.weight, 0.6);
     assert!(!genome.edges.iter().any(|edge| {
         edge.pre_neuron_id == NeuronId(0)
             && edge.post_neuron_id == NeuronId(crate::brain::ACTION_ID_BASE)
     }));
+}
+
+#[test]
+fn mutate_add_synapse_adds_new_edge_and_increments_target() {
+    let mut genome = test_genome();
+    genome.num_neurons = 1;
+    genome.inter_biases = vec![0.0];
+    genome.inter_log_time_constants = vec![0.0];
+    genome.inter_locations = vec![BrainLocation { x: 5.0, y: 5.0 }];
+    genome.edges = vec![SynapseEdge {
+        pre_neuron_id: NeuronId(0),
+        post_neuron_id: NeuronId(crate::brain::ACTION_ID_BASE),
+        weight: 0.4,
+        eligibility: 0.0,
+        pending_coactivation: 0.0,
+    }];
+    genome.num_synapses = 1;
+
+    let mut rng = ChaCha8Rng::seed_from_u64(2026);
+    crate::genome::mutate_add_synapse(&mut genome, &mut rng);
+
+    assert_eq!(genome.num_synapses, 2);
+    assert_eq!(genome.edges.len(), 2);
+    let unique_pairs = genome
+        .edges
+        .iter()
+        .map(|edge| (edge.pre_neuron_id, edge.post_neuron_id))
+        .collect::<HashSet<_>>();
+    assert_eq!(unique_pairs.len(), genome.edges.len());
+}
+
+#[test]
+fn mutate_remove_synapse_removes_edge_and_decrements_target() {
+    let mut genome = test_genome();
+    genome.num_neurons = 1;
+    genome.inter_biases = vec![0.0];
+    genome.inter_log_time_constants = vec![0.0];
+    genome.inter_locations = vec![BrainLocation { x: 5.0, y: 5.0 }];
+    genome.edges = vec![
+        SynapseEdge {
+            pre_neuron_id: NeuronId(0),
+            post_neuron_id: NeuronId(crate::brain::INTER_ID_BASE),
+            weight: 0.4,
+            eligibility: 0.0,
+            pending_coactivation: 0.0,
+        },
+        SynapseEdge {
+            pre_neuron_id: NeuronId(crate::brain::INTER_ID_BASE),
+            post_neuron_id: NeuronId(crate::brain::ACTION_ID_BASE),
+            weight: -0.7,
+            eligibility: 0.0,
+            pending_coactivation: 0.0,
+        },
+    ];
+    genome.num_synapses = 2;
+
+    let mut rng = ChaCha8Rng::seed_from_u64(7);
+    crate::genome::mutate_remove_synapse(&mut genome, &mut rng);
+
+    assert_eq!(genome.num_synapses, 1);
+    assert_eq!(genome.edges.len(), 1);
 }
 
 #[test]
@@ -300,6 +370,8 @@ fn global_mutation_rate_modifier_does_not_change_inherited_mutation_rate_genes()
     genome_a.mutation_rate_synapse_prune_threshold = 0.03;
     genome_a.mutation_rate_neuron_location = 0.19;
     genome_a.mutation_rate_synapse_weight_perturbation = 0.23;
+    genome_a.mutation_rate_add_synapse = 0.31;
+    genome_a.mutation_rate_remove_synapse = 0.27;
     genome_a.mutation_rate_add_neuron_split_edge = 0.29;
     let mut genome_b = genome_a.clone();
 
@@ -344,6 +416,14 @@ fn global_mutation_rate_modifier_does_not_change_inherited_mutation_rate_genes()
     assert_eq!(
         genome_a.mutation_rate_synapse_weight_perturbation,
         genome_b.mutation_rate_synapse_weight_perturbation
+    );
+    assert_eq!(
+        genome_a.mutation_rate_add_synapse,
+        genome_b.mutation_rate_add_synapse
+    );
+    assert_eq!(
+        genome_a.mutation_rate_remove_synapse,
+        genome_b.mutation_rate_remove_synapse
     );
     assert_eq!(
         genome_a.mutation_rate_add_neuron_split_edge,
