@@ -3,11 +3,13 @@
 ## Project Structure
 
 - `sim-types/`: shared domain types used across all Rust crates.
+- `sim-config/`: world + seed-genome config crate (`default.toml`, typed loader/validation).
 - `sim-core/`: deterministic simulation engine:
   - `lib.rs`: `Simulation` struct, config validation.
-  - `turn.rs`: turn pipeline, move/consume/starvation resolution.
+  - `turn.rs`: turn pipeline, intent resolution, movement, consume/predation, commit.
   - `brain.rs`: neural network evaluation and genome expression.
-  - `genome.rs`: genome generation, mutation, species assignment.
+  - `plasticity.rs`: runtime eligibility/coactivation and Hebbian updates.
+  - `genome.rs`: genome generation and mutation operators.
   - `spawn.rs`: initial population spawn and reproduction placement.
   - `grid.rs`: hex-grid geometry and occupancy helpers.
 - `sim-server/`: Axum HTTP + WebSocket server (`src/main.rs`), with server-only
@@ -61,68 +63,92 @@ axes. Occupancy is a dense `Vec<Option<Occupant>>`
 from Perlin noise at world init (`terrain_noise_scale`, `terrain_threshold`) and
 block spawn, movement, and ray vision.
 
+Food fertility is binary (boolean per cell), generated from Perlin noise in
+`spawn.rs` using hardcoded constants:
+`FOOD_FERTILITY_NOISE_SCALE = 0.012`, `FOOD_FERTILITY_THRESHOLD = 0.83`.
+Terrain-wall cells are infertile.
+
 ### Turn Pipeline (execution order)
 
-1. **Lifecycle** — deduct
-   `neuron_metabolism_cost * (enabled interneuron count)`, remove dead/old
-   organisms.
+1. **Lifecycle** — deduct passive metabolism
+   `(food_energy / 10000) * (num_neurons + sensory_count + synapse_count + vision_distance / 3)`,
+   remove starved/aged organisms.
 2. **Snapshot** — freeze occupancy + organism state, stable ID ordering.
-3. **Intent** — evaluate brains, select one categorical action per organism
-   (argmax over action neurons), then derive facing/move/reproduce intent from
-   that single action. Apply runtime plasticity (eligibility traces +
-   maturity-gated 3-factor updates). Any non-`Idle` action pays one
-   `move_action_energy_cost`.
-4. **Reproduction** — queue spawn at hex behind (opposite facing). Requires
-   `age_turns >= age_of_maturity` and sufficient energy.
-5. **Move resolution** — simultaneous resolution; highest confidence wins, ties
-   broken by lower ID. Moving into food consumes it. Moving into an occupied
-   organism cell applies passive bite (`drain = min(prey_energy, food_energy *
-   2.0)`) instead of displacement. Walls block movement.
-6. **Commit** — apply moves, kills, energy transfers. Replenish food.
+3. **Intent** — evaluate brains, sample one action per organism from
+   temperature-scaled softmax logits (deterministic sample stream), derive
+   facing/move/consume/reproduce intent. Any non-`Idle` action pays one
+   `move_action_energy_cost`. When runtime plasticity is enabled, compute
+   per-edge pending coactivations (`pre * post`).
+4. **Reproduction trigger** — `Reproduce` starts a 2-turn lock if mature and
+   energy is sufficient; parent energy is debited immediately by
+   `seed_genome_config.starting_energy`.
+5. **Move resolution** — simultaneous movement into empty targets only; highest
+   confidence wins, ties broken by lower ID. Occupied cells and walls block.
+6. **Commit** — apply facing + moves + action costs; resolve `Consume` on forward
+   cell: food grants `10% * food_energy`, predation succeeds with probability
+   `predator_energy / (predator_energy + prey_energy)` and grants `10%` of prey
+   energy. Failed predation applies extra action-energy penalty. Process due food
+   regrowth and runtime weight updates.
 7. **Age** — increment `age_turns`.
-8. **Spawn** — process queue, mutate genome, assign species.
-9. **Metrics & delta** — prune extinct species, emit `TickDelta`.
+8. **Spawn** — complete reproduction locks into spawn requests (if cells are
+   free), mutate genomes for offspring, and process periodic seed-genome
+   injections.
+9. **Metrics & delta** — update counters and emit `TickDelta`.
 
 ### Brain
 
 Sensory receptors are multi-ray:
-`LookRay { ray_offset in [-2,-1,0,1,2], target in {Food, Organism} }` plus
-`Energy` (11 sensory neurons total). Ray scans are cached per tick and stop on
+`LookRay { ray_offset in [-2,-1,0,1,2,3], target in {Food, Organism, Wall} }`
+plus `Energy` (19 sensory neurons total). Ray scans are cached per tick and stop on
 first blocking entity (including walls), with signal
 `(max_dist - dist + 1) / max_dist`.
 
-Inter neurons are `1000..1000+n`. Action neurons are `2000..2008` mapped to:
-`Idle`, `TurnLeft`, `TurnRight`, `Forward`, `TurnLeftForward`,
-`TurnRightForward`, `Consume`, `Reproduce`. Policy is single-choice categorical
-per tick (highest activation).
+Inter neurons are `1000..1000+n`. Action neurons are `2000..2005` mapped to:
+`Idle`, `TurnLeft`, `TurnRight`, `Forward`, `Consume`, `Reproduce`.
+Policy is single-choice categorical sampling per tick from softmax logits.
 
 Runtime plasticity:
-- Eligibility: `e = eligibility_retention * e + pre * post`.
+- Pending coactivation accumulation: `pending = pre * post` during intent eval.
 - Reward signal:
   `dopamine = tanh((energy - energy_prev + passive_metabolism_baseline) / 10.0)`.
 - Mature-only update: `w += eta * dopamine * e - 0.001 * w`,
   where `eta = max(0, hebb_eta_gain)`.
-- Sign/clamp constraints preserve excitatory/inhibitory polarity.
-- Synapse pruning is maturity-gated.
+- Eligibility fold: `e = retention * e + (1 - retention) * pending`.
+- Synapse pruning is maturity-gated (every 10 ticks) using weight+eligibility thresholds.
 
 ### Genome
 
-`OrganismGenome` has `num_neurons`, `vision_distance`, `age_of_maturity`,
-`hebb_eta_gain`, `eligibility_retention`,
-`synapse_prune_threshold`, `inter_biases`, `inter_log_time_constants`,
-`interneuron_types`, `action_biases`, `edges` (sorted, with per-edge
-`eligibility` trace), and per-operator mutation-rate genes. No weight mutation;
-weights are set at birth and modified by Hebbian learning. Species assigned by
-L1 genome distance; exceeding `speciation_threshold` creates a new species.
+`OrganismGenome` has `num_neurons`, `num_synapses`, `spatial_prior_sigma`,
+`vision_distance`, `starting_energy`, `age_of_maturity`, `hebb_eta_gain`,
+`eligibility_retention`, `synapse_prune_threshold`, `inter_biases`,
+`inter_log_time_constants`, `action_biases`, neuron-location vectors
+(`sensory_locations`, `inter_locations`, `action_locations`), sorted `edges`
+(with runtime traces), and per-operator mutation-rate genes.
+
+Implemented mutation operators include: age/maturity and vision step mutation,
+bias/time-constant/retention/prune-threshold perturbation, neuron-location
+perturbation, synapse weight perturb/replace, add synapse, remove synapse,
+split-edge add-neuron, plus optional meta-mutation of mutation-rate genes.
+
+No species registry/speciation in sim-core.
+
+### Food Ecology
+
+Food regrowth is event-driven with per-cell due-turn bookkeeping
+(`food_regrowth_due_turn` + `food_regrowth_schedule`). Delay is
+`food_regrowth_interval +/- food_regrowth_jitter` (floor 1 turn). Due cells
+occupied by organisms are deferred by 1 turn.
 
 ### Delta Model
 
 `TickDelta` has unified `removed_positions: Vec<RemovedEntityPosition>` (each
 with `entity_id: EntityId` tagged `Organism` or `Food`). No separate food
-removal field. `food_spawned` for new food. Clients partition removals by entity
-type. Full `WorldSnapshot` occupancy cells now include `Wall`.
+removal field. `facing_updates` and `food_spawned` are included. Clients
+partition removals by entity type. Full `WorldSnapshot` occupancy cells include
+`Wall`.
 
 ### Determinism
 
 Fixed config + seed = identical results. All tie-breaking uses organism ID
-ordering. Any change to turn logic must preserve determinism.
+ordering. Action sampling and predation sampling are deterministic hashes of
+`(seed, turn, organism IDs)`. Any change to turn logic must preserve determinism.
