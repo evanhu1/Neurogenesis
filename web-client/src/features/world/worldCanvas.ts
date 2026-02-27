@@ -9,6 +9,13 @@ const BASE_HEX_SIZE_AT_900PX = 8;
 const BASE_HEX_MIN_SIZE_PX = 6;
 const BASE_HEX_REFERENCE_CANVAS_PX = 900;
 const EARTH_COLOR = '#d4c4a8';
+const HEX_VERTEX_OFFSETS = Array.from({ length: 6 }, (_, index) => {
+  const angle = (Math.PI / 180) * (60 * index - 30);
+  return {
+    x: Math.cos(angle),
+    y: Math.sin(angle),
+  };
+});
 
 type HexLayout = {
   size: number;
@@ -98,11 +105,11 @@ export function hexCenter(layout: HexLayout, q: number, r: number) {
 }
 
 function traceHex(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number) {
-  for (let i = 0; i < 6; i += 1) {
-    const angle = (Math.PI / 180) * (60 * i - 30);
-    const x = cx + size * Math.cos(angle);
-    const y = cy + size * Math.sin(angle);
-    if (i === 0) {
+  for (let index = 0; index < HEX_VERTEX_OFFSETS.length; index += 1) {
+    const vertex = HEX_VERTEX_OFFSETS[index];
+    const x = cx + size * vertex.x;
+    const y = cy + size * vertex.y;
+    if (index === 0) {
       ctx.moveTo(x, y);
     } else {
       ctx.lineTo(x, y);
