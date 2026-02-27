@@ -1,4 +1,12 @@
-import { useCallback, useMemo, useRef, useState, type ChangeEvent, type MutableRefObject } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type MutableRefObject,
+} from 'react';
 import { unwrapId } from '../../protocol';
 import { colorForSpeciesId } from '../../speciesColor';
 import type {
@@ -24,8 +32,8 @@ type ControlPanelProps = {
   stepProgress: StepProgressData | null;
   speedLevelIndex: number;
   speedLevelCount: number;
-  onNewSession: () => void;
-  onReset: () => void;
+  onNewSession: (seedInput: string) => void;
+  onReset: (seedInput: string) => void;
   onToggleRun: () => void;
   onSpeedLevelChange: (levelIndex: number) => void;
   onStep: (count: number) => void;
@@ -68,6 +76,7 @@ export function ControlPanel({
   panToHexRef,
 }: ControlPanelProps) {
   const [skipCountInput, setSkipCountInput] = useState('1000');
+  const [seedInput, setSeedInput] = useState('');
   const [worldCountInput, setWorldCountInput] = useState('8');
   const [ticksInput, setTicksInput] = useState('1000');
   const [archivedWorldSortMode, setArchivedWorldSortMode] =
@@ -112,6 +121,11 @@ export function ControlPanel({
     const percent = Math.round((completed / total) * 100);
     return { total, completed, percent };
   }, [batchRunStatus]);
+
+  useEffect(() => {
+    if (!snapshot) return;
+    setSeedInput(String(snapshot.rng_seed));
+  }, [snapshot?.rng_seed]);
 
   const runtimeStatsText = useMemo(() => {
     const visibleMetricPrefixes = ['turn=', 'organisms=', 'species_alive='];
@@ -177,8 +191,8 @@ export function ControlPanel({
       />
 
       <div className="mt-3 flex flex-wrap gap-2">
-        <ControlButton label="New Session" onClick={onNewSession} />
-        <ControlButton label="Reset" onClick={onReset} />
+        <ControlButton label="New Session" onClick={() => onNewSession(seedInput)} />
+        <ControlButton label="Reset" onClick={() => onReset(seedInput)} />
         <ControlButton label="Save World" onClick={onSaveCurrentWorld} disabled={!snapshot} />
         <div className="flex w-full items-center gap-2 rounded-lg bg-white/70 px-2 py-1">
           <ControlButton
@@ -199,6 +213,18 @@ export function ControlPanel({
           />
           <span className="text-xs" role="img" aria-label="rabbit">🐇</span>
         </div>
+      </div>
+      <div className="mt-2 flex items-center gap-2 rounded-lg bg-white/70 px-2 py-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-ink/75">Seed</span>
+        <input
+          aria-label="Session seed"
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          value={seedInput}
+          onChange={(evt) => setSeedInput(evt.target.value)}
+          className="w-48 rounded-md border border-accent/30 bg-white px-2 py-1 font-mono text-sm text-ink outline-none ring-accent/20 focus:ring-2"
+        />
       </div>
       <div className="mt-2 flex gap-2">
         <ControlButton label="Step 1" onClick={() => onStep(1)} disabled={isStepPending} />

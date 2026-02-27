@@ -46,10 +46,6 @@ export function unwrapId(id: ApiScalarId | number): number {
   return id[0];
 }
 
-function deriveSpeciesId(generation: number): number {
-  return Math.max(0, Math.floor(generation));
-}
-
 function normalizeSynapseEdge(edge: ApiSynapseEdge): SynapseEdge {
   return {
     pre_neuron_id: unwrapId(edge.pre_neuron_id),
@@ -120,7 +116,7 @@ function normalizeFoodState(food: ApiFoodState): FoodState {
 function normalizeWorldOrganismState(organism: ApiWorldOrganismState): WorldOrganismState {
   return {
     id: unwrapId(organism.id),
-    species_id: deriveSpeciesId(organism.generation),
+    species_id: unwrapId(organism.species_id),
     q: organism.q,
     r: organism.r,
     generation: organism.generation,
@@ -135,7 +131,7 @@ function normalizeWorldOrganismState(organism: ApiWorldOrganismState): WorldOrga
 function normalizeOrganismState(organism: ApiOrganismState): OrganismState {
   return {
     id: unwrapId(organism.id),
-    species_id: deriveSpeciesId(organism.generation),
+    species_id: unwrapId(organism.species_id),
     q: organism.q,
     r: organism.r,
     generation: organism.generation,

@@ -36,6 +36,8 @@ struct Cli {
     min_lifetime: u64,
     #[arg(long)]
     out: Option<PathBuf>,
+    #[arg(long)]
+    title: Option<String>,
     #[arg(long, default_value_t = false)]
     baseline: bool,
 }
@@ -47,11 +49,13 @@ struct RunOptions {
     report_every: u64,
     min_lifetime: u64,
     out_dir: PathBuf,
+    title: Option<String>,
     baseline: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct ValidationSummary {
+    title: Option<String>,
     seed: u64,
     ticks: u64,
     baseline: bool,
@@ -96,6 +100,7 @@ fn main() -> Result<()> {
         report_every: cli.report_every,
         min_lifetime: cli.min_lifetime,
         out_dir,
+        title: cli.title,
         baseline: cli.baseline,
     };
 
@@ -198,9 +203,11 @@ fn run_with_config(config: WorldConfig, options: &RunOptions) -> Result<Validati
 
     reporter.flush()?;
     let total_time_seconds = run_started.elapsed().as_secs_f64();
+    let generated_at_utc = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
     let aggregate_score = compute_aggregate_score(&timeseries);
 
     let summary = ValidationSummary {
+        title: options.title.clone(),
         seed: options.seed,
         ticks: options.ticks,
         baseline: options.baseline,
@@ -213,12 +220,14 @@ fn run_with_config(config: WorldConfig, options: &RunOptions) -> Result<Validati
     write_html_report(
         &options.out_dir,
         &HtmlReportMeta {
+            title: summary.title.clone(),
             seed: summary.seed,
             ticks: summary.ticks,
             report_every: options.report_every,
             min_lifetime: options.min_lifetime,
             baseline: summary.baseline,
             total_time_seconds: summary.total_time_seconds,
+            generated_at_utc,
             aggregate_score: summary.aggregate_score.score,
             aggregate_window_start_tick: summary.aggregate_score.window_start_tick,
             aggregate_window_end_tick: summary.aggregate_score.window_end_tick,
@@ -348,6 +357,7 @@ mod tests {
             report_every: 50,
             min_lifetime: 10,
             out_dir: out_a.clone(),
+            title: None,
             baseline: false,
         };
         let options_b = RunOptions {

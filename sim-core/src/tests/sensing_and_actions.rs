@@ -36,6 +36,7 @@ fn simple_action_bias_organism(
     let brain = express_genome(&genome, &mut rng);
     OrganismState {
         id: OrganismId(0),
+        species_id: sim_types::SpeciesId(0),
         q: 0,
         r: 0,
         generation: 0,
@@ -300,6 +301,7 @@ fn runtime_plasticity_updates_weights() {
 
     let mut organism = OrganismState {
         id: OrganismId(0),
+        species_id: sim_types::SpeciesId(0),
         q: 0,
         r: 0,
         generation: 0,
@@ -379,6 +381,7 @@ fn runtime_plasticity_neutralizes_passive_metabolism_for_dopamine() {
 
     let mut organism = OrganismState {
         id: OrganismId(0),
+        species_id: sim_types::SpeciesId(0),
         q: 0,
         r: 0,
         generation: 0,
@@ -487,6 +490,7 @@ fn inter_recurrent_eligibility_uses_prev_inter_pre_signal_only_for_inter_targets
     };
     let mut organism = OrganismState {
         id: OrganismId(0),
+        species_id: sim_types::SpeciesId(0),
         q: 0,
         r: 0,
         generation: 0,
@@ -568,6 +572,7 @@ fn action_target_eligibility_uses_centered_logits_not_sigmoid_activation() {
     };
     let mut organism = OrganismState {
         id: OrganismId(0),
+        species_id: sim_types::SpeciesId(0),
         q: 0,
         r: 0,
         generation: 0,
@@ -641,6 +646,7 @@ fn energy_sensor_clamps_and_scales_with_starting_energy() {
 
     let mut organism = OrganismState {
         id: OrganismId(0),
+        species_id: sim_types::SpeciesId(0),
         q: 0,
         r: 0,
         generation: 0,

@@ -51,12 +51,14 @@ impl Reporter {
 }
 
 pub struct HtmlReportMeta {
+    pub title: Option<String>,
     pub seed: u64,
     pub ticks: u64,
     pub report_every: u64,
     pub min_lifetime: u64,
     pub baseline: bool,
     pub total_time_seconds: f64,
+    pub generated_at_utc: String,
     pub aggregate_score: f64,
     pub aggregate_window_start_tick: u64,
     pub aggregate_window_end_tick: u64,
@@ -100,6 +102,9 @@ pub fn write_html_report(
     );
 
     html.push_str("<div class=\"panel\"><h1>Simulation Validation Report</h1><div class=\"meta\">");
+    if let Some(title) = &meta.title {
+        kv(&mut html, "Title", title);
+    }
     kv(&mut html, "Seed", &meta.seed.to_string());
     kv(&mut html, "Ticks", &meta.ticks.to_string());
     kv(&mut html, "Report Every", &meta.report_every.to_string());
@@ -114,6 +119,7 @@ pub fn write_html_report(
         "Total Time",
         &format!("{:.3}s", meta.total_time_seconds),
     );
+    kv(&mut html, "Generated At (UTC)", &meta.generated_at_utc);
     html.push_str("</div></div>");
 
     html.push_str("<div class=\"panel\"><h2>Aggregate Score</h2>");

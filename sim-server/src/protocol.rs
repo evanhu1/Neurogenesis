@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use sim_types::{
     FacingDirection, FoodState, MetricsSnapshot, NeuronId, OccupancyCell, OrganismFacing,
-    OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, TickDelta, WorldConfig,
+    OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId, TickDelta,
+    WorldConfig,
     WorldSnapshot,
 };
 use uuid::Uuid;
@@ -144,6 +145,7 @@ pub struct StepProgressData {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorldOrganismState {
     pub id: OrganismId,
+    pub species_id: SpeciesId,
     pub q: i32,
     pub r: i32,
     pub generation: u64,
@@ -158,6 +160,7 @@ impl From<&OrganismState> for WorldOrganismState {
     fn from(organism: &OrganismState) -> Self {
         Self {
             id: organism.id,
+            species_id: organism.species_id,
             q: organism.q,
             r: organism.r,
             generation: organism.generation,

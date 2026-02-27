@@ -148,8 +148,8 @@ export type SimulationSessionState = {
   speedLevels: readonly number[];
   speedLevelIndex: number;
   errorText: string | null;
-  createSession: () => Promise<void>;
-  resetSession: () => void;
+  createSession: (seedInput?: string) => Promise<void>;
+  resetSession: (seedInput?: string) => void;
   toggleRun: () => void;
   setSpeedLevelIndex: (levelIndex: number) => void;
   step: (count: number) => void;
@@ -170,6 +170,27 @@ function nextRandomUniverseSeed(): number {
     return value[0];
   }
   return Math.floor(Math.random() * 0x1_0000_0000);
+}
+
+function parseSessionSeedInput(seedInput?: string): { seed: number | null; error: string | null } {
+  if (seedInput === undefined) {
+    return { seed: null, error: null };
+  }
+  const trimmed = seedInput.trim();
+  if (!trimmed) {
+    return { seed: null, error: null };
+  }
+  if (!/^\d+$/.test(trimmed)) {
+    return { seed: null, error: 'Seed must be a non-negative integer' };
+  }
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isSafeInteger(parsed)) {
+    return {
+      seed: null,
+      error: `Seed must be <= ${Number.MAX_SAFE_INTEGER.toLocaleString()} in the web client`,
+    };
+  }
+  return { seed: parsed, error: null };
 }
 
 export function useSimulationSession(): SimulationSessionState {
@@ -332,11 +353,17 @@ export function useSimulationSession(): SimulationSessionState {
     [connectWs, setFocusedOrganismIdTracked],
   );
 
-  const createSession = useCallback(async () => {
+  const createSession = useCallback(async (seedInput?: string) => {
+    const { seed, error } = parseSessionSeedInput(seedInput);
+    if (error) {
+      setErrorText(error);
+      return;
+    }
+    const sessionSeed = seed ?? Math.floor(Date.now() / 1000);
     try {
       setErrorText(null);
       const payload = await request<ApiCreateSessionResponse>('/v1/sessions', 'POST', {
-        seed: Math.floor(Date.now() / 1000),
+        seed: sessionSeed,
       });
       const normalized = normalizeCreateSessionResponse(payload);
       applyLoadedSession(normalized.metadata, normalized.snapshot);
@@ -513,9 +540,14 @@ export function useSimulationSession(): SimulationSessionState {
     [sendCommand],
   );
 
-  const resetSession = useCallback(() => {
+  const resetSession = useCallback((seedInput?: string) => {
     if (!session) return;
-    void request<ApiWorldSnapshot>(`/v1/sessions/${session.id}/reset`, 'POST', { seed: null })
+    const { seed, error } = parseSessionSeedInput(seedInput);
+    if (error) {
+      setErrorText(error);
+      return;
+    }
+    void request<ApiWorldSnapshot>(`/v1/sessions/${session.id}/reset`, 'POST', { seed })
       .then((nextSnapshot) => {
         const normalized = normalizeWorldSnapshot(nextSnapshot);
         setIsStepPending(false);

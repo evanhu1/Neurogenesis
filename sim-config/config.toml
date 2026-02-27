@@ -12,7 +12,7 @@ terrain_noise_scale = 0.01
 terrain_threshold = 0.70
 global_mutation_rate_modifier = 1.0
 meta_mutation_enabled = false
-runtime_plasticity_enabled = false
+runtime_plasticity_enabled = true
 force_random_actions = false
 
 [seed_genome_config]

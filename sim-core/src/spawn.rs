@@ -6,6 +6,7 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use sim_types::{
     FacingDirection, FoodId, FoodState, Occupant, OrganismGenome, OrganismId, OrganismState,
+    SpeciesId,
 };
 
 const DEFAULT_TERRAIN_THRESHOLD: f64 = 0.86;
@@ -18,6 +19,7 @@ const FOOD_FERTILITY_THRESHOLD: f64 = 0.6;
 pub(crate) struct ReproductionSpawn {
     pub(crate) parent_genome: OrganismGenome,
     pub(crate) parent_generation: u64,
+    pub(crate) parent_species_id: SpeciesId,
     pub(crate) parent_facing: FacingDirection,
     pub(crate) q: i32,
     pub(crate) r: i32,
@@ -69,10 +71,11 @@ impl Simulation {
                         &mut self.rng,
                     );
                     let generation = reproduction.parent_generation.saturating_add(1);
-
+                    let id = self.alloc_organism_id();
                     let brain = express_genome(&child_genome, &mut self.rng);
                     OrganismState {
-                        id: self.alloc_organism_id(),
+                        id,
+                        species_id: reproduction.parent_species_id,
                         q: reproduction.q,
                         r: reproduction.r,
                         generation,
@@ -91,9 +94,11 @@ impl Simulation {
                 SpawnRequestKind::PeriodicInjection(injection) => {
                     let genome =
                         generate_seed_genome(&self.config.seed_genome_config, &mut self.rng);
+                    let id = self.alloc_organism_id();
                     let brain = express_genome(&genome, &mut self.rng);
                     OrganismState {
-                        id: self.alloc_organism_id(),
+                        id,
+                        species_id: founder_species_id(id),
                         q: injection.q,
                         r: injection.r,
                         generation: 0,
@@ -174,6 +179,7 @@ impl Simulation {
             let facing = self.random_facing();
             let organism = OrganismState {
                 id,
+                species_id: founder_species_id(id),
                 q,
                 r,
                 generation: 0,
@@ -394,6 +400,10 @@ impl Simulation {
         }
         positions
     }
+}
+
+fn founder_species_id(id: OrganismId) -> SpeciesId {
+    SpeciesId(id.0)
 }
 
 fn build_fertility_map(world_width: u32, seed: u64) -> Vec<bool> {

@@ -189,6 +189,7 @@ export type BrainState = {
 
 export type ApiOrganismState = {
   id: ApiOrganismId;
+  species_id: ApiSpeciesId;
   q: number;
   r: number;
   generation: number;
@@ -224,6 +225,7 @@ export type OrganismState = {
 
 export type ApiWorldOrganismState = {
   id: ApiOrganismId;
+  species_id: ApiSpeciesId;
   q: number;
   r: number;
   generation: number;

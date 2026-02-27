@@ -12,6 +12,7 @@ macro_rules! id_newtype {
 }
 
 id_newtype!(OrganismId, u64);
+id_newtype!(SpeciesId, u64);
 id_newtype!(NeuronId, u32);
 id_newtype!(FoodId, u64);
 
@@ -223,6 +224,7 @@ pub struct BrainState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OrganismState {
     pub id: OrganismId,
+    pub species_id: SpeciesId,
     pub q: i32,
     pub r: i32,
     #[serde(default)]

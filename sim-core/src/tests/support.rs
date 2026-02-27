@@ -214,6 +214,7 @@ pub(super) fn make_organism(
     let initial_energy = if energy <= 0.0 { 10.0 } else { energy };
     OrganismState {
         id: OrganismId(id),
+        species_id: sim_types::SpeciesId(id),
         q,
         r,
         generation: 0,
@@ -248,6 +249,7 @@ pub(super) fn reproduction_request_from_parent(
         kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
             parent_genome: parent.genome.clone(),
             parent_generation: parent.generation,
+            parent_species_id: parent.species_id,
             parent_facing: parent.facing,
             q,
             r,
@@ -270,6 +272,7 @@ pub(super) fn reproduction_request_at(
         kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
             parent_genome: parent.genome.clone(),
             parent_generation: parent.generation,
+            parent_species_id: parent.species_id,
             parent_facing: parent.facing,
             q,
             r,

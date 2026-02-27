@@ -35,8 +35,8 @@ export default function App() {
           stepProgress={simulation.stepProgress}
           speedLevelIndex={simulation.speedLevelIndex}
           speedLevelCount={simulation.speedLevels.length}
-          onNewSession={() => void simulation.createSession()}
-          onReset={simulation.resetSession}
+          onNewSession={(seedInput) => void simulation.createSession(seedInput)}
+          onReset={(seedInput) => simulation.resetSession(seedInput)}
           onToggleRun={simulation.toggleRun}
           onSpeedLevelChange={simulation.setSpeedLevelIndex}
           onStep={simulation.step}

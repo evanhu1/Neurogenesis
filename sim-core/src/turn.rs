@@ -676,6 +676,7 @@ impl Simulation {
                         kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
                             parent_genome: parent.genome.clone(),
                             parent_generation: parent.generation,
+                            parent_species_id: parent.species_id,
                             parent_facing: parent.facing,
                             q,
                             r,
