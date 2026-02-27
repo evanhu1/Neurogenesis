@@ -152,8 +152,10 @@ export function useSimulationSession(): SimulationSessionState {
   >([]);
   const [errorText, setErrorText] = useState<string | null>(null);
   const latestSnapshotTurnRef = useRef<number>(NO_FOCUS_TURN);
+  const snapshotRef = useRef<WorldSnapshot | null>(snapshot);
   const request = useMemo(() => createSimHttpClient(apiBase), []);
   const sendCommandRef = useRef<(command: unknown) => boolean>(() => false);
+  snapshotRef.current = snapshot;
   const sendCommand = useCallback((command: unknown): boolean => {
     return sendCommandRef.current(command);
   }, []);
@@ -167,6 +169,7 @@ export function useSimulationSession(): SimulationSessionState {
         case 'StateSnapshot': {
           const nextSnapshot = normalizeWorldSnapshot(event.data);
           latestSnapshotTurnRef.current = nextSnapshot.turn;
+          snapshotRef.current = nextSnapshot;
           controls.clearPendingStep();
           setSnapshot(nextSnapshot);
           setSpeciesPopulationHistory((previous) =>
@@ -185,17 +188,19 @@ export function useSimulationSession(): SimulationSessionState {
           const delta = normalizeTickDelta(event.data);
           latestSnapshotTurnRef.current = delta.turn;
           controls.clearPendingStep();
-          setSnapshot((prev) => {
-            if (!prev) return prev;
-            const nextSnapshot = applyTickDelta(prev, delta);
-            setSpeciesPopulationHistory((previous) =>
-              upsertSpeciesPopulationHistory(previous, {
-                turn: nextSnapshot.turn,
-                speciesCounts: normalizeSpeciesCounts(nextSnapshot.metrics.species_counts),
-              }),
-            );
-            return nextSnapshot;
-          });
+          const previousSnapshot = snapshotRef.current;
+          if (!previousSnapshot) {
+            break;
+          }
+          const nextSnapshot = applyTickDelta(previousSnapshot, delta);
+          snapshotRef.current = nextSnapshot;
+          setSnapshot(nextSnapshot);
+          setSpeciesPopulationHistory((previous) =>
+            upsertSpeciesPopulationHistory(previous, {
+              turn: nextSnapshot.turn,
+              speciesCounts: normalizeSpeciesCounts(nextSnapshot.metrics.species_counts),
+            }),
+          );
 
           const trackedFocusedId = focus.focusedOrganismIdRef.current;
           if (trackedFocusedId !== null) {
@@ -245,6 +250,7 @@ export function useSimulationSession(): SimulationSessionState {
       setErrorText(null);
       setSession(metadata);
       latestSnapshotTurnRef.current = loadedSnapshot.turn;
+      snapshotRef.current = loadedSnapshot;
       setSnapshot(loadedSnapshot);
       focus.resetFocusState(true);
       controls.syncSessionState(metadata.running, metadata.ticks_per_second);
@@ -322,6 +328,7 @@ export function useSimulationSession(): SimulationSessionState {
         .then((nextSnapshot) => {
           const normalized = normalizeWorldSnapshot(nextSnapshot);
           latestSnapshotTurnRef.current = normalized.turn;
+          snapshotRef.current = normalized;
           controls.syncSessionState(false, 0);
           setSnapshot(normalized);
           setSpeciesPopulationHistory([
