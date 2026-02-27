@@ -1,17 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { applyTickDelta, findOrganism, unwrapId } from '../../../protocol';
+import {
+  applyTickDelta,
+  findOrganism,
+  normalizeBatchRunStatusResponse,
+  normalizeCreateSessionResponse,
+  normalizeFocusBrainData,
+  normalizeListArchivedWorldsResponse,
+  normalizeTickDelta,
+  normalizeWorldSnapshot,
+  unwrapId,
+} from '../../../protocol';
 import type {
+  ApiBatchRunStatusResponse,
+  ApiCreateSessionResponse,
+  ApiListArchivedWorldsResponse,
+  ApiServerEvent,
+  ApiWorldSnapshot,
   ArchivedWorldSummary,
   BatchRunStatusResponse,
   CreateBatchRunResponse,
-  CreateSessionResponse,
   FocusBrainData,
-  ListArchivedWorldsResponse,
   OrganismState,
-  ServerEvent,
   SessionMetadata,
   StepProgressData,
-  TickDelta,
   WorldOrganismState,
   WorldSnapshot,
 } from '../../../types';
@@ -188,10 +199,10 @@ export function useSimulationSession(): SimulationSessionState {
     setFocusedOrganismId(organismId);
   }, []);
 
-  const handleServerEvent = useCallback((event: ServerEvent) => {
+  const handleServerEvent = useCallback((event: ApiServerEvent) => {
     switch (event.type) {
       case 'StateSnapshot': {
-        const nextSnapshot = event.data as WorldSnapshot;
+        const nextSnapshot = normalizeWorldSnapshot(event.data);
         setIsStepPending(false);
         setStepProgress(null);
         setSnapshot(nextSnapshot);
@@ -211,19 +222,19 @@ export function useSimulationSession(): SimulationSessionState {
         break;
       }
       case 'TickDelta': {
-        const delta = event.data as TickDelta;
+        const delta = normalizeTickDelta(event.data);
         setIsStepPending(false);
         setStepProgress(null);
-        setSpeciesPopulationHistory((previous) =>
-          upsertSpeciesPopulationHistory(previous, {
-            turn: delta.turn,
-            speciesCounts: normalizeSpeciesCounts(delta.metrics.species_counts),
-          }),
-        );
-
         setSnapshot((prev) => {
           if (!prev) return prev;
-          return applyTickDelta(prev, delta);
+          const nextSnapshot = applyTickDelta(prev, delta);
+          setSpeciesPopulationHistory((previous) =>
+            upsertSpeciesPopulationHistory(previous, {
+              turn: nextSnapshot.turn,
+              speciesCounts: normalizeSpeciesCounts(nextSnapshot.metrics.species_counts),
+            }),
+          );
+          return nextSnapshot;
         });
 
         const trackedFocusedId = focusedOrganismIdRef.current;
@@ -249,13 +260,12 @@ export function useSimulationSession(): SimulationSessionState {
         break;
       }
       case 'FocusBrain': {
-        const { organism, active_action_neuron_id } = event.data as FocusBrainData;
+        const { organism, active_action_neuron_id }: FocusBrainData =
+          normalizeFocusBrainData(event.data);
         const organismId = unwrapId(organism.id);
         setFocusedOrganismIdTracked(organismId);
         setFocusedOrganism(organism);
-        setActiveActionNeuronId(
-          active_action_neuron_id == null ? null : unwrapId(active_action_neuron_id),
-        );
+        setActiveActionNeuronId(active_action_neuron_id);
         break;
       }
       case 'Metrics': {
@@ -264,8 +274,7 @@ export function useSimulationSession(): SimulationSessionState {
       case 'Error': {
         setIsStepPending(false);
         setStepProgress(null);
-        const message =
-          typeof event.data === 'string' ? event.data : 'Simulation server reported an error';
+        const message = event.data.message || 'Simulation server reported an error';
         setErrorText(message);
         break;
       }
@@ -322,26 +331,28 @@ export function useSimulationSession(): SimulationSessionState {
   const createSession = useCallback(async () => {
     try {
       setErrorText(null);
-      const payload = await request<CreateSessionResponse>('/v1/sessions', 'POST', {
+      const payload = await request<ApiCreateSessionResponse>('/v1/sessions', 'POST', {
         seed: Math.floor(Date.now() / 1000),
       });
-      applyLoadedSession(payload.metadata, payload.snapshot);
+      const normalized = normalizeCreateSessionResponse(payload);
+      applyLoadedSession(normalized.metadata, normalized.snapshot);
     } catch (err) {
       setErrorText(err instanceof Error ? err.message : 'Failed to create session');
     }
   }, [applyLoadedSession, request]);
 
   const refreshArchivedWorlds = useCallback(async () => {
-    const payload = await request<ListArchivedWorldsResponse>('/v1/worlds', 'GET');
-    setArchivedWorlds(payload.worlds);
+    const payload = await request<ApiListArchivedWorldsResponse>('/v1/worlds', 'GET');
+    setArchivedWorlds(normalizeListArchivedWorldsResponse(payload).worlds);
   }, [request]);
 
   const loadArchivedWorld = useCallback(
     async (worldId: string) => {
       try {
         setErrorText(null);
-        const payload = await request<CreateSessionResponse>(`/v1/worlds/${worldId}/sessions`, 'POST');
-        applyLoadedSession(payload.metadata, payload.snapshot);
+        const payload = await request<ApiCreateSessionResponse>(`/v1/worlds/${worldId}/sessions`, 'POST');
+        const normalized = normalizeCreateSessionResponse(payload);
+        applyLoadedSession(normalized.metadata, normalized.snapshot);
       } catch (err) {
         setErrorText(err instanceof Error ? err.message : 'Failed to load archived world');
       }
@@ -442,9 +453,9 @@ export function useSimulationSession(): SimulationSessionState {
       try {
         const [metadata, restoredSnapshot] = await Promise.all([
           request<SessionMetadata>(`/v1/sessions/${sessionId}`, 'GET'),
-          request<WorldSnapshot>(`/v1/sessions/${sessionId}/state`, 'GET'),
+          request<ApiWorldSnapshot>(`/v1/sessions/${sessionId}/state`, 'GET'),
         ]);
-        applyLoadedSession(metadata, restoredSnapshot);
+        applyLoadedSession(metadata, normalizeWorldSnapshot(restoredSnapshot));
         return true;
       } catch {
         clearPersistedSessionId();
@@ -500,15 +511,16 @@ export function useSimulationSession(): SimulationSessionState {
 
   const resetSession = useCallback(() => {
     if (!session) return;
-    void request<WorldSnapshot>(`/v1/sessions/${session.id}/reset`, 'POST', { seed: null })
+    void request<ApiWorldSnapshot>(`/v1/sessions/${session.id}/reset`, 'POST', { seed: null })
       .then((nextSnapshot) => {
+        const normalized = normalizeWorldSnapshot(nextSnapshot);
         setIsStepPending(false);
         setStepProgress(null);
-        setSnapshot(nextSnapshot);
+        setSnapshot(normalized);
         setSpeciesPopulationHistory([
           {
-            turn: nextSnapshot.turn,
-            speciesCounts: normalizeSpeciesCounts(nextSnapshot.metrics.species_counts),
+            turn: normalized.turn,
+            speciesCounts: normalizeSpeciesCounts(normalized.metrics.species_counts),
           },
         ]);
         setFocusedOrganismIdTracked(null);
@@ -596,11 +608,12 @@ export function useSimulationSession(): SimulationSessionState {
 
     const poll = async () => {
       try {
-        const status = await request<BatchRunStatusResponse>(`/v1/world-runs/${activeBatchRunId}`, 'GET');
+        const status = await request<ApiBatchRunStatusResponse>(`/v1/world-runs/${activeBatchRunId}`, 'GET');
         if (cancelled) return;
-        setBatchRunStatus(status);
+        const normalized = normalizeBatchRunStatusResponse(status);
+        setBatchRunStatus(normalized);
 
-        if (status.status === 'Running') {
+        if (normalized.status === 'Running') {
           timerId = window.setTimeout(() => {
             void poll();
           }, BATCH_RUN_POLL_INTERVAL_MS);
@@ -608,8 +621,8 @@ export function useSimulationSession(): SimulationSessionState {
         }
 
         setActiveBatchRunId(null);
-        if (status.error) {
-          setErrorText(status.error);
+        if (normalized.error) {
+          setErrorText(normalized.error);
         }
         void refreshArchivedWorlds().catch((err: unknown) => {
           if (err instanceof Error) {

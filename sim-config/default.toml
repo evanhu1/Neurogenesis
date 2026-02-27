@@ -11,6 +11,7 @@ food_regrowth_jitter = 20
 terrain_noise_scale = 0.01
 terrain_threshold = 0.70
 global_mutation_rate_modifier = 1.0
+meta_mutation_enabled = true
 runtime_plasticity_enabled = false
 
 [seed_genome_config]

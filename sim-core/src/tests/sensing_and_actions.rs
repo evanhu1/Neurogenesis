@@ -171,7 +171,7 @@ fn mutate_genome_adds_synapses_when_below_target() {
     let mut genome = genome_template.clone();
     genome.edges.clear();
     let mut rng = ChaCha8Rng::seed_from_u64(10_000);
-    crate::genome::mutate_genome(&mut genome, 1.0, &mut rng);
+    crate::genome::mutate_genome(&mut genome, 1.0, true, &mut rng);
 
     assert_eq!(genome.num_synapses, 8);
     assert_eq!(genome.edges.len(), 8);

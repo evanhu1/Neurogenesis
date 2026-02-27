@@ -65,6 +65,7 @@ impl Simulation {
                     mutate_genome(
                         &mut child_genome,
                         self.config.global_mutation_rate_modifier,
+                        self.config.meta_mutation_enabled,
                         &mut self.rng,
                     );
                     let generation = reproduction.parent_generation.saturating_add(1);

@@ -280,6 +280,7 @@ fn stable_perf_config() -> WorldConfig {
         terrain_threshold: 1.0,
         max_organism_age: u32::MAX,
         global_mutation_rate_modifier: 1.0,
+        meta_mutation_enabled: true,
         runtime_plasticity_enabled: true,
         seed_genome_config: SeedGenomeConfig {
             num_neurons: 20,

@@ -31,6 +31,8 @@ const INTER_LOG_TIME_CONSTANT_PERTURBATION_STDDEV: f32 = 0.05;
 const ELIGIBILITY_RETENTION_PERTURBATION_STDDEV: f32 = 0.05;
 const SYNAPSE_PRUNE_THRESHOLD_PERTURBATION_STDDEV: f32 = 0.02;
 const SYNAPSE_WEIGHT_PERTURBATION_STDDEV: f32 = 0.15;
+const SYNAPSE_WEIGHT_PERTURB_EDGE_RATE: f32 = 0.8;
+const SYNAPSE_WEIGHT_REPLACEMENT_RATE: f32 = 0.1;
 const LOCATION_PERTURBATION_STDDEV: f32 = 0.75;
 pub(crate) const INTER_TIME_CONSTANT_MIN: f32 = 0.1;
 pub(crate) const INTER_TIME_CONSTANT_MAX: f32 = 15.0;
@@ -212,10 +214,13 @@ fn effective_mutation_rate(rate: f32, global_mutation_rate_modifier: f32) -> f32
 pub(crate) fn mutate_genome<R: Rng + ?Sized>(
     genome: &mut OrganismGenome,
     global_mutation_rate_modifier: f32,
+    meta_mutation_enabled: bool,
     rng: &mut R,
 ) {
     align_genome_vectors(genome, rng);
-    mutate_mutation_rate_genes(genome, rng);
+    if meta_mutation_enabled {
+        mutate_mutation_rate_genes(genome, rng);
+    }
 
     let mutation_rate_age_of_maturity = effective_mutation_rate(
         genome.mutation_rate_age_of_maturity,
@@ -342,7 +347,7 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
     }
 
     if rng.random::<f32>() < mutation_rate_synapse_weight_perturbation {
-        mutate_random_synapse_weight(genome, rng);
+        mutate_synapse_weights(genome, rng);
     }
 
     if rng.random::<f32>() < mutation_rate_add_synapse {
@@ -398,19 +403,37 @@ fn mutate_random_neuron_location<R: Rng + ?Sized>(genome: &mut OrganismGenome, r
     }
 }
 
-fn mutate_random_synapse_weight<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
+fn mutate_synapse_weights<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
     if genome.edges.is_empty() {
         return;
     }
 
+    let mut mutated_any = false;
+    for edge in &mut genome.edges {
+        if rng.random::<f32>() >= SYNAPSE_WEIGHT_PERTURB_EDGE_RATE {
+            continue;
+        }
+        mutated_any = true;
+        if rng.random::<f32>() < SYNAPSE_WEIGHT_REPLACEMENT_RATE {
+            edge.weight = sample_lognormal_weight(rng);
+        } else {
+            let magnitude_scale = (SYNAPSE_WEIGHT_PERTURBATION_STDDEV * standard_normal(rng)).exp();
+            edge.weight = constrain_weight(edge.weight * magnitude_scale);
+        }
+    }
+
+    if mutated_any {
+        return;
+    }
+
     let idx = rng.random_range(0..genome.edges.len());
-    let weight = {
-        let edge = &genome.edges[idx];
-        edge.weight
-    };
-    let magnitude_scale = (SYNAPSE_WEIGHT_PERTURBATION_STDDEV * standard_normal(rng)).exp();
-    let perturbed_weight = weight * magnitude_scale;
-    genome.edges[idx].weight = constrain_weight(perturbed_weight);
+    if rng.random::<f32>() < SYNAPSE_WEIGHT_REPLACEMENT_RATE {
+        genome.edges[idx].weight = sample_lognormal_weight(rng);
+    } else {
+        let magnitude_scale = (SYNAPSE_WEIGHT_PERTURBATION_STDDEV * standard_normal(rng)).exp();
+        let perturbed_weight = genome.edges[idx].weight * magnitude_scale;
+        genome.edges[idx].weight = constrain_weight(perturbed_weight);
+    }
 }
 
 pub(crate) fn mutate_add_synapse<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {

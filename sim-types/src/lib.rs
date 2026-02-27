@@ -1,16 +1,19 @@
 use serde::{Deserialize, Serialize};
 pub use sim_config::{world_config_from_toml_str, SeedGenomeConfig, WorldConfig};
+use strum::VariantArray;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct OrganismId(pub u64);
+macro_rules! id_newtype {
+    ($name:ident, $inner:ty) => {
+        #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        pub struct $name(pub $inner);
+    };
+}
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct NeuronId(pub u32);
+id_newtype!(OrganismId, u64);
+id_newtype!(NeuronId, u32);
+id_newtype!(FoodId, u64);
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct FoodId(pub u64);
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, VariantArray)]
 pub enum ActionType {
     Idle,
     TurnLeft,
@@ -20,14 +23,7 @@ pub enum ActionType {
     Reproduce,
 }
 impl ActionType {
-    pub const ALL: [ActionType; 6] = [
-        ActionType::Idle,
-        ActionType::TurnLeft,
-        ActionType::TurnRight,
-        ActionType::Forward,
-        ActionType::Consume,
-        ActionType::Reproduce,
-    ];
+    pub const ALL: &'static [ActionType] = Self::VARIANTS;
 }
 
 impl Default for ActionType {
@@ -36,7 +32,7 @@ impl Default for ActionType {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, VariantArray)]
 pub enum FacingDirection {
     East,
     NorthEast,
@@ -47,14 +43,7 @@ pub enum FacingDirection {
 }
 
 impl FacingDirection {
-    pub const ALL: [FacingDirection; 6] = [
-        FacingDirection::East,
-        FacingDirection::NorthEast,
-        FacingDirection::NorthWest,
-        FacingDirection::West,
-        FacingDirection::SouthWest,
-        FacingDirection::SouthEast,
-    ];
+    pub const ALL: &'static [FacingDirection] = Self::VARIANTS;
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

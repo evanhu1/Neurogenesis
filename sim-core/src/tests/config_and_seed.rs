@@ -71,7 +71,7 @@ fn mutate_genome_matches_synapse_target_and_mutates_location_in_bounds() {
     let mut rng = ChaCha8Rng::seed_from_u64(7);
 
     for _ in 0..32 {
-        crate::genome::mutate_genome(&mut genome, 1.0, &mut rng);
+        crate::genome::mutate_genome(&mut genome, 1.0, true, &mut rng);
     }
 
     assert_eq!(genome.num_synapses, genome.edges.len() as u32);
@@ -155,7 +155,7 @@ fn mutate_genome_sanitizes_synapse_genes_and_does_not_trim_excess() {
     ];
 
     let mut rng = ChaCha8Rng::seed_from_u64(42);
-    crate::genome::mutate_genome(&mut genome, 1.0, &mut rng);
+    crate::genome::mutate_genome(&mut genome, 1.0, true, &mut rng);
 
     assert_eq!(genome.num_synapses, 2);
     assert_eq!(genome.edges.len(), 2);
@@ -217,7 +217,7 @@ fn mutate_genome_can_apply_add_neuron_split_edge_operator() {
     let initial_neurons = genome.num_neurons;
     let initial_synapses = genome.num_synapses;
     for _ in 0..64 {
-        crate::genome::mutate_genome(&mut genome, 1.0, &mut rng);
+        crate::genome::mutate_genome(&mut genome, 1.0, true, &mut rng);
         if genome.num_neurons > initial_neurons {
             break;
         }
@@ -378,8 +378,8 @@ fn global_mutation_rate_modifier_does_not_change_inherited_mutation_rate_genes()
     let mut rng_a = ChaCha8Rng::seed_from_u64(404);
     let mut rng_b = ChaCha8Rng::seed_from_u64(404);
 
-    crate::genome::mutate_genome(&mut genome_a, 1.0, &mut rng_a);
-    crate::genome::mutate_genome(&mut genome_b, 10.0, &mut rng_b);
+    crate::genome::mutate_genome(&mut genome_a, 1.0, true, &mut rng_a);
+    crate::genome::mutate_genome(&mut genome_b, 10.0, true, &mut rng_b);
 
     assert_eq!(
         genome_a.mutation_rate_age_of_maturity,
@@ -428,6 +428,76 @@ fn global_mutation_rate_modifier_does_not_change_inherited_mutation_rate_genes()
     assert_eq!(
         genome_a.mutation_rate_add_neuron_split_edge,
         genome_b.mutation_rate_add_neuron_split_edge
+    );
+}
+
+#[test]
+fn meta_mutation_disabled_keeps_mutation_rate_genes_unchanged() {
+    let mut genome = test_genome();
+    genome.mutation_rate_age_of_maturity = 0.17;
+    genome.mutation_rate_vision_distance = 0.13;
+    genome.mutation_rate_inter_bias = 0.09;
+    genome.mutation_rate_inter_update_rate = 0.11;
+    genome.mutation_rate_action_bias = 0.07;
+    genome.mutation_rate_eligibility_retention = 0.05;
+    genome.mutation_rate_synapse_prune_threshold = 0.03;
+    genome.mutation_rate_neuron_location = 0.19;
+    genome.mutation_rate_synapse_weight_perturbation = 0.23;
+    genome.mutation_rate_add_synapse = 0.31;
+    genome.mutation_rate_remove_synapse = 0.27;
+    genome.mutation_rate_add_neuron_split_edge = 0.29;
+    let baseline = genome.clone();
+
+    let mut rng = ChaCha8Rng::seed_from_u64(404);
+    crate::genome::mutate_genome(&mut genome, 1.0, false, &mut rng);
+
+    assert_eq!(
+        genome.mutation_rate_age_of_maturity,
+        baseline.mutation_rate_age_of_maturity
+    );
+    assert_eq!(
+        genome.mutation_rate_vision_distance,
+        baseline.mutation_rate_vision_distance
+    );
+    assert_eq!(
+        genome.mutation_rate_inter_bias,
+        baseline.mutation_rate_inter_bias
+    );
+    assert_eq!(
+        genome.mutation_rate_inter_update_rate,
+        baseline.mutation_rate_inter_update_rate
+    );
+    assert_eq!(
+        genome.mutation_rate_action_bias,
+        baseline.mutation_rate_action_bias
+    );
+    assert_eq!(
+        genome.mutation_rate_eligibility_retention,
+        baseline.mutation_rate_eligibility_retention
+    );
+    assert_eq!(
+        genome.mutation_rate_synapse_prune_threshold,
+        baseline.mutation_rate_synapse_prune_threshold
+    );
+    assert_eq!(
+        genome.mutation_rate_neuron_location,
+        baseline.mutation_rate_neuron_location
+    );
+    assert_eq!(
+        genome.mutation_rate_synapse_weight_perturbation,
+        baseline.mutation_rate_synapse_weight_perturbation
+    );
+    assert_eq!(
+        genome.mutation_rate_add_synapse,
+        baseline.mutation_rate_add_synapse
+    );
+    assert_eq!(
+        genome.mutation_rate_remove_synapse,
+        baseline.mutation_rate_remove_synapse
+    );
+    assert_eq!(
+        genome.mutation_rate_add_neuron_split_edge,
+        baseline.mutation_rate_add_neuron_split_edge
     );
 }
 

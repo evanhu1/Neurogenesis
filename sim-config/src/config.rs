@@ -58,6 +58,8 @@ pub struct WorldConfig {
     pub max_organism_age: u32,
     #[serde(default = "default_global_mutation_rate_modifier")]
     pub global_mutation_rate_modifier: f32,
+    #[serde(default = "default_meta_mutation_enabled")]
+    pub meta_mutation_enabled: bool,
     #[serde(default = "default_runtime_plasticity_enabled")]
     pub runtime_plasticity_enabled: bool,
     pub seed_genome_config: SeedGenomeConfig,
@@ -87,6 +89,8 @@ struct WorldConfigDeserialize {
     max_organism_age: u32,
     #[serde(default = "default_global_mutation_rate_modifier")]
     global_mutation_rate_modifier: f32,
+    #[serde(default = "default_meta_mutation_enabled")]
+    meta_mutation_enabled: bool,
     #[serde(default = "default_runtime_plasticity_enabled")]
     runtime_plasticity_enabled: bool,
     seed_genome_config: SeedGenomeConfig,
@@ -113,6 +117,7 @@ impl<'de> Deserialize<'de> for WorldConfig {
             terrain_threshold: raw.terrain_threshold,
             max_organism_age: raw.max_organism_age,
             global_mutation_rate_modifier: raw.global_mutation_rate_modifier,
+            meta_mutation_enabled: raw.meta_mutation_enabled,
             runtime_plasticity_enabled: raw.runtime_plasticity_enabled,
             seed_genome_config: raw.seed_genome_config,
         })
@@ -256,6 +261,10 @@ fn default_action_temperature() -> f32 {
 
 fn default_global_mutation_rate_modifier() -> f32 {
     1.0
+}
+
+fn default_meta_mutation_enabled() -> bool {
+    true
 }
 
 fn default_runtime_plasticity_enabled() -> bool {

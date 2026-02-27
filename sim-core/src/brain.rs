@@ -109,7 +109,7 @@ pub(crate) fn express_genome<R: Rng + ?Sized>(genome: &OrganismGenome, _rng: &mu
     }
 
     let mut action = Vec::with_capacity(ACTION_COUNT);
-    for (idx, action_type) in ActionType::ALL.into_iter().enumerate() {
+    for (idx, action_type) in ActionType::ALL.iter().copied().enumerate() {
         let bias = genome.action_biases.get(idx).copied().unwrap_or(0.0);
         action.push(make_action_neuron(
             ACTION_ID_BASE + idx as u32,
