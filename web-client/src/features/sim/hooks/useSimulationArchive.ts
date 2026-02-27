@@ -15,6 +15,7 @@ import type {
   WorldSnapshot,
 } from '../../../types';
 import type { SimRequestFn } from '../api/simHttpClient';
+import { captureError } from './captureError';
 
 const BATCH_RUN_POLL_INTERVAL_MS = 500;
 
@@ -57,7 +58,7 @@ export function useSimulationArchive({
         const normalized = normalizeCreateSessionResponse(payload);
         applyLoadedSession(normalized.metadata, normalized.snapshot);
       } catch (err) {
-        setErrorText(err instanceof Error ? err.message : 'Failed to load archived world');
+        captureError(setErrorText, err, 'Failed to load archived world');
       }
     },
     [applyLoadedSession, request, setErrorText],
@@ -70,7 +71,7 @@ export function useSimulationArchive({
       await request<ArchivedWorldSummary>(`/v1/sessions/${session.id}/archive`, 'POST');
       await refreshArchivedWorlds();
     } catch (err) {
-      setErrorText(err instanceof Error ? err.message : 'Failed to save current world');
+      captureError(setErrorText, err, 'Failed to save current world');
     }
   }, [refreshArchivedWorlds, request, session, setErrorText]);
 
@@ -88,7 +89,7 @@ export function useSimulationArchive({
           };
         });
       } catch (err) {
-        setErrorText(err instanceof Error ? err.message : 'Failed to delete archived world');
+        captureError(setErrorText, err, 'Failed to delete archived world');
       }
     },
     [refreshArchivedWorlds, request, setErrorText],
@@ -145,7 +146,7 @@ export function useSimulationArchive({
         setBatchRunStatus(null);
         setActiveBatchRunId(payload.run_id);
       } catch (err) {
-        setErrorText(err instanceof Error ? err.message : 'Failed to start world batch run');
+        captureError(setErrorText, err, 'Failed to start world batch run');
       }
     },
     [request, setErrorText],
@@ -153,9 +154,7 @@ export function useSimulationArchive({
 
   useEffect(() => {
     void refreshArchivedWorlds().catch((err: unknown) => {
-      if (err instanceof Error) {
-        setErrorText(err.message);
-      }
+      captureError(setErrorText, err, 'Failed to load archived worlds');
     });
   }, [refreshArchivedWorlds, setErrorText]);
 
@@ -183,14 +182,12 @@ export function useSimulationArchive({
           setErrorText(normalized.error);
         }
         void refreshArchivedWorlds().catch((err: unknown) => {
-          if (err instanceof Error) {
-            setErrorText(err.message);
-          }
+          captureError(setErrorText, err, 'Failed to load archived worlds');
         });
       } catch (err) {
         if (cancelled) return;
         setActiveBatchRunId(null);
-        setErrorText(err instanceof Error ? err.message : 'Failed to fetch world run status');
+        captureError(setErrorText, err, 'Failed to fetch world run status');
       }
     };
 

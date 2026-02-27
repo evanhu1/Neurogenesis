@@ -21,6 +21,7 @@ import type {
 import { createSimHttpClient } from '../api/simHttpClient';
 import { apiBase } from '../constants';
 import { clearPersistedSessionId, loadPersistedSessionId, persistSessionId } from '../storage';
+import { captureError } from './captureError';
 import { useSimulationArchive } from './useSimulationArchive';
 import { useSimulationConnection } from './useSimulationConnection';
 import { useSimulationControls } from './useSimulationControls';
@@ -289,7 +290,7 @@ export function useSimulationSession(): SimulationSessionState {
         const normalized = normalizeCreateSessionResponse(payload);
         applyLoadedSession(normalized.metadata, normalized.snapshot);
       } catch (err) {
-        setErrorText(err instanceof Error ? err.message : 'Failed to create session');
+        captureError(setErrorText, err, 'Failed to create session');
       }
     },
     [applyLoadedSession, request],
@@ -340,7 +341,7 @@ export function useSimulationSession(): SimulationSessionState {
           focus.resetFocusState(true);
         })
         .catch((err) => {
-          setErrorText(err instanceof Error ? err.message : 'Failed to reset session');
+          captureError(setErrorText, err, 'Failed to reset session');
         });
     },
     [controls, focus, request, sendCommand, session],

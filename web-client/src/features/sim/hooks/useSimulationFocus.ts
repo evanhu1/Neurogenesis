@@ -8,6 +8,7 @@ import type {
   WorldSnapshot,
 } from '../../../types';
 import type { SimRequestFn } from '../api/simHttpClient';
+import { captureError } from './captureError';
 
 export const NO_FOCUS_TURN = -1;
 
@@ -83,7 +84,7 @@ export function useSimulationFocus({
       void request(`/v1/sessions/${session.id}/focus`, 'POST', {
         organism_id: organismId,
       }).catch((err) => {
-        setErrorText(err instanceof Error ? err.message : 'Failed to focus organism');
+        captureError(setErrorText, err, 'Failed to focus organism');
       });
     },
     [request, session, setErrorText, setFocusedOrganismIdTracked],
