@@ -61,11 +61,22 @@ function toWorldSpace(
 export function computeBaseHexSize(
   canvasWidth: number,
   canvasHeight: number,
-  _worldWidth: number,
+  worldWidth: number,
 ): number {
   const minCanvasDimension = Math.max(1, Math.min(canvasWidth, canvasHeight));
   const scaledSize = (minCanvasDimension / BASE_HEX_REFERENCE_CANVAS_PX) * BASE_HEX_SIZE_AT_900PX;
-  return Math.max(BASE_HEX_MIN_SIZE_PX, scaledSize);
+  if (!Number.isFinite(worldWidth) || worldWidth <= 0) {
+    return Math.max(BASE_HEX_MIN_SIZE_PX, scaledSize);
+  }
+
+  const { widthFactor, heightFactor } = computeWorldDimensionFactors(worldWidth);
+  const fitLimitedSize = Math.min(canvasWidth / widthFactor, canvasHeight / heightFactor);
+  if (!Number.isFinite(fitLimitedSize) || fitLimitedSize <= 0) {
+    return Math.max(BASE_HEX_MIN_SIZE_PX, scaledSize);
+  }
+
+  const minimumSize = Math.min(BASE_HEX_MIN_SIZE_PX, fitLimitedSize);
+  return Math.max(minimumSize, Math.min(scaledSize, fitLimitedSize));
 }
 
 function computeWorldDimensionFactors(worldWidth: number) {
