@@ -231,9 +231,13 @@ fn normalize_world_config_toml(value: &mut toml::Value) {
     }
 
     if let Some(world_width) = world_width {
+        let derived_max_age = derived_max_organism_age(world_width);
         table
             .entry("max_organism_age")
-            .or_insert_with(|| toml::Value::Integer(i64::from(world_width.saturating_mul(5))));
+            .or_insert_with(|| toml::Value::Integer(i64::from(derived_max_age)));
+        table
+            .entry("periodic_injection_interval_turns")
+            .or_insert_with(|| toml::Value::Integer(i64::from(derived_max_age)));
     }
 }
 
@@ -247,6 +251,10 @@ fn default_food_regrowth_interval() -> u32 {
 
 fn default_food_regrowth_jitter() -> u32 {
     2
+}
+
+fn derived_max_organism_age(world_width: u32) -> u32 {
+    world_width.saturating_mul(5)
 }
 
 fn default_periodic_injection_interval_turns() -> u32 {

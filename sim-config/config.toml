@@ -1,6 +1,5 @@
 world_width = 200
 num_organisms = 5000
-periodic_injection_interval_turns = 100
 periodic_injection_count = 100
 food_energy = 100
 move_action_energy_cost = 1.0

@@ -30,6 +30,9 @@ const BIAS_PERTURBATION_STDDEV: f32 = 0.15;
 const INTER_LOG_TIME_CONSTANT_PERTURBATION_STDDEV: f32 = 0.05;
 const ELIGIBILITY_RETENTION_PERTURBATION_STDDEV: f32 = 0.05;
 const SYNAPSE_PRUNE_THRESHOLD_PERTURBATION_STDDEV: f32 = 0.02;
+const INTER_BIAS_PERTURB_NEURON_RATE: f32 = 0.8;
+const INTER_UPDATE_RATE_PERTURB_NEURON_RATE: f32 = 0.8;
+const ACTION_BIAS_PERTURB_ACTION_RATE: f32 = 0.8;
 const SYNAPSE_WEIGHT_PERTURBATION_STDDEV: f32 = 0.15;
 const SYNAPSE_WEIGHT_PERTURB_EDGE_RATE: f32 = 0.8;
 const SYNAPSE_WEIGHT_REPLACEMENT_RATE: f32 = 0.1;
@@ -289,37 +292,16 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
         );
     }
 
-    if rng.random::<f32>() < mutation_rate_inter_bias && genome.num_neurons > 0 {
-        let idx = rng.random_range(0..genome.num_neurons as usize);
-        genome.inter_biases[idx] = perturb_clamped(
-            genome.inter_biases[idx],
-            BIAS_PERTURBATION_STDDEV,
-            -BIAS_MAX,
-            BIAS_MAX,
-            rng,
-        );
+    if rng.random::<f32>() < mutation_rate_inter_bias {
+        mutate_inter_biases(genome, rng);
     }
 
-    if rng.random::<f32>() < mutation_rate_inter_update_rate && genome.num_neurons > 0 {
-        let idx = rng.random_range(0..genome.num_neurons as usize);
-        genome.inter_log_time_constants[idx] = perturb_clamped(
-            genome.inter_log_time_constants[idx],
-            INTER_LOG_TIME_CONSTANT_PERTURBATION_STDDEV,
-            INTER_LOG_TIME_CONSTANT_MIN,
-            INTER_LOG_TIME_CONSTANT_MAX,
-            rng,
-        );
+    if rng.random::<f32>() < mutation_rate_inter_update_rate {
+        mutate_inter_update_rates(genome, rng);
     }
 
-    if rng.random::<f32>() < mutation_rate_action_bias && !genome.action_biases.is_empty() {
-        let idx = rng.random_range(0..genome.action_biases.len());
-        genome.action_biases[idx] = perturb_clamped(
-            genome.action_biases[idx],
-            BIAS_PERTURBATION_STDDEV,
-            -BIAS_MAX,
-            BIAS_MAX,
-            rng,
-        );
+    if rng.random::<f32>() < mutation_rate_action_bias {
+        mutate_action_biases(genome, rng);
     }
 
     if rng.random::<f32>() < mutation_rate_eligibility_retention {
@@ -434,6 +416,96 @@ fn mutate_synapse_weights<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mu
         let perturbed_weight = genome.edges[idx].weight * magnitude_scale;
         genome.edges[idx].weight = constrain_weight(perturbed_weight);
     }
+}
+
+fn mutate_inter_biases<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
+    if genome.inter_biases.is_empty() {
+        return;
+    }
+
+    let mut mutated_any = false;
+    for bias in &mut genome.inter_biases {
+        if rng.random::<f32>() >= INTER_BIAS_PERTURB_NEURON_RATE {
+            continue;
+        }
+        mutated_any = true;
+        *bias = perturb_clamped(*bias, BIAS_PERTURBATION_STDDEV, -BIAS_MAX, BIAS_MAX, rng);
+    }
+
+    if mutated_any {
+        return;
+    }
+
+    let idx = rng.random_range(0..genome.inter_biases.len());
+    genome.inter_biases[idx] = perturb_clamped(
+        genome.inter_biases[idx],
+        BIAS_PERTURBATION_STDDEV,
+        -BIAS_MAX,
+        BIAS_MAX,
+        rng,
+    );
+}
+
+fn mutate_inter_update_rates<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
+    if genome.inter_log_time_constants.is_empty() {
+        return;
+    }
+
+    let mut mutated_any = false;
+    for log_tau in &mut genome.inter_log_time_constants {
+        if rng.random::<f32>() >= INTER_UPDATE_RATE_PERTURB_NEURON_RATE {
+            continue;
+        }
+        mutated_any = true;
+        *log_tau = perturb_clamped(
+            *log_tau,
+            INTER_LOG_TIME_CONSTANT_PERTURBATION_STDDEV,
+            INTER_LOG_TIME_CONSTANT_MIN,
+            INTER_LOG_TIME_CONSTANT_MAX,
+            rng,
+        );
+    }
+
+    if mutated_any {
+        return;
+    }
+
+    let idx = rng.random_range(0..genome.inter_log_time_constants.len());
+    genome.inter_log_time_constants[idx] = perturb_clamped(
+        genome.inter_log_time_constants[idx],
+        INTER_LOG_TIME_CONSTANT_PERTURBATION_STDDEV,
+        INTER_LOG_TIME_CONSTANT_MIN,
+        INTER_LOG_TIME_CONSTANT_MAX,
+        rng,
+    );
+}
+
+fn mutate_action_biases<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
+    if genome.action_biases.is_empty() {
+        return;
+    }
+
+    let mut mutated_any = false;
+    for bias in &mut genome.action_biases {
+        if rng.random::<f32>() >= ACTION_BIAS_PERTURB_ACTION_RATE {
+            continue;
+        }
+        mutated_any = true;
+        *bias = perturb_clamped(*bias, BIAS_PERTURBATION_STDDEV, -BIAS_MAX, BIAS_MAX, rng);
+    }
+
+    if mutated_any {
+        return;
+    }
+
+    let idx = rng.random_range(0..genome.action_biases.len());
+    genome.action_biases[idx] = perturb_clamped(
+        genome.action_biases[idx],
+        BIAS_PERTURBATION_STDDEV,
+        -BIAS_MAX,
+        BIAS_MAX,
+        rng,
+    );
 }
 
 pub(crate) fn mutate_add_synapse<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
