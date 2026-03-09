@@ -41,6 +41,7 @@ fn stable_perf_config() -> WorldConfig {
             mutation_rate_synapse_weight_perturbation: 0.1,
             mutation_rate_add_synapse: 0.05,
             mutation_rate_remove_synapse: 0.05,
+            mutation_rate_remove_neuron: 0.02,
             mutation_rate_add_neuron_split_edge: 0.05,
         },
     }

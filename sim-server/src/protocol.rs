@@ -2,8 +2,7 @@ use serde::{Deserialize, Serialize};
 use sim_types::{
     FacingDirection, FoodState, MetricsSnapshot, NeuronId, OccupancyCell, OrganismFacing,
     OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId, TickDelta,
-    WorldConfig,
-    WorldSnapshot,
+    WorldConfig, WorldSnapshot,
 };
 use uuid::Uuid;
 

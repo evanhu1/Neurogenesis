@@ -69,11 +69,7 @@ fn reproduction_offspring_brain_runtime_state_is_reset() {
         .iter()
         .all(|n| n.neuron.activation == 0.0));
     assert!(child.brain.inter.iter().all(|n| n.neuron.activation == 0.0));
-    assert!(child
-        .brain
-        .action
-        .iter()
-        .all(|n| n.neuron.activation == 0.0));
+    assert!(child.brain.action.iter().all(|n| n.logit == 0.0));
     assert_eq!(child.facing, FacingDirection::West);
 }
 

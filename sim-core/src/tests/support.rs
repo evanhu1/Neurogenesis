@@ -51,6 +51,7 @@ pub(super) fn test_genome() -> OrganismGenome {
         mutation_rate_synapse_weight_perturbation: 0.0,
         mutation_rate_add_synapse: 0.0,
         mutation_rate_remove_synapse: 0.0,
+        mutation_rate_remove_neuron: 0.0,
         mutation_rate_add_neuron_split_edge: 0.0,
         inter_biases: vec![0.0],
         inter_log_time_constants: vec![0.0],
@@ -100,6 +101,7 @@ pub(super) fn stable_test_config() -> WorldConfig {
             mutation_rate_synapse_weight_perturbation: 0.0,
             mutation_rate_add_synapse: 0.0,
             mutation_rate_remove_synapse: 0.0,
+            mutation_rate_remove_neuron: 0.0,
             mutation_rate_add_neuron_split_edge: 0.0,
         },
     }
@@ -154,6 +156,7 @@ fn forced_brain(
         })
         .collect();
     let synapse_count = inter_synapses.len() as u32;
+    let inter_state = inter_bias.clamp(-0.999_999, 0.999_999).atanh();
     let inter = vec![InterNeuronState {
         neuron: NeuronState {
             neuron_id: inter_id,
@@ -164,6 +167,7 @@ fn forced_brain(
             activation: confidence,
             parent_ids: Vec::new(),
         },
+        state: inter_state,
         alpha: 1.0,
         synapses: inter_synapses,
     }];

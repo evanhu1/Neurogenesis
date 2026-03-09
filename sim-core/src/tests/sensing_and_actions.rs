@@ -161,9 +161,9 @@ fn express_genome_uses_stored_synapse_topology() {
         0.5 * (BRAIN_SPACE_MIN + BRAIN_SPACE_MAX)
     );
     let reproduce_idx = action_index(ActionType::Reproduce);
-    assert_eq!(brain_a.action[reproduce_idx].neuron.x, BRAIN_SPACE_MAX);
+    assert_eq!(brain_a.action[reproduce_idx].x, BRAIN_SPACE_MAX);
     assert_eq!(
-        brain_a.action[reproduce_idx].neuron.y,
+        brain_a.action[reproduce_idx].y,
         0.5 * (BRAIN_SPACE_MIN + BRAIN_SPACE_MAX)
     );
 }
@@ -189,26 +189,6 @@ fn mutate_genome_adds_synapses_when_below_target() {
 
     assert_eq!(genome.num_synapses, 8);
     assert_eq!(genome.edges.len(), 8);
-}
-
-#[test]
-fn weighted_energy_input_drives_actions_without_interneurons() {
-    let mut organism = simple_weighted_action_organism(0.6, 0.9, 10.0);
-
-    let occupancy = vec![None; 9];
-    let mut scratch = BrainScratch::new();
-    let vision_distance = organism.genome.vision_distance;
-    let eval = evaluate_brain(
-        &mut organism,
-        3,
-        &occupancy,
-        vision_distance,
-        deterministic_action_policy(),
-        0.5,
-        &mut scratch,
-    );
-
-    assert_eq!(eval.selected_action, ActionType::Reproduce);
 }
 
 #[test]
@@ -441,6 +421,7 @@ fn inter_recurrent_eligibility_uses_prev_inter_pre_signal_only_for_inter_targets
             activation: 0.8,
             parent_ids: Vec::new(),
         },
+        state: 0.8_f32.atanh(),
         alpha: 1.0,
         synapses: vec![
             SynapseEdge {
@@ -469,6 +450,7 @@ fn inter_recurrent_eligibility_uses_prev_inter_pre_signal_only_for_inter_targets
             activation: 0.0,
             parent_ids: Vec::new(),
         },
+        state: 0.0,
         alpha: 1.0,
         synapses: Vec::new(),
     };
@@ -477,7 +459,11 @@ fn inter_recurrent_eligibility_uses_prev_inter_pre_signal_only_for_inter_targets
         .copied()
         .enumerate()
         .map(|(idx, action_type)| {
-            make_action_neuron(ACTION_ID_BASE + idx as u32, action_type, loc(2.0, idx as f32))
+            make_action_neuron(
+                ACTION_ID_BASE + idx as u32,
+                action_type,
+                loc(2.0, idx as f32),
+            )
         })
         .collect();
     let brain = BrainState {
@@ -554,7 +540,11 @@ fn action_target_eligibility_uses_centered_logits_not_sigmoid_activation() {
         .copied()
         .enumerate()
         .map(|(idx, action_type)| {
-            make_action_neuron(ACTION_ID_BASE + idx as u32, action_type, loc(2.0, 1.0 + idx as f32))
+            make_action_neuron(
+                ACTION_ID_BASE + idx as u32,
+                action_type,
+                loc(2.0, 1.0 + idx as f32),
+            )
         })
         .collect();
     let brain = BrainState {

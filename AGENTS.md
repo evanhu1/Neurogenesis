@@ -18,6 +18,9 @@
   API types in `src/protocol.rs`.
 - `web-client/`: React + TailwindCSS + Vite canvas UI (`src/`).
 - `sim-config/config.toml`: baseline simulation configuration.
+- `sim-validation/config.toml`: stable validation benchmark configuration.
+  Keep this in sync with `sim-config/config.toml` when config-schema or baseline
+  tuning changes affect validation assumptions.
 
 ## Build & Test
 

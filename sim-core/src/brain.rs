@@ -47,6 +47,7 @@ pub(crate) struct BrainEvaluation {
 pub(crate) struct BrainScratch {
     pub(crate) inter_inputs: Vec<f32>,
     pub(crate) prev_inter: Vec<f32>,
+    pub(crate) prev_inter_states: Vec<f32>,
     pub(crate) inter_activations: Vec<f32>,
     pub(crate) action_post_signals: [f32; ACTION_COUNT],
 }
@@ -56,6 +57,7 @@ impl BrainScratch {
         Self {
             inter_inputs: Vec::new(),
             prev_inter: Vec::new(),
+            prev_inter_states: Vec::new(),
             inter_activations: Vec::new(),
             action_post_signals: [0.0; ACTION_COUNT],
         }
@@ -106,6 +108,7 @@ pub(crate) fn express_genome<R: Rng + ?Sized>(genome: &OrganismGenome, _rng: &mu
                 bias,
                 location_or_default(&genome.inter_locations, idx),
             ),
+            state: 0.0,
             alpha,
             synapses: Vec::new(),
         });
@@ -113,7 +116,11 @@ pub(crate) fn express_genome<R: Rng + ?Sized>(genome: &OrganismGenome, _rng: &mu
 
     let mut action = Vec::with_capacity(ACTION_COUNT);
     for (idx, action_type) in ActionType::ALL.iter().copied().enumerate() {
-        action.push(make_action_neuron(ACTION_ID_BASE + idx as u32, action_type, action_spawn));
+        action.push(make_action_neuron(
+            ACTION_ID_BASE + idx as u32,
+            action_type,
+            action_spawn,
+        ));
     }
 
     wire_birth_synapses_from_genome(genome, &mut sensory, &mut inter);
@@ -331,6 +338,10 @@ pub(crate) fn evaluate_brain(
     scratch
         .prev_inter
         .extend(brain.inter.iter().map(|n| n.neuron.activation));
+    scratch.prev_inter_states.clear();
+    scratch
+        .prev_inter_states
+        .extend(brain.inter.iter().map(|n| n.state));
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::InterSetup, stage_started.elapsed());
 
@@ -348,12 +359,12 @@ pub(crate) fn evaluate_brain(
         );
     }
 
-    // Recurrent inter → inter uses previous tick's inter activations.
-    for (i, inter) in brain.inter.iter().enumerate() {
+    // Recurrent inter → inter uses previous tick's squashed inter activations.
+    for inter in &brain.inter {
         let (inter_edges, _) = split_inter_and_action_edges(&inter.synapses);
         result.synapse_ops += accumulate_inter_inputs(
             inter_edges,
-            scratch.prev_inter[i],
+            inter.neuron.activation,
             &mut scratch.inter_inputs,
         );
     }
@@ -364,9 +375,9 @@ pub(crate) fn evaluate_brain(
     let stage_started = Instant::now();
     for (idx, neuron) in brain.inter.iter_mut().enumerate() {
         let alpha = neuron.alpha;
-        let previous = scratch.prev_inter[idx];
-        let target = scratch.inter_inputs[idx].tanh();
-        neuron.neuron.activation = (1.0 - alpha) * previous + alpha * target;
+        let previous = scratch.prev_inter_states[idx];
+        neuron.state = (1.0 - alpha) * previous + alpha * scratch.inter_inputs[idx];
+        neuron.neuron.activation = neuron.state.tanh();
     }
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::InterActivation, stage_started.elapsed());

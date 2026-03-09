@@ -30,6 +30,8 @@ pub struct SeedGenomeConfig {
     #[serde(default)]
     pub mutation_rate_remove_synapse: f32,
     #[serde(default)]
+    pub mutation_rate_remove_neuron: f32,
+    #[serde(default)]
     pub mutation_rate_add_neuron_split_edge: f32,
 }
 

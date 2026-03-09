@@ -18,7 +18,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-const DEFAULT_CONFIG_PATH: &str = "sim-config/config.toml";
+const DEFAULT_CONFIG_PATH: &str = "sim-validation/config.toml";
 
 #[derive(Debug, Clone, Parser)]
 #[command(name = "sim-validation")]

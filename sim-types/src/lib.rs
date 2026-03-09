@@ -101,7 +101,7 @@ pub enum SensoryReceptor {
 
 impl SensoryReceptor {
     /// Fixed relative ray offsets around facing direction.
-    pub const LOOK_RAY_OFFSETS: [i8; 6] = [-2, -1, 0, 1, 2, 3];
+    pub const LOOK_RAY_OFFSETS: [i8; 3] = [-1, 0, 1];
     /// Number of entity classes available to look-ray sensors.
     pub const LOOK_TARGET_COUNT: u32 = 3;
     /// Number of look-based sensory neurons (ray count x object type count).
@@ -145,6 +145,8 @@ pub struct OrganismGenome {
     pub mutation_rate_add_synapse: f32,
     #[serde(default)]
     pub mutation_rate_remove_synapse: f32,
+    #[serde(default)]
+    pub mutation_rate_remove_neuron: f32,
     #[serde(default)]
     pub mutation_rate_add_neuron_split_edge: f32,
     pub inter_biases: Vec<f32>,
@@ -200,6 +202,8 @@ pub struct SensoryNeuronState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct InterNeuronState {
     pub neuron: NeuronState,
+    #[serde(default)]
+    pub state: f32,
     pub alpha: f32,
     pub synapses: Vec<SynapseEdge>,
 }
