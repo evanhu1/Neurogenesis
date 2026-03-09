@@ -1,7 +1,7 @@
 use sim_types::{ActionRecord, ActionType, OrganismId};
 use std::collections::HashMap;
 
-pub const N_ACTIONS: usize = ActionType::ALL.len();
+pub const N_ACTIONS: usize = 6;
 pub const SENSORY_BIN_COUNT: usize = 5;
 const INTER_EMA_ALPHA: f32 = 0.05;
 const UTILIZATION_THRESHOLD: f32 = 0.03;
@@ -171,5 +171,27 @@ fn action_index(action: ActionType) -> usize {
         ActionType::Forward => 3,
         ActionType::Consume => 4,
         ActionType::Reproduce => 5,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{action_index, N_ACTIONS};
+    use sim_types::ActionType;
+
+    #[test]
+    fn selected_action_histogram_covers_all_variants() {
+        let variants = [
+            ActionType::Idle,
+            ActionType::TurnLeft,
+            ActionType::TurnRight,
+            ActionType::Forward,
+            ActionType::Consume,
+            ActionType::Reproduce,
+        ];
+
+        for action in variants {
+            assert!(action_index(action) < N_ACTIONS);
+        }
     }
 }

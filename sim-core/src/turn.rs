@@ -860,7 +860,11 @@ fn build_intent_for_organism(
             compute_pending_coactivations(organism, scratch);
         }
         selected_action = evaluation.selected_action;
-        selected_action_logit = evaluation.action_logits[action_index(selected_action)];
+        selected_action_logit = if selected_action == ActionType::Idle {
+            0.0
+        } else {
+            evaluation.action_logits[action_index(selected_action)]
+        };
         synapse_ops = evaluation.synapse_ops;
         #[cfg(feature = "instrumentation")]
         {

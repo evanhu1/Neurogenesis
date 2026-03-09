@@ -246,7 +246,13 @@ fn scan_rays_stops_at_wall_occluders() {
         &occupancy,
         5,
     );
-    let center_ray = scans[2].as_ref().expect("center ray should detect wall");
+    let center_ray_idx = SensoryReceptor::LOOK_RAY_OFFSETS
+        .iter()
+        .position(|offset| *offset == 0)
+        .expect("center ray offset should exist");
+    let center_ray = scans[center_ray_idx]
+        .as_ref()
+        .expect("center ray should detect wall");
     assert_eq!(center_ray.target, EntityType::Wall);
 }
 

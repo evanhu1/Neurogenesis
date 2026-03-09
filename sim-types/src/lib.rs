@@ -26,7 +26,13 @@ pub enum ActionType {
     Reproduce,
 }
 impl ActionType {
-    pub const ALL: &'static [ActionType] = Self::VARIANTS;
+    pub const ALL: &'static [ActionType] = &[
+        ActionType::TurnLeft,
+        ActionType::TurnRight,
+        ActionType::Forward,
+        ActionType::Consume,
+        ActionType::Reproduce,
+    ];
 }
 
 impl Default for ActionType {
@@ -101,7 +107,7 @@ pub enum SensoryReceptor {
 
 impl SensoryReceptor {
     /// Fixed relative ray offsets around facing direction.
-    pub const LOOK_RAY_OFFSETS: [i8; 3] = [-1, 0, 1];
+    pub const LOOK_RAY_OFFSETS: [i8; 1] = [0];
     /// Number of entity classes available to look-ray sensors.
     pub const LOOK_TARGET_COUNT: u32 = 3;
     /// Number of look-based sensory neurons (ray count x object type count).

@@ -44,6 +44,7 @@ pub(crate) const BRAIN_SPACE_MAX: f32 = 10.0;
 const SPATIAL_PRIOR_LONG_RANGE_FLOOR: f32 = 0.01;
 const SYNAPSE_WEIGHT_LOG_NORMAL_MU: f32 = -0.5;
 const SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA: f32 = 0.8;
+const INITIAL_SYNAPSE_EXCITATORY_PROBABILITY: f32 = 0.8;
 
 pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     config: &SeedGenomeConfig,
@@ -777,7 +778,7 @@ fn add_synapse_genes_with_spatial_prior<R: Rng + ?Sized>(
         genome.edges.push(SynapseEdge {
             pre_neuron_id: pre_id,
             post_neuron_id: post_id,
-            weight: sample_lognormal_weight(rng),
+            weight: sample_initial_synapse_weight(rng),
             eligibility: 0.0,
             pending_coactivation: 0.0,
         });
@@ -814,7 +815,23 @@ fn sample_lognormal_weight<R: Rng + ?Sized>(rng: &mut R) -> f32 {
     let magnitude = (SYNAPSE_WEIGHT_LOG_NORMAL_MU + SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA * z)
         .exp()
         .clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX);
-    if rng.random::<bool>() {
+    sample_signed_weight(magnitude, 0.5, rng)
+}
+
+fn sample_initial_synapse_weight<R: Rng + ?Sized>(rng: &mut R) -> f32 {
+    let z = standard_normal(rng);
+    let magnitude = (SYNAPSE_WEIGHT_LOG_NORMAL_MU + SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA * z)
+        .exp()
+        .clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX);
+    sample_signed_weight(magnitude, INITIAL_SYNAPSE_EXCITATORY_PROBABILITY, rng)
+}
+
+fn sample_signed_weight<R: Rng + ?Sized>(
+    magnitude: f32,
+    excitatory_probability: f32,
+    rng: &mut R,
+) -> f32 {
+    if rng.random::<f32>() < excitatory_probability {
         magnitude
     } else {
         -magnitude

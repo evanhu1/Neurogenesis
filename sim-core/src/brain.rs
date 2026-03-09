@@ -19,6 +19,7 @@ const HEBB_WEIGHT_CLAMP_ENABLED: bool = true;
 const MIN_ENERGY_SENSOR_SCALE: f32 = 1.0;
 const ENERGY_SENSOR_CURVE_EXPONENT: f32 = 2.0;
 const MIN_ACTION_TEMPERATURE: f32 = 1.0e-6;
+pub(crate) const BASELINE_ACTION_LOGIT: f32 = -0.1;
 const LOOK_TARGETS: [EntityType; 3] = [EntityType::Food, EntityType::Organism, EntityType::Wall];
 const LOOK_RAY_COUNT: usize = SensoryReceptor::LOOK_RAY_OFFSETS.len();
 pub(crate) const SENSORY_COUNT: u32 = SensoryReceptor::LOOK_NEURON_COUNT + 1;
@@ -137,12 +138,12 @@ pub(crate) fn express_genome<R: Rng + ?Sized>(genome: &OrganismGenome, _rng: &mu
 
 pub(crate) fn action_index(action: ActionType) -> usize {
     match action {
-        ActionType::Idle => 0,
-        ActionType::TurnLeft => 1,
-        ActionType::TurnRight => 2,
-        ActionType::Forward => 3,
-        ActionType::Consume => 4,
-        ActionType::Reproduce => 5,
+        ActionType::Idle => unreachable!("Idle has no action neuron"),
+        ActionType::TurnLeft => 0,
+        ActionType::TurnRight => 1,
+        ActionType::Forward => 2,
+        ActionType::Consume => 3,
+        ActionType::Reproduce => 4,
     }
 }
 
@@ -345,7 +346,7 @@ pub(crate) fn evaluate_brain(
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::InterSetup, stage_started.elapsed());
 
-    let mut action_inputs = [0.0f32; ACTION_COUNT];
+    let mut action_inputs = [BASELINE_ACTION_LOGIT; ACTION_COUNT];
 
     // Accumulate sensory → inter.
     #[cfg(feature = "profiling")]
@@ -428,23 +429,42 @@ fn select_action_from_logits(
     action_temperature: f32,
     action_sample: f32,
 ) -> ActionType {
-    let best_idx = argmax_index(&action_logits);
-    let best_logit = action_logits[best_idx];
-
     let temperature = action_temperature.max(MIN_ACTION_TEMPERATURE);
     let mut weights = [0.0_f32; ACTION_COUNT];
     let mut weight_sum = 0.0_f32;
+    let mut best_positive_logit = f32::NEG_INFINITY;
     for (idx, logit) in action_logits.iter().copied().enumerate() {
-        let scaled = (logit - best_logit) / temperature;
+        if logit > 0.0 {
+            best_positive_logit = best_positive_logit.max(logit);
+            weights[idx] = logit;
+        }
+    }
+
+    if !best_positive_logit.is_finite() {
+        return ActionType::Idle;
+    }
+
+    for positive_logit in &mut weights {
+        if *positive_logit <= 0.0 {
+            continue;
+        }
+        let scaled = (*positive_logit - best_positive_logit) / temperature;
         let weight = scaled.exp();
         if weight.is_finite() {
-            weights[idx] = weight;
+            *positive_logit = weight;
             weight_sum += weight;
+        } else {
+            *positive_logit = 0.0;
         }
     }
 
     if !weight_sum.is_finite() || weight_sum <= 0.0 {
-        return ActionType::ALL[best_idx];
+        let best_idx = argmax_index(&action_logits);
+        return if action_logits[best_idx] > 0.0 {
+            ActionType::ALL[best_idx]
+        } else {
+            ActionType::Idle
+        };
     }
 
     let sample = action_sample.clamp(0.0, 1.0 - f32::EPSILON) * weight_sum;

@@ -1,4 +1,7 @@
-use crate::metrics::{action_baseline_entropy, action_baseline_probability, IntervalMetrics};
+use crate::{
+    ledger::N_ACTIONS,
+    metrics::{action_baseline_entropy, action_baseline_probability, IntervalMetrics},
+};
 use anyhow::Result;
 use std::fmt::Write as _;
 use std::fs::File;
@@ -445,12 +448,18 @@ fn line_chart_svg(series: &[(u64, f64)], baseline: Option<f64>, color: &str) -> 
 }
 
 fn append_interpretation_guidance(html: &mut String) {
+    let baseline_probability = action_baseline_probability();
+    let baseline_entropy = action_baseline_entropy();
+
     html.push_str("<div class=\"panel guide\"><h2>Interpreting The Metrics</h2>");
 
     html.push_str("<h3>P(Fwd|food) -- \"Can they see?\"</h3>");
     html.push_str("<p>This is the single most important number. It answers: when food is directly ahead, does the organism walk toward it more often than chance?</p>");
     html.push_str("<ul>");
-    html.push_str("<li><code>0.25</code> (4 actions) or <code>0.14</code> (7 actions): random. Brains are not influencing behavior in a useful way. Evolution has not discovered stimulus-response coupling.</li>");
+    let _ = write!(
+        html,
+        "<li><code>{baseline_probability:.2}</code> ({N_ACTIONS} actions): random. Brains are not influencing behavior in a useful way. Evolution has not discovered stimulus-response coupling.</li>",
+    );
     html.push_str("<li><code>0.30-0.40</code>: weak signal. Something is working but unreliably. Could be a small subpopulation of competent foragers diluted by many random walkers.</li>");
     html.push_str("<li><code>0.50+</code>: strong directed foraging. Evolution has found brains that reliably turn sensory input into adaptive action.</li>");
     html.push_str("<li>Below baseline: actively food-avoidant. Possible if the action encoding or sensory wiring has an inversion bug.</li>");
@@ -461,8 +470,11 @@ fn append_interpretation_guidance(html: &mut String) {
     html.push_str("<p>Shannon entropy of the action distribution. Measures behavioral diversity, not quality.</p>");
     html.push_str("<ul>");
     html.push_str("<li><code>~= 0</code>: organism does one thing every tick (usually Idle). Degenerate. Common when metabolism is so punishing that any movement is a net loss.</li>");
-    html.push_str("<li><code>~= log2(N_ACTIONS)</code> (<code>2.0</code> for 4 actions): uniform random. No preferences. Brain output is noise.</li>");
-    html.push_str("<li><code>0.8-1.5</code> bits (for 4 actions): organism has preferences but uses multiple actions. This is where directed foragers live - they mostly go Forward but turn when needed.</li>");
+    let _ = write!(
+        html,
+        "<li><code>~= log2(N_ACTIONS)</code> (<code>{baseline_entropy:.2}</code> for {N_ACTIONS} actions): uniform random. No preferences. Brain output is noise.</li>",
+    );
+    html.push_str("<li><code>0.8-1.5</code> bits: organism has preferences but uses multiple actions. This is where directed foragers live - they mostly go Forward but turn when needed.</li>");
     html.push_str("</ul>");
     html.push_str("<p>Read H together with P(Fwd|food). If H is intermediate AND P(Fwd|food) is above baseline, you have genuine adaptive behavior. If H is intermediate but P(Fwd|food) is at baseline, the organism has arbitrary preferences that are not connected to sensory input - a fixed motor program, not intelligence.</p>");
 
