@@ -296,15 +296,10 @@ fn runtime_plasticity_updates_weights() {
         .copied()
         .enumerate()
         .map(|(idx, action_type)| {
-            make_action_neuron(
-                2000 + idx as u32,
-                action_type,
-                0.0,
-                loc(2.0, 1.0 + idx as f32),
-            )
+            make_action_neuron(2000 + idx as u32, action_type, loc(2.0, 1.0 + idx as f32))
         })
         .collect();
-    action[action_index(ActionType::Forward)].neuron.parent_ids = vec![NeuronId(energy_id)];
+    action[action_index(ActionType::Forward)].parent_ids = vec![NeuronId(energy_id)];
     let brain = BrainState {
         sensory,
         inter: vec![],
@@ -377,12 +372,7 @@ fn runtime_plasticity_neutralizes_passive_metabolism_for_dopamine() {
         .copied()
         .enumerate()
         .map(|(idx, action_type)| {
-            make_action_neuron(
-                2000 + idx as u32,
-                action_type,
-                0.0,
-                loc(2.0, 1.0 + idx as f32),
-            )
+            make_action_neuron(2000 + idx as u32, action_type, loc(2.0, 1.0 + idx as f32))
         })
         .collect();
     let brain = BrainState {
@@ -487,12 +477,7 @@ fn inter_recurrent_eligibility_uses_prev_inter_pre_signal_only_for_inter_targets
         .copied()
         .enumerate()
         .map(|(idx, action_type)| {
-            make_action_neuron(
-                ACTION_ID_BASE + idx as u32,
-                action_type,
-                if idx == 0 { 1.5 } else { 0.0 },
-                loc(2.0, idx as f32),
-            )
+            make_action_neuron(ACTION_ID_BASE + idx as u32, action_type, loc(2.0, idx as f32))
         })
         .collect();
     let brain = BrainState {
@@ -569,12 +554,7 @@ fn action_target_eligibility_uses_centered_logits_not_sigmoid_activation() {
         .copied()
         .enumerate()
         .map(|(idx, action_type)| {
-            make_action_neuron(
-                ACTION_ID_BASE + idx as u32,
-                action_type,
-                if idx == 0 { 2.0 } else { 0.0 },
-                loc(2.0, 1.0 + idx as f32),
-            )
+            make_action_neuron(ACTION_ID_BASE + idx as u32, action_type, loc(2.0, 1.0 + idx as f32))
         })
         .collect();
     let brain = BrainState {
@@ -642,12 +622,7 @@ fn energy_sensor_clamps_and_scales_with_starting_energy() {
         .copied()
         .enumerate()
         .map(|(idx, action_type)| {
-            make_action_neuron(
-                2000 + idx as u32,
-                action_type,
-                0.0,
-                loc(2.0, 1.0 + idx as f32),
-            )
+            make_action_neuron(2000 + idx as u32, action_type, loc(2.0, 1.0 + idx as f32))
         })
         .collect();
     let brain = BrainState {

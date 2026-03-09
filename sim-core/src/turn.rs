@@ -811,7 +811,7 @@ fn build_intent_for_organism(
     let vision_distance = organism.genome.vision_distance;
     let action_sample = deterministic_action_sample(sim_seed, tick, organism_id);
     let mut selected_action = uniform_random_action(action_sample);
-    let mut selected_action_activation = 1.0;
+    let mut selected_action_logit = 0.0;
     let mut synapse_ops = 0;
     #[cfg(feature = "instrumentation")]
     let food_flags: (bool, bool, bool, bool);
@@ -860,7 +860,7 @@ fn build_intent_for_organism(
             compute_pending_coactivations(organism, scratch);
         }
         selected_action = evaluation.selected_action;
-        selected_action_activation = evaluation.action_activations[action_index(selected_action)];
+        selected_action_logit = evaluation.action_logits[action_index(selected_action)];
         synapse_ops = evaluation.synapse_ops;
         #[cfg(feature = "instrumentation")]
         {
@@ -886,7 +886,7 @@ fn build_intent_for_organism(
         consume_target,
     ) = intent_from_selected_action(selected_action, snapshot_state, world_width);
     let move_confidence = if wants_move {
-        selected_action_activation
+        selected_action_logit
     } else {
         0.0
     };

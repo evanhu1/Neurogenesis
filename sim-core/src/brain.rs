@@ -14,10 +14,6 @@ use sim_types::{
 #[cfg(feature = "profiling")]
 use std::time::Instant;
 
-fn sigmoid(x: f32) -> f32 {
-    1.0 / (1.0 + (-x).exp())
-}
-
 const DEFAULT_BIAS: f32 = 0.0;
 const HEBB_WEIGHT_CLAMP_ENABLED: bool = true;
 const MIN_ENERGY_SENSOR_SCALE: f32 = 1.0;
@@ -36,7 +32,6 @@ pub(crate) const ACTION_ID_BASE: u32 = 2000;
 pub(crate) struct BrainEvaluation {
     pub(crate) selected_action: ActionType,
     pub(crate) action_logits: [f32; ACTION_COUNT],
-    pub(crate) action_activations: [f32; ACTION_COUNT],
     pub(crate) synapse_ops: u64,
     #[cfg(feature = "instrumentation")]
     pub(crate) food_ahead: bool,
@@ -118,12 +113,7 @@ pub(crate) fn express_genome<R: Rng + ?Sized>(genome: &OrganismGenome, _rng: &mu
 
     let mut action = Vec::with_capacity(ACTION_COUNT);
     for (idx, action_type) in ActionType::ALL.iter().copied().enumerate() {
-        action.push(make_action_neuron(
-            ACTION_ID_BASE + idx as u32,
-            action_type,
-            DEFAULT_BIAS,
-            action_spawn,
-        ));
+        action.push(make_action_neuron(ACTION_ID_BASE + idx as u32, action_type, action_spawn));
     }
 
     wire_birth_synapses_from_genome(genome, &mut sensory, &mut inter);
@@ -266,11 +256,14 @@ pub(crate) fn make_sensory_neuron(
 pub(crate) fn make_action_neuron(
     id: u32,
     action_type: ActionType,
-    bias: f32,
     location: BrainLocation,
 ) -> ActionNeuronState {
     ActionNeuronState {
-        neuron: make_neuron(NeuronId(id), NeuronType::Action, bias, location),
+        neuron_id: NeuronId(id),
+        x: location.x,
+        y: location.y,
+        logit: 0.0,
+        parent_ids: Vec::new(),
         action_type,
     }
 }
@@ -342,9 +335,6 @@ pub(crate) fn evaluate_brain(
     profiling::record_brain_stage(BrainStage::InterSetup, stage_started.elapsed());
 
     let mut action_inputs = [0.0f32; ACTION_COUNT];
-    for (idx, action) in brain.action.iter().enumerate() {
-        action_inputs[idx] = action.neuron.bias;
-    }
 
     // Accumulate sensory → inter.
     #[cfg(feature = "profiling")]
@@ -400,8 +390,8 @@ pub(crate) fn evaluate_brain(
         scratch.action_post_signals[idx] = logit - logit_mean;
     }
     for (idx, action) in brain.action.iter_mut().enumerate() {
-        action.neuron.activation = sigmoid(action_inputs[idx]);
-        result.action_activations[action_index(action.action_type)] = action.neuron.activation;
+        debug_assert_eq!(action_index(action.action_type), idx);
+        action.logit = action_inputs[idx];
     }
 
     result.selected_action =
@@ -419,7 +409,7 @@ pub fn derive_active_action_neuron_id(organism: &OrganismState) -> Option<Neuron
         .action
         .iter()
         .find(|action| action.action_type == organism.last_action_taken)
-        .map(|action_neuron| action_neuron.neuron.neuron_id)
+        .map(|action_neuron| action_neuron.neuron_id)
 }
 
 fn select_action_from_logits(
@@ -537,7 +527,7 @@ pub(crate) fn refresh_parent_ids_and_synapse_count(brain: &mut BrainState) {
         let mut parents = std::mem::take(&mut action_parent_ids[idx]);
         parents.sort();
         parents.dedup();
-        action.neuron.parent_ids = parents;
+        action.parent_ids = parents;
     }
 
     let synapse_count = brain

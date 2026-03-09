@@ -175,7 +175,6 @@ fn forced_brain(
             make_action_neuron(
                 2000 + idx as u32,
                 action_type,
-                0.0,
                 BrainLocation {
                     x: 2.0,
                     y: idx as f32,
@@ -184,7 +183,7 @@ fn forced_brain(
         })
         .collect();
     for action_neuron in &mut action {
-        action_neuron.neuron.parent_ids = vec![inter_id];
+        action_neuron.parent_ids = vec![inter_id];
     }
 
     BrainState {

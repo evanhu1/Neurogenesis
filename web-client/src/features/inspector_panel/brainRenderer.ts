@@ -20,8 +20,8 @@ type BrainNode = {
   id: number;
   type: string;
   label?: string;
-  activation: number;
-  bias: number;
+  value: number;
+  bias?: number;
   gx: number;
   gy: number;
   timeConstant?: number;
@@ -50,7 +50,7 @@ export function computeBrainLayout(
         neuron.receptor_type === 'LookRay'
           ? `Vision[${neuron.ray_offset ?? 0}]: ${neuron.look_target ?? 'Look'}`
           : neuron.receptor_type,
-      activation: neuron.neuron.activation,
+      value: neuron.neuron.activation,
       bias: neuron.neuron.bias,
       gx: finiteOr(neuron.neuron.x, sensoryIdx),
       gy: finiteOr(neuron.neuron.y, sensoryIdx * 0.9),
@@ -63,7 +63,7 @@ export function computeBrainLayout(
     nodes.push({
       id: nid,
       type: 'inter',
-      activation: neuron.neuron.activation,
+      value: neuron.neuron.activation,
       bias: neuron.neuron.bias,
       gx: finiteOr(neuron.neuron.x, 3.5 + (interIdx % 6) * 0.7),
       gy: finiteOr(neuron.neuron.y, 1 + Math.floor(interIdx / 6) * 0.9),
@@ -73,15 +73,14 @@ export function computeBrainLayout(
   });
 
   brain.action.forEach((neuron, actionIdx) => {
-    const nid = unwrapId(neuron.neuron.neuron_id);
+    const nid = unwrapId(neuron.neuron_id);
     nodes.push({
       id: nid,
       type: 'action',
       label: neuron.action_type,
-      activation: neuron.neuron.activation,
-      bias: neuron.neuron.bias,
-      gx: finiteOr(neuron.neuron.x, 8.5),
-      gy: finiteOr(neuron.neuron.y, actionIdx * 1.2 + 2),
+      value: neuron.logit,
+      gx: finiteOr(neuron.x, 8.5),
+      gy: finiteOr(neuron.y, actionIdx * 1.2 + 2),
       isActive: activeActionNeuronId === nid,
     });
   });
@@ -458,9 +457,11 @@ export function renderBrain(
       }
       ctx.fillStyle = '#43556f';
       const metricsY = hasLabel ? node.y + 16 : node.y + 4;
-      ctx.fillText(`h=${node.activation.toFixed(2)}`, node.x + 12, metricsY);
+      const valueLabel = node.type === 'action' ? 'logit' : 'h';
+      ctx.fillText(`${valueLabel}=${node.value.toFixed(2)}`, node.x + 12, metricsY);
       if (node.type === 'inter') {
-        ctx.fillText(`b=${node.bias.toFixed(2)}`, node.x + 12, metricsY + 12);
+        const bias = node.bias ?? 0;
+        ctx.fillText(`b=${bias.toFixed(2)}`, node.x + 12, metricsY + 12);
       }
       if (node.type === 'inter') {
         if (node.timeConstant != null) {

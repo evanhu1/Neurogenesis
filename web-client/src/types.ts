@@ -162,12 +162,20 @@ export type InterNeuronState = {
 };
 
 export type ApiActionNeuronState = {
-  neuron: ApiNeuronState;
+  neuron_id: ApiNeuronId;
+  x: number;
+  y: number;
+  logit: number;
+  parent_ids: ApiNeuronId[];
   action_type: ActionType;
 };
 
 export type ActionNeuronState = {
-  neuron: NeuronState;
+  neuron_id: NeuronId;
+  x: number;
+  y: number;
+  logit: number;
+  parent_ids: NeuronId[];
   action_type: ActionType;
 };
 

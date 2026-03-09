@@ -206,7 +206,11 @@ pub struct InterNeuronState {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ActionNeuronState {
-    pub neuron: NeuronState,
+    pub neuron_id: NeuronId,
+    pub x: f32,
+    pub y: f32,
+    pub logit: f32,
+    pub parent_ids: Vec<NeuronId>,
     pub action_type: ActionType,
 }
 

@@ -98,7 +98,11 @@ function normalizeBrainState(brain: ApiOrganismState['brain']): BrainState {
       synapses: inter.synapses.map(normalizeSynapseEdge),
     })),
     action: brain.action.map((action) => ({
-      neuron: normalizeNeuronState(action.neuron),
+      neuron_id: unwrapId(action.neuron_id),
+      x: action.x,
+      y: action.y,
+      logit: action.logit,
+      parent_ids: action.parent_ids.map(unwrapId),
       action_type: action.action_type,
     })),
   };
