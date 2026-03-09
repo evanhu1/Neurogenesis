@@ -302,7 +302,6 @@ fn stable_perf_config() -> WorldConfig {
             mutation_rate_vision_distance: 0.04,
             mutation_rate_inter_bias: 0.2,
             mutation_rate_inter_update_rate: 0.12,
-            mutation_rate_action_bias: 0.2,
             mutation_rate_eligibility_retention: 0.05,
             mutation_rate_synapse_prune_threshold: 0.05,
             mutation_rate_neuron_location: 0.02,

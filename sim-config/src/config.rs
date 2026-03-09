@@ -20,7 +20,6 @@ pub struct SeedGenomeConfig {
     pub mutation_rate_vision_distance: f32,
     pub mutation_rate_inter_bias: f32,
     pub mutation_rate_inter_update_rate: f32,
-    pub mutation_rate_action_bias: f32,
     pub mutation_rate_eligibility_retention: f32,
     pub mutation_rate_synapse_prune_threshold: f32,
     pub mutation_rate_neuron_location: f32,

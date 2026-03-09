@@ -103,11 +103,6 @@ export function InspectorPanel({
         value: genome.mutation_rate_inter_update_rate,
       },
       {
-        key: 'mutation_rate_action_bias',
-        label: 'Action Bias',
-        value: genome.mutation_rate_action_bias,
-      },
-      {
         key: 'mutation_rate_eligibility_retention',
         label: 'Elig Retention',
         value: genome.mutation_rate_eligibility_retention,
@@ -160,7 +155,6 @@ export function InspectorPanel({
           label: 'Inter Time Constant Genes',
           value: String(genome.inter_log_time_constants.length),
         },
-        { label: 'Action Bias Genes', value: String(genome.action_biases.length) },
       ] satisfies StatItem[],
       mutationRates,
     };

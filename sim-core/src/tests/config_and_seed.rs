@@ -212,7 +212,6 @@ fn mutate_genome_can_apply_add_neuron_split_edge_operator() {
     genome.mutation_rate_vision_distance = 0.0;
     genome.mutation_rate_inter_bias = 0.0;
     genome.mutation_rate_inter_update_rate = 0.0;
-    genome.mutation_rate_action_bias = 0.0;
     genome.mutation_rate_eligibility_retention = 0.0;
     genome.mutation_rate_synapse_prune_threshold = 0.0;
     genome.mutation_rate_neuron_location = 0.0;
@@ -373,7 +372,6 @@ fn global_mutation_rate_modifier_does_not_change_inherited_mutation_rate_genes()
     genome_a.mutation_rate_vision_distance = 0.13;
     genome_a.mutation_rate_inter_bias = 0.09;
     genome_a.mutation_rate_inter_update_rate = 0.11;
-    genome_a.mutation_rate_action_bias = 0.07;
     genome_a.mutation_rate_eligibility_retention = 0.05;
     genome_a.mutation_rate_synapse_prune_threshold = 0.03;
     genome_a.mutation_rate_neuron_location = 0.19;
@@ -404,10 +402,6 @@ fn global_mutation_rate_modifier_does_not_change_inherited_mutation_rate_genes()
     assert_eq!(
         genome_a.mutation_rate_inter_update_rate,
         genome_b.mutation_rate_inter_update_rate
-    );
-    assert_eq!(
-        genome_a.mutation_rate_action_bias,
-        genome_b.mutation_rate_action_bias
     );
     assert_eq!(
         genome_a.mutation_rate_eligibility_retention,

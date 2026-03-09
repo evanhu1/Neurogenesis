@@ -2,7 +2,7 @@ use crate::brain::{ACTION_COUNT, ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE
 use rand::Rng;
 use rand_distr::{Distribution, StandardNormal};
 use sim_types::{
-    ActionType, BrainLocation, NeuronId, OrganismGenome, SeedGenomeConfig, SynapseEdge,
+    BrainLocation, NeuronId, OrganismGenome, SeedGenomeConfig, SynapseEdge,
 };
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -32,7 +32,6 @@ const ELIGIBILITY_RETENTION_PERTURBATION_STDDEV: f32 = 0.05;
 const SYNAPSE_PRUNE_THRESHOLD_PERTURBATION_STDDEV: f32 = 0.02;
 const INTER_BIAS_PERTURB_NEURON_RATE: f32 = 0.8;
 const INTER_UPDATE_RATE_PERTURB_NEURON_RATE: f32 = 0.8;
-const ACTION_BIAS_PERTURB_ACTION_RATE: f32 = 0.8;
 const SYNAPSE_WEIGHT_PERTURBATION_STDDEV: f32 = 0.15;
 const SYNAPSE_WEIGHT_PERTURB_EDGE_RATE: f32 = 0.8;
 const SYNAPSE_WEIGHT_REPLACEMENT_RATE: f32 = 0.1;
@@ -61,10 +60,6 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     let inter_locations: Vec<BrainLocation> = (0..num_neurons)
         .map(|_| sample_uniform_location(rng))
         .collect();
-    let action_biases: Vec<f32> = ActionType::ALL
-        .into_iter()
-        .map(|_| sample_initial_bias(rng))
-        .collect();
     let sensory_locations: Vec<BrainLocation> = (0..SENSORY_COUNT)
         .map(|_| sample_uniform_location(rng))
         .collect();
@@ -86,7 +81,6 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         mutation_rate_vision_distance: config.mutation_rate_vision_distance,
         mutation_rate_inter_bias: config.mutation_rate_inter_bias,
         mutation_rate_inter_update_rate: config.mutation_rate_inter_update_rate,
-        mutation_rate_action_bias: config.mutation_rate_action_bias,
         mutation_rate_eligibility_retention: config.mutation_rate_eligibility_retention,
         mutation_rate_synapse_prune_threshold: config.mutation_rate_synapse_prune_threshold,
         mutation_rate_neuron_location: config.mutation_rate_neuron_location,
@@ -96,7 +90,6 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         mutation_rate_add_neuron_split_edge: config.mutation_rate_add_neuron_split_edge,
         inter_biases,
         inter_log_time_constants,
-        action_biases,
         sensory_locations,
         inter_locations,
         action_locations,
@@ -112,7 +105,6 @@ fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng:
         genome.mutation_rate_vision_distance,
         genome.mutation_rate_inter_bias,
         genome.mutation_rate_inter_update_rate,
-        genome.mutation_rate_action_bias,
         genome.mutation_rate_eligibility_retention,
         genome.mutation_rate_synapse_prune_threshold,
         genome.mutation_rate_neuron_location,
@@ -135,14 +127,13 @@ fn mutate_mutation_rate_genes<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng:
     genome.mutation_rate_vision_distance = rates[1];
     genome.mutation_rate_inter_bias = rates[2];
     genome.mutation_rate_inter_update_rate = rates[3];
-    genome.mutation_rate_action_bias = rates[4];
-    genome.mutation_rate_eligibility_retention = rates[5];
-    genome.mutation_rate_synapse_prune_threshold = rates[6];
-    genome.mutation_rate_neuron_location = rates[7];
-    genome.mutation_rate_synapse_weight_perturbation = rates[8];
-    genome.mutation_rate_add_synapse = rates[9];
-    genome.mutation_rate_remove_synapse = rates[10];
-    genome.mutation_rate_add_neuron_split_edge = rates[11];
+    genome.mutation_rate_eligibility_retention = rates[4];
+    genome.mutation_rate_synapse_prune_threshold = rates[5];
+    genome.mutation_rate_neuron_location = rates[6];
+    genome.mutation_rate_synapse_weight_perturbation = rates[7];
+    genome.mutation_rate_add_synapse = rates[8];
+    genome.mutation_rate_remove_synapse = rates[9];
+    genome.mutation_rate_add_neuron_split_edge = rates[10];
 }
 
 fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
@@ -169,12 +160,6 @@ fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut 
         genome.inter_locations.push(sample_uniform_location(rng));
     }
     genome.inter_locations.truncate(target_inter_len);
-
-    if genome.action_biases.len() < ACTION_COUNT {
-        genome.action_biases.resize(ACTION_COUNT, 0.0);
-    } else if genome.action_biases.len() > ACTION_COUNT {
-        genome.action_biases.truncate(ACTION_COUNT);
-    }
 
     while genome.sensory_locations.len() < SENSORY_COUNT as usize {
         genome.sensory_locations.push(sample_uniform_location(rng));
@@ -241,10 +226,6 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
         genome.mutation_rate_inter_update_rate,
         global_mutation_rate_modifier,
     );
-    let mutation_rate_action_bias = effective_mutation_rate(
-        genome.mutation_rate_action_bias,
-        global_mutation_rate_modifier,
-    );
     let mutation_rate_eligibility_retention = effective_mutation_rate(
         genome.mutation_rate_eligibility_retention,
         global_mutation_rate_modifier,
@@ -298,10 +279,6 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
 
     if rng.random::<f32>() < mutation_rate_inter_update_rate {
         mutate_inter_update_rates(genome, rng);
-    }
-
-    if rng.random::<f32>() < mutation_rate_action_bias {
-        mutate_action_biases(genome, rng);
     }
 
     if rng.random::<f32>() < mutation_rate_eligibility_retention {
@@ -476,34 +453,6 @@ fn mutate_inter_update_rates<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: 
         INTER_LOG_TIME_CONSTANT_PERTURBATION_STDDEV,
         INTER_LOG_TIME_CONSTANT_MIN,
         INTER_LOG_TIME_CONSTANT_MAX,
-        rng,
-    );
-}
-
-fn mutate_action_biases<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
-    if genome.action_biases.is_empty() {
-        return;
-    }
-
-    let mut mutated_any = false;
-    for bias in &mut genome.action_biases {
-        if rng.random::<f32>() >= ACTION_BIAS_PERTURB_ACTION_RATE {
-            continue;
-        }
-        mutated_any = true;
-        *bias = perturb_clamped(*bias, BIAS_PERTURBATION_STDDEV, -BIAS_MAX, BIAS_MAX, rng);
-    }
-
-    if mutated_any {
-        return;
-    }
-
-    let idx = rng.random_range(0..genome.action_biases.len());
-    genome.action_biases[idx] = perturb_clamped(
-        genome.action_biases[idx],
-        BIAS_PERTURBATION_STDDEV,
-        -BIAS_MAX,
-        BIAS_MAX,
         rng,
     );
 }

@@ -8,8 +8,12 @@ const GEOMETRY_DOMAIN_MAX = 10;
 const GEOMETRY_RENDER_SCALE = 70;
 const GEOMETRY_RENDER_OFFSET = (GEOMETRY_DOMAIN_MIN + GEOMETRY_DOMAIN_MAX) * 0.5 * GEOMETRY_RENDER_SCALE;
 const NODE_RADIUS = 10;
-const OVERLAP_MIN_DISTANCE = NODE_RADIUS * 2.2;
-const OVERLAP_RELAX_ITERS = 6;
+const OVERLAP_MIN_DISTANCE = NODE_RADIUS * 3.4;
+const OVERLAP_LABEL_HORIZONTAL_GAP = 118;
+const OVERLAP_LABEL_VERTICAL_BAND = 34;
+const OVERLAP_STACK_VERTICAL_GAP = 24;
+const OVERLAP_STACK_HORIZONTAL_BAND = NODE_RADIUS * 2.8;
+const OVERLAP_RELAX_ITERS = 12;
 const DEFAULT_ZOOM_INSET = 1.1;
 
 type BrainNode = {
@@ -113,7 +117,7 @@ export function computeBrainLayout(
     bounds: {
       minX: minX - pad,
       minY: minY - pad,
-      maxX: maxX + pad + 110,
+      maxX: maxX + pad + 140,
       maxY: maxY + pad,
     },
   };
@@ -176,6 +180,28 @@ function relaxOverlaps(nodes: BrainNodePos[]) {
         a.y -= ny * push;
         b.x += nx * push;
         b.y += ny * push;
+
+        const labelBandOverlap = OVERLAP_LABEL_VERTICAL_BAND - Math.abs(b.y - a.y);
+        const labelGapShortfall = OVERLAP_LABEL_HORIZONTAL_GAP - Math.abs(b.x - a.x);
+        if (labelBandOverlap > 0 && labelGapShortfall > 0) {
+          const horizontalDir = b.x >= a.x ? 1 : -1;
+          const horizontalPush = labelGapShortfall * 0.5;
+          const verticalPush = Math.min(labelBandOverlap * 0.18, 4);
+          a.x -= horizontalDir * horizontalPush;
+          b.x += horizontalDir * horizontalPush;
+          a.y -= verticalPush;
+          b.y += verticalPush;
+        }
+
+        const stackBandOverlap = OVERLAP_STACK_HORIZONTAL_BAND - Math.abs(b.x - a.x);
+        const stackGapShortfall = OVERLAP_STACK_VERTICAL_GAP - Math.abs(b.y - a.y);
+        if (stackBandOverlap > 0 && stackGapShortfall > 0) {
+          const verticalDir = b.y >= a.y ? 1 : -1;
+          const verticalPush = stackGapShortfall * 0.5;
+          a.y -= verticalDir * verticalPush;
+          b.y += verticalDir * verticalPush;
+        }
+
         movedAny = true;
       }
     }
@@ -433,7 +459,7 @@ export function renderBrain(
       ctx.fillStyle = '#43556f';
       const metricsY = hasLabel ? node.y + 16 : node.y + 4;
       ctx.fillText(`h=${node.activation.toFixed(2)}`, node.x + 12, metricsY);
-      if (node.type === 'inter' || node.type === 'action') {
+      if (node.type === 'inter') {
         ctx.fillText(`b=${node.bias.toFixed(2)}`, node.x + 12, metricsY + 12);
       }
       if (node.type === 'inter') {

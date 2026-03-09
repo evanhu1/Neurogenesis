@@ -2,7 +2,7 @@ use super::support::test_genome;
 use super::*;
 use crate::brain::{
     action_index, evaluate_brain, express_genome, scan_rays, BrainScratch, ACTION_COUNT_U32,
-    ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT,
+    ACTION_ID_BASE, ENERGY_SENSORY_ID, INTER_ID_BASE, SENSORY_COUNT,
 };
 use crate::genome::{BRAIN_SPACE_MAX, BRAIN_SPACE_MIN};
 use crate::plasticity::{apply_runtime_weight_updates, compute_pending_coactivations};
@@ -17,20 +17,33 @@ fn deterministic_action_policy() -> f32 {
     0.5
 }
 
-fn simple_action_bias_organism(
-    forward_bias: f32,
-    reproduce_bias: f32,
+fn simple_weighted_action_organism(
+    forward_weight: f32,
+    reproduce_weight: f32,
     energy: f32,
 ) -> OrganismState {
     let mut genome = test_genome();
     genome.num_neurons = 0;
-    genome.num_synapses = 0;
-    genome.action_biases = vec![0.0; ActionType::ALL.len()];
-    genome.action_biases[action_index(ActionType::Forward)] = forward_bias;
-    genome.action_biases[action_index(ActionType::Reproduce)] = reproduce_bias;
+    genome.num_synapses = 2;
     genome.inter_biases.clear();
     genome.inter_log_time_constants.clear();
     genome.inter_locations.clear();
+    genome.edges = vec![
+        SynapseEdge {
+            pre_neuron_id: NeuronId(ENERGY_SENSORY_ID),
+            post_neuron_id: NeuronId(ACTION_ID_BASE + action_index(ActionType::Forward) as u32),
+            weight: forward_weight,
+            eligibility: 0.0,
+            pending_coactivation: 0.0,
+        },
+        SynapseEdge {
+            pre_neuron_id: NeuronId(ENERGY_SENSORY_ID),
+            post_neuron_id: NeuronId(ACTION_ID_BASE + action_index(ActionType::Reproduce) as u32),
+            weight: reproduce_weight,
+            eligibility: 0.0,
+            pending_coactivation: 0.0,
+        },
+    ];
 
     let mut rng = ChaCha8Rng::seed_from_u64(55);
     let brain = express_genome(&genome, &mut rng);
@@ -179,8 +192,8 @@ fn mutate_genome_adds_synapses_when_below_target() {
 }
 
 #[test]
-fn action_biases_drive_actions_without_incoming_synapses() {
-    let mut organism = simple_action_bias_organism(5.0, 6.0, 10.0);
+fn weighted_energy_input_drives_actions_without_interneurons() {
+    let mut organism = simple_weighted_action_organism(0.6, 0.9, 10.0);
 
     let occupancy = vec![None; 9];
     let mut scratch = BrainScratch::new();
@@ -200,7 +213,7 @@ fn action_biases_drive_actions_without_incoming_synapses() {
 
 #[test]
 fn stochastic_action_selection_is_seed_deterministic() {
-    let mut organism_a = simple_action_bias_organism(0.8, 0.7, 10.0);
+    let mut organism_a = simple_weighted_action_organism(0.8, 0.7, 10.0);
     let mut organism_b = organism_a.clone();
     let occupancy = vec![None; 9];
     let mut scratch_a = BrainScratch::new();

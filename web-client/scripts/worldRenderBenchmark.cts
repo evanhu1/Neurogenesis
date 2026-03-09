@@ -120,7 +120,6 @@ function createSnapshot(worldWidth: number, organismCount: number, foodCount: nu
         mutation_rate_vision_distance: 0.1,
         mutation_rate_inter_bias: 0.1,
         mutation_rate_inter_update_rate: 0.1,
-        mutation_rate_action_bias: 0.1,
         mutation_rate_eligibility_retention: 0.1,
         mutation_rate_synapse_prune_threshold: 0.1,
         mutation_rate_neuron_location: 0.1,

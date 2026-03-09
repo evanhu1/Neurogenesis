@@ -41,7 +41,6 @@ type GenomeMutationRateParams = {
   mutation_rate_vision_distance: number;
   mutation_rate_inter_bias: number;
   mutation_rate_inter_update_rate: number;
-  mutation_rate_action_bias: number;
   mutation_rate_eligibility_retention: number;
   mutation_rate_synapse_prune_threshold: number;
   mutation_rate_neuron_location: number;
@@ -98,7 +97,6 @@ export type SynapseEdge = {
 type OrganismGenomeVectors<TEdge> = {
   inter_biases: number[];
   inter_log_time_constants: number[];
-  action_biases: number[];
   sensory_locations: BrainLocation[];
   inter_locations: BrainLocation[];
   action_locations: BrainLocation[];

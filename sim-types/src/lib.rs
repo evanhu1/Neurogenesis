@@ -134,8 +134,6 @@ pub struct OrganismGenome {
     #[serde(default)]
     pub mutation_rate_inter_update_rate: f32,
     #[serde(default)]
-    pub mutation_rate_action_bias: f32,
-    #[serde(default)]
     pub mutation_rate_eligibility_retention: f32,
     #[serde(default)]
     pub mutation_rate_synapse_prune_threshold: f32,
@@ -151,7 +149,6 @@ pub struct OrganismGenome {
     pub mutation_rate_add_neuron_split_edge: f32,
     pub inter_biases: Vec<f32>,
     pub inter_log_time_constants: Vec<f32>,
-    pub action_biases: Vec<f32>,
     pub sensory_locations: Vec<BrainLocation>,
     pub inter_locations: Vec<BrainLocation>,
     pub action_locations: Vec<BrainLocation>,
