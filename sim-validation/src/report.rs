@@ -55,7 +55,8 @@ impl Reporter {
 
 pub struct HtmlReportMeta {
     pub title: Option<String>,
-    pub seed: u64,
+    pub seed_label: String,
+    pub seed_count: usize,
     pub ticks: u64,
     pub report_every: u64,
     pub min_lifetime: u64,
@@ -71,6 +72,16 @@ pub struct HtmlReportMeta {
     pub aggregate_mean_p_fwd_food: Option<f64>,
     pub aggregate_mean_mi_sa: Option<f64>,
     pub aggregate_mean_h_action: Option<f64>,
+    pub timeseries_label: String,
+    pub per_seed_rows: Vec<PerSeedReportRow>,
+}
+
+pub struct PerSeedReportRow {
+    pub seed: u64,
+    pub score: f64,
+    pub total_time_seconds: f64,
+    pub state_hash: String,
+    pub report_href: String,
 }
 
 pub fn write_html_report(
@@ -108,7 +119,11 @@ pub fn write_html_report(
     if let Some(title) = &meta.title {
         kv(&mut html, "Title", title);
     }
-    kv(&mut html, "Seed", &meta.seed.to_string());
+    kv(
+        &mut html,
+        if meta.seed_count == 1 { "Seed" } else { "Seeds" },
+        &meta.seed_label,
+    );
     kv(&mut html, "Ticks", &meta.ticks.to_string());
     kv(&mut html, "Report Every", &meta.report_every.to_string());
     kv(&mut html, "Min Lifetime", &meta.min_lifetime.to_string());
@@ -126,12 +141,24 @@ pub fn write_html_report(
     html.push_str("</div></div>");
 
     html.push_str("<div class=\"panel\"><h2>Aggregate Score</h2>");
-    let _ = write!(
-        html,
-        "<p class=\"score-big\">{:.2}</p>\
-         <p class=\"score-sub\">window: ticks {}-{} | higher is better for quick run-to-run comparison</p>",
-        meta.aggregate_score, meta.aggregate_window_start_tick, meta.aggregate_window_end_tick
-    );
+    if meta.seed_count == 1 {
+        let _ = write!(
+            html,
+            "<p class=\"score-big\">{:.2}</p>\
+             <p class=\"score-sub\">window: ticks {}-{} | higher is better for quick run-to-run comparison</p>",
+            meta.aggregate_score, meta.aggregate_window_start_tick, meta.aggregate_window_end_tick
+        );
+    } else {
+        let _ = write!(
+            html,
+            "<p class=\"score-big\">{:.2}</p>\
+             <p class=\"score-sub\">arithmetic mean across {} seeds | window: ticks {}-{}</p>",
+            meta.aggregate_score,
+            meta.seed_count,
+            meta.aggregate_window_start_tick,
+            meta.aggregate_window_end_tick
+        );
+    }
     html.push_str("<div class=\"score-grid\">");
     kv(
         &mut html,
@@ -165,7 +192,27 @@ pub fn write_html_report(
     );
     html.push_str("</div></div>");
 
-    html.push_str("<div class=\"panel\"><h2>Timeseries</h2><table><thead><tr>");
+    if !meta.per_seed_rows.is_empty() {
+        html.push_str("<div class=\"panel\"><h2>Per-Seed Results</h2><table><thead><tr>");
+        for header in ["seed", "score", "time_s", "state_hash", "report"] {
+            let _ = write!(html, "<th>{header}</th>");
+        }
+        html.push_str("</tr></thead><tbody>");
+        for row in &meta.per_seed_rows {
+            let _ = write!(
+                html,
+                "<tr><td>{}</td><td>{:.2}</td><td>{:.3}</td><td>{}</td><td><a href=\"{}\">open</a></td></tr>",
+                row.seed, row.score, row.total_time_seconds, row.state_hash, row.report_href
+            );
+        }
+        html.push_str("</tbody></table></div>");
+    }
+
+    let _ = write!(
+        html,
+        "<div class=\"panel\"><h2>Timeseries</h2><p class=\"note\">{}</p><table><thead><tr>",
+        meta.timeseries_label
+    );
     for header in [
         "tick",
         "pop",
