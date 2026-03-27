@@ -8,7 +8,7 @@ use sim_types::{BrainState, OrganismState, SynapseEdge};
 #[cfg(feature = "profiling")]
 use std::time::Instant;
 
-const DOPAMINE_ENERGY_DELTA_SCALE: f32 = 10.0;
+const DOPAMINE_ENERGY_DELTA_SCALE: f32 = 20.0;
 const PLASTIC_WEIGHT_DECAY: f32 = 0.001;
 const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
 
