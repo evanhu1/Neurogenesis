@@ -28,9 +28,13 @@
 - `cargo test --workspace`: run all Rust tests.
 - `make fmt`: format Rust code.
 - `make lint`: clippy with warnings as errors.
-- `cargo run -p sim-validation --release -- --seed <u64>`: run evolution-loop
-  validation harness and generate `report.html`/`timeseries.csv`/`summary.json`.
-- `make validate ARGS="--seed <u64>"`: same harness via Makefile wrapper.
+- `cargo run -p sim-validation --release --`: run the default 10-seed
+  evolution-loop validation harness and generate
+  `report.html`/`timeseries.csv`/`summary.json`.
+- `cargo run -p sim-validation --release -- --seed <u64>[,<u64>...]`: override
+  the default seed suite.
+- `make validate ARGS="--seed <u64>[,<u64>...]"`: same harness via Makefile
+  wrapper.
 - `cargo run -p sim-server`: start backend on `127.0.0.1:8080`.
 - `cd web-client && npm run dev`: run frontend (Vite).
 - `cd web-client && npm run build && npm run typecheck`: production build + TS.

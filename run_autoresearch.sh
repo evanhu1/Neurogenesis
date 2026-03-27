@@ -126,13 +126,13 @@ Archive rules:
 Project-specific rules:
 - This repo's validation harness already averages multiple seeds by default.
 - Run: cargo run -p sim-validation --release -- --ticks 50000 --out ${ITER_ARTIFACT_REL} > ${RUN_LOG_REL} 2>&1
-- After the run, use: grep \"^aggregate_score:\\|^total_time_seconds:\\|^seed_score\\|^seeds:\" ${RUN_LOG_REL}
+- After the run, use: grep \"^aggregate_score:\\|^aggregate_score_median:\\|^aggregate_score_stddev:\\|^aggregate_score_min:\\|^aggregate_score_max:\\|^total_time_seconds:\\|^seed_score\\|^seeds:\" ${RUN_LOG_REL}
 - If grep output is empty, the run crashed. Inspect with: tail -n 50 ${RUN_LOG_REL}
 - Log every result to ${RESULTS_REL} as tab-separated columns:
   commit<TAB>score<TAB>time_s<TAB>status<TAB>description
 - Do not git-commit ${RESULTS_REL}
 - If a run crashes and you cannot fix it quickly, log a crash row with score 0.00 and time 0.0
-- If aggregate_score improved (higher than best so far), keep the experiment commit.
+- Prefer changes that improve aggregate_score without an obvious median/min regression.
 - If aggregate_score is equal or worse, discard it with: git reset --hard HEAD~1
 - On iteration 1, establish the baseline by running the harness unmodified.
 

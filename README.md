@@ -99,13 +99,16 @@ Use `sim-validation` to benchmark the evolution loop and inspect whether
 behavioral adaptation is emerging.
 
 - Cargo command (release):
-  - `cargo run -p sim-validation --release -- --seed 42`
+  - `cargo run -p sim-validation --release --`
 - Make command:
-  - `make validate ARGS="--seed 42"`
+  - `make validate`
 - Baseline/random-action control:
-  - `cargo run -p sim-validation --release -- --seed 42 --baseline`
+  - `cargo run -p sim-validation --release -- --baseline`
 - Faster smoke run:
-  - `cargo run -p sim-validation --release -- --seed 42 --ticks 1000 --report-every 250`
+  - `cargo run -p sim-validation --release -- --ticks 1000 --report-every 250`
+
+By default the harness runs a fixed 10-seed benchmark suite. You can override it
+with `--seed` and a comma-separated list such as `--seed 42,123,7`.
 
 Each run writes artifacts under `artifacts/validation/...` including
 `timeseries.csv`, `summary.json`, and `report.html`.

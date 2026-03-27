@@ -13,14 +13,16 @@ use sim_config::load_world_config_from_path;
 use sim_core::Simulation;
 use sim_types::{EntityId, OrganismState, WorldConfig};
 use std::collections::hash_map::DefaultHasher;
+use std::collections::VecDeque;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
 const DEFAULT_CONFIG_PATH: &str = "sim-validation/config.toml";
-const DEFAULT_SEEDS: &str = "42,123,7,2026";
+const DEFAULT_SEEDS: &str = "42,123,7,2026,99,314,2718,4242,9001,65537";
 
 #[derive(Debug, Clone, Parser)]
 #[command(name = "sim-validation")]
@@ -89,6 +91,7 @@ struct ValidationSummary {
     seeds: Vec<u64>,
     ticks: u64,
     baseline: bool,
+    worker_threads: usize,
     total_time_seconds: f64,
     aggregate_score: AggregateScore,
     seed_summaries: Vec<SeedRunSummary>,
@@ -107,14 +110,20 @@ struct SeedRunSummary {
 #[derive(Debug, Clone, Serialize)]
 struct AggregateScore {
     score: f64,
+    score_median: f64,
+    score_stddev: f64,
+    score_min: f64,
+    score_max: f64,
     window_start_tick: u64,
     window_end_tick: u64,
     mean_p_fwd_food: Option<f64>,
     mean_mi_sa: Option<f64>,
     mean_h_action: Option<f64>,
+    mean_predation_rate: Option<f64>,
     p_component: f64,
     mi_component: f64,
     entropy_component: f64,
+    predation_component: f64,
 }
 
 fn main() -> Result<()> {
@@ -155,6 +164,7 @@ fn main() -> Result<()> {
     println!("html_report: {}", report_path.display());
     println!("browser_url: {}", browser_file_url(&report_path));
     println!("seeds: {}", format_seed_list(&summary.seeds));
+    println!("worker_threads: {}", summary.worker_threads);
     for seed_summary in &summary.seed_summaries {
         println!(
             "seed_score[{}]: {:.2}",
@@ -162,6 +172,26 @@ fn main() -> Result<()> {
         );
     }
     println!("aggregate_score: {:.2}", summary.aggregate_score.score);
+    println!(
+        "aggregate_score_median: {:.2}",
+        summary.aggregate_score.score_median
+    );
+    println!(
+        "aggregate_score_stddev: {:.2}",
+        summary.aggregate_score.score_stddev
+    );
+    println!(
+        "aggregate_score_min: {:.2}",
+        summary.aggregate_score.score_min
+    );
+    println!(
+        "aggregate_score_max: {:.2}",
+        summary.aggregate_score.score_max
+    );
+    println!(
+        "aggregate_predation_component: {:.3}",
+        summary.aggregate_score.predation_component
+    );
     println!("total_time_seconds: {:.3}", summary.total_time_seconds);
     Ok(())
 }
@@ -172,34 +202,62 @@ fn run_validation_across_seeds(
 ) -> Result<ValidationSummary> {
     let run_started = Instant::now();
     fs::create_dir_all(&options.out_dir)?;
+    let worker_threads = default_worker_threads(options.seeds.len());
+    let seed_queue = Arc::new(Mutex::new(VecDeque::from(options.seeds.clone())));
+    let (tx, rx) = mpsc::channel();
+    let mut handles = Vec::with_capacity(worker_threads);
 
-    let mut handles = Vec::with_capacity(options.seeds.len());
-    for &seed in &options.seeds {
+    for _ in 0..worker_threads {
         let config = config.clone();
-        let seed_options = SeedRunOptions {
-            seed,
-            ticks: options.ticks,
-            report_every: options.report_every,
-            min_lifetime: options.min_lifetime,
-            out_dir: options.out_dir.join(format!("seed_{seed}")),
-            title: options
-                .title
-                .as_ref()
-                .map(|title| format!("{title} (seed {seed})")),
-            baseline: options.baseline,
-        };
-        handles.push((
-            seed,
-            thread::spawn(move || run_single_seed_validation(config, seed_options)),
-        ));
-    }
+        let seed_queue = Arc::clone(&seed_queue);
+        let tx = tx.clone();
+        let out_dir = options.out_dir.clone();
+        let title = options.title.clone();
+        let ticks = options.ticks;
+        let report_every = options.report_every;
+        let min_lifetime = options.min_lifetime;
+        let baseline = options.baseline;
 
-    let mut seed_summaries = Vec::with_capacity(handles.len());
-    for (seed, handle) in handles {
-        let summary = handle
-            .join()
-            .map_err(|_| anyhow!("seed run {seed} panicked"))??;
+        handles.push(thread::spawn(move || loop {
+            let seed = match seed_queue.lock() {
+                Ok(mut queue) => queue.pop_front(),
+                Err(_) => None,
+            };
+            let Some(seed) = seed else {
+                break;
+            };
+
+            let seed_options = SeedRunOptions {
+                seed,
+                ticks,
+                report_every,
+                min_lifetime,
+                out_dir: out_dir.join(format!("seed_{seed}")),
+                title: title
+                    .as_ref()
+                    .map(|run_title| format!("{run_title} (seed {seed})")),
+                baseline,
+            };
+            let result = run_single_seed_validation(config.clone(), seed_options);
+            if tx.send((seed, result)).is_err() {
+                break;
+            }
+        }));
+    }
+    drop(tx);
+
+    let mut seed_summaries = Vec::with_capacity(options.seeds.len());
+    for _ in 0..options.seeds.len() {
+        let (_seed, result) = rx
+            .recv()
+            .map_err(|_| anyhow!("validation worker exited before reporting all seeds"))?;
+        let summary = result?;
         seed_summaries.push(summary);
+    }
+    for handle in handles {
+        handle
+            .join()
+            .map_err(|_| anyhow!("validation worker panicked"))?;
     }
     seed_summaries.sort_by_key(|summary| summary.seed);
 
@@ -226,6 +284,7 @@ fn run_validation_across_seeds(
         seeds: options.seeds.clone(),
         ticks: options.ticks,
         baseline: options.baseline,
+        worker_threads,
         total_time_seconds,
         aggregate_score: aggregate_score.clone(),
         seed_summaries: seed_run_summaries.clone(),
@@ -246,14 +305,20 @@ fn run_validation_across_seeds(
             total_time_seconds: summary.total_time_seconds,
             generated_at_utc,
             aggregate_score: summary.aggregate_score.score,
+            aggregate_score_median: summary.aggregate_score.score_median,
+            aggregate_score_stddev: summary.aggregate_score.score_stddev,
+            aggregate_score_min: summary.aggregate_score.score_min,
+            aggregate_score_max: summary.aggregate_score.score_max,
             aggregate_window_start_tick: summary.aggregate_score.window_start_tick,
             aggregate_window_end_tick: summary.aggregate_score.window_end_tick,
             aggregate_p_component: summary.aggregate_score.p_component,
             aggregate_mi_component: summary.aggregate_score.mi_component,
             aggregate_entropy_component: summary.aggregate_score.entropy_component,
+            aggregate_predation_component: summary.aggregate_score.predation_component,
             aggregate_mean_p_fwd_food: summary.aggregate_score.mean_p_fwd_food,
             aggregate_mean_mi_sa: summary.aggregate_score.mean_mi_sa,
             aggregate_mean_h_action: summary.aggregate_score.mean_h_action,
+            aggregate_mean_predation_rate: summary.aggregate_score.mean_predation_rate,
             timeseries_label: "mean across seeds".to_owned(),
             per_seed_rows: seed_run_summaries
                 .iter()
@@ -290,11 +355,17 @@ fn run_single_seed_validation(
     let mut current_food_count = sim.snapshot().foods.len() as u64;
     let mut interval_births = 0_u64;
     let mut interval_deaths = 0_u64;
+    let mut interval_predations = 0_u64;
+    let mut interval_population_exposure = 0_u64;
     let mut timeseries = Vec::new();
 
     for tick in 1..=options.ticks {
+        interval_population_exposure =
+            interval_population_exposure.saturating_add(sim.organisms().len() as u64);
         let delta = sim.tick();
         let records = sim.drain_action_records();
+        interval_predations =
+            interval_predations.saturating_add(delta.metrics.predations_last_turn);
 
         for record in records {
             ledger.update(record);
@@ -331,6 +402,8 @@ fn run_single_seed_validation(
                 interval_births,
                 interval_deaths,
                 current_food_count,
+                interval_predations,
+                interval_population_exposure,
                 ledger.recently_deceased(),
                 sim.organisms(),
             );
@@ -339,6 +412,8 @@ fn run_single_seed_validation(
 
             interval_births = 0;
             interval_deaths = 0;
+            interval_predations = 0;
+            interval_population_exposure = 0;
             ledger.clear_interval();
         }
     }
@@ -372,14 +447,20 @@ fn run_single_seed_validation(
             total_time_seconds: summary.total_time_seconds,
             generated_at_utc,
             aggregate_score: summary.aggregate_score.score,
+            aggregate_score_median: summary.aggregate_score.score_median,
+            aggregate_score_stddev: summary.aggregate_score.score_stddev,
+            aggregate_score_min: summary.aggregate_score.score_min,
+            aggregate_score_max: summary.aggregate_score.score_max,
             aggregate_window_start_tick: summary.aggregate_score.window_start_tick,
             aggregate_window_end_tick: summary.aggregate_score.window_end_tick,
             aggregate_p_component: summary.aggregate_score.p_component,
             aggregate_mi_component: summary.aggregate_score.mi_component,
             aggregate_entropy_component: summary.aggregate_score.entropy_component,
+            aggregate_predation_component: summary.aggregate_score.predation_component,
             aggregate_mean_p_fwd_food: summary.aggregate_score.mean_p_fwd_food,
             aggregate_mean_mi_sa: summary.aggregate_score.mean_mi_sa,
             aggregate_mean_h_action: summary.aggregate_score.mean_h_action,
+            aggregate_mean_predation_rate: summary.aggregate_score.mean_predation_rate,
             timeseries_label: "per-seed timeseries".to_owned(),
             per_seed_rows: Vec::new(),
         },
@@ -428,7 +509,10 @@ fn browser_file_url(path: &Path) -> String {
 fn default_output_dir(seeds: &[u64]) -> PathBuf {
     let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ");
     if seeds.len() == 1 {
-        return PathBuf::from(format!("artifacts/validation/{}_seed_{}", timestamp, seeds[0]));
+        return PathBuf::from(format!(
+            "artifacts/validation/{}_seed_{}",
+            timestamp, seeds[0]
+        ));
     }
     PathBuf::from(format!(
         "artifacts/validation/{}_seeds_{}",
@@ -453,7 +537,8 @@ fn seed_slug(seeds: &[u64]) -> String {
 }
 
 fn format_seed_list(seeds: &[u64]) -> String {
-    seeds.iter()
+    seeds
+        .iter()
         .map(u64::to_string)
         .collect::<Vec<_>>()
         .join(",")
@@ -497,10 +582,12 @@ fn compute_aggregate_score(timeseries: &[IntervalMetrics]) -> AggregateScore {
     let mean_p_fwd_food = mean_option(window.iter().map(|row| row.p_fwd_food));
     let mean_mi_sa = mean_option(window.iter().map(|row| row.mi_sa));
     let mean_h_action = mean_option(window.iter().map(|row| row.h_action));
+    let mean_predation_rate = mean_option(window.iter().map(|row| row.predation_rate));
 
     let p_baseline = metrics::action_baseline_probability();
     let h_baseline = metrics::action_baseline_entropy();
     let strong_foraging_reference = 0.55;
+    let competitive_predation_reference = 0.002;
     let p_component = mean_p_fwd_food
         .map(|value| {
             clamp01(
@@ -514,19 +601,32 @@ fn compute_aggregate_score(timeseries: &[IntervalMetrics]) -> AggregateScore {
     let entropy_component = mean_h_action
         .map(|value| 1.0 - clamp01((value - entropy_target).abs() / entropy_width.max(1e-6)))
         .unwrap_or(0.0);
+    let predation_component = mean_predation_rate
+        .map(|value| clamp01(value / competitive_predation_reference))
+        .unwrap_or(0.0);
 
-    let score = 100.0 * (0.50 * p_component + 0.35 * mi_component + 0.15 * entropy_component);
+    let score = 100.0
+        * (0.40 * p_component
+            + 0.25 * mi_component
+            + 0.10 * entropy_component
+            + 0.25 * predation_component);
 
     AggregateScore {
         score,
+        score_median: score,
+        score_stddev: 0.0,
+        score_min: score,
+        score_max: score,
         window_start_tick,
         window_end_tick,
         mean_p_fwd_food,
         mean_mi_sa,
         mean_h_action,
+        mean_predation_rate,
         p_component,
         mi_component,
         entropy_component,
+        predation_component,
     }
 }
 
@@ -534,8 +634,17 @@ fn average_aggregate_scores(seed_summaries: &[SeedValidationSummary]) -> Aggrega
     let first = seed_summaries
         .first()
         .expect("multi-seed validation requires at least one seed");
+    let score_stats = score_stats(
+        seed_summaries
+            .iter()
+            .map(|summary| summary.aggregate_score.score),
+    );
     AggregateScore {
-        score: mean_f64(seed_summaries.iter().map(|summary| summary.aggregate_score.score)),
+        score: score_stats.mean,
+        score_median: score_stats.median,
+        score_stddev: score_stats.stddev,
+        score_min: score_stats.min,
+        score_max: score_stats.max,
         window_start_tick: first.aggregate_score.window_start_tick,
         window_end_tick: first.aggregate_score.window_end_tick,
         mean_p_fwd_food: mean_option(
@@ -553,6 +662,11 @@ fn average_aggregate_scores(seed_summaries: &[SeedValidationSummary]) -> Aggrega
                 .iter()
                 .map(|summary| summary.aggregate_score.mean_h_action),
         ),
+        mean_predation_rate: mean_option(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.mean_predation_rate),
+        ),
         p_component: mean_f64(
             seed_summaries
                 .iter()
@@ -568,7 +682,66 @@ fn average_aggregate_scores(seed_summaries: &[SeedValidationSummary]) -> Aggrega
                 .iter()
                 .map(|summary| summary.aggregate_score.entropy_component),
         ),
+        predation_component: mean_f64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.predation_component),
+        ),
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ScoreStats {
+    mean: f64,
+    median: f64,
+    stddev: f64,
+    min: f64,
+    max: f64,
+}
+
+fn score_stats(values: impl Iterator<Item = f64>) -> ScoreStats {
+    let mut scores = values.filter(|value| value.is_finite()).collect::<Vec<_>>();
+    if scores.is_empty() {
+        return ScoreStats {
+            mean: 0.0,
+            median: 0.0,
+            stddev: 0.0,
+            min: 0.0,
+            max: 0.0,
+        };
+    }
+
+    scores.sort_by(|a, b| a.total_cmp(b));
+    let len = scores.len();
+    let mean = scores.iter().sum::<f64>() / len as f64;
+    let median = if len % 2 == 0 {
+        (scores[len / 2 - 1] + scores[len / 2]) / 2.0
+    } else {
+        scores[len / 2]
+    };
+    let variance = scores
+        .iter()
+        .map(|score| {
+            let delta = *score - mean;
+            delta * delta
+        })
+        .sum::<f64>()
+        / len as f64;
+
+    ScoreStats {
+        mean,
+        median,
+        stddev: variance.sqrt(),
+        min: scores[0],
+        max: scores[len - 1],
+    }
+}
+
+fn default_worker_threads(seed_count: usize) -> usize {
+    thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1)
+        .clamp(1, seed_count.max(1))
 }
 
 fn average_timeseries(seed_summaries: &[SeedValidationSummary]) -> Vec<IntervalMetrics> {
@@ -616,10 +789,10 @@ fn average_timeseries(seed_summaries: &[SeedValidationSummary]) -> Vec<IntervalM
                     .iter()
                     .map(|summary| summary.timeseries[row_idx].life_mean),
             ),
-            life_max: mean_option_u64(
+            predation_rate: mean_option(
                 seed_summaries
                     .iter()
-                    .map(|summary| summary.timeseries[row_idx].life_max),
+                    .map(|summary| summary.timeseries[row_idx].predation_rate),
             ),
             ate_pct: mean_option(
                 seed_summaries
@@ -700,7 +873,11 @@ fn mean_f64(values: impl Iterator<Item = f64>) -> f64 {
             count = count.saturating_add(1);
         }
     }
-    if count == 0 { 0.0 } else { sum / count as f64 }
+    if count == 0 {
+        0.0
+    } else {
+        sum / count as f64
+    }
 }
 
 fn clamp01(value: f64) -> f64 {
@@ -773,15 +950,31 @@ mod tests {
 
         let summary =
             run_validation_across_seeds(cfg, &options).expect("multi-seed run should succeed");
-        let expected = summary
+        let mut seed_scores = summary
             .seed_summaries
             .iter()
             .map(|seed_summary| seed_summary.aggregate_score.score)
+            .collect::<Vec<_>>();
+        let expected_mean = seed_scores.iter().sum::<f64>() / seed_scores.len() as f64;
+        seed_scores.sort_by(|a, b| a.total_cmp(b));
+        let expected_median = (seed_scores[1] + seed_scores[2]) / 2.0;
+        let expected_variance = seed_scores
+            .iter()
+            .map(|score| {
+                let delta = *score - expected_mean;
+                delta * delta
+            })
             .sum::<f64>()
-            / summary.seed_summaries.len() as f64;
-        assert!((summary.aggregate_score.score - expected).abs() < 1.0e-9);
+            / seed_scores.len() as f64;
+
+        assert!((summary.aggregate_score.score - expected_mean).abs() < 1.0e-9);
+        assert!((summary.aggregate_score.score_median - expected_median).abs() < 1.0e-9);
+        assert!((summary.aggregate_score.score_stddev - expected_variance.sqrt()).abs() < 1.0e-9);
+        assert_eq!(summary.aggregate_score.score_min, seed_scores[0]);
+        assert_eq!(summary.aggregate_score.score_max, seed_scores[3]);
         assert_eq!(summary.seed_summaries.len(), 4);
         assert_eq!(summary.seeds, vec![2026, 7, 123, 42]);
+        assert!(summary.worker_threads >= 1);
 
         let _ = fs::remove_dir_all(out_dir);
     }

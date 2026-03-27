@@ -11,7 +11,7 @@ pub struct IntervalMetrics {
     pub food: u64,
     pub max_generation: Option<u64>,
     pub life_mean: Option<f64>,
-    pub life_max: Option<u64>,
+    pub predation_rate: Option<f64>,
     pub ate_pct: Option<f64>,
     pub cons_mean: Option<f64>,
     pub brain_size: Option<f64>,
@@ -27,40 +27,41 @@ pub fn compute_interval_metrics(
     births: u64,
     deaths: u64,
     food: u64,
+    interval_predations: u64,
+    interval_population_exposure: u64,
     deceased: &[CompletedLifetime],
     living: &[OrganismState],
 ) -> IntervalMetrics {
     let brain_size = mean_living_brain_size(living);
     let max_generation = living.iter().map(|organism| organism.generation).max();
+    let predation_rate = predation_rate(interval_predations, interval_population_exposure);
 
-    let (life_mean, life_max, ate_pct, cons_mean, p_fwd_food, mi_sa, h_action, util) =
-        if deceased.is_empty() {
-            (None, None, None, None, None, None, None, None)
-        } else {
-            let life_sum: u64 = deceased.iter().map(|entry| entry.lifetime).sum();
-            let life_max = deceased.iter().map(|entry| entry.lifetime).max();
-            let ate_count = deceased
-                .iter()
-                .filter(|entry| entry.consumptions > 0)
-                .count() as f64;
-            let cons_sum: u64 = deceased.iter().map(|entry| entry.consumptions).sum();
-            let util_mean = deceased
-                .iter()
-                .map(|entry| entry.utilization as f64)
-                .sum::<f64>()
-                / deceased.len() as f64;
+    let (life_mean, ate_pct, cons_mean, p_fwd_food, mi_sa, h_action, util) = if deceased.is_empty()
+    {
+        (None, None, None, None, None, None, None)
+    } else {
+        let life_sum: u64 = deceased.iter().map(|entry| entry.lifetime).sum();
+        let ate_count = deceased
+            .iter()
+            .filter(|entry| entry.consumptions > 0)
+            .count() as f64;
+        let cons_sum: u64 = deceased.iter().map(|entry| entry.consumptions).sum();
+        let util_mean = deceased
+            .iter()
+            .map(|entry| entry.utilization as f64)
+            .sum::<f64>()
+            / deceased.len() as f64;
 
-            (
-                Some(life_sum as f64 / deceased.len() as f64),
-                life_max,
-                Some(100.0 * ate_count / deceased.len() as f64),
-                Some(cons_sum as f64 / deceased.len() as f64),
-                pooled_p_fwd_food(deceased),
-                pooled_mi_sa(deceased),
-                pooled_action_entropy(deceased),
-                Some(util_mean),
-            )
-        };
+        (
+            Some(life_sum as f64 / deceased.len() as f64),
+            Some(100.0 * ate_count / deceased.len() as f64),
+            Some(cons_sum as f64 / deceased.len() as f64),
+            pooled_p_fwd_food(deceased),
+            pooled_mi_sa(deceased),
+            pooled_action_entropy(deceased),
+            Some(util_mean),
+        )
+    };
 
     IntervalMetrics {
         tick,
@@ -70,7 +71,7 @@ pub fn compute_interval_metrics(
         food,
         max_generation,
         life_mean,
-        life_max,
+        predation_rate,
         ate_pct,
         cons_mean,
         brain_size,
@@ -79,6 +80,13 @@ pub fn compute_interval_metrics(
         h_action,
         util,
     }
+}
+
+fn predation_rate(predations: u64, interval_population_exposure: u64) -> Option<f64> {
+    if interval_population_exposure == 0 {
+        return None;
+    }
+    Some(predations as f64 / interval_population_exposure as f64)
 }
 
 fn mean_living_brain_size(living: &[OrganismState]) -> Option<f64> {

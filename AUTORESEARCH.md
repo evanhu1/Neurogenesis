@@ -129,7 +129,7 @@ grep "^aggregate_score:" .autoresearch_archive/run.log
 And from the generated `summary.json` for detailed breakdown:
 
 ```
-cat .autoresearch_archive/artifacts/validation/*/summary.json | python3 -c "import sys,json; d=json.load(sys.stdin); s=d['aggregate_score']; print(f'score={s[\"score\"]:.2f} p={s.get(\"mean_p_fwd_food\",0):.4f} mi={s.get(\"mean_mi_sa\",0):.4f} h={s.get(\"mean_h_action\",0):.4f}')"
+cat .autoresearch_archive/artifacts/validation/*/summary.json | python3 -c "import sys,json; d=json.load(sys.stdin); s=d['aggregate_score']; print(f'score={s[\"score\"]:.2f} p={s.get(\"mean_p_fwd_food\",0):.4f} mi={s.get(\"mean_mi_sa\",0):.4f} h={s.get(\"mean_h_action\",0):.4f} pred={s.get(\"mean_predation_rate\",0):.6f}')"
 ```
 
 ## Logging results
@@ -161,17 +161,15 @@ d4e5f6g	0.00	0.0	crash	add recurrent connections (type error)
 
 ## Multi-seed validation
 
-When a change looks promising (score improvement > 2 points), validate across
-multiple seeds before deciding to keep:
+The default validation command already runs the fixed benchmark seed suite:
 
 ```
-cargo run -p sim-validation --release -- --seed 42 --ticks 50000 --out .autoresearch_archive/artifacts/validation/seed_42 > .autoresearch_archive/run_42.log 2>&1
-cargo run -p sim-validation --release -- --seed 123 --ticks 50000 --out .autoresearch_archive/artifacts/validation/seed_123 > .autoresearch_archive/run_123.log 2>&1
-cargo run -p sim-validation --release -- --seed 7 --ticks 50000 --out .autoresearch_archive/artifacts/validation/seed_7 > .autoresearch_archive/run_7.log 2>&1
+cargo run -p sim-validation --release -- --ticks 50000 --out .autoresearch_archive/artifacts/validation/full_suite > .autoresearch_archive/run_full_suite.log 2>&1
 ```
 
-A change that improves one seed but degrades others is likely overfitting to
-initial conditions. Only keep changes that improve or hold across seeds.
+A change that improves the mean but regresses the median or has a much worse
+minimum seed is likely overfitting to initial conditions. Prefer changes that
+hold up across the full suite.
 
 ## The experiment loop
 
@@ -187,15 +185,15 @@ LOOP FOREVER:
    `cargo run -p sim-validation --release -- --seed 42 --ticks 50000 --out .autoresearch_archive/artifacts/validation/exp_name > .autoresearch_archive/run.log 2>&1`
    (redirect everything — do NOT use tee or let output flood your context).
 6. Read out the results:
-   `grep "^aggregate_score:\|^total_time_seconds:" .autoresearch_archive/run.log`
+   `grep "^aggregate_score:\|^aggregate_score_median:\|^aggregate_score_stddev:\|^aggregate_score_min:\|^aggregate_score_max:\|^total_time_seconds:" .autoresearch_archive/run.log`
 7. If the grep output is empty, the run crashed. Run
    `tail -n 50 .autoresearch_archive/run.log` to read the error and attempt a
    fix. If you can't get things to work after more than a few attempts, give up
    on this idea.
 8. Record the results in `.autoresearch_archive/results.tsv` (NOTE: do not
    commit it, leave it untracked by git).
-9. If aggregate_score improved (higher), you "advance" the branch, keeping the
-   git commit. For large improvements, consider multi-seed validation.
+9. If the aggregate result improved without introducing an obvious median/min
+   regression, you "advance" the branch, keeping the git commit.
 10. If aggregate_score is equal or worse, you `git reset --hard` back to where
     you started.
 

@@ -18,7 +18,7 @@ impl Reporter {
         let mut csv = BufWriter::new(File::create(csv_path)?);
         writeln!(
             csv,
-            "tick,pop,births,deaths,food,max_generation,life_mean,life_max,ate_pct,cons_mean,brain_size,p_fwd_food,mi_sa,h_action,util"
+            "tick,pop,births,deaths,food,max_generation,life_mean,predation_rate,ate_pct,cons_mean,brain_size,p_fwd_food,mi_sa,h_action,util"
         )?;
         Ok(Self { csv })
     }
@@ -26,7 +26,7 @@ impl Reporter {
     pub fn emit(&mut self, metrics: &IntervalMetrics) -> Result<()> {
         writeln!(
             self.csv,
-            "{tick},{pop},{births},{deaths},{food},{max_generation},{life_mean},{life_max},{ate_pct},{cons_mean},{brain_size},{p_fwd_food},{mi_sa},{h_action},{util}",
+            "{tick},{pop},{births},{deaths},{food},{max_generation},{life_mean},{predation_rate},{ate_pct},{cons_mean},{brain_size},{p_fwd_food},{mi_sa},{h_action},{util}",
             tick = metrics.tick,
             pop = metrics.pop,
             births = metrics.births,
@@ -34,7 +34,7 @@ impl Reporter {
             food = metrics.food,
             max_generation = csv_opt_u64(metrics.max_generation),
             life_mean = csv_opt(metrics.life_mean),
-            life_max = csv_opt_u64(metrics.life_max),
+            predation_rate = csv_opt(metrics.predation_rate),
             ate_pct = csv_opt(metrics.ate_pct),
             cons_mean = csv_opt(metrics.cons_mean),
             brain_size = csv_opt(metrics.brain_size),
@@ -64,14 +64,20 @@ pub struct HtmlReportMeta {
     pub total_time_seconds: f64,
     pub generated_at_utc: String,
     pub aggregate_score: f64,
+    pub aggregate_score_median: f64,
+    pub aggregate_score_stddev: f64,
+    pub aggregate_score_min: f64,
+    pub aggregate_score_max: f64,
     pub aggregate_window_start_tick: u64,
     pub aggregate_window_end_tick: u64,
     pub aggregate_p_component: f64,
     pub aggregate_mi_component: f64,
     pub aggregate_entropy_component: f64,
+    pub aggregate_predation_component: f64,
     pub aggregate_mean_p_fwd_food: Option<f64>,
     pub aggregate_mean_mi_sa: Option<f64>,
     pub aggregate_mean_h_action: Option<f64>,
+    pub aggregate_mean_predation_rate: Option<f64>,
     pub timeseries_label: String,
     pub per_seed_rows: Vec<PerSeedReportRow>,
 }
@@ -121,7 +127,11 @@ pub fn write_html_report(
     }
     kv(
         &mut html,
-        if meta.seed_count == 1 { "Seed" } else { "Seeds" },
+        if meta.seed_count == 1 {
+            "Seed"
+        } else {
+            "Seeds"
+        },
         &meta.seed_label,
     );
     kv(&mut html, "Ticks", &meta.ticks.to_string());
@@ -152,14 +162,40 @@ pub fn write_html_report(
         let _ = write!(
             html,
             "<p class=\"score-big\">{:.2}</p>\
-             <p class=\"score-sub\">arithmetic mean across {} seeds | window: ticks {}-{}</p>",
+             <p class=\"score-sub\">mean across {} seeds | median {:.2} | stddev {:.2} | min {:.2} | max {:.2} | window: ticks {}-{}</p>",
             meta.aggregate_score,
             meta.seed_count,
+            meta.aggregate_score_median,
+            meta.aggregate_score_stddev,
+            meta.aggregate_score_min,
+            meta.aggregate_score_max,
             meta.aggregate_window_start_tick,
             meta.aggregate_window_end_tick
         );
     }
     html.push_str("<div class=\"score-grid\">");
+    if meta.seed_count > 1 {
+        kv(
+            &mut html,
+            "Median Score",
+            &format!("{:.2}", meta.aggregate_score_median),
+        );
+        kv(
+            &mut html,
+            "Score Stddev",
+            &format!("{:.2}", meta.aggregate_score_stddev),
+        );
+        kv(
+            &mut html,
+            "Score Min",
+            &format!("{:.2}", meta.aggregate_score_min),
+        );
+        kv(
+            &mut html,
+            "Score Max",
+            &format!("{:.2}", meta.aggregate_score_max),
+        );
+    }
     kv(
         &mut html,
         "P(Fwd|food) component",
@@ -177,6 +213,11 @@ pub fn write_html_report(
     );
     kv(
         &mut html,
+        "Predation component",
+        &format!("{:.3}", meta.aggregate_predation_component),
+    );
+    kv(
+        &mut html,
         "Window mean P(Fwd|food)",
         &fmt_opt(meta.aggregate_mean_p_fwd_food, 4),
     );
@@ -189,6 +230,11 @@ pub fn write_html_report(
         &mut html,
         "Window mean H(action)",
         &fmt_opt(meta.aggregate_mean_h_action, 4),
+    );
+    kv(
+        &mut html,
+        "Window mean predation rate",
+        &fmt_opt(meta.aggregate_mean_predation_rate, 6),
     );
     html.push_str("</div></div>");
 
@@ -221,7 +267,7 @@ pub fn write_html_report(
         "food",
         "max_generation",
         "life_mean",
-        "life_max",
+        "predation_rate",
         "ate_pct",
         "cons_mean",
         "brain_size",
@@ -245,7 +291,7 @@ pub fn write_html_report(
             row.food,
             fmt_opt_u64(row.max_generation),
             fmt_opt(row.life_mean, 2),
-            fmt_opt_u64(row.life_max),
+            fmt_opt(row.predation_rate, 6),
             fmt_opt(row.ate_pct, 2),
             fmt_opt(row.cons_mean, 2),
             fmt_opt(row.brain_size, 2),
@@ -293,6 +339,12 @@ pub fn write_html_report(
             metric_series(rows, |r| r.life_mean),
             None,
             "#7c3aed",
+        ),
+        (
+            "Predation Rate",
+            metric_series(rows, |r| r.predation_rate),
+            Some(0.0),
+            "#be123c",
         ),
         ("Ate %", metric_series(rows, |r| r.ate_pct), None, "#c2410c"),
         (

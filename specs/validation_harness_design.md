@@ -65,11 +65,11 @@ sim-validation/
 ```
 sim-validation \
   --config <path>          # default: config/default.toml
-  --seed <u64>
+  --seed <u64>[,<u64>...]  # default: fixed benchmark suite
   --ticks <u64>            # default: 10000
   --report-every <u64>     # default: 1000
   --min-lifetime <u64>     # default: 30
-  --out <path>             # default: artifacts/validation/<ISO8601>_seed_<seed>/
+  --out <path>             # default: artifacts/validation/<ISO8601>_seed_<seed>/ or ..._seeds_<slug>/
   --baseline               # uniform random actions, bypasses brain eval
 ```
 
@@ -212,7 +212,7 @@ All computed on recently-deceased buffer except brain_size.
 | Metric      | Definition                                                                            |
 | ----------- | ------------------------------------------------------------------------------------- |
 | `life_mean` | mean lifetime ticks                                                                   |
-| `life_max`  | max lifetime ticks                                                                    |
+| `pred_rate` | interval predations / Σ(pop before tick), a proxy for competition per organism-turn   |
 | `ate%`      | % with consumptions > 0                                                               |
 | `cons_mean` | mean lifetime consumptions                                                            |
 | `brain`     | mean `(num_neurons + synapse_count)` over **living** population via `sim.organisms()` |
@@ -241,9 +241,9 @@ observations. Clamp ≥ 0. Baseline: 0.
 ```
 # _d = deceased (lifetime >= 30), _l = living | baselines: P 0.25, H 2.00, MI 0.00
 
-tick  | pop  |  +  |  -  | food | life_μ| life_max| ate% | cons_μ|brain_l|P(F|fd)|MI(S;A)|H(act)|util
- 1000 | 4872 | 312 | 340 | 8210 |  48.2 |     312 | 12.0 |   0.3 |  51.2 |  0.19 |  0.02 | 1.31 | 0.34
- 2000 | 4901 | 298 | 285 | 7840 |  52.1 |     408 | 18.0 |   0.5 |  50.8 |  0.24 |  0.05 | 1.25 | 0.37
+tick  | pop  |  +  |  -  | food | life_μ|pred_rt | ate% | cons_μ|brain_l|P(F|fd)|MI(S;A)|H(act)|util
+ 1000 | 4872 | 312 | 340 | 8210 |  48.2 | 0.0012 | 12.0 |   0.3 |  51.2 |  0.19 |  0.02 | 1.31 | 0.34
+ 2000 | 4901 | 298 | 285 | 7840 |  52.1 | 0.0018 | 18.0 |   0.5 |  50.8 |  0.24 |  0.05 | 1.25 | 0.37
 ```
 
 ### timeseries.csv
