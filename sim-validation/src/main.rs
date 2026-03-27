@@ -596,10 +596,8 @@ fn compute_aggregate_score(timeseries: &[IntervalMetrics]) -> AggregateScore {
         })
         .unwrap_or(0.0);
     let mi_component = mean_mi_sa.map(|value| clamp01(value / 0.10)).unwrap_or(0.0);
-    let entropy_target = 0.60 * h_baseline;
-    let entropy_width = 0.60 * h_baseline;
     let entropy_component = mean_h_action
-        .map(|value| 1.0 - clamp01((value - entropy_target).abs() / entropy_width.max(1e-6)))
+        .map(|value| entropy_component_score(value, h_baseline))
         .unwrap_or(0.0);
     let predation_component = mean_predation_rate
         .map(|value| clamp01(value / competitive_predation_reference))
@@ -884,9 +882,28 @@ fn clamp01(value: f64) -> f64 {
     value.clamp(0.0, 1.0)
 }
 
+fn entropy_component_score(mean_h_action: f64, h_baseline: f64) -> f64 {
+    // Prefer a small but nonzero action repertoire: competent agents should be
+    // decisive, but a lifetime histogram of exactly one action usually means
+    // collapse rather than adaptive sequential behavior.
+    let entropy_target = 0.35 * h_baseline;
+    let high_entropy_width = 0.45 * h_baseline;
+
+    if mean_h_action <= entropy_target {
+        let progress = clamp01(mean_h_action / entropy_target.max(f64::EPSILON));
+        0.25 + 0.75 * progress * progress
+    } else {
+        let excess =
+            clamp01((mean_h_action - entropy_target) / high_entropy_width.max(f64::EPSILON));
+        1.0 - excess
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ledger::N_ACTIONS;
+    use sim_types::ActionType;
 
     #[test]
     fn same_seed_yields_same_summary_hash() {
@@ -928,11 +945,101 @@ mod tests {
         let _ = fs::remove_dir_all(out_b);
     }
 
+    #[test]
+    fn entropy_component_prefers_small_purposeful_repertoires() {
+        let h_baseline = metrics::action_baseline_entropy();
+
+        let collapsed = entropy_component_score(
+            entropy_from_actions(&repeated(ActionType::Forward, 24)),
+            h_baseline,
+        );
+        let purposeful = entropy_component_score(
+            entropy_from_actions(&sequence_counts(&[
+                (ActionType::Forward, 15),
+                (ActionType::Consume, 3),
+                (ActionType::TurnLeft, 2),
+            ])),
+            h_baseline,
+        );
+        let exploratory = entropy_component_score(
+            entropy_from_actions(&sequence_counts(&[
+                (ActionType::Forward, 10),
+                (ActionType::Consume, 5),
+                (ActionType::TurnLeft, 5),
+                (ActionType::TurnRight, 5),
+            ])),
+            h_baseline,
+        );
+        let random_like = entropy_component_score(
+            entropy_from_actions(&sequence_counts(&[
+                (ActionType::Idle, 4),
+                (ActionType::TurnLeft, 4),
+                (ActionType::TurnRight, 4),
+                (ActionType::Forward, 4),
+                (ActionType::Consume, 4),
+                (ActionType::Reproduce, 4),
+            ])),
+            h_baseline,
+        );
+
+        assert!(purposeful > collapsed);
+        assert!(purposeful > exploratory);
+        assert!(collapsed > random_like);
+        assert!(exploratory > random_like);
+    }
+
     fn test_output_dir(suffix: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock should be after UNIX_EPOCH")
             .as_nanos();
         std::env::temp_dir().join(format!("sim-validation-test-{suffix}-{nanos}"))
+    }
+
+    fn repeated(action: ActionType, count: usize) -> Vec<ActionType> {
+        let mut actions = Vec::with_capacity(count);
+        for _ in 0..count {
+            actions.push(action);
+        }
+        actions
+    }
+
+    fn sequence_counts(counts: &[(ActionType, usize)]) -> Vec<ActionType> {
+        let total = counts.iter().map(|(_, count)| *count).sum();
+        let mut actions = Vec::with_capacity(total);
+        for (action, count) in counts {
+            for _ in 0..*count {
+                actions.push(*action);
+            }
+        }
+        actions
+    }
+
+    fn entropy_from_actions(actions: &[ActionType]) -> f64 {
+        let mut counts = [0_u64; N_ACTIONS];
+        for action in actions {
+            let idx = match action {
+                ActionType::Idle => 0,
+                ActionType::TurnLeft => 1,
+                ActionType::TurnRight => 2,
+                ActionType::Forward => 3,
+                ActionType::Consume => 4,
+                ActionType::Reproduce => 5,
+            };
+            counts[idx] = counts[idx].saturating_add(1);
+        }
+
+        let total: u64 = counts.iter().sum();
+        assert!(total > 0, "entropy test sequences must be non-empty");
+
+        let mut entropy = 0.0;
+        for count in counts {
+            if count == 0 {
+                continue;
+            }
+            let p = count as f64 / total as f64;
+            entropy -= p * p.log2();
+        }
+        entropy
     }
 }

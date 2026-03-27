@@ -565,17 +565,18 @@ fn append_interpretation_guidance(html: &mut String) {
     html.push_str("</ul>");
     html.push_str("<p>If this number is flat at baseline after thousands of generations, the evolutionary loop is broken. Check energy economics first (is eating actually rewarded enough to matter?), then mutation rates (can evolution explore fast enough?).</p>");
 
-    html.push_str("<h3>H(action) -- \"Are they interesting?\"</h3>");
-    html.push_str("<p>Shannon entropy of the action distribution. Measures behavioral diversity, not quality.</p>");
+    html.push_str("<h3>H(action) -- \"Are they decisive?\"</h3>");
+    html.push_str("<p>Shannon entropy of the action distribution. In the aggregate score, the preferred regime is low but nonzero entropy: a small, purposeful repertoire is better than random wandering, but better than single-action collapse too.</p>");
     html.push_str("<ul>");
-    html.push_str("<li><code>~= 0</code>: organism does one thing every tick (usually Idle). Degenerate. Common when metabolism is so punishing that any movement is a net loss.</li>");
+    html.push_str("<li><code>~= 0</code>: over-collapsed. Usually a rigid fixed-action policy rather than intelligent sequencing.</li>");
+    html.push_str("<li><code>~0.8-1.1</code> bits: preferred band. Typically means mostly forward movement, periodic consumes, and occasional turns when the state demands them.</li>");
     let _ = write!(
         html,
         "<li><code>~= log2(N_ACTIONS)</code> (<code>{baseline_entropy:.2}</code> for {N_ACTIONS} actions): uniform random. No preferences. Brain output is noise.</li>",
     );
-    html.push_str("<li><code>0.8-1.5</code> bits: organism has preferences but uses multiple actions. This is where directed foragers live - they mostly go Forward but turn when needed.</li>");
+    html.push_str("<li><code>1.5+</code> bits: too diffuse. There may be some structure, but too much behavior is still being left to randomness.</li>");
     html.push_str("</ul>");
-    html.push_str("<p>Read H together with P(Fwd|food). If H is intermediate AND P(Fwd|food) is above baseline, you have genuine adaptive behavior. If H is intermediate but P(Fwd|food) is at baseline, the organism has arbitrary preferences that are not connected to sensory input - a fixed motor program, not intelligence.</p>");
+    html.push_str("<p>Read H together with P(Fwd|food) and MI(S;A). The ideal is low entropy plus strong sensory coupling: a policy that commits hard within each situation while still using different actions across situations. Near-zero entropy with weak coupling is a dumb reflex. High entropy is just noise.</p>");
 
     html.push_str("<h3>MI(S;A) -- \"Do they react?\"</h3>");
     html.push_str("<p>Mutual information between what the organism sees and what it does. The general version of P(Fwd|food) - captures all sensory-action coupling, not just the food-ahead case.</p>");
