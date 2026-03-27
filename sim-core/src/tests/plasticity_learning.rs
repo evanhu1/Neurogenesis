@@ -700,7 +700,10 @@ fn run_delayed_reward_sequence(
     organism.energy += 20.0;
     apply_runtime_weight_updates(&mut organism, 0.0);
 
-    (food_consume_edge(&organism).weight, eligibility_before_reward)
+    (
+        food_consume_edge(&organism).weight,
+        eligibility_before_reward,
+    )
 }
 
 #[test]

@@ -332,4 +332,3 @@ pub struct TickDelta {
     pub food_spawned: Vec<FoodState>,
     pub metrics: MetricsSnapshot,
 }
-

@@ -14,7 +14,10 @@
       "Bash(UPDATE_GOLDEN=1 cargo test:*)",
       "Bash(cargo tree:*)",
       "Bash(npm install:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ]
   }
 }

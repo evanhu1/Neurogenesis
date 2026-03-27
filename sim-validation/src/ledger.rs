@@ -173,4 +173,3 @@ fn action_index(action: ActionType) -> usize {
         ActionType::Reproduce => 5,
     }
 }
-

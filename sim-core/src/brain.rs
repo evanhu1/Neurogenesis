@@ -418,7 +418,12 @@ pub(crate) fn evaluate_brain(
     } else {
         let selected_idx = action_index(result.selected_action);
         scratch.action_credit_signals.fill(0.0);
-        for (idx, probability) in action_policy.action_probabilities.iter().copied().enumerate() {
+        for (idx, probability) in action_policy
+            .action_probabilities
+            .iter()
+            .copied()
+            .enumerate()
+        {
             if idx == selected_idx {
                 scratch.action_credit_signals[idx] = 1.0 - probability;
             }
