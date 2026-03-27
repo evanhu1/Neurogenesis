@@ -497,7 +497,7 @@ fn inter_recurrent_eligibility_uses_prev_inter_pre_signal_only_for_inter_targets
 }
 
 #[test]
-fn action_target_eligibility_uses_centered_logits_not_sigmoid_activation() {
+fn action_target_eligibility_uses_sampled_action_advantage_signal() {
     let mut genome = test_genome();
     genome.num_neurons = 0;
     genome.num_synapses = 0;
@@ -571,11 +571,23 @@ fn action_target_eligibility_uses_centered_logits_not_sigmoid_activation() {
     let sensory_activation = organism.brain.sensory[0].neuron.activation;
     let edge_pending = organism.brain.sensory[0].synapses[0].pending_coactivation;
     let logit0 = eval.action_logits[0];
-    let logit_mean = eval.action_logits.iter().sum::<f32>() / eval.action_logits.len() as f32;
-    let expected_centered_logit = sensory_activation * (logit0 - logit_mean);
+    let max_logit = eval
+        .action_logits
+        .iter()
+        .copied()
+        .fold(f32::NEG_INFINITY, f32::max);
+    let temperature = 0.5_f32;
+    let selected_probability = ((logit0 - max_logit) / temperature).exp()
+        / eval
+            .action_logits
+            .iter()
+            .copied()
+            .map(|logit| ((logit - max_logit) / temperature).exp())
+            .sum::<f32>();
+    let expected_advantage_signal = sensory_activation * (1.0 - selected_probability);
     let sigmoid_expected = sensory_activation * (1.0 / (1.0 + (-logit0).exp()));
 
-    assert!((edge_pending - expected_centered_logit).abs() < 1.0e-6);
+    assert!((edge_pending - expected_advantage_signal).abs() < 1.0e-6);
     assert!((edge_pending - sigmoid_expected).abs() > 1.0e-3);
 }
 

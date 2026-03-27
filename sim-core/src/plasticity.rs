@@ -37,7 +37,7 @@ pub(crate) fn compute_pending_coactivations(
             &mut sensory.synapses,
             sensory.neuron.activation,
             &scratch.inter_activations,
-            &scratch.action_post_signals,
+            &scratch.action_credit_signals,
         );
     }
     #[cfg(feature = "profiling")]
@@ -51,7 +51,7 @@ pub(crate) fn compute_pending_coactivations(
             pre_idx,
             &scratch.prev_inter,
             &scratch.inter_activations,
-            &scratch.action_post_signals,
+            &scratch.action_credit_signals,
         );
     }
     #[cfg(feature = "profiling")]
@@ -128,7 +128,7 @@ fn compute_pending_sensory_edge_coactivations(
     edges: &mut [SynapseEdge],
     pre_activation: f32,
     inter_activations: &[f32],
-    action_post_signals: &[f32; ACTION_COUNT],
+    action_credit_signals: &[f32; ACTION_COUNT],
 ) {
     let (inter_edges, action_edges) = split_inter_and_action_edges_mut(edges);
 
@@ -142,7 +142,7 @@ fn compute_pending_sensory_edge_coactivations(
 
     for edge in action_edges {
         let idx = edge.post_neuron_id.0.wrapping_sub(ACTION_ID_BASE) as usize;
-        let Some(post_activation) = action_post_signals.get(idx).copied() else {
+        let Some(post_activation) = action_credit_signals.get(idx).copied() else {
             continue;
         };
         edge.pending_coactivation = pre_activation * post_activation;
@@ -154,7 +154,7 @@ fn compute_pending_inter_edge_coactivations(
     pre_idx: usize,
     prev_inter_activations: &[f32],
     inter_activations: &[f32],
-    action_post_signals: &[f32; ACTION_COUNT],
+    action_credit_signals: &[f32; ACTION_COUNT],
 ) {
     let Some(pre_prev) = prev_inter_activations.get(pre_idx).copied() else {
         return;
@@ -175,7 +175,7 @@ fn compute_pending_inter_edge_coactivations(
 
     for edge in action_edges {
         let idx = edge.post_neuron_id.0.wrapping_sub(ACTION_ID_BASE) as usize;
-        let Some(post_activation) = action_post_signals.get(idx).copied() else {
+        let Some(post_activation) = action_credit_signals.get(idx).copied() else {
             continue;
         };
         edge.pending_coactivation = pre_current * post_activation;
@@ -191,13 +191,14 @@ fn apply_edge_weight_update_and_fold_pending(
 ) {
     let instantaneous_scale = 1.0 - eligibility_retention;
     for edge in edges {
+        let next_eligibility = eligibility_retention * edge.eligibility
+            + instantaneous_scale * edge.pending_coactivation;
         if apply_weight_update {
-            let updated_weight = edge.weight + eta * dopamine * edge.eligibility
+            let updated_weight = edge.weight + eta * dopamine * next_eligibility
                 - PLASTIC_WEIGHT_DECAY * edge.weight;
             edge.weight = constrain_weight(updated_weight);
         }
-        edge.eligibility = eligibility_retention * edge.eligibility
-            + instantaneous_scale * edge.pending_coactivation;
+        edge.eligibility = next_eligibility;
         edge.pending_coactivation = 0.0;
     }
 }

@@ -50,7 +50,7 @@ pub(crate) struct BrainScratch {
     pub(crate) prev_inter: Vec<f32>,
     pub(crate) prev_inter_states: Vec<f32>,
     pub(crate) inter_activations: Vec<f32>,
-    pub(crate) action_post_signals: [f32; ACTION_COUNT],
+    pub(crate) action_credit_signals: [f32; ACTION_COUNT],
 }
 
 impl BrainScratch {
@@ -60,7 +60,7 @@ impl BrainScratch {
             prev_inter: Vec::new(),
             prev_inter_states: Vec::new(),
             inter_activations: Vec::new(),
-            action_post_signals: [0.0; ACTION_COUNT],
+            action_credit_signals: [0.0; ACTION_COUNT],
         }
     }
 }
@@ -397,17 +397,29 @@ pub(crate) fn evaluate_brain(
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     result.action_logits = action_inputs;
-    let logit_mean = action_inputs.iter().sum::<f32>() / ACTION_COUNT as f32;
-    for (idx, logit) in action_inputs.iter().copied().enumerate() {
-        scratch.action_post_signals[idx] = logit - logit_mean;
-    }
     for (idx, action) in brain.action.iter_mut().enumerate() {
         debug_assert_eq!(action_index(action.action_type), idx);
         action.logit = action_inputs[idx];
     }
 
-    result.selected_action =
-        select_action_from_logits(result.action_logits, action_temperature, action_sample);
+    if let Some(action_probabilities) =
+        action_probabilities_from_logits(result.action_logits, action_temperature)
+    {
+        result.selected_action = select_action_from_probabilities(action_probabilities, action_sample);
+        let selected_idx = action_index(result.selected_action);
+        let action_credit_probabilities =
+            action_credit_probabilities_from_logits(result.action_logits, action_temperature);
+        for (idx, probability) in action_credit_probabilities.iter().copied().enumerate() {
+            scratch.action_credit_signals[idx] = if idx == selected_idx {
+                1.0 - probability
+            } else {
+                -probability
+            };
+        }
+    } else {
+        result.selected_action = ActionType::Idle;
+        scratch.action_credit_signals.fill(0.0);
+    }
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::ActionActivationResolve, stage_started.elapsed());
 
@@ -424,11 +436,10 @@ pub fn derive_active_action_neuron_id(organism: &OrganismState) -> Option<Neuron
         .map(|action_neuron| action_neuron.neuron_id)
 }
 
-fn select_action_from_logits(
+fn action_probabilities_from_logits(
     action_logits: [f32; ACTION_COUNT],
     action_temperature: f32,
-    action_sample: f32,
-) -> ActionType {
+) -> Option<[f32; ACTION_COUNT]> {
     let temperature = action_temperature.max(MIN_ACTION_TEMPERATURE);
     let mut weights = [0.0_f32; ACTION_COUNT];
     let mut weight_sum = 0.0_f32;
@@ -441,7 +452,7 @@ fn select_action_from_logits(
     }
 
     if !best_positive_logit.is_finite() {
-        return ActionType::Idle;
+        return None;
     }
 
     for positive_logit in &mut weights {
@@ -460,17 +471,68 @@ fn select_action_from_logits(
 
     if !weight_sum.is_finite() || weight_sum <= 0.0 {
         let best_idx = argmax_index(&action_logits);
-        return if action_logits[best_idx] > 0.0 {
-            ActionType::ALL[best_idx]
-        } else {
-            ActionType::Idle
-        };
+        if action_logits[best_idx] > 0.0 {
+            let mut probabilities = [0.0_f32; ACTION_COUNT];
+            probabilities[best_idx] = 1.0;
+            return Some(probabilities);
+        }
+        return None;
     }
 
+    for weight in &mut weights {
+        *weight /= weight_sum;
+    }
+    Some(weights)
+}
+
+fn action_credit_probabilities_from_logits(
+    action_logits: [f32; ACTION_COUNT],
+    action_temperature: f32,
+) -> [f32; ACTION_COUNT] {
+    let temperature = action_temperature.max(MIN_ACTION_TEMPERATURE);
+    let best_logit = action_logits
+        .iter()
+        .copied()
+        .fold(f32::NEG_INFINITY, f32::max);
+    if !best_logit.is_finite() {
+        let uniform_probability = 1.0 / ACTION_COUNT as f32;
+        return [uniform_probability; ACTION_COUNT];
+    }
+
+    let mut weights = [0.0_f32; ACTION_COUNT];
+    let mut weight_sum = 0.0_f32;
+    for (idx, logit) in action_logits.iter().copied().enumerate() {
+        let scaled = (logit - best_logit) / temperature;
+        let weight = scaled.exp();
+        if weight.is_finite() {
+            weights[idx] = weight;
+            weight_sum += weight;
+        }
+    }
+
+    if !weight_sum.is_finite() || weight_sum <= 0.0 {
+        let uniform_probability = 1.0 / ACTION_COUNT as f32;
+        return [uniform_probability; ACTION_COUNT];
+    }
+
+    for weight in &mut weights {
+        *weight /= weight_sum;
+    }
+    weights
+}
+
+fn select_action_from_probabilities(
+    action_probabilities: [f32; ACTION_COUNT],
+    action_sample: f32,
+) -> ActionType {
+    let weight_sum = action_probabilities.iter().sum::<f32>();
+    if !weight_sum.is_finite() || weight_sum <= 0.0 {
+        return ActionType::Idle;
+    }
     let sample = action_sample.clamp(0.0, 1.0 - f32::EPSILON) * weight_sum;
     let mut cumulative = 0.0_f32;
-    for (idx, weight) in weights.iter().copied().enumerate() {
-        cumulative += weight;
+    for (idx, probability) in action_probabilities.iter().copied().enumerate() {
+        cumulative += probability;
         if sample < cumulative {
             return ActionType::ALL[idx];
         }
