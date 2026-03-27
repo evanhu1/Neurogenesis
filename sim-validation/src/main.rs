@@ -37,7 +37,7 @@ struct Cli {
         default_value = DEFAULT_SEEDS
     )]
     seeds: Vec<u64>,
-    #[arg(long, default_value_t = 50_000)]
+    #[arg(long, default_value_t = 100_000)]
     ticks: u64,
     #[arg(long, default_value_t = 2_500, value_parser = clap::value_parser!(u64).range(1..))]
     report_every: u64,
