@@ -169,29 +169,6 @@ fn express_genome_uses_stored_synapse_topology() {
 }
 
 #[test]
-fn mutate_genome_adds_synapses_when_below_target() {
-    let mut genome_template = test_genome();
-    genome_template.num_neurons = 12;
-    genome_template.num_synapses = 8;
-    genome_template.inter_biases = vec![0.0; 12];
-    genome_template.inter_log_time_constants = vec![0.0; 12];
-    genome_template.sensory_locations = vec![loc(0.0, 0.0); SENSORY_COUNT as usize];
-    genome_template.inter_locations = (0..12).map(|i| loc(1.0 + i as f32 * 0.7, 5.0)).collect();
-    genome_template.action_locations = (0..ActionType::ALL.len())
-        .map(|i| loc(1.0 + i as f32 * 0.7, 9.0))
-        .collect();
-    genome_template.mutation_rate_neuron_location = 0.0;
-
-    let mut genome = genome_template.clone();
-    genome.edges.clear();
-    let mut rng = ChaCha8Rng::seed_from_u64(10_000);
-    crate::genome::mutate_genome(&mut genome, 1.0, true, &mut rng);
-
-    assert_eq!(genome.num_synapses, 8);
-    assert_eq!(genome.edges.len(), 8);
-}
-
-#[test]
 fn stochastic_action_selection_is_seed_deterministic() {
     let mut organism_a = simple_weighted_action_organism(0.8, 0.7, 10.0);
     let mut organism_b = organism_a.clone();

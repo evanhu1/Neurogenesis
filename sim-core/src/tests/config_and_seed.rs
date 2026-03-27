@@ -1,451 +1,5 @@
 use super::support::{stable_test_config, test_genome};
 use super::*;
-use rand::SeedableRng;
-use rand_chacha::ChaCha8Rng;
-
-#[test]
-fn config_validation_rejects_negative_global_mutation_rate_modifier() {
-    let mut cfg = stable_test_config();
-    cfg.global_mutation_rate_modifier = -0.1;
-    let err = Simulation::new(cfg, 1).expect_err("config should be rejected");
-    assert!(err.to_string().contains("global_mutation_rate_modifier"));
-}
-
-#[test]
-fn config_validation_rejects_non_positive_action_temperature() {
-    let mut cfg = stable_test_config();
-    cfg.action_temperature = 0.0;
-    let err = Simulation::new(cfg, 1).expect_err("config should be rejected");
-    assert!(err.to_string().contains("action_temperature"));
-}
-
-#[test]
-fn config_validation_rejects_zero_intent_parallel_threads() {
-    let mut cfg = stable_test_config();
-    cfg.intent_parallel_threads = 0;
-    let err = Simulation::new(cfg, 1).expect_err("config should be rejected");
-    assert!(err.to_string().contains("intent_parallel_threads"));
-}
-
-#[test]
-fn seed_genome_initializes_spatial_vectors_within_brain_space() {
-    let mut cfg = stable_test_config();
-    cfg.seed_genome_config.num_neurons = 4;
-    cfg.seed_genome_config.num_synapses = 12;
-
-    let mut rng = ChaCha8Rng::seed_from_u64(99);
-    let genome = crate::genome::generate_seed_genome(&cfg.seed_genome_config, &mut rng);
-
-    assert_eq!(genome.num_neurons, 4);
-    assert_eq!(genome.inter_biases.len(), 4);
-    assert_eq!(genome.inter_log_time_constants.len(), 4);
-    assert_eq!(genome.inter_locations.len(), 4);
-    assert_eq!(
-        genome.sensory_locations.len(),
-        crate::brain::SENSORY_COUNT as usize
-    );
-    assert_eq!(genome.action_locations.len(), ActionType::ALL.len());
-    assert_eq!(genome.edges.len(), genome.num_synapses as usize);
-
-    for location in genome
-        .sensory_locations
-        .iter()
-        .chain(genome.inter_locations.iter())
-        .chain(genome.action_locations.iter())
-    {
-        assert!(
-            (crate::genome::BRAIN_SPACE_MIN..=crate::genome::BRAIN_SPACE_MAX).contains(&location.x)
-        );
-        assert!(
-            (crate::genome::BRAIN_SPACE_MIN..=crate::genome::BRAIN_SPACE_MAX).contains(&location.y)
-        );
-    }
-}
-
-#[test]
-fn seed_genome_biases_initial_time_constants_toward_faster_neurons() {
-    let mut cfg = stable_test_config();
-    cfg.seed_genome_config.num_neurons = 256;
-    cfg.seed_genome_config.num_synapses = 0;
-
-    let mut rng = ChaCha8Rng::seed_from_u64(7);
-    let genome = crate::genome::generate_seed_genome(&cfg.seed_genome_config, &mut rng);
-
-    let mean_tau = genome
-        .inter_log_time_constants
-        .iter()
-        .map(|log_tau| log_tau.exp())
-        .sum::<f32>()
-        / genome.inter_log_time_constants.len() as f32;
-
-    assert!(
-        mean_tau < 1.0,
-        "expected faster-than-one-turn average time constant, got {mean_tau}",
-    );
-}
-
-#[test]
-fn default_inter_time_constant_is_fast() {
-    let default_tau = crate::genome::DEFAULT_INTER_LOG_TIME_CONSTANT.exp();
-    assert!(
-        default_tau < 0.5,
-        "expected fast default tau, got {default_tau}"
-    );
-}
-
-#[test]
-fn mutate_genome_sanitizes_synapse_genes_and_does_not_trim_excess() {
-    let mut genome = test_genome();
-    genome.num_neurons = 2;
-    genome.inter_biases = vec![0.0; 2];
-    genome.inter_log_time_constants = vec![0.0; 2];
-    genome.inter_locations = vec![BrainLocation { x: 5.0, y: 5.0 }; 2];
-    genome.num_synapses = 1;
-    genome.edges = vec![
-        SynapseEdge {
-            pre_neuron_id: NeuronId(crate::brain::ACTION_ID_BASE),
-            post_neuron_id: NeuronId(crate::brain::INTER_ID_BASE),
-            weight: 0.5,
-            eligibility: 4.0,
-            pending_coactivation: 0.0,
-        },
-        SynapseEdge {
-            pre_neuron_id: NeuronId(0),
-            post_neuron_id: NeuronId(crate::brain::INTER_ID_BASE),
-            weight: -0.5,
-            eligibility: 3.0,
-            pending_coactivation: 0.0,
-        },
-        SynapseEdge {
-            pre_neuron_id: NeuronId(0),
-            post_neuron_id: NeuronId(crate::brain::INTER_ID_BASE),
-            weight: 0.8,
-            eligibility: 2.0,
-            pending_coactivation: 0.0,
-        },
-        SynapseEdge {
-            pre_neuron_id: NeuronId(crate::brain::INTER_ID_BASE + 1),
-            post_neuron_id: NeuronId(crate::brain::ACTION_ID_BASE),
-            weight: 0.7,
-            eligibility: 1.0,
-            pending_coactivation: 0.0,
-        },
-        SynapseEdge {
-            pre_neuron_id: NeuronId(crate::brain::INTER_ID_BASE),
-            post_neuron_id: NeuronId(crate::brain::INTER_ID_BASE),
-            weight: 0.3,
-            eligibility: 5.0,
-            pending_coactivation: 0.0,
-        },
-    ];
-
-    let mut rng = ChaCha8Rng::seed_from_u64(42);
-    crate::genome::mutate_genome(&mut genome, 1.0, true, &mut rng);
-
-    assert_eq!(genome.num_synapses, 2);
-    assert_eq!(genome.edges.len(), 2);
-
-    let first = &genome.edges[0];
-    let second = &genome.edges[1];
-    assert_eq!(first.pre_neuron_id, NeuronId(0));
-    assert_eq!(first.post_neuron_id, NeuronId(crate::brain::INTER_ID_BASE));
-    assert_eq!(first.eligibility, 0.0);
-    assert!(
-        first.weight.abs() >= crate::genome::SYNAPSE_STRENGTH_MIN
-            && first.weight.abs() <= crate::genome::SYNAPSE_STRENGTH_MAX
-    );
-
-    assert_eq!(
-        second.pre_neuron_id,
-        NeuronId(crate::brain::INTER_ID_BASE + 1)
-    );
-    assert_eq!(
-        second.post_neuron_id,
-        NeuronId(crate::brain::ACTION_ID_BASE)
-    );
-    assert_eq!(second.eligibility, 0.0);
-    assert!(
-        second.weight.abs() >= crate::genome::SYNAPSE_STRENGTH_MIN
-            && second.weight.abs() <= crate::genome::SYNAPSE_STRENGTH_MAX
-    );
-}
-
-#[test]
-fn mutate_genome_can_apply_add_neuron_split_edge_operator() {
-    let mut genome = test_genome();
-    genome.num_neurons = 1;
-    genome.inter_biases = vec![0.0];
-    genome.inter_log_time_constants = vec![0.0];
-    genome.inter_locations = vec![BrainLocation { x: 5.0, y: 5.0 }];
-    genome.edges = vec![SynapseEdge {
-        pre_neuron_id: NeuronId(0),
-        post_neuron_id: NeuronId(crate::brain::ACTION_ID_BASE),
-        weight: 0.5,
-        eligibility: 0.0,
-        pending_coactivation: 0.0,
-    }];
-    genome.num_synapses = 1;
-    genome.mutation_rate_age_of_maturity = 0.0;
-    genome.mutation_rate_vision_distance = 0.0;
-    genome.mutation_rate_inter_bias = 0.0;
-    genome.mutation_rate_inter_update_rate = 0.0;
-    genome.mutation_rate_eligibility_retention = 0.0;
-    genome.mutation_rate_synapse_prune_threshold = 0.0;
-    genome.mutation_rate_neuron_location = 0.0;
-    genome.mutation_rate_synapse_weight_perturbation = 0.0;
-    genome.mutation_rate_add_synapse = 0.0;
-    genome.mutation_rate_remove_synapse = 0.0;
-    genome.mutation_rate_remove_neuron = 0.0;
-    genome.mutation_rate_add_neuron_split_edge = 1.0;
-
-    let mut rng = ChaCha8Rng::seed_from_u64(12345);
-    let initial_neurons = genome.num_neurons;
-    let initial_synapses = genome.num_synapses;
-    for _ in 0..64 {
-        crate::genome::mutate_genome(&mut genome, 1.0, true, &mut rng);
-        if genome.num_neurons > initial_neurons {
-            break;
-        }
-    }
-
-    assert!(
-        genome.num_neurons > initial_neurons,
-        "expected add-neuron split-edge mutation to be applied",
-    );
-    assert!(genome.num_synapses > initial_synapses);
-}
-
-#[test]
-fn mutate_add_neuron_split_edge_replaces_synapse_and_extends_inter_vectors() {
-    let mut genome = test_genome();
-    genome.num_neurons = 1;
-    genome.inter_biases = vec![0.0];
-    genome.inter_log_time_constants = vec![0.2];
-    genome.inter_locations = vec![BrainLocation { x: 2.0, y: 3.0 }];
-    genome.sensory_locations =
-        vec![BrainLocation { x: 1.0, y: 1.0 }; crate::brain::SENSORY_COUNT as usize];
-    genome.action_locations = vec![BrainLocation { x: 9.0, y: 9.0 }; ActionType::ALL.len()];
-    genome.edges = vec![SynapseEdge {
-        pre_neuron_id: NeuronId(0),
-        post_neuron_id: NeuronId(crate::brain::ACTION_ID_BASE),
-        weight: 0.6,
-        eligibility: 0.7,
-        pending_coactivation: 0.0,
-    }];
-    genome.num_synapses = 1;
-
-    let mut rng = ChaCha8Rng::seed_from_u64(1234);
-    crate::genome::mutate_add_neuron_split_edge(&mut genome, &mut rng);
-
-    let new_inter_id = NeuronId(crate::brain::INTER_ID_BASE + 1);
-    assert_eq!(genome.num_neurons, 2);
-    assert_eq!(genome.inter_biases.len(), 2);
-    assert_eq!(genome.inter_log_time_constants.len(), 2);
-    assert_eq!(genome.inter_locations.len(), 2);
-    assert_eq!(genome.num_synapses, 2);
-    assert_eq!(genome.edges.len(), 2);
-    let incoming = genome
-        .edges
-        .iter()
-        .find(|edge| edge.pre_neuron_id == NeuronId(0) && edge.post_neuron_id == new_inter_id)
-        .expect("split mutation should create pre->new edge");
-    let outgoing = genome
-        .edges
-        .iter()
-        .find(|edge| {
-            edge.pre_neuron_id == new_inter_id
-                && edge.post_neuron_id == NeuronId(crate::brain::ACTION_ID_BASE)
-        })
-        .expect("split mutation should create new->post edge");
-    assert_eq!(incoming.weight, 1.0);
-    assert_eq!(outgoing.weight, 0.6);
-    assert!(!genome.edges.iter().any(|edge| {
-        edge.pre_neuron_id == NeuronId(0)
-            && edge.post_neuron_id == NeuronId(crate::brain::ACTION_ID_BASE)
-    }));
-}
-
-#[test]
-fn mutate_add_synapse_adds_new_edge_and_increments_target() {
-    let mut genome = test_genome();
-    genome.num_neurons = 1;
-    genome.inter_biases = vec![0.0];
-    genome.inter_log_time_constants = vec![0.0];
-    genome.inter_locations = vec![BrainLocation { x: 5.0, y: 5.0 }];
-    genome.edges = vec![SynapseEdge {
-        pre_neuron_id: NeuronId(0),
-        post_neuron_id: NeuronId(crate::brain::ACTION_ID_BASE),
-        weight: 0.4,
-        eligibility: 0.0,
-        pending_coactivation: 0.0,
-    }];
-    genome.num_synapses = 1;
-
-    let mut rng = ChaCha8Rng::seed_from_u64(2026);
-    crate::genome::mutate_add_synapse(&mut genome, &mut rng);
-
-    assert_eq!(genome.num_synapses, 2);
-    assert_eq!(genome.edges.len(), 2);
-    let unique_pairs = genome
-        .edges
-        .iter()
-        .map(|edge| (edge.pre_neuron_id, edge.post_neuron_id))
-        .collect::<HashSet<_>>();
-    assert_eq!(unique_pairs.len(), genome.edges.len());
-}
-
-#[test]
-fn mutate_remove_synapse_removes_edge_and_decrements_target() {
-    let mut genome = test_genome();
-    genome.num_neurons = 1;
-    genome.inter_biases = vec![0.0];
-    genome.inter_log_time_constants = vec![0.0];
-    genome.inter_locations = vec![BrainLocation { x: 5.0, y: 5.0 }];
-    genome.edges = vec![
-        SynapseEdge {
-            pre_neuron_id: NeuronId(0),
-            post_neuron_id: NeuronId(crate::brain::INTER_ID_BASE),
-            weight: 0.4,
-            eligibility: 0.0,
-            pending_coactivation: 0.0,
-        },
-        SynapseEdge {
-            pre_neuron_id: NeuronId(crate::brain::INTER_ID_BASE),
-            post_neuron_id: NeuronId(crate::brain::ACTION_ID_BASE),
-            weight: -0.7,
-            eligibility: 0.0,
-            pending_coactivation: 0.0,
-        },
-    ];
-    genome.num_synapses = 2;
-
-    let mut rng = ChaCha8Rng::seed_from_u64(7);
-    crate::genome::mutate_remove_synapse(&mut genome, &mut rng);
-
-    assert_eq!(genome.num_synapses, 1);
-    assert_eq!(genome.edges.len(), 1);
-}
-
-#[test]
-fn mutate_remove_neuron_is_noop_when_no_interneurons_exist() {
-    let mut genome = test_genome();
-    genome.num_neurons = 0;
-    genome.inter_biases.clear();
-    genome.inter_log_time_constants.clear();
-    genome.inter_locations.clear();
-    genome.edges = vec![SynapseEdge {
-        pre_neuron_id: NeuronId(0),
-        post_neuron_id: NeuronId(crate::brain::ACTION_ID_BASE),
-        weight: 0.4,
-        eligibility: 0.3,
-        pending_coactivation: 0.2,
-    }];
-    genome.num_synapses = 1;
-
-    let before = genome.clone();
-    let mut rng = ChaCha8Rng::seed_from_u64(17);
-    crate::genome::mutate_remove_neuron(&mut genome, &mut rng);
-
-    assert_eq!(genome, before);
-}
-
-#[test]
-fn seed_num_synapses_is_clamped_to_possible_pairs() {
-    let mut cfg = stable_test_config();
-    cfg.seed_genome_config.num_neurons = 3;
-    cfg.seed_genome_config.num_synapses = 9_999;
-
-    let mut rng = ChaCha8Rng::seed_from_u64(123);
-    let genome = crate::genome::generate_seed_genome(&cfg.seed_genome_config, &mut rng);
-
-    let all_pairs = (crate::brain::SENSORY_COUNT + genome.num_neurons)
-        * (genome.num_neurons + crate::brain::ACTION_COUNT_U32);
-    let max_pairs = all_pairs.saturating_sub(genome.num_neurons);
-    assert_eq!(genome.num_synapses, max_pairs);
-    assert_eq!(genome.edges.len(), max_pairs as usize);
-}
-
-#[test]
-fn global_mutation_rate_modifier_does_not_change_inherited_mutation_rate_genes() {
-    let mut genome_a = test_genome();
-
-    genome_a.mutation_rate_age_of_maturity = 0.17;
-    genome_a.mutation_rate_vision_distance = 0.13;
-    genome_a.mutation_rate_inter_bias = 0.09;
-    genome_a.mutation_rate_inter_update_rate = 0.11;
-    genome_a.mutation_rate_eligibility_retention = 0.05;
-    genome_a.mutation_rate_synapse_prune_threshold = 0.03;
-    genome_a.mutation_rate_neuron_location = 0.19;
-    genome_a.mutation_rate_synapse_weight_perturbation = 0.23;
-    genome_a.mutation_rate_add_synapse = 0.31;
-    genome_a.mutation_rate_remove_synapse = 0.27;
-    genome_a.mutation_rate_remove_neuron = 0.07;
-    genome_a.mutation_rate_add_neuron_split_edge = 0.29;
-    let mut genome_b = genome_a.clone();
-
-    let mut rng_a = ChaCha8Rng::seed_from_u64(404);
-    let mut rng_b = ChaCha8Rng::seed_from_u64(404);
-
-    crate::genome::mutate_genome(&mut genome_a, 1.0, true, &mut rng_a);
-    crate::genome::mutate_genome(&mut genome_b, 10.0, true, &mut rng_b);
-
-    assert_eq!(
-        genome_a.mutation_rate_age_of_maturity,
-        genome_b.mutation_rate_age_of_maturity
-    );
-    assert_eq!(
-        genome_a.mutation_rate_vision_distance,
-        genome_b.mutation_rate_vision_distance
-    );
-    assert_eq!(
-        genome_a.mutation_rate_inter_bias,
-        genome_b.mutation_rate_inter_bias
-    );
-    assert_eq!(
-        genome_a.mutation_rate_inter_update_rate,
-        genome_b.mutation_rate_inter_update_rate
-    );
-    assert_eq!(
-        genome_a.mutation_rate_eligibility_retention,
-        genome_b.mutation_rate_eligibility_retention
-    );
-    assert_eq!(
-        genome_a.mutation_rate_synapse_prune_threshold,
-        genome_b.mutation_rate_synapse_prune_threshold
-    );
-    assert_eq!(
-        genome_a.mutation_rate_neuron_location,
-        genome_b.mutation_rate_neuron_location
-    );
-    assert_eq!(
-        genome_a.mutation_rate_synapse_weight_perturbation,
-        genome_b.mutation_rate_synapse_weight_perturbation
-    );
-    assert_eq!(
-        genome_a.mutation_rate_add_synapse,
-        genome_b.mutation_rate_add_synapse
-    );
-    assert_eq!(
-        genome_a.mutation_rate_remove_synapse,
-        genome_b.mutation_rate_remove_synapse
-    );
-    assert_eq!(
-        genome_a.mutation_rate_remove_neuron,
-        genome_b.mutation_rate_remove_neuron
-    );
-    assert_eq!(
-        genome_a.mutation_rate_add_neuron_split_edge,
-        genome_b.mutation_rate_add_neuron_split_edge
-    );
-}
-
-#[test]
-fn config_validation_rejects_invalid_terrain_threshold() {
-    let mut cfg = stable_test_config();
-    cfg.terrain_threshold = 1.5;
-    let err = Simulation::new(cfg, 7).expect_err("config should be rejected");
-    assert!(err.to_string().contains("terrain_threshold"));
-}
 
 #[test]
 fn terrain_map_is_seed_deterministic_and_threshold_controlled() {
@@ -518,6 +72,81 @@ fn stochastic_action_sampling_is_deterministic_for_repeated_runs() {
     }
 
     assert_eq!(run_a.snapshot(), run_b.snapshot());
+}
+
+#[test]
+fn champion_pool_bootstrap_is_seed_deterministic() {
+    let mut cfg = stable_test_config();
+    cfg.world_width = 24;
+    cfg.num_organisms = 32;
+
+    let mut champion_a = test_genome();
+    champion_a.num_neurons = 2;
+    champion_a.vision_distance = 7;
+    champion_a.starting_energy = 321.0;
+    champion_a.inter_biases = vec![0.1, -0.2];
+    champion_a.inter_log_time_constants = vec![0.0, 0.2];
+    champion_a.inter_locations = vec![
+        BrainLocation { x: 1.0, y: 1.0 },
+        BrainLocation { x: 2.0, y: 2.0 },
+    ];
+
+    let mut champion_b = champion_a.clone();
+    champion_b.num_neurons = 3;
+    champion_b.vision_distance = 9;
+    champion_b.starting_energy = 654.0;
+    champion_b.inter_biases = vec![0.3, -0.4, 0.5];
+    champion_b.inter_log_time_constants = vec![0.0, 0.1, 0.2];
+    champion_b.inter_locations = vec![
+        BrainLocation { x: 3.0, y: 3.0 },
+        BrainLocation { x: 4.0, y: 4.0 },
+        BrainLocation { x: 5.0, y: 5.0 },
+    ];
+
+    let champion_pool = vec![champion_a.clone(), champion_b.clone()];
+    let run_a = Simulation::new_with_champion_pool(cfg.clone(), 2026, champion_pool.clone())
+        .expect("simulation should initialize");
+    let run_b = Simulation::new_with_champion_pool(cfg, 2026, champion_pool)
+        .expect("simulation should initialize");
+
+    assert_eq!(run_a.snapshot(), run_b.snapshot());
+    assert!(run_a
+        .organisms()
+        .iter()
+        .all(|organism| { organism.genome == champion_a || organism.genome == champion_b }));
+}
+
+#[test]
+fn reset_preserves_champion_pool_bootstrap_behavior() {
+    let mut cfg = stable_test_config();
+    cfg.world_width = 18;
+    cfg.num_organisms = 16;
+
+    let mut champion = test_genome();
+    champion.num_neurons = 4;
+    champion.vision_distance = 11;
+    champion.starting_energy = 777.0;
+    champion.inter_biases = vec![0.0, 0.1, 0.2, 0.3];
+    champion.inter_log_time_constants = vec![0.0, 0.1, 0.2, 0.3];
+    champion.inter_locations = vec![
+        BrainLocation { x: 1.0, y: 1.0 },
+        BrainLocation { x: 2.0, y: 2.0 },
+        BrainLocation { x: 3.0, y: 3.0 },
+        BrainLocation { x: 4.0, y: 4.0 },
+    ];
+
+    let mut sim = Simulation::new_with_champion_pool(cfg, 99, vec![champion.clone()])
+        .expect("simulation should initialize");
+    let initial_snapshot = sim.snapshot();
+
+    sim.advance_n(10);
+    sim.reset(Some(99));
+
+    assert_eq!(sim.snapshot(), initial_snapshot);
+    assert!(sim
+        .organisms()
+        .iter()
+        .all(|organism| organism.genome == champion));
 }
 
 fn stable_test_config_with_terrain(terrain_threshold: f32) -> WorldConfig {

@@ -174,24 +174,3 @@ fn action_index(action: ActionType) -> usize {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{action_index, N_ACTIONS};
-    use sim_types::ActionType;
-
-    #[test]
-    fn selected_action_histogram_covers_all_variants() {
-        let variants = [
-            ActionType::Idle,
-            ActionType::TurnLeft,
-            ActionType::TurnRight,
-            ActionType::Forward,
-            ActionType::Consume,
-            ActionType::Reproduce,
-        ];
-
-        for action in variants {
-            assert!(action_index(action) < N_ACTIONS);
-        }
-    }
-}

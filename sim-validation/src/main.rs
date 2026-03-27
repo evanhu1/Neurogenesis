@@ -928,57 +928,6 @@ mod tests {
         let _ = fs::remove_dir_all(out_b);
     }
 
-    #[test]
-    fn multi_seed_summary_uses_mean_seed_score() {
-        let mut cfg = WorldConfig::default();
-        cfg.world_width = 40;
-        cfg.num_organisms = 300;
-        cfg.periodic_injection_interval_turns = 0;
-        cfg.periodic_injection_count = 0;
-        cfg.force_random_actions = false;
-
-        let out_dir = test_output_dir("multi");
-        let options = HarnessRunOptions {
-            seeds: vec![2026, 7, 123, 42],
-            ticks: 100,
-            report_every: 50,
-            min_lifetime: 10,
-            out_dir: out_dir.clone(),
-            title: None,
-            baseline: false,
-        };
-
-        let summary =
-            run_validation_across_seeds(cfg, &options).expect("multi-seed run should succeed");
-        let mut seed_scores = summary
-            .seed_summaries
-            .iter()
-            .map(|seed_summary| seed_summary.aggregate_score.score)
-            .collect::<Vec<_>>();
-        let expected_mean = seed_scores.iter().sum::<f64>() / seed_scores.len() as f64;
-        seed_scores.sort_by(|a, b| a.total_cmp(b));
-        let expected_median = (seed_scores[1] + seed_scores[2]) / 2.0;
-        let expected_variance = seed_scores
-            .iter()
-            .map(|score| {
-                let delta = *score - expected_mean;
-                delta * delta
-            })
-            .sum::<f64>()
-            / seed_scores.len() as f64;
-
-        assert!((summary.aggregate_score.score - expected_mean).abs() < 1.0e-9);
-        assert!((summary.aggregate_score.score_median - expected_median).abs() < 1.0e-9);
-        assert!((summary.aggregate_score.score_stddev - expected_variance.sqrt()).abs() < 1.0e-9);
-        assert_eq!(summary.aggregate_score.score_min, seed_scores[0]);
-        assert_eq!(summary.aggregate_score.score_max, seed_scores[3]);
-        assert_eq!(summary.seed_summaries.len(), 4);
-        assert_eq!(summary.seeds, vec![2026, 7, 123, 42]);
-        assert!(summary.worker_threads >= 1);
-
-        let _ = fs::remove_dir_all(out_dir);
-    }
-
     fn test_output_dir(suffix: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

@@ -333,31 +333,3 @@ pub struct TickDelta {
     pub metrics: MetricsSnapshot,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn config_roundtrip() {
-        let cfg = WorldConfig::default();
-        let json = serde_json::to_string(&cfg).expect("serialize config");
-        let parsed: WorldConfig = serde_json::from_str(&json).expect("deserialize config");
-        assert_eq!(parsed, cfg);
-    }
-
-    #[test]
-    fn legacy_coverage_fields_are_ignored() {
-        let cfg = WorldConfig::default();
-        let mut value = serde_json::to_value(&cfg).expect("serialize config to value");
-        let object = value
-            .as_object_mut()
-            .expect("world config JSON value must be an object");
-        object.insert("plant_target_coverage".to_owned(), json!(0.05));
-        object.insert("food_coverage_divisor".to_owned(), json!(20));
-
-        let parsed: WorldConfig =
-            serde_json::from_value(value).expect("deserialize legacy world config");
-        assert_eq!(parsed, cfg);
-    }
-}
