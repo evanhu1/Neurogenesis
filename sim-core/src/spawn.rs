@@ -164,6 +164,7 @@ impl Simulation {
 
     pub(crate) fn spawn_initial_population(&mut self) {
         let seed_config = self.config.seed_genome_config.clone();
+        let champion_pool = self.champion_pool.clone();
 
         let mut open_positions = self.empty_positions();
         open_positions.shuffle(&mut self.rng);
@@ -174,7 +175,12 @@ impl Simulation {
                 .pop()
                 .expect("initial population requires at least one unique cell per organism");
             let id = self.alloc_organism_id();
-            let genome = generate_seed_genome(&seed_config, &mut self.rng);
+            let genome = if champion_pool.is_empty() {
+                generate_seed_genome(&seed_config, &mut self.rng)
+            } else {
+                let idx = self.rng.random_range(0..champion_pool.len());
+                champion_pool[idx].clone()
+            };
             let brain = express_genome(&genome, &mut self.rng);
 
             let facing = self.random_facing();

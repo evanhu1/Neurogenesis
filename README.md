@@ -55,6 +55,9 @@ to degenerate niches along the way.
   - NEAT-style topology mutators are implemented: add synapse, remove synapse,
     and split-edge/add-neuron.
   - Spatial priors bias new synapse creation based on neuron positions.
+  - The server maintains a persistent champion genome pool and bootstraps new
+    sessions/batch worlds from it when available, instead of always starting
+    from the primitive seed genome.
   - Periodic random injections add fresh seed-genome organisms.
 - Ecology:
   - `Consume` transfers `10%` of target energy (food or prey) to the actor.
@@ -278,6 +281,10 @@ REST:
 - Batch runs: create/status (`/v1/world-runs`, `/v1/world-runs/{id}`)
 - Archived worlds: list/delete/instantiate session (`/v1/worlds*`)
 - Sessions: create/get state/step/reset/archive/focus/stream (`/v1/sessions*`)
+
+Runtime sessions and batch runs created from config use a persisted champion
+genome pool at `sim-server/champion_pool.json` when it exists. Archived worlds
+still resume exact saved simulation state.
 
 WS commands: `Start { ticks_per_second }` (`0` means unbounded/headless speed),
 `Pause`, `Step { count }`, `SetFocus { organism_id }`.

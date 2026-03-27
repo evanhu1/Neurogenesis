@@ -17,7 +17,7 @@ use sim_server::{
         StepProgressData, WorldSnapshotView,
     },
 };
-use sim_types::WorldSnapshot;
+use sim_types::{OrganismGenome, OrganismState, WorldSnapshot};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -35,6 +35,7 @@ struct AppState {
     sessions: Arc<RwLock<HashMap<Uuid, Arc<Session>>>>,
     batch_runs: Arc<RwLock<HashMap<Uuid, Arc<BatchRun>>>>,
     world_archive: Arc<WorldArchiveStore>,
+    champion_pool: Arc<ChampionPoolStore>,
 }
 
 struct Session {
@@ -67,6 +68,9 @@ struct BatchRunInner {
 }
 
 const WORLD_ARCHIVE_SCHEMA_VERSION: u32 = 1;
+const CHAMPION_POOL_SCHEMA_VERSION: u32 = 1;
+const CHAMPION_POOL_MAX_GENOMES: usize = 32;
+const CHAMPION_POOL_MAX_CANDIDATES_PER_WORLD: usize = 32;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ArchivedWorldFile {
@@ -87,6 +91,30 @@ struct ArchivedWorldIndexEntry {
 struct WorldArchiveStore {
     worlds_dir: PathBuf,
     by_id: StdRwLock<HashMap<Uuid, ArchivedWorldIndexEntry>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ChampionPoolFile {
+    schema_version: u32,
+    updated_at_unix_ms: u128,
+    entries: Vec<ChampionGenomeRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct ChampionGenomeRecord {
+    genome: OrganismGenome,
+    source_turn: u64,
+    source_created_at_unix_ms: u128,
+    generation: u64,
+    age_turns: u64,
+    reproductions_count: u64,
+    consumptions_count: u64,
+    energy: f32,
+}
+
+struct ChampionPoolStore {
+    pool_path: PathBuf,
+    entries: StdRwLock<Vec<ChampionGenomeRecord>>,
 }
 
 const STEP_PROGRESS_TARGET_BATCHES: u32 = 48;
@@ -117,6 +145,10 @@ fn now_unix_ms() -> Result<u128, AppError> {
 
 fn archive_worlds_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("worlds")
+}
+
+fn champion_pool_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("champion_pool.json")
 }
 
 fn splitmix64(mut z: u64) -> u64 {
@@ -182,6 +214,98 @@ fn compute_batch_aggregate(worlds: &[ArchivedWorldSummary]) -> Option<BatchAggre
         min_organisms_alive,
         max_organisms_alive,
     })
+}
+
+fn compare_champion_records(
+    left: &ChampionGenomeRecord,
+    right: &ChampionGenomeRecord,
+) -> std::cmp::Ordering {
+    right
+        .generation
+        .cmp(&left.generation)
+        .then_with(|| right.reproductions_count.cmp(&left.reproductions_count))
+        .then_with(|| right.consumptions_count.cmp(&left.consumptions_count))
+        .then_with(|| right.energy.total_cmp(&left.energy))
+        .then_with(|| right.age_turns.cmp(&left.age_turns))
+        .then_with(|| {
+            right
+                .source_created_at_unix_ms
+                .cmp(&left.source_created_at_unix_ms)
+        })
+}
+
+fn champion_record_from_organism(
+    source_created_at_unix_ms: u128,
+    source_turn: u64,
+    organism: &OrganismState,
+) -> ChampionGenomeRecord {
+    ChampionGenomeRecord {
+        genome: organism.genome.clone(),
+        source_turn,
+        source_created_at_unix_ms,
+        generation: organism.generation,
+        age_turns: organism.age_turns,
+        reproductions_count: organism.reproductions_count,
+        consumptions_count: organism.consumptions_count,
+        energy: organism.energy,
+    }
+}
+
+fn select_champion_candidates(
+    source_created_at_unix_ms: u128,
+    source_turn: u64,
+    organisms: &[OrganismState],
+) -> Vec<ChampionGenomeRecord> {
+    let mut candidates: Vec<ChampionGenomeRecord> = organisms
+        .iter()
+        .map(|organism| {
+            champion_record_from_organism(source_created_at_unix_ms, source_turn, organism)
+        })
+        .collect();
+    candidates.sort_by(compare_champion_records);
+
+    let mut unique =
+        Vec::with_capacity(CHAMPION_POOL_MAX_CANDIDATES_PER_WORLD.min(candidates.len()));
+    for candidate in candidates {
+        if unique
+            .iter()
+            .any(|existing: &ChampionGenomeRecord| existing.genome == candidate.genome)
+        {
+            continue;
+        }
+        unique.push(candidate);
+        if unique.len() >= CHAMPION_POOL_MAX_CANDIDATES_PER_WORLD {
+            break;
+        }
+    }
+
+    unique
+}
+
+fn merge_champion_entries(
+    existing: &[ChampionGenomeRecord],
+    candidates: &[ChampionGenomeRecord],
+) -> Vec<ChampionGenomeRecord> {
+    let mut merged = Vec::with_capacity(existing.len() + candidates.len());
+    merged.extend(existing.iter().cloned());
+    merged.extend(candidates.iter().cloned());
+    merged.sort_by(compare_champion_records);
+
+    let mut unique = Vec::with_capacity(CHAMPION_POOL_MAX_GENOMES.min(merged.len()));
+    for entry in merged {
+        if unique
+            .iter()
+            .any(|existing_entry: &ChampionGenomeRecord| existing_entry.genome == entry.genome)
+        {
+            continue;
+        }
+        unique.push(entry);
+        if unique.len() >= CHAMPION_POOL_MAX_GENOMES {
+            break;
+        }
+    }
+
+    unique
 }
 
 impl WorldArchiveStore {
@@ -462,6 +586,111 @@ impl WorldArchiveStore {
     }
 }
 
+impl ChampionPoolStore {
+    fn bootstrap(pool_path: PathBuf) -> Result<Self, AppError> {
+        if let Some(parent) = pool_path.parent() {
+            fs::create_dir_all(parent).map_err(|err| {
+                AppError::Internal(format!(
+                    "failed to create champion pool directory {}: {err}",
+                    parent.display()
+                ))
+            })?;
+        }
+
+        let entries = match fs::read(&pool_path) {
+            Ok(bytes) => match serde_json::from_slice::<ChampionPoolFile>(&bytes) {
+                Ok(file) if file.schema_version == CHAMPION_POOL_SCHEMA_VERSION => file.entries,
+                Ok(file) => {
+                    warn!(
+                        "ignoring champion pool {} with schema version {} (expected {})",
+                        pool_path.display(),
+                        file.schema_version,
+                        CHAMPION_POOL_SCHEMA_VERSION
+                    );
+                    Vec::new()
+                }
+                Err(err) => {
+                    warn!(
+                        "failed to parse champion pool {}: {err}",
+                        pool_path.display()
+                    );
+                    Vec::new()
+                }
+            },
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(err) => {
+                return Err(AppError::Internal(format!(
+                    "failed to read champion pool {}: {err}",
+                    pool_path.display()
+                )))
+            }
+        };
+
+        Ok(Self {
+            pool_path,
+            entries: StdRwLock::new(entries),
+        })
+    }
+
+    fn snapshot_genomes(&self) -> Result<Vec<OrganismGenome>, AppError> {
+        let entries = self
+            .entries
+            .read()
+            .map_err(|_| AppError::Internal("failed to lock champion pool".to_owned()))?;
+        Ok(entries.iter().map(|entry| entry.genome.clone()).collect())
+    }
+
+    fn update_from_simulation(&self, simulation: &Simulation) -> Result<(), AppError> {
+        let source_created_at_unix_ms = now_unix_ms()?;
+        let candidates = select_champion_candidates(
+            source_created_at_unix_ms,
+            simulation.turn(),
+            simulation.organisms(),
+        );
+        if candidates.is_empty() {
+            return Ok(());
+        }
+
+        let mut entries = self
+            .entries
+            .write()
+            .map_err(|_| AppError::Internal("failed to lock champion pool".to_owned()))?;
+        let merged = merge_champion_entries(entries.as_slice(), &candidates);
+        self.persist_entries(&merged)?;
+        *entries = merged;
+        Ok(())
+    }
+
+    fn persist_entries(&self, entries: &[ChampionGenomeRecord]) -> Result<(), AppError> {
+        let file = ChampionPoolFile {
+            schema_version: CHAMPION_POOL_SCHEMA_VERSION,
+            updated_at_unix_ms: now_unix_ms()?,
+            entries: entries.to_vec(),
+        };
+        let encoded = serde_json::to_vec_pretty(&file).map_err(|err| {
+            AppError::Internal(format!(
+                "failed to encode champion pool {}: {err}",
+                self.pool_path.display()
+            ))
+        })?;
+
+        let temp_path = self.pool_path.with_extension("json.tmp");
+        fs::write(&temp_path, encoded).map_err(|err| {
+            AppError::Internal(format!(
+                "failed to write champion pool temp file {}: {err}",
+                temp_path.display()
+            ))
+        })?;
+        fs::rename(&temp_path, &self.pool_path).map_err(|err| {
+            AppError::Internal(format!(
+                "failed to finalize champion pool {}: {err}",
+                self.pool_path.display()
+            ))
+        })?;
+        Ok(())
+    }
+}
+
 #[derive(Serialize)]
 struct HealthResponse {
     status: &'static str,
@@ -534,10 +763,12 @@ async fn main() -> anyhow::Result<()> {
 
 fn new_state() -> Result<AppState, AppError> {
     let world_archive = Arc::new(WorldArchiveStore::bootstrap(archive_worlds_dir())?);
+    let champion_pool = Arc::new(ChampionPoolStore::bootstrap(champion_pool_path())?);
     Ok(AppState {
         sessions: Arc::new(RwLock::new(HashMap::new())),
         batch_runs: Arc::new(RwLock::new(HashMap::new())),
         world_archive,
+        champion_pool,
     })
 }
 
@@ -601,11 +832,13 @@ async fn create_batch_run(
     }
 
     let config = load_runtime_default_world_config()?;
+    let champion_pool = state.champion_pool.snapshot_genomes()?;
 
     tokio::spawn(run_batch_simulations(
         state.clone(),
         batch_run,
         config,
+        champion_pool,
         req.world_count,
         req.universe_seed,
         ticks_per_world,
@@ -670,7 +903,8 @@ async fn create_session(
     Json(req): Json<CreateSessionRequest>,
 ) -> Result<Json<CreateSessionResponse>, AppError> {
     let config = load_runtime_default_world_config()?;
-    let simulation = Simulation::new(config, req.seed)?;
+    let champion_pool = state.champion_pool.snapshot_genomes()?;
+    let simulation = Simulation::new_with_champion_pool(config, req.seed, champion_pool)?;
     let response = create_runtime_session(&state, simulation).await?;
     Ok(Json(response))
 }
@@ -716,6 +950,7 @@ async fn run_batch_simulations(
     state: AppState,
     run: Arc<BatchRun>,
     config: sim_types::WorldConfig,
+    champion_pool: Vec<OrganismGenome>,
     world_count: u32,
     universe_seed: u64,
     ticks_per_world: u64,
@@ -726,12 +961,18 @@ async fn run_batch_simulations(
     for world_index in 0..world_count {
         let run_id = run.id;
         let world_archive = state.world_archive.clone();
+        let champion_pool_store = state.champion_pool.clone();
         let world_config = config.clone();
+        let champion_pool = champion_pool.clone();
         let seed = world_seed(universe_seed, world_index);
         join_set.spawn(async move {
             tokio::task::spawn_blocking(move || -> Result<ArchivedWorldSummary, AppError> {
-                let mut simulation = Simulation::new(world_config, seed)?;
+                let mut simulation =
+                    Simulation::new_with_champion_pool(world_config, seed, champion_pool)?;
                 simulate_ticks(&mut simulation, ticks_per_world);
+                if let Err(err) = champion_pool_store.update_from_simulation(&simulation) {
+                    warn!("failed to update champion pool from batch world {world_index}: {err}");
+                }
                 world_archive.persist_batch_world(
                     run_id,
                     world_index,
@@ -862,8 +1103,22 @@ async fn reset_session(
     Json(req): Json<ResetRequest>,
 ) -> Result<Json<WorldSnapshotView>, AppError> {
     let session = get_session(&state, id).await?;
+    let previous_sim = {
+        let sim = session.simulation.lock().await;
+        sim.clone()
+    };
+    let champion_pool_store = state.champion_pool.clone();
+    let champion_pool = tokio::task::spawn_blocking(move || {
+        if let Err(err) = champion_pool_store.update_from_simulation(&previous_sim) {
+            warn!("failed to update champion pool before reset for session {id}: {err}");
+        }
+        champion_pool_store.snapshot_genomes()
+    })
+    .await
+    .map_err(|err| AppError::Internal(format!("session reset worker join error: {err}")))??;
+
     let mut sim = session.simulation.lock().await;
-    sim.reset(req.seed);
+    sim.reset_with_champion_pool(req.seed, champion_pool);
     let snapshot = sim.snapshot();
     drop(sim);
 
@@ -885,9 +1140,15 @@ async fn save_session_world(
     };
 
     let world_archive = state.world_archive.clone();
-    let summary = tokio::task::spawn_blocking(move || world_archive.persist_session_world(id, sim))
-        .await
-        .map_err(|err| AppError::Internal(format!("session archive worker join error: {err}")))??;
+    let champion_pool = state.champion_pool.clone();
+    let summary = tokio::task::spawn_blocking(move || {
+        if let Err(err) = champion_pool.update_from_simulation(&sim) {
+            warn!("failed to update champion pool from session {id}: {err}");
+        }
+        world_archive.persist_session_world(id, sim)
+    })
+    .await
+    .map_err(|err| AppError::Internal(format!("session archive worker join error: {err}")))??;
     Ok(Json(summary))
 }
 
@@ -1135,4 +1396,138 @@ async fn get_session(state: &AppState, id: Uuid) -> Result<Arc<Session>, AppErro
         .get(&id)
         .cloned()
         .ok_or_else(|| AppError::NotFound(format!("session {id} not found")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sim_types::{ActionType, BrainState, FacingDirection, OrganismId, SpeciesId};
+
+    fn make_record(
+        generation: u64,
+        reproductions: u64,
+        consumptions: u64,
+        energy: f32,
+    ) -> ChampionGenomeRecord {
+        let mut genome = OrganismGenome {
+            num_neurons: 1,
+            num_synapses: 0,
+            spatial_prior_sigma: 3.5,
+            vision_distance: 2,
+            starting_energy: energy.max(1.0),
+            age_of_maturity: 0,
+            hebb_eta_gain: 0.0,
+            eligibility_retention: 0.9,
+            synapse_prune_threshold: 0.01,
+            mutation_rate_age_of_maturity: 0.0,
+            mutation_rate_vision_distance: 0.0,
+            mutation_rate_inter_bias: 0.0,
+            mutation_rate_inter_update_rate: 0.0,
+            mutation_rate_eligibility_retention: 0.0,
+            mutation_rate_synapse_prune_threshold: 0.0,
+            mutation_rate_neuron_location: 0.0,
+            mutation_rate_synapse_weight_perturbation: 0.0,
+            mutation_rate_add_synapse: 0.0,
+            mutation_rate_remove_synapse: 0.0,
+            mutation_rate_remove_neuron: 0.0,
+            mutation_rate_add_neuron_split_edge: 0.0,
+            inter_biases: vec![0.0],
+            inter_log_time_constants: vec![0.0],
+            sensory_locations: vec![sim_types::BrainLocation { x: 0.0, y: 0.0 }; 2],
+            inter_locations: vec![sim_types::BrainLocation { x: 1.0, y: 1.0 }],
+            action_locations: vec![sim_types::BrainLocation { x: 2.0, y: 2.0 }; 5],
+            edges: Vec::new(),
+        };
+        genome.num_neurons = generation as u32 + 1;
+        genome.vision_distance = generation as u32 + 2;
+        genome.starting_energy = energy.max(1.0);
+        genome.inter_biases = vec![generation as f32];
+        genome.inter_log_time_constants = vec![generation as f32 * 0.1];
+        genome.inter_locations = vec![sim_types::BrainLocation {
+            x: generation as f32,
+            y: generation as f32,
+        }];
+
+        ChampionGenomeRecord {
+            genome,
+            source_turn: generation * 10,
+            source_created_at_unix_ms: generation as u128,
+            generation,
+            age_turns: generation * 2,
+            reproductions_count: reproductions,
+            consumptions_count: consumptions,
+            energy,
+        }
+    }
+
+    #[test]
+    fn merge_champion_entries_prefers_higher_ranked_unique_genomes() {
+        let weak = make_record(3, 1, 1, 10.0);
+        let strong = make_record(8, 5, 9, 80.0);
+        let duplicate_strong = strong.clone();
+
+        let merged = merge_champion_entries(&[weak.clone()], &[duplicate_strong, strong.clone()]);
+
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0], strong);
+        assert_eq!(merged[1], weak);
+    }
+
+    #[test]
+    fn select_champion_candidates_deduplicates_identical_genomes() {
+        let strong = make_record(10, 4, 2, 40.0);
+        let weaker_duplicate = ChampionGenomeRecord {
+            energy: 5.0,
+            generation: 2,
+            ..strong.clone()
+        };
+        let empty_brain = BrainState {
+            sensory: Vec::new(),
+            inter: Vec::new(),
+            action: Vec::new(),
+            synapse_count: 0,
+        };
+
+        let organisms = vec![
+            OrganismState {
+                id: OrganismId(1),
+                species_id: SpeciesId(1),
+                q: 0,
+                r: 0,
+                generation: strong.generation,
+                age_turns: strong.age_turns,
+                facing: FacingDirection::East,
+                energy: strong.energy,
+                energy_prev: strong.energy,
+                dopamine: 0.0,
+                consumptions_count: strong.consumptions_count,
+                reproductions_count: strong.reproductions_count,
+                last_action_taken: ActionType::Idle,
+                brain: empty_brain.clone(),
+                genome: strong.genome.clone(),
+            },
+            OrganismState {
+                id: OrganismId(2),
+                species_id: SpeciesId(2),
+                q: 1,
+                r: 0,
+                generation: weaker_duplicate.generation,
+                age_turns: weaker_duplicate.age_turns,
+                facing: FacingDirection::East,
+                energy: weaker_duplicate.energy,
+                energy_prev: weaker_duplicate.energy,
+                dopamine: 0.0,
+                consumptions_count: weaker_duplicate.consumptions_count,
+                reproductions_count: weaker_duplicate.reproductions_count,
+                last_action_taken: ActionType::Idle,
+                brain: empty_brain,
+                genome: weaker_duplicate.genome,
+            },
+        ];
+
+        let candidates = select_champion_candidates(1, 100, &organisms);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].generation, strong.generation);
+        assert_eq!(candidates[0].energy, strong.energy);
+    }
 }

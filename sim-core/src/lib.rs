@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "instrumentation")]
 use sim_types::ActionRecord;
 use sim_types::{
-    FoodState, MetricsSnapshot, OccupancyCell, Occupant, OrganismId, OrganismState, TickDelta,
-    WorldConfig, WorldSnapshot,
+    FoodState, MetricsSnapshot, OccupancyCell, Occupant, OrganismGenome, OrganismId, OrganismState,
+    TickDelta, WorldConfig, WorldSnapshot,
 };
 use std::collections::BTreeMap;
 use thiserror::Error;
@@ -39,6 +39,8 @@ pub struct Simulation {
     turn: u64,
     seed: u64,
     rng: ChaCha8Rng,
+    #[serde(default)]
+    champion_pool: Vec<OrganismGenome>,
     next_organism_id: u64,
     next_food_id: u64,
     organisms: Vec<OrganismState>,
@@ -76,6 +78,14 @@ pub(crate) struct PendingActionState {
 
 impl Simulation {
     pub fn new(config: WorldConfig, seed: u64) -> Result<Self, SimError> {
+        Self::new_with_champion_pool(config, seed, Vec::new())
+    }
+
+    pub fn new_with_champion_pool(
+        config: WorldConfig,
+        seed: u64,
+        champion_pool: Vec<OrganismGenome>,
+    ) -> Result<Self, SimError> {
         sim_config::validate_world_config(&config).map_err(SimError::InvalidConfig)?;
 
         let capacity = grid::world_capacity(config.world_width);
@@ -84,6 +94,7 @@ impl Simulation {
             turn: 0,
             seed,
             rng: ChaCha8Rng::seed_from_u64(seed),
+            champion_pool,
             next_organism_id: 0,
             next_food_id: 0,
             organisms: Vec::new(),
@@ -144,9 +155,18 @@ impl Simulation {
     }
 
     pub fn reset(&mut self, seed: Option<u64>) {
+        self.reset_with_champion_pool(seed, self.champion_pool.clone());
+    }
+
+    pub fn reset_with_champion_pool(
+        &mut self,
+        seed: Option<u64>,
+        champion_pool: Vec<OrganismGenome>,
+    ) {
         self.seed = seed.unwrap_or(self.seed);
         self.rng = ChaCha8Rng::seed_from_u64(self.seed);
         self.turn = 0;
+        self.champion_pool = champion_pool;
         self.next_organism_id = 0;
         self.next_food_id = 0;
         self.organisms.clear();
