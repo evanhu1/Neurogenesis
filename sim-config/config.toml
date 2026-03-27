@@ -15,7 +15,7 @@ runtime_plasticity_enabled = true
 force_random_actions = false
 
 [seed_genome_config]
-num_neurons = 1
+num_neurons = 3
 num_synapses = 20
 spatial_prior_sigma = 3.0
 vision_distance = 10
