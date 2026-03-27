@@ -11,7 +11,6 @@ import type {
   ApiServerEvent,
   ApiWorldSnapshot,
   ArchivedWorldSummary,
-  BatchRunStatusResponse,
   OrganismState,
   SessionMetadata,
   StepProgressData,
@@ -97,7 +96,6 @@ function upsertSpeciesPopulationHistory(
 export type SimulationSessionState = {
   session: SessionMetadata | null;
   snapshot: WorldSnapshot | null;
-  batchRunStatus: BatchRunStatusResponse | null;
   archivedWorlds: ArchivedWorldSummary[];
   speciesPopulationHistory: SpeciesPopulationPoint[];
   focusedOrganismId: number | null;
@@ -119,7 +117,6 @@ export type SimulationSessionState = {
   saveCurrentWorld: () => Promise<void>;
   deleteArchivedWorld: (worldId: string) => Promise<void>;
   deleteAllArchivedWorlds: () => Promise<void>;
-  startBatchRun: (worldCount: number, ticksPerWorld: number) => Promise<void>;
   loadArchivedWorld: (worldId: string) => Promise<void>;
   refreshArchivedWorlds: () => Promise<void>;
 };
@@ -403,7 +400,6 @@ export function useSimulationSession(): SimulationSessionState {
   return {
     session,
     snapshot,
-    batchRunStatus: archive.batchRunStatus,
     archivedWorlds: archive.archivedWorlds,
     speciesPopulationHistory,
     focusedOrganismId,
@@ -425,7 +421,6 @@ export function useSimulationSession(): SimulationSessionState {
     saveCurrentWorld: archive.saveCurrentWorld,
     deleteArchivedWorld: archive.deleteArchivedWorld,
     deleteAllArchivedWorlds: archive.deleteAllArchivedWorlds,
-    startBatchRun: archive.startBatchRun,
     loadArchivedWorld: archive.loadArchivedWorld,
     refreshArchivedWorlds: archive.refreshArchivedWorlds,
   };

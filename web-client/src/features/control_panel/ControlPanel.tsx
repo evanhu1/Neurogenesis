@@ -1,14 +1,12 @@
 import { useCallback, useRef, type MutableRefObject } from 'react';
 import type {
   ArchivedWorldSummary,
-  BatchRunStatusResponse,
   StepProgressData,
   WorldOrganismState,
   WorldSnapshot,
 } from '../../types';
 import type { SpeciesPopulationPoint } from '../sim/hooks/useSimulationSession';
 import { ArchivedWorldsPanel } from './ArchivedWorldsPanel';
-import { BatchRunPanel } from './BatchRunPanel';
 import { SessionOverviewPanel } from './SessionOverviewPanel';
 import { SimulationControlsPanel } from './SimulationControlsPanel';
 import { SpeciesPopulationChart } from './SpeciesPopulationChart';
@@ -39,10 +37,6 @@ type ControlPanelProps = {
     onStep: (count: number) => void;
     onSaveCurrentWorld: () => void;
   };
-  batch: {
-    batchRunStatus: BatchRunStatusResponse | null;
-    onStartBatchRun: (worldCount: number, ticksPerWorld: number) => void;
-  };
   archive: {
     archivedWorlds: ArchivedWorldSummary[];
     onLoadArchivedWorld: (worldId: string) => void;
@@ -56,7 +50,6 @@ export function ControlPanel({
   overview,
   species,
   controls,
-  batch,
   archive,
   errorText,
 }: ControlPanelProps) {
@@ -109,11 +102,6 @@ export function ControlPanel({
         onSpeedLevelChange={controls.onSpeedLevelChange}
         onStep={controls.onStep}
         onSaveCurrentWorld={controls.onSaveCurrentWorld}
-      />
-
-      <BatchRunPanel
-        batchRunStatus={batch.batchRunStatus}
-        onStartBatchRun={batch.onStartBatchRun}
       />
 
       <ArchivedWorldsPanel

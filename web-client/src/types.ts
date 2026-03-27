@@ -348,80 +348,15 @@ export type CreateSessionResponse = {
   snapshot: WorldSnapshot;
 };
 
-export type BatchRunStatus = 'Running' | 'Completed' | 'Failed';
-
-export type ApiBatchAggregateStats = {
-  total_organisms_alive: number;
-  mean_organisms_alive: number;
-  min_organisms_alive: number;
-  max_organisms_alive: number;
-};
-
-export type BatchAggregateStats = ApiBatchAggregateStats & {
-  total_species_alive: number;
-  mean_species_alive: number;
-  min_species_alive: number;
-  max_species_alive: number;
-};
-
-export type ApiArchivedWorldSource =
-  | {
-      type: 'BatchRun';
-      data: {
-        run_id: string;
-        world_index: number;
-        universe_seed: number;
-        world_seed: number;
-        ticks_simulated: number;
-      };
-    }
-  | {
-      type: 'Session';
-      data: {
-        session_id: string;
-      };
-    };
-
-export type ArchivedWorldSource = ApiArchivedWorldSource;
-
 export type ApiArchivedWorldSummary = {
   world_id: string;
   created_at_unix_ms: number;
   turn: number;
   organisms_alive: number;
-  source: ApiArchivedWorldSource;
 };
 
 export type ArchivedWorldSummary = ApiArchivedWorldSummary & {
   species_alive: number;
-};
-
-export type ApiCreateBatchRunResponse = {
-  run_id: string;
-};
-
-export type CreateBatchRunResponse = ApiCreateBatchRunResponse;
-
-export type ApiBatchRunStatusResponse = {
-  run_id: string;
-  created_at_unix_ms: number;
-  status: BatchRunStatus;
-  total_worlds: number;
-  completed_worlds: number;
-  aggregate: ApiBatchAggregateStats | null;
-  worlds: ApiArchivedWorldSummary[];
-  error: string | null;
-};
-
-export type BatchRunStatusResponse = {
-  run_id: string;
-  created_at_unix_ms: number;
-  status: BatchRunStatus;
-  total_worlds: number;
-  completed_worlds: number;
-  aggregate: BatchAggregateStats | null;
-  worlds: ArchivedWorldSummary[];
-  error: string | null;
 };
 
 export type ApiListArchivedWorldsResponse = {

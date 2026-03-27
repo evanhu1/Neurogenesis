@@ -1,6 +1,4 @@
 import type {
-  ApiBatchAggregateStats,
-  ApiBatchRunStatusResponse,
   ApiCreateSessionResponse,
   ApiEntityId,
   ApiFocusBrainData,
@@ -17,8 +15,6 @@ import type {
   ApiWorldOrganismState,
   ApiWorldSnapshot,
   ArchivedWorldSummary,
-  BatchAggregateStats,
-  BatchRunStatusResponse,
   BrainState,
   CreateSessionResponse,
   EntityId,
@@ -224,22 +220,11 @@ function normalizeRemovedEntityPosition(entry: {
   };
 }
 
-function normalizeBatchAggregateStats(stats: ApiBatchAggregateStats): BatchAggregateStats {
-  return {
-    ...stats,
-    total_species_alive: 0,
-    mean_species_alive: 0,
-    min_species_alive: 0,
-    max_species_alive: 0,
-  };
-}
-
 function normalizeArchivedWorldSummary(world: {
   world_id: string;
   created_at_unix_ms: number;
   turn: number;
   organisms_alive: number;
-  source: ArchivedWorldSummary['source'];
 }): ArchivedWorldSummary {
   return {
     ...world,
@@ -299,21 +284,6 @@ export function normalizeCreateSessionResponse(response: ApiCreateSessionRespons
   return {
     metadata: response.metadata,
     snapshot: normalizeWorldSnapshot(response.snapshot),
-  };
-}
-
-export function normalizeBatchRunStatusResponse(
-  response: ApiBatchRunStatusResponse,
-): BatchRunStatusResponse {
-  return {
-    run_id: response.run_id,
-    created_at_unix_ms: response.created_at_unix_ms,
-    status: response.status,
-    total_worlds: response.total_worlds,
-    completed_worlds: response.completed_worlds,
-    aggregate: response.aggregate ? normalizeBatchAggregateStats(response.aggregate) : null,
-    worlds: response.worlds.map((world) => normalizeArchivedWorldSummary(world)),
-    error: response.error,
   };
 }
 

@@ -45,11 +45,6 @@ export default function App() {
             onStep: simulation.step,
             onSaveCurrentWorld: () => void simulation.saveCurrentWorld(),
           }}
-          batch={{
-            batchRunStatus: simulation.batchRunStatus,
-            onStartBatchRun: (worldCount, ticksPerWorld) =>
-              void simulation.startBatchRun(worldCount, ticksPerWorld),
-          }}
           archive={{
             archivedWorlds: simulation.archivedWorlds,
             onLoadArchivedWorld: (worldId) => void simulation.loadArchivedWorld(worldId),
