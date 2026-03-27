@@ -571,19 +571,23 @@ fn action_target_eligibility_uses_sampled_action_advantage_signal() {
     let sensory_activation = organism.brain.sensory[0].neuron.activation;
     let edge_pending = organism.brain.sensory[0].synapses[0].pending_coactivation;
     let logit0 = eval.action_logits[0];
+    let temperature = 0.5_f32;
     let max_logit = eval
         .action_logits
         .iter()
         .copied()
-        .fold(f32::NEG_INFINITY, f32::max);
-    let temperature = 0.5_f32;
-    let selected_probability = ((logit0 - max_logit) / temperature).exp()
-        / eval
-            .action_logits
-            .iter()
-            .copied()
-            .map(|logit| ((logit - max_logit) / temperature).exp())
-            .sum::<f32>();
+        .map(|logit| logit / temperature)
+        .fold(0.0, f32::max);
+    let idle_weight = (0.0 - max_logit).exp();
+    let selected_weight = ((logit0 / temperature) - max_logit).exp();
+    let selected_probability = selected_weight
+        / (idle_weight
+            + eval
+                .action_logits
+                .iter()
+                .copied()
+                .map(|logit| ((logit / temperature) - max_logit).exp())
+                .sum::<f32>());
     let expected_advantage_signal = sensory_activation * (1.0 - selected_probability);
     let sigmoid_expected = sensory_activation * (1.0 / (1.0 + (-logit0).exp()));
 
