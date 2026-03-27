@@ -4,3 +4,4 @@ web-client/dist/
 .DS_Store
 sim-server/worlds/
 artifacts/
+.autoresearch_archive/
