@@ -19,11 +19,7 @@ const HEBB_WEIGHT_CLAMP_ENABLED: bool = true;
 const MIN_ENERGY_SENSOR_SCALE: f32 = 1.0;
 const ENERGY_SENSOR_CURVE_EXPONENT: f32 = 2.0;
 const MIN_ACTION_TEMPERATURE: f32 = 1.0e-6;
-// Per-action tonic inhibition. At the default temperature (0.08), five neutral
-// action channels together are roughly balanced against the quiescent baseline.
-pub(crate) const BASELINE_ACTION_LOGIT: f32 = -0.13;
-// Fixed quiescence reference logit for the implicit "do nothing" option.
-const IDLE_LOG_POLICY_WEIGHT: f32 = 0.0;
+pub(crate) const BASELINE_ACTION_LOGIT: f32 = -0.01;
 const LOOK_TARGETS: [EntityType; 3] = [EntityType::Food, EntityType::Organism, EntityType::Wall];
 const LOOK_RAY_COUNT: usize = SensoryReceptor::LOOK_RAY_OFFSETS.len();
 pub(crate) const SENSORY_COUNT: u32 = SensoryReceptor::LOOK_NEURON_COUNT + 1;
@@ -48,18 +44,13 @@ pub(crate) struct BrainEvaluation {
     pub(crate) food_behind: bool,
 }
 
-struct ActionPolicy {
-    idle_probability: f32,
-    action_probabilities: [f32; ACTION_COUNT],
-}
-
 /// Reusable scratch buffers for brain evaluation, avoiding per-tick allocations.
 pub(crate) struct BrainScratch {
     pub(crate) inter_inputs: Vec<f32>,
     pub(crate) prev_inter: Vec<f32>,
     pub(crate) prev_inter_states: Vec<f32>,
     pub(crate) inter_activations: Vec<f32>,
-    pub(crate) action_credit_signals: [f32; ACTION_COUNT],
+    pub(crate) action_post_signals: [f32; ACTION_COUNT],
 }
 
 impl BrainScratch {
@@ -69,7 +60,7 @@ impl BrainScratch {
             prev_inter: Vec::new(),
             prev_inter_states: Vec::new(),
             inter_activations: Vec::new(),
-            action_credit_signals: [0.0; ACTION_COUNT],
+            action_post_signals: [0.0; ACTION_COUNT],
         }
     }
 }
@@ -406,29 +397,17 @@ pub(crate) fn evaluate_brain(
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     result.action_logits = action_inputs;
+    let logit_mean = action_inputs.iter().sum::<f32>() / ACTION_COUNT as f32;
+    for (idx, logit) in action_inputs.iter().copied().enumerate() {
+        scratch.action_post_signals[idx] = logit - logit_mean;
+    }
     for (idx, action) in brain.action.iter_mut().enumerate() {
         debug_assert_eq!(action_index(action.action_type), idx);
         action.logit = action_inputs[idx];
     }
 
-    let action_policy = action_policy_from_logits(result.action_logits, action_temperature);
-    result.selected_action = select_action_from_policy(&action_policy, action_sample);
-    if result.selected_action == ActionType::Idle {
-        scratch.action_credit_signals.fill(0.0);
-    } else {
-        let selected_idx = action_index(result.selected_action);
-        scratch.action_credit_signals.fill(0.0);
-        for (idx, probability) in action_policy
-            .action_probabilities
-            .iter()
-            .copied()
-            .enumerate()
-        {
-            if idx == selected_idx {
-                scratch.action_credit_signals[idx] = 1.0 - probability;
-            }
-        }
-    }
+    result.selected_action =
+        select_action_from_logits(result.action_logits, action_temperature, action_sample);
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::ActionActivationResolve, stage_started.elapsed());
 
@@ -445,88 +424,70 @@ pub fn derive_active_action_neuron_id(organism: &OrganismState) -> Option<Neuron
         .map(|action_neuron| action_neuron.neuron_id)
 }
 
-fn action_policy_from_logits(
+fn select_action_from_logits(
     action_logits: [f32; ACTION_COUNT],
     action_temperature: f32,
-) -> ActionPolicy {
+    action_sample: f32,
+) -> ActionType {
     let temperature = action_temperature.max(MIN_ACTION_TEMPERATURE);
-    let idle_scaled = IDLE_LOG_POLICY_WEIGHT;
-    let best_action_scaled = action_logits
-        .iter()
-        .copied()
-        .map(|logit| logit / temperature)
-        .fold(f32::NEG_INFINITY, f32::max);
-    let max_scaled = best_action_scaled.max(idle_scaled);
-
-    let mut action_weights = [0.0_f32; ACTION_COUNT];
-    let mut action_weight_sum = 0.0_f32;
-    let idle_weight = (idle_scaled - max_scaled).exp();
+    let mut weights = [0.0_f32; ACTION_COUNT];
     let mut weight_sum = 0.0_f32;
-    if idle_weight.is_finite() {
-        weight_sum += idle_weight;
-    }
+    let mut best_positive_logit = f32::NEG_INFINITY;
     for (idx, logit) in action_logits.iter().copied().enumerate() {
-        let scaled = (logit / temperature) - max_scaled;
+        if logit > 0.0 {
+            best_positive_logit = best_positive_logit.max(logit);
+            weights[idx] = logit;
+        }
+    }
+
+    if !best_positive_logit.is_finite() {
+        return ActionType::Idle;
+    }
+
+    for positive_logit in &mut weights {
+        if *positive_logit <= 0.0 {
+            continue;
+        }
+        let scaled = (*positive_logit - best_positive_logit) / temperature;
         let weight = scaled.exp();
         if weight.is_finite() {
-            action_weights[idx] = weight;
-            action_weight_sum += weight;
+            *positive_logit = weight;
             weight_sum += weight;
+        } else {
+            *positive_logit = 0.0;
         }
     }
 
     if !weight_sum.is_finite() || weight_sum <= 0.0 {
-        let uniform_action_probability = 1.0 / (ACTION_COUNT as f32 + 1.0);
-        return ActionPolicy {
-            idle_probability: uniform_action_probability,
-            action_probabilities: [uniform_action_probability; ACTION_COUNT],
+        let best_idx = argmax_index(&action_logits);
+        return if action_logits[best_idx] > 0.0 {
+            ActionType::ALL[best_idx]
+        } else {
+            ActionType::Idle
         };
     }
 
-    for weight in &mut action_weights {
-        *weight /= weight_sum;
-    }
-    let idle_probability = if idle_weight.is_finite() {
-        idle_weight / weight_sum
-    } else {
-        0.0
-    };
-    if idle_probability + action_weight_sum / weight_sum <= 0.0 {
-        let uniform_action_probability = 1.0 / (ACTION_COUNT as f32 + 1.0);
-        return ActionPolicy {
-            idle_probability: uniform_action_probability,
-            action_probabilities: [uniform_action_probability; ACTION_COUNT],
-        };
-    }
-    ActionPolicy {
-        idle_probability,
-        action_probabilities: action_weights,
-    }
-}
-
-fn select_action_from_policy(action_policy: &ActionPolicy, action_sample: f32) -> ActionType {
-    let weight_sum =
-        action_policy.idle_probability + action_policy.action_probabilities.iter().sum::<f32>();
-    if !weight_sum.is_finite() || weight_sum <= 0.0 {
-        return ActionType::Idle;
-    }
     let sample = action_sample.clamp(0.0, 1.0 - f32::EPSILON) * weight_sum;
-    let mut cumulative = action_policy.idle_probability;
-    if sample < cumulative {
-        return ActionType::Idle;
-    }
-    for (idx, probability) in action_policy
-        .action_probabilities
-        .iter()
-        .copied()
-        .enumerate()
-    {
-        cumulative += probability;
+    let mut cumulative = 0.0_f32;
+    for (idx, weight) in weights.iter().copied().enumerate() {
+        cumulative += weight;
         if sample < cumulative {
             return ActionType::ALL[idx];
         }
     }
     ActionType::ALL[ACTION_COUNT - 1]
+}
+
+fn argmax_index(values: &[f32]) -> usize {
+    let mut best_idx = 0usize;
+    let mut best_value = values[0];
+    for (idx, value) in values.iter().copied().enumerate().skip(1) {
+        if value > best_value {
+            best_idx = idx;
+            best_value = value;
+        }
+    }
+    best_idx
 }
 
 pub(crate) fn constrain_weight(weight: f32) -> f32 {
