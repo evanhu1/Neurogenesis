@@ -1416,8 +1416,11 @@ mod tests {
             vision_distance: 2,
             starting_energy: energy.max(1.0),
             age_of_maturity: 0,
+            plasticity_start_age: 0,
             hebb_eta_gain: 0.0,
+            juvenile_eta_scale: 0.5,
             eligibility_retention: 0.9,
+            max_weight_delta_per_tick: 0.05,
             synapse_prune_threshold: 0.01,
             mutation_rate_age_of_maturity: 0.0,
             mutation_rate_vision_distance: 0.0,
@@ -1433,9 +1436,15 @@ mod tests {
             mutation_rate_add_neuron_split_edge: 0.0,
             inter_biases: vec![0.0],
             inter_log_time_constants: vec![0.0],
-            sensory_locations: vec![sim_types::BrainLocation { x: 0.0, y: 0.0 }; 2],
+            sensory_locations: vec![
+                sim_types::BrainLocation { x: 0.0, y: 0.0 };
+                sim_types::SensoryReceptor::LOOK_NEURON_COUNT as usize + 3
+            ],
             inter_locations: vec![sim_types::BrainLocation { x: 1.0, y: 1.0 }],
-            action_locations: vec![sim_types::BrainLocation { x: 2.0, y: 2.0 }; 5],
+            action_locations: vec![
+                sim_types::BrainLocation { x: 2.0, y: 2.0 };
+                ActionType::ALL.len()
+            ],
             edges: Vec::new(),
         };
         genome.num_neurons = generation as u32 + 1;
@@ -1500,6 +1509,7 @@ mod tests {
                 energy: strong.energy,
                 energy_prev: strong.energy,
                 dopamine: 0.0,
+                damage_taken_last_turn: 0.0,
                 consumptions_count: strong.consumptions_count,
                 reproductions_count: strong.reproductions_count,
                 last_action_taken: ActionType::Idle,
@@ -1517,6 +1527,7 @@ mod tests {
                 energy: weaker_duplicate.energy,
                 energy_prev: weaker_duplicate.energy,
                 dopamine: 0.0,
+                damage_taken_last_turn: 0.0,
                 consumptions_count: weaker_duplicate.consumptions_count,
                 reproductions_count: weaker_duplicate.reproductions_count,
                 last_action_taken: ActionType::Idle,

@@ -10,7 +10,14 @@ export type SpeciesId = number;
 export type FoodId = number;
 export type NeuronId = number;
 
-export type ActionType = 'Idle' | 'TurnLeft' | 'TurnRight' | 'Forward' | 'Consume' | 'Reproduce';
+export type ActionType =
+  | 'Idle'
+  | 'TurnLeft'
+  | 'TurnRight'
+  | 'Forward'
+  | 'Eat'
+  | 'Attack'
+  | 'Reproduce';
 
 export type NeuronType = 'Sensory' | 'Inter' | 'Action';
 
@@ -31,8 +38,11 @@ type GenomeCoreParams = {
   vision_distance: number;
   starting_energy: number;
   age_of_maturity: number;
+  plasticity_start_age: number;
   hebb_eta_gain: number;
+  juvenile_eta_scale: number;
   eligibility_retention: number;
+  max_weight_delta_per_tick: number;
   synapse_prune_threshold: number;
 };
 
@@ -62,6 +72,7 @@ export type WorldConfig = {
   periodic_injection_count: number;
   food_energy: number;
   move_action_energy_cost: number;
+  reproduction_investment_energy: number;
   action_temperature: number;
   neuron_metabolism_cost: number;
   food_regrowth_interval: number;
@@ -73,6 +84,10 @@ export type WorldConfig = {
   global_mutation_rate_modifier: number;
   meta_mutation_enabled: boolean;
   runtime_plasticity_enabled: boolean;
+  explicit_idle_softmax: boolean;
+  executed_action_credit: boolean;
+  juvenile_plasticity_enabled: boolean;
+  split_attack_actions: boolean;
   force_random_actions: boolean;
   seed_genome_config: SeedGenomeConfig;
 };
@@ -137,7 +152,19 @@ type EnergyReceptor = {
   receptor_type: 'Energy';
 };
 
-export type SensoryReceptor = LookRayReceptor | EnergyReceptor;
+type ContactAheadReceptor = {
+  receptor_type: 'ContactAhead';
+};
+
+type DamageReceptor = {
+  receptor_type: 'Damage';
+};
+
+export type SensoryReceptor =
+  | LookRayReceptor
+  | ContactAheadReceptor
+  | DamageReceptor
+  | EnergyReceptor;
 
 export type ApiSensoryNeuronState = {
   neuron: ApiNeuronState;
@@ -204,6 +231,7 @@ export type ApiOrganismState = {
   energy: number;
   energy_prev: number;
   dopamine: number;
+  damage_taken_last_turn: number;
   consumptions_count: number;
   reproductions_count: number;
   last_action_taken: ActionType;
@@ -222,6 +250,7 @@ export type OrganismState = {
   energy: number;
   energy_prev: number;
   dopamine: number;
+  damage_taken_last_turn: number;
   consumptions_count: number;
   reproductions_count: number;
   last_action_taken: ActionType;
@@ -238,6 +267,7 @@ export type ApiWorldOrganismState = {
   age_turns: number;
   facing: FacingDirection;
   energy: number;
+  damage_taken_last_turn: number;
   consumptions_count: number;
   reproductions_count: number;
 };
@@ -251,6 +281,7 @@ export type WorldOrganismState = {
   age_turns: number;
   facing: FacingDirection;
   energy: number;
+  damage_taken_last_turn: number;
   consumptions_count: number;
   reproductions_count: number;
 };

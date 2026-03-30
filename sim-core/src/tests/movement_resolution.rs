@@ -163,6 +163,58 @@ fn move_resolution_blocks_wall_cells() {
 }
 
 #[test]
+fn eat_only_interacts_with_food() {
+    let cfg = test_config(5, 2);
+    let mut sim = Simulation::new(cfg, 204).expect("simulation should initialize");
+    configure_sim(
+        &mut sim,
+        vec![
+            make_single_action_organism(0, 1, 1, FacingDirection::East, ActionType::Eat, 0.9, 50.0),
+            make_single_action_organism(1, 2, 1, FacingDirection::East, ActionType::Idle, 0.1, 50.0),
+        ],
+    );
+
+    let delta = tick_once(&mut sim);
+    assert_eq!(delta.metrics.consumptions_last_turn, 0);
+    let prey = sim
+        .organisms
+        .iter()
+        .find(|organism| organism.id == OrganismId(1))
+        .expect("prey should still exist");
+    assert_eq!(prey.damage_taken_last_turn, 0.0);
+}
+
+#[test]
+fn attack_only_interacts_with_organisms_and_applies_damage() {
+    let cfg = test_config(5, 2);
+    let mut sim = Simulation::new(cfg, 205).expect("simulation should initialize");
+    configure_sim(
+        &mut sim,
+        vec![
+            make_single_action_organism(
+                0,
+                1,
+                1,
+                FacingDirection::East,
+                ActionType::Attack,
+                0.9,
+                50.0,
+            ),
+            make_single_action_organism(1, 2, 1, FacingDirection::East, ActionType::Idle, 0.1, 50.0),
+        ],
+    );
+
+    let _ = tick_once(&mut sim);
+    let prey = sim
+        .organisms
+        .iter()
+        .find(|organism| organism.id == OrganismId(1))
+        .expect("prey should survive a single attack");
+    assert!(prey.damage_taken_last_turn > 0.0);
+    assert!(prey.energy < 50.0);
+}
+
+#[test]
 fn dopamine_stays_near_zero_when_idle_without_events() {
     let cfg = test_config(5, 1);
     let mut sim = Simulation::new(cfg, 301).expect("simulation should initialize");
