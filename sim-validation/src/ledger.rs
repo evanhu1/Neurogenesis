@@ -1,7 +1,7 @@
 use sim_types::{ActionRecord, ActionType, OrganismId};
 use std::collections::HashMap;
 
-pub const N_ACTIONS: usize = 6;
+pub const N_ACTIONS: usize = 7;
 pub const SENSORY_BIN_COUNT: usize = 5;
 const INTER_EMA_ALPHA: f32 = 0.05;
 const UTILIZATION_THRESHOLD: f32 = 0.03;
@@ -15,6 +15,22 @@ pub struct CompletedLifetime {
     pub food_ahead_ticks: u32,
     pub fwd_when_food_ahead: u32,
     pub utilization: f32,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct IntervalActionStats {
+    pub action_counts: [u64; N_ACTIONS],
+    pub joint: [[u64; N_ACTIONS]; SENSORY_BIN_COUNT],
+    pub juvenile_joint: [[u64; N_ACTIONS]; SENSORY_BIN_COUNT],
+    pub adult_joint: [[u64; N_ACTIONS]; SENSORY_BIN_COUNT],
+    pub reproduction_attempts: u64,
+    pub total_damage_taken: f64,
+}
+
+impl IntervalActionStats {
+    pub fn total_actions(&self) -> u64 {
+        self.action_counts.iter().sum()
+    }
 }
 
 #[derive(Debug)]
@@ -48,6 +64,7 @@ impl OrganismEntry {
 pub struct Ledger {
     sidecar: HashMap<OrganismId, OrganismEntry>,
     recently_deceased: Vec<CompletedLifetime>,
+    interval_action_stats: IntervalActionStats,
     pub neonatal_deaths: u64,
     min_lifetime: u64,
 }
@@ -57,6 +74,7 @@ impl Ledger {
         Self {
             sidecar: HashMap::new(),
             recently_deceased: Vec::new(),
+            interval_action_stats: IntervalActionStats::default(),
             neonatal_deaths: 0,
             min_lifetime,
         }
@@ -67,27 +85,36 @@ impl Ledger {
     }
 
     pub fn update(&mut self, record: ActionRecord) {
+        let action_idx = action_index(record.selected_action);
+        let sensory_bin = sensory_bin(&record);
+        self.interval_action_stats.action_counts[action_idx] =
+            self.interval_action_stats.action_counts[action_idx].saturating_add(1);
+        self.interval_action_stats.joint[sensory_bin][action_idx] =
+            self.interval_action_stats.joint[sensory_bin][action_idx].saturating_add(1);
+        if record.age_turns < u64::from(record.age_of_maturity) {
+            self.interval_action_stats.juvenile_joint[sensory_bin][action_idx] =
+                self.interval_action_stats.juvenile_joint[sensory_bin][action_idx]
+                    .saturating_add(1);
+        } else {
+            self.interval_action_stats.adult_joint[sensory_bin][action_idx] =
+                self.interval_action_stats.adult_joint[sensory_bin][action_idx].saturating_add(1);
+        }
+        if record.selected_action == ActionType::Reproduce {
+            self.interval_action_stats.reproduction_attempts = self
+                .interval_action_stats
+                .reproduction_attempts
+                .saturating_add(1);
+        }
+        self.interval_action_stats.total_damage_taken +=
+            f64::from(record.damage_taken_last_turn.max(0.0));
+
         let Some(entry) = self.sidecar.get_mut(&record.organism_id) else {
             return;
         };
 
-        let action_idx = action_index(record.selected_action);
         entry.last_consumptions = record.consumptions_count;
         entry.action_counts[action_idx] = entry.action_counts[action_idx].saturating_add(1);
-
-        let sensory_bin = if record.food_ahead {
-            1
-        } else if record.food_left {
-            2
-        } else if record.food_right {
-            3
-        } else if record.food_behind {
-            4
-        } else {
-            0
-        };
-        entry.joint[sensory_bin][action_idx] =
-            entry.joint[sensory_bin][action_idx].saturating_add(1);
+        entry.joint[sensory_bin][action_idx] = entry.joint[sensory_bin][action_idx].saturating_add(1);
 
         if record.food_ahead {
             entry.food_ahead_ticks = entry.food_ahead_ticks.saturating_add(1);
@@ -157,9 +184,28 @@ impl Ledger {
         &self.recently_deceased
     }
 
+    pub fn interval_action_stats(&self) -> &IntervalActionStats {
+        &self.interval_action_stats
+    }
+
     pub fn clear_interval(&mut self) {
         self.recently_deceased.clear();
+        self.interval_action_stats = IntervalActionStats::default();
         self.neonatal_deaths = 0;
+    }
+}
+
+fn sensory_bin(record: &ActionRecord) -> usize {
+    if record.food_ahead {
+        1
+    } else if record.food_left {
+        2
+    } else if record.food_right {
+        3
+    } else if record.food_behind {
+        4
+    } else {
+        0
     }
 }
 
@@ -169,7 +215,8 @@ fn action_index(action: ActionType) -> usize {
         ActionType::TurnLeft => 1,
         ActionType::TurnRight => 2,
         ActionType::Forward => 3,
-        ActionType::Consume => 4,
-        ActionType::Reproduce => 5,
+        ActionType::Eat => 4,
+        ActionType::Attack => 5,
+        ActionType::Reproduce => 6,
     }
 }

@@ -3,6 +3,7 @@ use crate::{
     metrics::{action_baseline_entropy, action_baseline_probability, IntervalMetrics},
 };
 use anyhow::Result;
+use serde::Serialize;
 use std::fmt::Write as _;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -18,7 +19,7 @@ impl Reporter {
         let mut csv = BufWriter::new(File::create(csv_path)?);
         writeln!(
             csv,
-            "tick,pop,births,deaths,food,max_generation,life_mean,predation_rate,ate_pct,cons_mean,brain_size,p_fwd_food,mi_sa,h_action,util"
+            "tick,pop,births,deaths,food,max_generation,life_mean,predation_rate,foraging_rate,attack_attempt_rate,attack_success_rate,ate_pct,cons_mean,brain_size,brain_size_stddev,brain_size_p10,brain_size_p50,brain_size_p90,lineage_diversity,p_fwd_food,mi_sa,mi_sa_juvenile,mi_sa_adult,h_action,idle_fraction,reproduction_efficiency,damage_avoidance,reward_reversal_shift,util"
         )?;
         Ok(Self { csv })
     }
@@ -26,7 +27,7 @@ impl Reporter {
     pub fn emit(&mut self, metrics: &IntervalMetrics) -> Result<()> {
         writeln!(
             self.csv,
-            "{tick},{pop},{births},{deaths},{food},{max_generation},{life_mean},{predation_rate},{ate_pct},{cons_mean},{brain_size},{p_fwd_food},{mi_sa},{h_action},{util}",
+            "{tick},{pop},{births},{deaths},{food},{max_generation},{life_mean},{predation_rate},{foraging_rate},{attack_attempt_rate},{attack_success_rate},{ate_pct},{cons_mean},{brain_size},{brain_size_stddev},{brain_size_p10},{brain_size_p50},{brain_size_p90},{lineage_diversity},{p_fwd_food},{mi_sa},{mi_sa_juvenile},{mi_sa_adult},{h_action},{idle_fraction},{reproduction_efficiency},{damage_avoidance},{reward_reversal_shift},{util}",
             tick = metrics.tick,
             pop = metrics.pop,
             births = metrics.births,
@@ -35,12 +36,26 @@ impl Reporter {
             max_generation = csv_opt_u64(metrics.max_generation),
             life_mean = csv_opt(metrics.life_mean),
             predation_rate = csv_opt(metrics.predation_rate),
+            foraging_rate = csv_opt(metrics.foraging_rate),
+            attack_attempt_rate = csv_opt(metrics.attack_attempt_rate),
+            attack_success_rate = csv_opt(metrics.attack_success_rate),
             ate_pct = csv_opt(metrics.ate_pct),
             cons_mean = csv_opt(metrics.cons_mean),
             brain_size = csv_opt(metrics.brain_size),
+            brain_size_stddev = csv_opt(metrics.brain_size_stddev),
+            brain_size_p10 = csv_opt(metrics.brain_size_p10),
+            brain_size_p50 = csv_opt(metrics.brain_size_p50),
+            brain_size_p90 = csv_opt(metrics.brain_size_p90),
+            lineage_diversity = csv_opt(metrics.lineage_diversity),
             p_fwd_food = csv_opt(metrics.p_fwd_food),
             mi_sa = csv_opt(metrics.mi_sa),
+            mi_sa_juvenile = csv_opt(metrics.mi_sa_juvenile),
+            mi_sa_adult = csv_opt(metrics.mi_sa_adult),
             h_action = csv_opt(metrics.h_action),
+            idle_fraction = csv_opt(metrics.idle_fraction),
+            reproduction_efficiency = csv_opt(metrics.reproduction_efficiency),
+            damage_avoidance = csv_opt(metrics.damage_avoidance),
+            reward_reversal_shift = csv_opt(metrics.reward_reversal_shift),
             util = csv_opt(metrics.util),
         )?;
 
@@ -76,18 +91,63 @@ pub struct HtmlReportMeta {
     pub aggregate_predation_component: f64,
     pub aggregate_mean_p_fwd_food: Option<f64>,
     pub aggregate_mean_mi_sa: Option<f64>,
+    pub aggregate_mean_mi_sa_juvenile: Option<f64>,
+    pub aggregate_mean_mi_sa_adult: Option<f64>,
     pub aggregate_mean_h_action: Option<f64>,
     pub aggregate_mean_predation_rate: Option<f64>,
+    pub aggregate_mean_foraging_rate: Option<f64>,
+    pub aggregate_mean_attack_attempt_rate: Option<f64>,
+    pub aggregate_mean_attack_success_rate: Option<f64>,
+    pub aggregate_mean_idle_fraction: Option<f64>,
+    pub aggregate_mean_reproduction_efficiency: Option<f64>,
+    pub aggregate_mean_lineage_diversity: Option<f64>,
+    pub aggregate_mean_damage_avoidance: Option<f64>,
+    pub aggregate_mean_reward_reversal_shift: Option<f64>,
+    pub aggregate_reward_reversal_adaptation_ticks: Option<u64>,
     pub timeseries_label: String,
     pub per_seed_rows: Vec<PerSeedReportRow>,
 }
 
+#[derive(Debug, Clone, Serialize)]
 pub struct PerSeedReportRow {
     pub seed: u64,
     pub score: f64,
     pub total_time_seconds: f64,
     pub state_hash: String,
     pub report_href: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ComparisonMetricRow {
+    pub label: String,
+    pub control_mean: Option<f64>,
+    pub treatment_mean: Option<f64>,
+    pub mean_diff: Option<f64>,
+    pub ci_low: Option<f64>,
+    pub ci_high: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PerSeedComparisonRow {
+    pub seed: u64,
+    pub control_score: f64,
+    pub treatment_score: f64,
+    pub diff_score: f64,
+    pub control_report_href: String,
+    pub treatment_report_href: String,
+}
+
+pub struct ComparisonHtmlReportMeta {
+    pub title: Option<String>,
+    pub seed_label: String,
+    pub ticks: u64,
+    pub control_label: String,
+    pub treatment_label: String,
+    pub total_time_seconds: f64,
+    pub metric_rows: Vec<ComparisonMetricRow>,
+    pub per_seed_rows: Vec<PerSeedComparisonRow>,
+    pub control_report_href: String,
+    pub treatment_report_href: String,
 }
 
 pub fn write_html_report(
@@ -228,6 +288,16 @@ pub fn write_html_report(
     );
     kv(
         &mut html,
+        "Window mean juvenile MI(S;A)",
+        &fmt_opt(meta.aggregate_mean_mi_sa_juvenile, 4),
+    );
+    kv(
+        &mut html,
+        "Window mean adult MI(S;A)",
+        &fmt_opt(meta.aggregate_mean_mi_sa_adult, 4),
+    );
+    kv(
+        &mut html,
         "Window mean H(action)",
         &fmt_opt(meta.aggregate_mean_h_action, 4),
     );
@@ -235,6 +305,51 @@ pub fn write_html_report(
         &mut html,
         "Window mean predation rate",
         &fmt_opt(meta.aggregate_mean_predation_rate, 6),
+    );
+    kv(
+        &mut html,
+        "Window mean foraging rate",
+        &fmt_opt(meta.aggregate_mean_foraging_rate, 6),
+    );
+    kv(
+        &mut html,
+        "Window mean attack attempt rate",
+        &fmt_opt(meta.aggregate_mean_attack_attempt_rate, 6),
+    );
+    kv(
+        &mut html,
+        "Window mean attack success rate",
+        &fmt_opt(meta.aggregate_mean_attack_success_rate, 4),
+    );
+    kv(
+        &mut html,
+        "Window mean idle fraction",
+        &fmt_opt(meta.aggregate_mean_idle_fraction, 4),
+    );
+    kv(
+        &mut html,
+        "Window mean reproduction efficiency",
+        &fmt_opt(meta.aggregate_mean_reproduction_efficiency, 4),
+    );
+    kv(
+        &mut html,
+        "Window mean lineage diversity",
+        &fmt_opt(meta.aggregate_mean_lineage_diversity, 4),
+    );
+    kv(
+        &mut html,
+        "Window mean damage avoidance",
+        &fmt_opt(meta.aggregate_mean_damage_avoidance, 4),
+    );
+    kv(
+        &mut html,
+        "Window mean reversal shift",
+        &fmt_opt(meta.aggregate_mean_reward_reversal_shift, 4),
+    );
+    kv(
+        &mut html,
+        "Reversal adaptation ticks",
+        &fmt_opt_u64(meta.aggregate_reward_reversal_adaptation_ticks),
     );
     html.push_str("</div></div>");
 
@@ -268,38 +383,61 @@ pub fn write_html_report(
         "max_generation",
         "life_mean",
         "predation_rate",
+        "foraging_rate",
+        "attack_attempt_rate",
+        "attack_success_rate",
         "ate_pct",
         "cons_mean",
         "brain_size",
+        "brain_size_stddev",
+        "lineage_diversity",
         "p_fwd_food",
         "mi_sa",
+        "mi_sa_juvenile",
+        "mi_sa_adult",
         "h_action",
+        "idle_fraction",
+        "reproduction_efficiency",
+        "damage_avoidance",
+        "reward_reversal_shift",
         "util",
     ] {
         let _ = write!(html, "<th>{header}</th>");
     }
     html.push_str("</tr></thead><tbody>");
     for row in rows {
-        let _ = write!(
-            html,
-            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td>\
-             <td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
-            row.tick,
-            row.pop,
-            row.births,
-            row.deaths,
-            row.food,
+        html.push_str("<tr>");
+        for cell in [
+            row.tick.to_string(),
+            row.pop.to_string(),
+            row.births.to_string(),
+            row.deaths.to_string(),
+            row.food.to_string(),
             fmt_opt_u64(row.max_generation),
             fmt_opt(row.life_mean, 2),
             fmt_opt(row.predation_rate, 6),
+            fmt_opt(row.foraging_rate, 6),
+            fmt_opt(row.attack_attempt_rate, 6),
+            fmt_opt(row.attack_success_rate, 4),
             fmt_opt(row.ate_pct, 2),
             fmt_opt(row.cons_mean, 2),
             fmt_opt(row.brain_size, 2),
+            fmt_opt(row.brain_size_stddev, 2),
+            fmt_opt(row.lineage_diversity, 4),
             fmt_opt(row.p_fwd_food, 4),
             fmt_opt(row.mi_sa, 4),
+            fmt_opt(row.mi_sa_juvenile, 4),
+            fmt_opt(row.mi_sa_adult, 4),
             fmt_opt(row.h_action, 4),
-            fmt_opt(row.util, 4)
-        );
+            fmt_opt(row.idle_fraction, 4),
+            fmt_opt(row.reproduction_efficiency, 4),
+            fmt_opt(row.damage_avoidance, 4),
+            fmt_opt(row.reward_reversal_shift, 4),
+            fmt_opt(row.util, 4),
+        ] {
+            let _ = write!(html, "<td>{cell}</td>");
+        }
+        html.push_str("</tr>");
     }
     html.push_str("</tbody></table></div>");
 
@@ -346,6 +484,24 @@ pub fn write_html_report(
             Some(0.0),
             "#be123c",
         ),
+        (
+            "Foraging Rate",
+            metric_series(rows, |r| r.foraging_rate),
+            Some(0.0),
+            "#16a34a",
+        ),
+        (
+            "Attack Attempt Rate",
+            metric_series(rows, |r| r.attack_attempt_rate),
+            Some(0.0),
+            "#ef4444",
+        ),
+        (
+            "Attack Success Rate",
+            metric_series(rows, |r| r.attack_success_rate),
+            Some(0.0),
+            "#b91c1c",
+        ),
         ("Ate %", metric_series(rows, |r| r.ate_pct), None, "#c2410c"),
         (
             "Consumptions Mean",
@@ -372,10 +528,52 @@ pub fn write_html_report(
             "#9333ea",
         ),
         (
+            "MI(S;A) Juvenile",
+            metric_series(rows, |r| r.mi_sa_juvenile),
+            Some(0.0),
+            "#7c3aed",
+        ),
+        (
+            "MI(S;A) Adult",
+            metric_series(rows, |r| r.mi_sa_adult),
+            Some(0.0),
+            "#581c87",
+        ),
+        (
             "H(Action)",
             metric_series(rows, |r| r.h_action),
             Some(action_baseline_entropy()),
             "#b45309",
+        ),
+        (
+            "Idle Fraction",
+            metric_series(rows, |r| r.idle_fraction),
+            Some(action_baseline_probability()),
+            "#f97316",
+        ),
+        (
+            "Reproduction Efficiency",
+            metric_series(rows, |r| r.reproduction_efficiency),
+            Some(0.0),
+            "#0ea5e9",
+        ),
+        (
+            "Lineage Diversity",
+            metric_series(rows, |r| r.lineage_diversity),
+            Some(0.0),
+            "#0f766e",
+        ),
+        (
+            "Damage Avoidance",
+            metric_series(rows, |r| r.damage_avoidance),
+            Some(1.0),
+            "#059669",
+        ),
+        (
+            "Reward Reversal Shift",
+            metric_series(rows, |r| r.reward_reversal_shift),
+            Some(0.0),
+            "#1d4ed8",
         ),
         (
             "Inter Utilization",
@@ -400,6 +598,114 @@ pub fn write_html_report(
     }
     html.push_str("</div>");
     append_interpretation_guidance(&mut html);
+
+    html.push_str("</div></body></html>");
+    std::fs::write(report_path, html)?;
+    Ok(())
+}
+
+pub fn write_comparison_html_report(
+    out_dir: &Path,
+    meta: &ComparisonHtmlReportMeta,
+) -> Result<()> {
+    let report_path = out_dir.join("comparison_report.html");
+    let mut html = String::new();
+    html.push_str(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
+    );
+    html.push_str("<title>Sim Validation Comparison</title>");
+    html.push_str(
+        "<style>\
+        :root{--bg:#f5f7fb;--panel:#ffffff;--ink:#0f172a;--muted:#64748b;--line:#dbe2ea;}\
+        *{box-sizing:border-box}body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink)}\
+        .wrap{max-width:1200px;margin:24px auto;padding:0 16px}\
+        .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}\
+        h1,h2{margin:0 0 10px 0}h1{font-size:24px}h2{font-size:18px}\
+        .meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}\
+        .k{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}.v{font-weight:600}\
+        table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:8px;border-bottom:1px solid var(--line);text-align:right}th:first-child,td:first-child{text-align:left}\
+        a{color:#1d4ed8;text-decoration:none}a:hover{text-decoration:underline}\
+        </style></head><body><div class=\"wrap\">",
+    );
+    html.push_str("<div class=\"panel\"><h1>Simulation Validation Comparison</h1><div class=\"meta\">");
+    if let Some(title) = &meta.title {
+        kv(&mut html, "Title", title);
+    }
+    kv(&mut html, "Seeds", &meta.seed_label);
+    kv(&mut html, "Ticks", &meta.ticks.to_string());
+    kv(&mut html, "Control", &meta.control_label);
+    kv(&mut html, "Treatment", &meta.treatment_label);
+    kv(
+        &mut html,
+        "Total Time",
+        &format!("{:.3}s", meta.total_time_seconds),
+    );
+    html.push_str("</div></div>");
+
+    html.push_str("<div class=\"panel\"><h2>Run Reports</h2><table><tbody>");
+    let _ = write!(
+        html,
+        "<tr><td>Control</td><td><a href=\"{}\">open report</a></td></tr>",
+        meta.control_report_href
+    );
+    let _ = write!(
+        html,
+        "<tr><td>Treatment</td><td><a href=\"{}\">open report</a></td></tr>",
+        meta.treatment_report_href
+    );
+    html.push_str("</tbody></table></div>");
+
+    html.push_str("<div class=\"panel\"><h2>Metric Diffs</h2><table><thead><tr>");
+    for header in [
+        "metric",
+        "control_mean",
+        "treatment_mean",
+        "mean_diff",
+        "ci_low",
+        "ci_high",
+    ] {
+        let _ = write!(html, "<th>{header}</th>");
+    }
+    html.push_str("</tr></thead><tbody>");
+    for row in &meta.metric_rows {
+        let _ = write!(
+            html,
+            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+            row.label,
+            fmt_opt(row.control_mean, 4),
+            fmt_opt(row.treatment_mean, 4),
+            fmt_opt(row.mean_diff, 4),
+            fmt_opt(row.ci_low, 4),
+            fmt_opt(row.ci_high, 4),
+        );
+    }
+    html.push_str("</tbody></table></div>");
+
+    html.push_str("<div class=\"panel\"><h2>Per-Seed Score Diffs</h2><table><thead><tr>");
+    for header in [
+        "seed",
+        "control_score",
+        "treatment_score",
+        "diff_score",
+        "control_report",
+        "treatment_report",
+    ] {
+        let _ = write!(html, "<th>{header}</th>");
+    }
+    html.push_str("</tr></thead><tbody>");
+    for row in &meta.per_seed_rows {
+        let _ = write!(
+            html,
+            "<tr><td>{}</td><td>{:.2}</td><td>{:.2}</td><td>{:.2}</td><td><a href=\"{}\">open</a></td><td><a href=\"{}\">open</a></td></tr>",
+            row.seed,
+            row.control_score,
+            row.treatment_score,
+            row.diff_score,
+            row.control_report_href,
+            row.treatment_report_href,
+        );
+    }
+    html.push_str("</tbody></table></div>");
 
     html.push_str("</div></body></html>");
     std::fs::write(report_path, html)?;

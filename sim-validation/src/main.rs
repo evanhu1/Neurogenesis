@@ -5,9 +5,12 @@ mod report;
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use clap::Parser;
-use ledger::Ledger;
-use metrics::{compute_interval_metrics, IntervalMetrics};
-use report::{write_html_report, HtmlReportMeta, PerSeedReportRow, Reporter};
+use ledger::{Ledger, N_ACTIONS};
+use metrics::{compute_interval_metrics, jensen_shannon_divergence, IntervalMetrics};
+use report::{
+    write_comparison_html_report, write_html_report, ComparisonHtmlReportMeta,
+    ComparisonMetricRow, HtmlReportMeta, PerSeedComparisonRow, PerSeedReportRow, Reporter,
+};
 use serde::Serialize;
 use sim_config::load_world_config_from_path;
 use sim_core::Simulation;
@@ -49,6 +52,61 @@ struct Cli {
     title: Option<String>,
     #[arg(long, default_value_t = false)]
     baseline: bool,
+    #[arg(long, default_value_t = false)]
+    compare: bool,
+    #[arg(long, default_value_t = false)]
+    disable_plasticity: bool,
+    #[arg(long)]
+    executed_action_credit: Option<bool>,
+    #[arg(long)]
+    explicit_idle_softmax: Option<bool>,
+    #[arg(long)]
+    juvenile_plasticity: Option<bool>,
+    #[arg(long)]
+    split_attack: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct FeatureOverrides {
+    disable_plasticity: bool,
+    executed_action_credit: Option<bool>,
+    explicit_idle_softmax: Option<bool>,
+    juvenile_plasticity: Option<bool>,
+    split_attack: Option<bool>,
+}
+
+impl FeatureOverrides {
+    fn has_overrides(&self) -> bool {
+        self.disable_plasticity
+            || self.executed_action_credit.is_some()
+            || self.explicit_idle_softmax.is_some()
+            || self.juvenile_plasticity.is_some()
+            || self.split_attack.is_some()
+    }
+
+    fn label(&self) -> String {
+        let mut parts = Vec::new();
+        if self.disable_plasticity {
+            parts.push("disable-plasticity".to_owned());
+        }
+        if let Some(value) = self.executed_action_credit {
+            parts.push(format!("executed-action-credit={value}"));
+        }
+        if let Some(value) = self.explicit_idle_softmax {
+            parts.push(format!("explicit-idle-softmax={value}"));
+        }
+        if let Some(value) = self.juvenile_plasticity {
+            parts.push(format!("juvenile-plasticity={value}"));
+        }
+        if let Some(value) = self.split_attack {
+            parts.push(format!("split-attack={value}"));
+        }
+        if parts.is_empty() {
+            "treatment".to_owned()
+        } else {
+            parts.join(", ")
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -71,6 +129,7 @@ struct SeedRunOptions {
     out_dir: PathBuf,
     title: Option<String>,
     baseline: bool,
+    reward_reversal_tick: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -118,12 +177,37 @@ struct AggregateScore {
     window_end_tick: u64,
     mean_p_fwd_food: Option<f64>,
     mean_mi_sa: Option<f64>,
+    mean_mi_sa_juvenile: Option<f64>,
+    mean_mi_sa_adult: Option<f64>,
     mean_h_action: Option<f64>,
     mean_predation_rate: Option<f64>,
+    mean_foraging_rate: Option<f64>,
+    mean_attack_attempt_rate: Option<f64>,
+    mean_attack_success_rate: Option<f64>,
+    mean_idle_fraction: Option<f64>,
+    mean_reproduction_efficiency: Option<f64>,
+    mean_lineage_diversity: Option<f64>,
+    mean_damage_avoidance: Option<f64>,
+    mean_reward_reversal_shift: Option<f64>,
+    mean_action_histogram: [f64; N_ACTIONS],
+    reward_reversal_adaptation_ticks: Option<u64>,
     p_component: f64,
     mi_component: f64,
     entropy_component: f64,
     predation_component: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ComparisonSummary {
+    title: Option<String>,
+    seeds: Vec<u64>,
+    ticks: u64,
+    control_label: String,
+    treatment_label: String,
+    total_time_seconds: f64,
+    control: ValidationSummary,
+    treatment: ValidationSummary,
+    metric_rows: Vec<ComparisonMetricRow>,
 }
 
 fn main() -> Result<()> {
@@ -134,10 +218,17 @@ fn main() -> Result<()> {
         );
     }
 
-    let mut config = load_world_config_from_path(&cli.config)?;
+    let mut control_config = load_world_config_from_path(&cli.config)?;
     if cli.baseline {
-        config.force_random_actions = true;
+        control_config.force_random_actions = true;
     }
+    let overrides = FeatureOverrides {
+        disable_plasticity: cli.disable_plasticity,
+        executed_action_credit: cli.executed_action_credit,
+        explicit_idle_softmax: cli.explicit_idle_softmax,
+        juvenile_plasticity: cli.juvenile_plasticity,
+        split_attack: cli.split_attack,
+    };
 
     let seeds = normalize_seeds(cli.seeds);
     if seeds.is_empty() {
@@ -158,42 +249,420 @@ fn main() -> Result<()> {
         baseline: cli.baseline,
     };
 
-    let summary = run_validation_across_seeds(config, &options)?;
-    let report_path = options.out_dir.join("report.html");
-    println!("wrote artifacts to {}", options.out_dir.display());
-    println!("html_report: {}", report_path.display());
-    println!("browser_url: {}", browser_file_url(&report_path));
-    println!("seeds: {}", format_seed_list(&summary.seeds));
-    println!("worker_threads: {}", summary.worker_threads);
-    for seed_summary in &summary.seed_summaries {
+    let run_comparison = cli.compare || overrides.has_overrides();
+    if run_comparison {
+        let treatment_config = apply_feature_overrides(control_config.clone(), &overrides);
+        let comparison = run_comparison_validation(control_config, treatment_config, &options, &overrides)?;
+        let report_path = options.out_dir.join("comparison_report.html");
+        println!("wrote artifacts to {}", options.out_dir.display());
+        println!("comparison_html_report: {}", report_path.display());
+        println!("browser_url: {}", browser_file_url(&report_path));
+        println!("seeds: {}", format_seed_list(&comparison.seeds));
+        println!("control_label: {}", comparison.control_label);
+        println!("treatment_label: {}", comparison.treatment_label);
+        for row in &comparison.metric_rows {
+            println!(
+                "compare[{label}]: control={control} treatment={treatment} diff={diff} ci95=[{low},{high}]",
+                label = row.label,
+                control = fmt_option(row.control_mean, 4),
+                treatment = fmt_option(row.treatment_mean, 4),
+                diff = fmt_option(row.mean_diff, 4),
+                low = fmt_option(row.ci_low, 4),
+                high = fmt_option(row.ci_high, 4),
+            );
+        }
+        println!("total_time_seconds: {:.3}", comparison.total_time_seconds);
+    } else {
+        let summary = run_validation_across_seeds(control_config, &options)?;
+        let report_path = options.out_dir.join("report.html");
+        println!("wrote artifacts to {}", options.out_dir.display());
+        println!("html_report: {}", report_path.display());
+        println!("browser_url: {}", browser_file_url(&report_path));
+        println!("seeds: {}", format_seed_list(&summary.seeds));
+        println!("worker_threads: {}", summary.worker_threads);
+        for seed_summary in &summary.seed_summaries {
+            println!(
+                "seed_score[{}]: {:.2}",
+                seed_summary.seed, seed_summary.aggregate_score.score
+            );
+        }
+        println!("aggregate_score: {:.2}", summary.aggregate_score.score);
         println!(
-            "seed_score[{}]: {:.2}",
-            seed_summary.seed, seed_summary.aggregate_score.score
+            "aggregate_score_median: {:.2}",
+            summary.aggregate_score.score_median
         );
+        println!(
+            "aggregate_score_stddev: {:.2}",
+            summary.aggregate_score.score_stddev
+        );
+        println!(
+            "aggregate_score_min: {:.2}",
+            summary.aggregate_score.score_min
+        );
+        println!(
+            "aggregate_score_max: {:.2}",
+            summary.aggregate_score.score_max
+        );
+        println!(
+            "aggregate_predation_component: {:.3}",
+            summary.aggregate_score.predation_component
+        );
+        println!("total_time_seconds: {:.3}", summary.total_time_seconds);
     }
-    println!("aggregate_score: {:.2}", summary.aggregate_score.score);
-    println!(
-        "aggregate_score_median: {:.2}",
-        summary.aggregate_score.score_median
-    );
-    println!(
-        "aggregate_score_stddev: {:.2}",
-        summary.aggregate_score.score_stddev
-    );
-    println!(
-        "aggregate_score_min: {:.2}",
-        summary.aggregate_score.score_min
-    );
-    println!(
-        "aggregate_score_max: {:.2}",
-        summary.aggregate_score.score_max
-    );
-    println!(
-        "aggregate_predation_component: {:.3}",
-        summary.aggregate_score.predation_component
-    );
-    println!("total_time_seconds: {:.3}", summary.total_time_seconds);
     Ok(())
+}
+
+fn apply_feature_overrides(mut config: WorldConfig, overrides: &FeatureOverrides) -> WorldConfig {
+    if overrides.disable_plasticity {
+        config.runtime_plasticity_enabled = false;
+    }
+    if let Some(value) = overrides.executed_action_credit {
+        config.executed_action_credit = value;
+    }
+    if let Some(value) = overrides.explicit_idle_softmax {
+        config.explicit_idle_softmax = value;
+    }
+    if let Some(value) = overrides.juvenile_plasticity {
+        config.juvenile_plasticity_enabled = value;
+    }
+    if let Some(value) = overrides.split_attack {
+        config.split_attack_actions = value;
+    }
+    config
+}
+
+fn reward_reversal_tick_for_run(ticks: u64) -> Option<u64> {
+    if ticks < 2 {
+        None
+    } else {
+        Some((ticks / 2).max(1))
+    }
+}
+
+fn fmt_option(value: Option<f64>, decimals: usize) -> String {
+    value
+        .map(|value| format!("{value:.decimals$}"))
+        .unwrap_or_else(|| "NA".to_owned())
+}
+
+fn run_comparison_validation(
+    control_config: WorldConfig,
+    treatment_config: WorldConfig,
+    options: &HarnessRunOptions,
+    overrides: &FeatureOverrides,
+) -> Result<ComparisonSummary> {
+    let run_started = Instant::now();
+    fs::create_dir_all(&options.out_dir)?;
+
+    let control = run_validation_across_seeds(
+        control_config,
+        &HarnessRunOptions {
+            out_dir: options.out_dir.join("control"),
+            title: options
+                .title
+                .as_ref()
+                .map(|title| format!("{title} [control]")),
+            ..options.clone()
+        },
+    )?;
+    let treatment = run_validation_across_seeds(
+        treatment_config,
+        &HarnessRunOptions {
+            out_dir: options.out_dir.join("treatment"),
+            title: options
+                .title
+                .as_ref()
+                .map(|title| format!("{title} [treatment]")),
+            ..options.clone()
+        },
+    )?;
+
+    let control_label = if options.baseline {
+        "control (baseline)".to_owned()
+    } else {
+        "control".to_owned()
+    };
+    let treatment_label = overrides.label();
+    let metric_rows = comparison_metric_rows(&control, &treatment);
+    let per_seed_rows = control
+        .seed_summaries
+        .iter()
+        .zip(&treatment.seed_summaries)
+        .map(|(control_seed, treatment_seed)| PerSeedComparisonRow {
+            seed: control_seed.seed,
+            control_score: control_seed.aggregate_score.score,
+            treatment_score: treatment_seed.aggregate_score.score,
+            diff_score: treatment_seed.aggregate_score.score - control_seed.aggregate_score.score,
+            control_report_href: format!("control/seed_{}/report.html", control_seed.seed),
+            treatment_report_href: format!("treatment/seed_{}/report.html", treatment_seed.seed),
+        })
+        .collect::<Vec<_>>();
+    let total_time_seconds = run_started.elapsed().as_secs_f64();
+    let comparison = ComparisonSummary {
+        title: options.title.clone(),
+        seeds: options.seeds.clone(),
+        ticks: options.ticks,
+        control_label: control_label.clone(),
+        treatment_label: treatment_label.clone(),
+        total_time_seconds,
+        control: control.clone(),
+        treatment: treatment.clone(),
+        metric_rows: metric_rows.clone(),
+    };
+    write_summary_json(&options.out_dir, &comparison)?;
+    write_comparison_html_report(
+        &options.out_dir,
+        &ComparisonHtmlReportMeta {
+            title: options.title.clone(),
+            seed_label: format_seed_list(&options.seeds),
+            ticks: options.ticks,
+            control_label,
+            treatment_label,
+            total_time_seconds,
+            metric_rows,
+            per_seed_rows,
+            control_report_href: "control/report.html".to_owned(),
+            treatment_report_href: "treatment/report.html".to_owned(),
+        },
+    )?;
+    Ok(comparison)
+}
+
+fn comparison_metric_rows(
+    control: &ValidationSummary,
+    treatment: &ValidationSummary,
+) -> Vec<ComparisonMetricRow> {
+    vec![
+        paired_metric_row(
+            "aggregate_score",
+            control
+                .seed_summaries
+                .iter()
+                .map(|seed| Some(seed.aggregate_score.score))
+                .collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|seed| Some(seed.aggregate_score.score))
+                .collect(),
+        ),
+        paired_metric_row(
+            "idle_fraction",
+            control
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_idle_fraction)
+                .collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_idle_fraction)
+                .collect(),
+        ),
+        paired_metric_row(
+            "action_entropy",
+            control
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_h_action)
+                .collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_h_action)
+                .collect(),
+        ),
+        paired_metric_row(
+            "p_fwd_food",
+            control
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_p_fwd_food)
+                .collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_p_fwd_food)
+                .collect(),
+        ),
+        paired_metric_row(
+            "mi_sa",
+            control
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_mi_sa)
+                .collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_mi_sa)
+                .collect(),
+        ),
+        paired_metric_row(
+            "mi_sa_juvenile",
+            control
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_mi_sa_juvenile)
+                .collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_mi_sa_juvenile)
+                .collect(),
+        ),
+        paired_metric_row(
+            "mi_sa_adult",
+            control
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_mi_sa_adult)
+                .collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_mi_sa_adult)
+                .collect(),
+        ),
+        paired_metric_row(
+            "reproduction_efficiency",
+            control
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_reproduction_efficiency)
+                .collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_reproduction_efficiency)
+                .collect(),
+        ),
+        paired_metric_row(
+            "foraging_rate",
+            control
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_foraging_rate)
+                .collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_foraging_rate)
+                .collect(),
+        ),
+        paired_metric_row(
+            "attack_attempt_rate",
+            control
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_attack_attempt_rate)
+                .collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_attack_attempt_rate)
+                .collect(),
+        ),
+        paired_metric_row(
+            "attack_success_rate",
+            control
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_attack_success_rate)
+                .collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_attack_success_rate)
+                .collect(),
+        ),
+        paired_metric_row(
+            "damage_avoidance",
+            control
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_damage_avoidance)
+                .collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_damage_avoidance)
+                .collect(),
+        ),
+        paired_metric_row(
+            "reward_reversal_shift",
+            control
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_reward_reversal_shift)
+                .collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_reward_reversal_shift)
+                .collect(),
+        ),
+        paired_metric_row(
+            "reward_reversal_adaptation_ticks",
+            control
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.reward_reversal_adaptation_ticks.map(|v| v as f64))
+                .collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.reward_reversal_adaptation_ticks.map(|v| v as f64))
+                .collect(),
+        ),
+    ]
+}
+
+fn paired_metric_row(
+    label: &str,
+    control_values: Vec<Option<f64>>,
+    treatment_values: Vec<Option<f64>>,
+) -> ComparisonMetricRow {
+    let control_mean = mean_option(control_values.iter().copied());
+    let treatment_mean = mean_option(treatment_values.iter().copied());
+    let diffs = control_values
+        .iter()
+        .zip(&treatment_values)
+        .filter_map(|(control, treatment)| match (*control, *treatment) {
+            (Some(control), Some(treatment)) => Some(treatment - control),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let (mean_diff, ci_low, ci_high) = diff_confidence_interval(&diffs);
+    ComparisonMetricRow {
+        label: label.to_owned(),
+        control_mean,
+        treatment_mean,
+        mean_diff,
+        ci_low,
+        ci_high,
+    }
+}
+
+fn diff_confidence_interval(diffs: &[f64]) -> (Option<f64>, Option<f64>, Option<f64>) {
+    if diffs.is_empty() {
+        return (None, None, None);
+    }
+    let mean = diffs.iter().sum::<f64>() / diffs.len() as f64;
+    if diffs.len() == 1 {
+        return (Some(mean), Some(mean), Some(mean));
+    }
+    let variance = diffs
+        .iter()
+        .map(|diff| {
+            let delta = *diff - mean;
+            delta * delta
+        })
+        .sum::<f64>()
+        / (diffs.len() as f64 - 1.0);
+    let se = variance.sqrt() / (diffs.len() as f64).sqrt();
+    let margin = 1.96 * se;
+    (Some(mean), Some(mean - margin), Some(mean + margin))
 }
 
 fn run_validation_across_seeds(
@@ -237,6 +706,7 @@ fn run_validation_across_seeds(
                     .as_ref()
                     .map(|run_title| format!("{run_title} (seed {seed})")),
                 baseline,
+                reward_reversal_tick: reward_reversal_tick_for_run(ticks),
             };
             let result = run_single_seed_validation(config.clone(), seed_options);
             if tx.send((seed, result)).is_err() {
@@ -317,8 +787,25 @@ fn run_validation_across_seeds(
             aggregate_predation_component: summary.aggregate_score.predation_component,
             aggregate_mean_p_fwd_food: summary.aggregate_score.mean_p_fwd_food,
             aggregate_mean_mi_sa: summary.aggregate_score.mean_mi_sa,
+            aggregate_mean_mi_sa_juvenile: summary.aggregate_score.mean_mi_sa_juvenile,
+            aggregate_mean_mi_sa_adult: summary.aggregate_score.mean_mi_sa_adult,
             aggregate_mean_h_action: summary.aggregate_score.mean_h_action,
             aggregate_mean_predation_rate: summary.aggregate_score.mean_predation_rate,
+            aggregate_mean_foraging_rate: summary.aggregate_score.mean_foraging_rate,
+            aggregate_mean_attack_attempt_rate: summary.aggregate_score.mean_attack_attempt_rate,
+            aggregate_mean_attack_success_rate: summary.aggregate_score.mean_attack_success_rate,
+            aggregate_mean_idle_fraction: summary.aggregate_score.mean_idle_fraction,
+            aggregate_mean_reproduction_efficiency: summary
+                .aggregate_score
+                .mean_reproduction_efficiency,
+            aggregate_mean_lineage_diversity: summary.aggregate_score.mean_lineage_diversity,
+            aggregate_mean_damage_avoidance: summary.aggregate_score.mean_damage_avoidance,
+            aggregate_mean_reward_reversal_shift: summary
+                .aggregate_score
+                .mean_reward_reversal_shift,
+            aggregate_reward_reversal_adaptation_ticks: summary
+                .aggregate_score
+                .reward_reversal_adaptation_ticks,
             timeseries_label: "mean across seeds".to_owned(),
             per_seed_rows: seed_run_summaries
                 .iter()
@@ -355,15 +842,25 @@ fn run_single_seed_validation(
     let mut current_food_count = sim.snapshot().foods.len() as u64;
     let mut interval_births = 0_u64;
     let mut interval_deaths = 0_u64;
+    let mut interval_consumptions = 0_u64;
     let mut interval_predations = 0_u64;
     let mut interval_population_exposure = 0_u64;
+    let mut pre_reversal_histogram: Option<[f64; N_ACTIONS]> = None;
     let mut timeseries = Vec::new();
 
     for tick in 1..=options.ticks {
+        if options
+            .reward_reversal_tick
+            .is_some_and(|reversal_tick| tick > reversal_tick)
+        {
+            sim.set_reward_signal_multiplier(-1.0);
+        }
         interval_population_exposure =
             interval_population_exposure.saturating_add(sim.organisms().len() as u64);
         let delta = sim.tick();
         let records = sim.drain_action_records();
+        interval_consumptions =
+            interval_consumptions.saturating_add(delta.metrics.consumptions_last_turn);
         interval_predations =
             interval_predations.saturating_add(delta.metrics.predations_last_turn);
 
@@ -396,22 +893,35 @@ fn run_single_seed_validation(
                 options.seed,
                 total = options.ticks
             );
-            let interval = compute_interval_metrics(
+            let mut interval = compute_interval_metrics(
                 tick,
                 delta.metrics.organisms,
                 interval_births,
                 interval_deaths,
                 current_food_count,
+                interval_consumptions,
                 interval_predations,
                 interval_population_exposure,
                 ledger.recently_deceased(),
                 sim.organisms(),
+                ledger.interval_action_stats(),
+                sim.config().food_energy,
             );
+            if options
+                .reward_reversal_tick
+                .is_some_and(|reversal_tick| tick <= reversal_tick)
+            {
+                pre_reversal_histogram = Some(interval.action_histogram);
+            } else if let Some(reference) = pre_reversal_histogram.as_ref() {
+                interval.reward_reversal_shift =
+                    jensen_shannon_divergence(&interval.action_histogram, reference);
+            }
             reporter.emit(&interval)?;
             timeseries.push(interval);
 
             interval_births = 0;
             interval_deaths = 0;
+            interval_consumptions = 0;
             interval_predations = 0;
             interval_population_exposure = 0;
             ledger.clear_interval();
@@ -421,7 +931,7 @@ fn run_single_seed_validation(
     reporter.flush()?;
     let total_time_seconds = run_started.elapsed().as_secs_f64();
     let generated_at_utc = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
-    let aggregate_score = compute_aggregate_score(&timeseries);
+    let aggregate_score = compute_aggregate_score(&timeseries, options.reward_reversal_tick);
 
     let summary = SeedValidationSummary {
         title: options.title.clone(),
@@ -459,8 +969,25 @@ fn run_single_seed_validation(
             aggregate_predation_component: summary.aggregate_score.predation_component,
             aggregate_mean_p_fwd_food: summary.aggregate_score.mean_p_fwd_food,
             aggregate_mean_mi_sa: summary.aggregate_score.mean_mi_sa,
+            aggregate_mean_mi_sa_juvenile: summary.aggregate_score.mean_mi_sa_juvenile,
+            aggregate_mean_mi_sa_adult: summary.aggregate_score.mean_mi_sa_adult,
             aggregate_mean_h_action: summary.aggregate_score.mean_h_action,
             aggregate_mean_predation_rate: summary.aggregate_score.mean_predation_rate,
+            aggregate_mean_foraging_rate: summary.aggregate_score.mean_foraging_rate,
+            aggregate_mean_attack_attempt_rate: summary.aggregate_score.mean_attack_attempt_rate,
+            aggregate_mean_attack_success_rate: summary.aggregate_score.mean_attack_success_rate,
+            aggregate_mean_idle_fraction: summary.aggregate_score.mean_idle_fraction,
+            aggregate_mean_reproduction_efficiency: summary
+                .aggregate_score
+                .mean_reproduction_efficiency,
+            aggregate_mean_lineage_diversity: summary.aggregate_score.mean_lineage_diversity,
+            aggregate_mean_damage_avoidance: summary.aggregate_score.mean_damage_avoidance,
+            aggregate_mean_reward_reversal_shift: summary
+                .aggregate_score
+                .mean_reward_reversal_shift,
+            aggregate_reward_reversal_adaptation_ticks: summary
+                .aggregate_score
+                .reward_reversal_adaptation_ticks,
             timeseries_label: "per-seed timeseries".to_owned(),
             per_seed_rows: Vec::new(),
         },
@@ -572,7 +1099,10 @@ fn state_hash(organisms: &[OrganismState]) -> String {
     format!("{:016x}", hasher.finish())
 }
 
-fn compute_aggregate_score(timeseries: &[IntervalMetrics]) -> AggregateScore {
+fn compute_aggregate_score(
+    timeseries: &[IntervalMetrics],
+    reward_reversal_tick: Option<u64>,
+) -> AggregateScore {
     let window_len = (timeseries.len() / 5).max(1);
     let start_idx = timeseries.len().saturating_sub(window_len);
     let window = &timeseries[start_idx..];
@@ -581,8 +1111,23 @@ fn compute_aggregate_score(timeseries: &[IntervalMetrics]) -> AggregateScore {
 
     let mean_p_fwd_food = mean_option(window.iter().map(|row| row.p_fwd_food));
     let mean_mi_sa = mean_option(window.iter().map(|row| row.mi_sa));
+    let mean_mi_sa_juvenile = mean_option(window.iter().map(|row| row.mi_sa_juvenile));
+    let mean_mi_sa_adult = mean_option(window.iter().map(|row| row.mi_sa_adult));
     let mean_h_action = mean_option(window.iter().map(|row| row.h_action));
     let mean_predation_rate = mean_option(window.iter().map(|row| row.predation_rate));
+    let mean_foraging_rate = mean_option(window.iter().map(|row| row.foraging_rate));
+    let mean_attack_attempt_rate = mean_option(window.iter().map(|row| row.attack_attempt_rate));
+    let mean_attack_success_rate = mean_option(window.iter().map(|row| row.attack_success_rate));
+    let mean_idle_fraction = mean_option(window.iter().map(|row| row.idle_fraction));
+    let mean_reproduction_efficiency =
+        mean_option(window.iter().map(|row| row.reproduction_efficiency));
+    let mean_lineage_diversity = mean_option(window.iter().map(|row| row.lineage_diversity));
+    let mean_damage_avoidance = mean_option(window.iter().map(|row| row.damage_avoidance));
+    let mean_reward_reversal_shift =
+        mean_option(window.iter().map(|row| row.reward_reversal_shift));
+    let mean_action_histogram = mean_action_histogram(window);
+    let reward_reversal_adaptation_ticks =
+        reward_reversal_adaptation_ticks(timeseries, reward_reversal_tick);
 
     let p_baseline = metrics::action_baseline_probability();
     let h_baseline = metrics::action_baseline_entropy();
@@ -619,8 +1164,20 @@ fn compute_aggregate_score(timeseries: &[IntervalMetrics]) -> AggregateScore {
         window_end_tick,
         mean_p_fwd_food,
         mean_mi_sa,
+        mean_mi_sa_juvenile,
+        mean_mi_sa_adult,
         mean_h_action,
         mean_predation_rate,
+        mean_foraging_rate,
+        mean_attack_attempt_rate,
+        mean_attack_success_rate,
+        mean_idle_fraction,
+        mean_reproduction_efficiency,
+        mean_lineage_diversity,
+        mean_damage_avoidance,
+        mean_reward_reversal_shift,
+        mean_action_histogram,
+        reward_reversal_adaptation_ticks,
         p_component,
         mi_component,
         entropy_component,
@@ -655,6 +1212,16 @@ fn average_aggregate_scores(seed_summaries: &[SeedValidationSummary]) -> Aggrega
                 .iter()
                 .map(|summary| summary.aggregate_score.mean_mi_sa),
         ),
+        mean_mi_sa_juvenile: mean_option(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.mean_mi_sa_juvenile),
+        ),
+        mean_mi_sa_adult: mean_option(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.mean_mi_sa_adult),
+        ),
         mean_h_action: mean_option(
             seed_summaries
                 .iter()
@@ -664,6 +1231,56 @@ fn average_aggregate_scores(seed_summaries: &[SeedValidationSummary]) -> Aggrega
             seed_summaries
                 .iter()
                 .map(|summary| summary.aggregate_score.mean_predation_rate),
+        ),
+        mean_foraging_rate: mean_option(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.mean_foraging_rate),
+        ),
+        mean_attack_attempt_rate: mean_option(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.mean_attack_attempt_rate),
+        ),
+        mean_attack_success_rate: mean_option(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.mean_attack_success_rate),
+        ),
+        mean_idle_fraction: mean_option(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.mean_idle_fraction),
+        ),
+        mean_reproduction_efficiency: mean_option(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.mean_reproduction_efficiency),
+        ),
+        mean_lineage_diversity: mean_option(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.mean_lineage_diversity),
+        ),
+        mean_damage_avoidance: mean_option(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.mean_damage_avoidance),
+        ),
+        mean_reward_reversal_shift: mean_option(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.mean_reward_reversal_shift),
+        ),
+        mean_action_histogram: mean_histogram(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.mean_action_histogram),
+        ),
+        reward_reversal_adaptation_ticks: mean_option_u64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.reward_reversal_adaptation_ticks),
         ),
         p_component: mean_f64(
             seed_summaries
@@ -792,6 +1409,21 @@ fn average_timeseries(seed_summaries: &[SeedValidationSummary]) -> Vec<IntervalM
                     .iter()
                     .map(|summary| summary.timeseries[row_idx].predation_rate),
             ),
+            foraging_rate: mean_option(
+                seed_summaries
+                    .iter()
+                    .map(|summary| summary.timeseries[row_idx].foraging_rate),
+            ),
+            attack_attempt_rate: mean_option(
+                seed_summaries
+                    .iter()
+                    .map(|summary| summary.timeseries[row_idx].attack_attempt_rate),
+            ),
+            attack_success_rate: mean_option(
+                seed_summaries
+                    .iter()
+                    .map(|summary| summary.timeseries[row_idx].attack_success_rate),
+            ),
             ate_pct: mean_option(
                 seed_summaries
                     .iter()
@@ -807,6 +1439,31 @@ fn average_timeseries(seed_summaries: &[SeedValidationSummary]) -> Vec<IntervalM
                     .iter()
                     .map(|summary| summary.timeseries[row_idx].brain_size),
             ),
+            brain_size_stddev: mean_option(
+                seed_summaries
+                    .iter()
+                    .map(|summary| summary.timeseries[row_idx].brain_size_stddev),
+            ),
+            brain_size_p10: mean_option(
+                seed_summaries
+                    .iter()
+                    .map(|summary| summary.timeseries[row_idx].brain_size_p10),
+            ),
+            brain_size_p50: mean_option(
+                seed_summaries
+                    .iter()
+                    .map(|summary| summary.timeseries[row_idx].brain_size_p50),
+            ),
+            brain_size_p90: mean_option(
+                seed_summaries
+                    .iter()
+                    .map(|summary| summary.timeseries[row_idx].brain_size_p90),
+            ),
+            lineage_diversity: mean_option(
+                seed_summaries
+                    .iter()
+                    .map(|summary| summary.timeseries[row_idx].lineage_diversity),
+            ),
             p_fwd_food: mean_option(
                 seed_summaries
                     .iter()
@@ -817,15 +1474,50 @@ fn average_timeseries(seed_summaries: &[SeedValidationSummary]) -> Vec<IntervalM
                     .iter()
                     .map(|summary| summary.timeseries[row_idx].mi_sa),
             ),
+            mi_sa_juvenile: mean_option(
+                seed_summaries
+                    .iter()
+                    .map(|summary| summary.timeseries[row_idx].mi_sa_juvenile),
+            ),
+            mi_sa_adult: mean_option(
+                seed_summaries
+                    .iter()
+                    .map(|summary| summary.timeseries[row_idx].mi_sa_adult),
+            ),
             h_action: mean_option(
                 seed_summaries
                     .iter()
                     .map(|summary| summary.timeseries[row_idx].h_action),
             ),
+            idle_fraction: mean_option(
+                seed_summaries
+                    .iter()
+                    .map(|summary| summary.timeseries[row_idx].idle_fraction),
+            ),
+            reproduction_efficiency: mean_option(
+                seed_summaries
+                    .iter()
+                    .map(|summary| summary.timeseries[row_idx].reproduction_efficiency),
+            ),
+            damage_avoidance: mean_option(
+                seed_summaries
+                    .iter()
+                    .map(|summary| summary.timeseries[row_idx].damage_avoidance),
+            ),
+            reward_reversal_shift: mean_option(
+                seed_summaries
+                    .iter()
+                    .map(|summary| summary.timeseries[row_idx].reward_reversal_shift),
+            ),
             util: mean_option(
                 seed_summaries
                     .iter()
                     .map(|summary| summary.timeseries[row_idx].util),
+            ),
+            action_histogram: mean_histogram(
+                seed_summaries
+                    .iter()
+                    .map(|summary| summary.timeseries[row_idx].action_histogram),
             ),
         });
     }
@@ -852,6 +1544,30 @@ fn mean_option(values: impl Iterator<Item = Option<f64>>) -> Option<f64> {
 fn mean_option_u64(values: impl Iterator<Item = Option<u64>>) -> Option<u64> {
     mean_option(values.map(|value| value.map(|inner| inner as f64)))
         .map(|value| value.round() as u64)
+}
+
+fn mean_histogram(values: impl Iterator<Item = [f64; N_ACTIONS]>) -> [f64; N_ACTIONS] {
+    let mut sums = [0.0; N_ACTIONS];
+    let mut count = 0.0;
+    for value in values {
+        for idx in 0..N_ACTIONS {
+            if value[idx].is_finite() {
+                sums[idx] += value[idx];
+            }
+        }
+        count += 1.0;
+    }
+    if count == 0.0 {
+        return [0.0; N_ACTIONS];
+    }
+    for sum in &mut sums {
+        *sum /= count;
+    }
+    sums
+}
+
+fn mean_action_histogram(window: &[IntervalMetrics]) -> [f64; N_ACTIONS] {
+    mean_histogram(window.iter().map(|row| row.action_histogram))
 }
 
 fn mean_round_u64(values: impl Iterator<Item = u64>) -> u64 {
@@ -899,6 +1615,23 @@ fn entropy_component_score(mean_h_action: f64, h_baseline: f64) -> f64 {
     }
 }
 
+fn reward_reversal_adaptation_ticks(
+    timeseries: &[IntervalMetrics],
+    reward_reversal_tick: Option<u64>,
+) -> Option<u64> {
+    const REVERSAL_SHIFT_THRESHOLD: f64 = 0.12;
+    let reward_reversal_tick = reward_reversal_tick?;
+    timeseries
+        .iter()
+        .find(|row| {
+            row.tick > reward_reversal_tick
+                && row
+                    .reward_reversal_shift
+                    .is_some_and(|shift| shift >= REVERSAL_SHIFT_THRESHOLD)
+        })
+        .map(|row| row.tick.saturating_sub(reward_reversal_tick))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -924,6 +1657,7 @@ mod tests {
             out_dir: out_a.clone(),
             title: None,
             baseline: false,
+            reward_reversal_tick: reward_reversal_tick_for_run(100),
         };
         let options_b = SeedRunOptions {
             out_dir: out_b.clone(),
@@ -956,7 +1690,7 @@ mod tests {
         let purposeful = entropy_component_score(
             entropy_from_actions(&sequence_counts(&[
                 (ActionType::Forward, 15),
-                (ActionType::Consume, 3),
+                (ActionType::Eat, 3),
                 (ActionType::TurnLeft, 2),
             ])),
             h_baseline,
@@ -964,7 +1698,7 @@ mod tests {
         let exploratory = entropy_component_score(
             entropy_from_actions(&sequence_counts(&[
                 (ActionType::Forward, 10),
-                (ActionType::Consume, 5),
+                (ActionType::Eat, 5),
                 (ActionType::TurnLeft, 5),
                 (ActionType::TurnRight, 5),
             ])),
@@ -976,7 +1710,8 @@ mod tests {
                 (ActionType::TurnLeft, 4),
                 (ActionType::TurnRight, 4),
                 (ActionType::Forward, 4),
-                (ActionType::Consume, 4),
+                (ActionType::Eat, 4),
+                (ActionType::Attack, 4),
                 (ActionType::Reproduce, 4),
             ])),
             h_baseline,
@@ -1023,8 +1758,9 @@ mod tests {
                 ActionType::TurnLeft => 1,
                 ActionType::TurnRight => 2,
                 ActionType::Forward => 3,
-                ActionType::Consume => 4,
-                ActionType::Reproduce => 5,
+                ActionType::Eat => 4,
+                ActionType::Attack => 5,
+                ActionType::Reproduce => 6,
             };
             counts[idx] = counts[idx].saturating_add(1);
         }
