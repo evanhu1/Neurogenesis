@@ -70,7 +70,6 @@ impl Reporter {
 
 pub struct HtmlReportMeta {
     pub title: Option<String>,
-    pub seed_label: String,
     pub seed_count: usize,
     pub ticks: u64,
     pub report_every: u64,
@@ -85,25 +84,26 @@ pub struct HtmlReportMeta {
     pub aggregate_score_max: f64,
     pub aggregate_window_start_tick: u64,
     pub aggregate_window_end_tick: u64,
-    pub aggregate_p_component: f64,
-    pub aggregate_mi_component: f64,
-    pub aggregate_entropy_component: f64,
-    pub aggregate_predation_component: f64,
-    pub aggregate_mean_p_fwd_food: Option<f64>,
-    pub aggregate_mean_mi_sa: Option<f64>,
-    pub aggregate_mean_mi_sa_juvenile: Option<f64>,
-    pub aggregate_mean_mi_sa_adult: Option<f64>,
-    pub aggregate_mean_h_action: Option<f64>,
-    pub aggregate_mean_predation_rate: Option<f64>,
-    pub aggregate_mean_foraging_rate: Option<f64>,
-    pub aggregate_mean_attack_attempt_rate: Option<f64>,
-    pub aggregate_mean_attack_success_rate: Option<f64>,
-    pub aggregate_mean_idle_fraction: Option<f64>,
-    pub aggregate_mean_reproduction_efficiency: Option<f64>,
-    pub aggregate_mean_lineage_diversity: Option<f64>,
-    pub aggregate_mean_damage_avoidance: Option<f64>,
-    pub aggregate_mean_reward_reversal_shift: Option<f64>,
-    pub aggregate_reward_reversal_adaptation_ticks: Option<u64>,
+    pub aggregate_viability_pillar: f64,
+    pub aggregate_foraging_pillar: f64,
+    pub aggregate_control_pillar: f64,
+    pub aggregate_competition_pillar: f64,
+    pub aggregate_adaptation_pillar: f64,
+    pub aggregate_viability_life_component: f64,
+    pub aggregate_viability_reproduction_component: f64,
+    pub aggregate_viability_damage_component: f64,
+    pub aggregate_foraging_p_fwd_food_component: f64,
+    pub aggregate_foraging_rate_component: f64,
+    pub aggregate_control_adult_mi_component: f64,
+    pub aggregate_control_entropy_component: f64,
+    pub aggregate_control_anti_idle_component: f64,
+    pub aggregate_control_util_component: f64,
+    pub aggregate_competition_predation_component: f64,
+    pub aggregate_competition_attack_success_component: f64,
+    pub aggregate_competition_attack_attempt_component: f64,
+    pub aggregate_adaptation_reversal_component: f64,
+    pub aggregate_adaptation_juvenile_mi_component: f64,
+    pub aggregate_adaptation_diversity_component: f64,
     pub timeseries_label: String,
     pub per_seed_rows: Vec<PerSeedReportRow>,
 }
@@ -139,7 +139,6 @@ pub struct PerSeedComparisonRow {
 
 pub struct ComparisonHtmlReportMeta {
     pub title: Option<String>,
-    pub seed_label: String,
     pub ticks: u64,
     pub control_label: String,
     pub treatment_label: String,
@@ -185,15 +184,6 @@ pub fn write_html_report(
     if let Some(title) = &meta.title {
         kv(&mut html, "Title", title);
     }
-    kv(
-        &mut html,
-        if meta.seed_count == 1 {
-            "Seed"
-        } else {
-            "Seeds"
-        },
-        &meta.seed_label,
-    );
     kv(&mut html, "Ticks", &meta.ticks.to_string());
     kv(&mut html, "Report Every", &meta.report_every.to_string());
     kv(&mut html, "Min Lifetime", &meta.min_lifetime.to_string());
@@ -258,98 +248,103 @@ pub fn write_html_report(
     }
     kv(
         &mut html,
-        "P(Fwd|food) component",
-        &format!("{:.3}", meta.aggregate_p_component),
+        "Viability pillar",
+        &format!("{:.3}", meta.aggregate_viability_pillar),
     );
     kv(
         &mut html,
-        "MI(S;A) component",
-        &format!("{:.3}", meta.aggregate_mi_component),
+        "Viability / life",
+        &format!("{:.3}", meta.aggregate_viability_life_component),
     );
     kv(
         &mut html,
-        "Entropy component",
-        &format!("{:.3}", meta.aggregate_entropy_component),
+        "Viability / reproduction",
+        &format!("{:.3}", meta.aggregate_viability_reproduction_component),
     );
     kv(
         &mut html,
-        "Predation component",
-        &format!("{:.3}", meta.aggregate_predation_component),
+        "Viability / damage avoidance",
+        &format!("{:.3}", meta.aggregate_viability_damage_component),
     );
     kv(
         &mut html,
-        "Window mean P(Fwd|food)",
-        &fmt_opt(meta.aggregate_mean_p_fwd_food, 4),
+        "Foraging pillar",
+        &format!("{:.3}", meta.aggregate_foraging_pillar),
     );
     kv(
         &mut html,
-        "Window mean MI(S;A)",
-        &fmt_opt(meta.aggregate_mean_mi_sa, 4),
+        "Foraging / P(Fwd|food)",
+        &format!("{:.3}", meta.aggregate_foraging_p_fwd_food_component),
     );
     kv(
         &mut html,
-        "Window mean juvenile MI(S;A)",
-        &fmt_opt(meta.aggregate_mean_mi_sa_juvenile, 4),
+        "Foraging / rate",
+        &format!("{:.3}", meta.aggregate_foraging_rate_component),
     );
     kv(
         &mut html,
-        "Window mean adult MI(S;A)",
-        &fmt_opt(meta.aggregate_mean_mi_sa_adult, 4),
+        "Behavioral control pillar",
+        &format!("{:.3}", meta.aggregate_control_pillar),
     );
     kv(
         &mut html,
-        "Window mean H(action)",
-        &fmt_opt(meta.aggregate_mean_h_action, 4),
+        "Control / adult MI",
+        &format!("{:.3}", meta.aggregate_control_adult_mi_component),
     );
     kv(
         &mut html,
-        "Window mean predation rate",
-        &fmt_opt(meta.aggregate_mean_predation_rate, 6),
+        "Control / entropy",
+        &format!("{:.3}", meta.aggregate_control_entropy_component),
     );
     kv(
         &mut html,
-        "Window mean foraging rate",
-        &fmt_opt(meta.aggregate_mean_foraging_rate, 6),
+        "Control / anti-idle",
+        &format!("{:.3}", meta.aggregate_control_anti_idle_component),
     );
     kv(
         &mut html,
-        "Window mean attack attempt rate",
-        &fmt_opt(meta.aggregate_mean_attack_attempt_rate, 6),
+        "Control / util",
+        &format!("{:.3}", meta.aggregate_control_util_component),
     );
     kv(
         &mut html,
-        "Window mean attack success rate",
-        &fmt_opt(meta.aggregate_mean_attack_success_rate, 4),
+        "Competition pillar",
+        &format!("{:.3}", meta.aggregate_competition_pillar),
     );
     kv(
         &mut html,
-        "Window mean idle fraction",
-        &fmt_opt(meta.aggregate_mean_idle_fraction, 4),
+        "Competition / predation",
+        &format!("{:.3}", meta.aggregate_competition_predation_component),
     );
     kv(
         &mut html,
-        "Window mean reproduction efficiency",
-        &fmt_opt(meta.aggregate_mean_reproduction_efficiency, 4),
+        "Competition / attack success",
+        &format!("{:.3}", meta.aggregate_competition_attack_success_component),
     );
     kv(
         &mut html,
-        "Window mean lineage diversity",
-        &fmt_opt(meta.aggregate_mean_lineage_diversity, 4),
+        "Competition / attack attempts",
+        &format!("{:.3}", meta.aggregate_competition_attack_attempt_component),
     );
     kv(
         &mut html,
-        "Window mean damage avoidance",
-        &fmt_opt(meta.aggregate_mean_damage_avoidance, 4),
+        "Adaptation pillar",
+        &format!("{:.3}", meta.aggregate_adaptation_pillar),
     );
     kv(
         &mut html,
-        "Window mean reversal shift",
-        &fmt_opt(meta.aggregate_mean_reward_reversal_shift, 4),
+        "Adaptation / reversal",
+        &format!("{:.3}", meta.aggregate_adaptation_reversal_component),
     );
     kv(
         &mut html,
-        "Reversal adaptation ticks",
-        &fmt_opt_u64(meta.aggregate_reward_reversal_adaptation_ticks),
+        "Adaptation / juvenile MI",
+        &format!("{:.3}", meta.aggregate_adaptation_juvenile_mi_component),
+    );
+    kv(
+        &mut html,
+        "Adaptation / diversity",
+        &format!("{:.3}", meta.aggregate_adaptation_diversity_component),
     );
     html.push_str("</div></div>");
 
@@ -630,7 +625,6 @@ pub fn write_comparison_html_report(out_dir: &Path, meta: &ComparisonHtmlReportM
     if let Some(title) = &meta.title {
         kv(&mut html, "Title", title);
     }
-    kv(&mut html, "Seeds", &meta.seed_label);
     kv(&mut html, "Ticks", &meta.ticks.to_string());
     kv(&mut html, "Control", &meta.control_label);
     kv(&mut html, "Treatment", &meta.treatment_label);

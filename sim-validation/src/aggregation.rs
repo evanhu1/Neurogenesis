@@ -37,6 +37,7 @@ pub(crate) fn compute_aggregate_score(
     let window_start_tick = window.first().map(|row| row.tick).unwrap_or(0);
     let window_end_tick = window.last().map(|row| row.tick).unwrap_or(0);
 
+    let mean_life_mean = mean_option(window.iter().map(|row| row.life_mean));
     let mean_p_fwd_food = mean_option(window.iter().map(|row| row.p_fwd_food));
     let mean_mi_sa = mean_option(window.iter().map(|row| row.mi_sa));
     let mean_mi_sa_juvenile = mean_option(window.iter().map(|row| row.mi_sa_juvenile));
@@ -53,34 +54,92 @@ pub(crate) fn compute_aggregate_score(
     let mean_damage_avoidance = mean_option(window.iter().map(|row| row.damage_avoidance));
     let mean_reward_reversal_shift =
         mean_option(window.iter().map(|row| row.reward_reversal_shift));
+    let mean_util = mean_option(window.iter().map(|row| row.util));
     let mean_action_histogram = mean_histogram(window.iter().map(|row| row.action_histogram));
     let reward_reversal_adaptation_ticks =
         reward_reversal_adaptation_ticks(timeseries, reward_reversal_tick);
 
     let p_baseline = metrics::action_baseline_probability();
     let h_baseline = metrics::action_baseline_entropy();
-    let strong_foraging_reference = 0.55;
-    let competitive_predation_reference = 0.002;
-    let p_component = mean_p_fwd_food
-        .map(|value| {
-            clamp01(
-                (value - p_baseline) / (strong_foraging_reference - p_baseline).max(f64::EPSILON),
-            )
-        })
+    let p_fwd_food_component = mean_p_fwd_food
+        .map(|value| clamp01((value - p_baseline) / (0.55 - p_baseline).max(f64::EPSILON)))
         .unwrap_or(0.0);
-    let mi_component = mean_mi_sa.map(|value| clamp01(value / 0.10)).unwrap_or(0.0);
+    let mean_mi_component = mean_mi_sa.map(|value| clamp01(value / 0.10)).unwrap_or(0.0);
+    let adult_mi_component = mean_mi_sa_adult
+        .map(|value| clamp01(value / 0.10))
+        .unwrap_or(mean_mi_component);
+    let juvenile_mi_component = mean_mi_sa_juvenile
+        .map(|value| clamp01(value / 0.08))
+        .unwrap_or(0.0);
     let entropy_component = mean_h_action
         .map(|value| entropy_component_score(value, h_baseline))
         .unwrap_or(0.0);
     let predation_component = mean_predation_rate
-        .map(|value| clamp01(value / competitive_predation_reference))
+        .map(|value| clamp01(value / 0.002))
+        .unwrap_or(0.0);
+    let life_component = mean_life_mean
+        .map(|value| clamp01(value / 250.0))
+        .unwrap_or(0.0);
+    let reproduction_component = mean_reproduction_efficiency
+        .map(|value| clamp01(value / 0.25))
+        .unwrap_or(0.0);
+    let damage_component = mean_damage_avoidance
+        .map(|value| clamp01((value - 0.70) / 0.25))
+        .unwrap_or(0.0);
+    let foraging_rate_component = mean_foraging_rate
+        .map(|value| clamp01(value / 0.01))
+        .unwrap_or(0.0);
+    let anti_idle_component = mean_idle_fraction
+        .map(|value| clamp01(1.0 - value / 0.60))
+        .unwrap_or(0.0);
+    let util_component = mean_util.map(|value| clamp01(value / 0.35)).unwrap_or(0.0);
+    let attack_success_component = mean_attack_success_rate
+        .map(|value| clamp01(value / 0.35))
+        .unwrap_or(0.0);
+    let attack_attempt_component = mean_attack_attempt_rate
+        .map(|value| clamp01(value / 0.01))
+        .unwrap_or(0.0);
+    let reversal_component = mean_reward_reversal_shift
+        .map(|value| clamp01(value / 0.20))
+        .unwrap_or(0.0);
+    let diversity_component = mean_lineage_diversity
+        .map(|value| clamp01(value / 2.0))
         .unwrap_or(0.0);
 
+    let viability_pillar = weighted_geometric_mean(&[
+        (life_component, 0.45),
+        (reproduction_component, 0.35),
+        (damage_component, 0.20),
+    ]);
+    let foraging_pillar = weighted_geometric_mean(&[
+        (p_fwd_food_component, 0.65),
+        (foraging_rate_component, 0.35),
+    ]);
+    let control_pillar = weighted_geometric_mean(&[
+        (adult_mi_component, 0.40),
+        (entropy_component, 0.20),
+        (anti_idle_component, 0.20),
+        (util_component, 0.20),
+    ]);
+    let competition_pillar = weighted_geometric_mean(&[
+        (predation_component, 0.50),
+        (attack_success_component, 0.30),
+        (attack_attempt_component, 0.20),
+    ]);
+    let adaptation_pillar = weighted_geometric_mean(&[
+        (reversal_component, 0.50),
+        (juvenile_mi_component, 0.30),
+        (diversity_component, 0.20),
+    ]);
+
     let score = 100.0
-        * (0.40 * p_component
-            + 0.25 * mi_component
-            + 0.10 * entropy_component
-            + 0.25 * predation_component);
+        * weighted_geometric_mean(&[
+            (viability_pillar, 0.30),
+            (foraging_pillar, 0.25),
+            (control_pillar, 0.20),
+            (competition_pillar, 0.10),
+            (adaptation_pillar, 0.15),
+        ]);
 
     AggregateScore {
         score,
@@ -90,6 +149,7 @@ pub(crate) fn compute_aggregate_score(
         score_max: score,
         window_start_tick,
         window_end_tick,
+        mean_life_mean,
         mean_p_fwd_food,
         mean_mi_sa,
         mean_mi_sa_juvenile,
@@ -104,12 +164,29 @@ pub(crate) fn compute_aggregate_score(
         mean_lineage_diversity,
         mean_damage_avoidance,
         mean_reward_reversal_shift,
+        mean_util,
         mean_action_histogram,
         reward_reversal_adaptation_ticks,
-        p_component,
-        mi_component,
-        entropy_component,
-        predation_component,
+        viability_life_component: life_component,
+        viability_reproduction_component: reproduction_component,
+        viability_damage_component: damage_component,
+        foraging_p_fwd_food_component: p_fwd_food_component,
+        foraging_rate_component,
+        control_adult_mi_component: adult_mi_component,
+        control_entropy_component: entropy_component,
+        control_anti_idle_component: anti_idle_component,
+        control_util_component: util_component,
+        competition_predation_component: predation_component,
+        competition_attack_success_component: attack_success_component,
+        competition_attack_attempt_component: attack_attempt_component,
+        adaptation_reversal_component: reversal_component,
+        adaptation_juvenile_mi_component: juvenile_mi_component,
+        adaptation_diversity_component: diversity_component,
+        viability_pillar,
+        foraging_pillar,
+        control_pillar,
+        competition_pillar,
+        adaptation_pillar,
     }
 }
 
@@ -130,6 +207,11 @@ pub(crate) fn average_aggregate_scores(seed_summaries: &[SeedValidationSummary])
         score_max: score_stats.max,
         window_start_tick: first.aggregate_score.window_start_tick,
         window_end_tick: first.aggregate_score.window_end_tick,
+        mean_life_mean: mean_option(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.mean_life_mean),
+        ),
         mean_p_fwd_food: mean_option(
             seed_summaries
                 .iter()
@@ -200,6 +282,11 @@ pub(crate) fn average_aggregate_scores(seed_summaries: &[SeedValidationSummary])
                 .iter()
                 .map(|summary| summary.aggregate_score.mean_reward_reversal_shift),
         ),
+        mean_util: mean_option(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.mean_util),
+        ),
         mean_action_histogram: mean_histogram(
             seed_summaries
                 .iter()
@@ -210,25 +297,105 @@ pub(crate) fn average_aggregate_scores(seed_summaries: &[SeedValidationSummary])
                 .iter()
                 .map(|summary| summary.aggregate_score.reward_reversal_adaptation_ticks),
         ),
-        p_component: mean_f64(
+        viability_life_component: mean_f64(
             seed_summaries
                 .iter()
-                .map(|summary| summary.aggregate_score.p_component),
+                .map(|summary| summary.aggregate_score.viability_life_component),
         ),
-        mi_component: mean_f64(
+        viability_reproduction_component: mean_f64(
             seed_summaries
                 .iter()
-                .map(|summary| summary.aggregate_score.mi_component),
+                .map(|summary| summary.aggregate_score.viability_reproduction_component),
         ),
-        entropy_component: mean_f64(
+        viability_damage_component: mean_f64(
             seed_summaries
                 .iter()
-                .map(|summary| summary.aggregate_score.entropy_component),
+                .map(|summary| summary.aggregate_score.viability_damage_component),
         ),
-        predation_component: mean_f64(
+        foraging_p_fwd_food_component: mean_f64(
             seed_summaries
                 .iter()
-                .map(|summary| summary.aggregate_score.predation_component),
+                .map(|summary| summary.aggregate_score.foraging_p_fwd_food_component),
+        ),
+        foraging_rate_component: mean_f64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.foraging_rate_component),
+        ),
+        control_adult_mi_component: mean_f64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.control_adult_mi_component),
+        ),
+        control_entropy_component: mean_f64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.control_entropy_component),
+        ),
+        control_anti_idle_component: mean_f64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.control_anti_idle_component),
+        ),
+        control_util_component: mean_f64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.control_util_component),
+        ),
+        competition_predation_component: mean_f64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.competition_predation_component),
+        ),
+        competition_attack_success_component: mean_f64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.competition_attack_success_component),
+        ),
+        competition_attack_attempt_component: mean_f64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.competition_attack_attempt_component),
+        ),
+        adaptation_reversal_component: mean_f64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.adaptation_reversal_component),
+        ),
+        adaptation_juvenile_mi_component: mean_f64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.adaptation_juvenile_mi_component),
+        ),
+        adaptation_diversity_component: mean_f64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.adaptation_diversity_component),
+        ),
+        viability_pillar: mean_f64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.viability_pillar),
+        ),
+        foraging_pillar: mean_f64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.foraging_pillar),
+        ),
+        control_pillar: mean_f64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.control_pillar),
+        ),
+        competition_pillar: mean_f64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.competition_pillar),
+        ),
+        adaptation_pillar: mean_f64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.adaptation_pillar),
         ),
     }
 }
@@ -401,6 +568,26 @@ pub(crate) fn average_timeseries(seed_summaries: &[SeedValidationSummary]) -> Ve
 
 fn clamp01(value: f64) -> f64 {
     value.clamp(0.0, 1.0)
+}
+
+fn weighted_geometric_mean(components: &[(f64, f64)]) -> f64 {
+    let mut total_weight = 0.0;
+    let mut weighted_log_sum = 0.0;
+
+    for (value, weight) in components {
+        if !value.is_finite() || !weight.is_finite() || *weight <= 0.0 {
+            continue;
+        }
+        total_weight += *weight;
+        let softened = 0.05 + 0.95 * clamp01(*value);
+        weighted_log_sum += *weight * softened.ln();
+    }
+
+    if total_weight <= 0.0 {
+        0.0
+    } else {
+        (weighted_log_sum / total_weight).exp()
+    }
 }
 
 pub(crate) fn entropy_component_score(mean_h_action: f64, h_baseline: f64) -> f64 {

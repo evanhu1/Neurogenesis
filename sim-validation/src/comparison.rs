@@ -1,7 +1,7 @@
 use crate::{
     cli::FeatureOverrides,
     orchestration::run_validation_across_seeds,
-    output::{format_seed_list, mean_option, write_summary_json},
+    output::{mean_option, write_summary_json},
     report::{
         write_comparison_html_report, ComparisonHtmlReportMeta, ComparisonMetricRow,
         PerSeedComparisonRow,
@@ -92,7 +92,6 @@ pub(crate) fn run_comparison_validation(
         &options.out_dir,
         &ComparisonHtmlReportMeta {
             title: options.title.clone(),
-            seed_label: format_seed_list(&options.seeds),
             ticks: options.ticks,
             control_label,
             treatment_label,
@@ -122,6 +121,84 @@ fn comparison_metric_rows(
                 .seed_summaries
                 .iter()
                 .map(|seed| Some(seed.aggregate_score.score))
+                .collect(),
+        ),
+        paired_metric_row(
+            "viability_pillar",
+            control
+                .seed_summaries
+                .iter()
+                .map(|seed| Some(seed.aggregate_score.viability_pillar))
+                .collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|seed| Some(seed.aggregate_score.viability_pillar))
+                .collect(),
+        ),
+        paired_metric_row(
+            "foraging_pillar",
+            control
+                .seed_summaries
+                .iter()
+                .map(|seed| Some(seed.aggregate_score.foraging_pillar))
+                .collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|seed| Some(seed.aggregate_score.foraging_pillar))
+                .collect(),
+        ),
+        paired_metric_row(
+            "control_pillar",
+            control
+                .seed_summaries
+                .iter()
+                .map(|seed| Some(seed.aggregate_score.control_pillar))
+                .collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|seed| Some(seed.aggregate_score.control_pillar))
+                .collect(),
+        ),
+        paired_metric_row(
+            "competition_pillar",
+            control
+                .seed_summaries
+                .iter()
+                .map(|seed| Some(seed.aggregate_score.competition_pillar))
+                .collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|seed| Some(seed.aggregate_score.competition_pillar))
+                .collect(),
+        ),
+        paired_metric_row(
+            "adaptation_pillar",
+            control
+                .seed_summaries
+                .iter()
+                .map(|seed| Some(seed.aggregate_score.adaptation_pillar))
+                .collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|seed| Some(seed.aggregate_score.adaptation_pillar))
+                .collect(),
+        ),
+        paired_metric_row(
+            "life_mean",
+            control
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_life_mean)
+                .collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_life_mean)
                 .collect(),
         ),
         paired_metric_row(
@@ -278,6 +355,19 @@ fn comparison_metric_rows(
                 .seed_summaries
                 .iter()
                 .map(|seed| seed.aggregate_score.mean_reward_reversal_shift)
+                .collect(),
+        ),
+        paired_metric_row(
+            "util",
+            control
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_util)
+                .collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_util)
                 .collect(),
         ),
         paired_metric_row(

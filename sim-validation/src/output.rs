@@ -111,8 +111,39 @@ pub(crate) fn print_validation_summary(out_dir: &Path, summary: &ValidationSumma
         summary.aggregate_score.score_max
     );
     println!(
-        "aggregate_predation_component: {:.3}",
-        summary.aggregate_score.predation_component
+        "aggregate_viability_pillar: {:.3} [life={:.3} reproduction={:.3} damage={:.3}]",
+        summary.aggregate_score.viability_pillar,
+        summary.aggregate_score.viability_life_component,
+        summary.aggregate_score.viability_reproduction_component,
+        summary.aggregate_score.viability_damage_component
+    );
+    println!(
+        "aggregate_foraging_pillar: {:.3} [p_fwd_food={:.3} foraging_rate={:.3}]",
+        summary.aggregate_score.foraging_pillar,
+        summary.aggregate_score.foraging_p_fwd_food_component,
+        summary.aggregate_score.foraging_rate_component
+    );
+    println!(
+        "aggregate_control_pillar: {:.3} [adult_mi={:.3} entropy={:.3} anti_idle={:.3} util={:.3}]",
+        summary.aggregate_score.control_pillar,
+        summary.aggregate_score.control_adult_mi_component,
+        summary.aggregate_score.control_entropy_component,
+        summary.aggregate_score.control_anti_idle_component,
+        summary.aggregate_score.control_util_component
+    );
+    println!(
+        "aggregate_competition_pillar: {:.3} [predation={:.3} attack_success={:.3} attack_attempts={:.3}]",
+        summary.aggregate_score.competition_pillar,
+        summary.aggregate_score.competition_predation_component,
+        summary.aggregate_score.competition_attack_success_component,
+        summary.aggregate_score.competition_attack_attempt_component
+    );
+    println!(
+        "aggregate_adaptation_pillar: {:.3} [reversal={:.3} juvenile_mi={:.3} diversity={:.3}]",
+        summary.aggregate_score.adaptation_pillar,
+        summary.aggregate_score.adaptation_reversal_component,
+        summary.aggregate_score.adaptation_juvenile_mi_component,
+        summary.aggregate_score.adaptation_diversity_component
     );
     println!("total_time_seconds: {:.3}", summary.total_time_seconds);
 }

@@ -4,7 +4,7 @@ use crate::{
     },
     ledger::{Ledger, N_ACTIONS},
     metrics::{compute_interval_metrics, jensen_shannon_divergence},
-    output::{format_seed_list, write_summary_json, write_timeseries_csv},
+    output::{write_summary_json, write_timeseries_csv},
     report::{write_html_report, HtmlReportMeta, PerSeedReportRow, Reporter},
     types::{
         HarnessRunOptions, SeedRunOptions, SeedRunSummary, SeedValidationSummary, ValidationSummary,
@@ -121,7 +121,6 @@ pub(crate) fn run_validation_across_seeds(
         &options.out_dir,
         &HtmlReportMeta {
             title: summary.title.clone(),
-            seed_label: format_seed_list(&summary.seeds),
             seed_count: summary.seeds.len(),
             ticks: summary.ticks,
             report_every: options.report_every,
@@ -136,31 +135,50 @@ pub(crate) fn run_validation_across_seeds(
             aggregate_score_max: summary.aggregate_score.score_max,
             aggregate_window_start_tick: summary.aggregate_score.window_start_tick,
             aggregate_window_end_tick: summary.aggregate_score.window_end_tick,
-            aggregate_p_component: summary.aggregate_score.p_component,
-            aggregate_mi_component: summary.aggregate_score.mi_component,
-            aggregate_entropy_component: summary.aggregate_score.entropy_component,
-            aggregate_predation_component: summary.aggregate_score.predation_component,
-            aggregate_mean_p_fwd_food: summary.aggregate_score.mean_p_fwd_food,
-            aggregate_mean_mi_sa: summary.aggregate_score.mean_mi_sa,
-            aggregate_mean_mi_sa_juvenile: summary.aggregate_score.mean_mi_sa_juvenile,
-            aggregate_mean_mi_sa_adult: summary.aggregate_score.mean_mi_sa_adult,
-            aggregate_mean_h_action: summary.aggregate_score.mean_h_action,
-            aggregate_mean_predation_rate: summary.aggregate_score.mean_predation_rate,
-            aggregate_mean_foraging_rate: summary.aggregate_score.mean_foraging_rate,
-            aggregate_mean_attack_attempt_rate: summary.aggregate_score.mean_attack_attempt_rate,
-            aggregate_mean_attack_success_rate: summary.aggregate_score.mean_attack_success_rate,
-            aggregate_mean_idle_fraction: summary.aggregate_score.mean_idle_fraction,
-            aggregate_mean_reproduction_efficiency: summary
+            aggregate_viability_pillar: summary.aggregate_score.viability_pillar,
+            aggregate_foraging_pillar: summary.aggregate_score.foraging_pillar,
+            aggregate_control_pillar: summary.aggregate_score.control_pillar,
+            aggregate_competition_pillar: summary.aggregate_score.competition_pillar,
+            aggregate_adaptation_pillar: summary.aggregate_score.adaptation_pillar,
+            aggregate_viability_life_component: summary.aggregate_score.viability_life_component,
+            aggregate_viability_reproduction_component: summary
                 .aggregate_score
-                .mean_reproduction_efficiency,
-            aggregate_mean_lineage_diversity: summary.aggregate_score.mean_lineage_diversity,
-            aggregate_mean_damage_avoidance: summary.aggregate_score.mean_damage_avoidance,
-            aggregate_mean_reward_reversal_shift: summary
+                .viability_reproduction_component,
+            aggregate_viability_damage_component: summary
                 .aggregate_score
-                .mean_reward_reversal_shift,
-            aggregate_reward_reversal_adaptation_ticks: summary
+                .viability_damage_component,
+            aggregate_foraging_p_fwd_food_component: summary
                 .aggregate_score
-                .reward_reversal_adaptation_ticks,
+                .foraging_p_fwd_food_component,
+            aggregate_foraging_rate_component: summary.aggregate_score.foraging_rate_component,
+            aggregate_control_adult_mi_component: summary
+                .aggregate_score
+                .control_adult_mi_component,
+            aggregate_control_entropy_component: summary
+                .aggregate_score
+                .control_entropy_component,
+            aggregate_control_anti_idle_component: summary
+                .aggregate_score
+                .control_anti_idle_component,
+            aggregate_control_util_component: summary.aggregate_score.control_util_component,
+            aggregate_competition_predation_component: summary
+                .aggregate_score
+                .competition_predation_component,
+            aggregate_competition_attack_success_component: summary
+                .aggregate_score
+                .competition_attack_success_component,
+            aggregate_competition_attack_attempt_component: summary
+                .aggregate_score
+                .competition_attack_attempt_component,
+            aggregate_adaptation_reversal_component: summary
+                .aggregate_score
+                .adaptation_reversal_component,
+            aggregate_adaptation_juvenile_mi_component: summary
+                .aggregate_score
+                .adaptation_juvenile_mi_component,
+            aggregate_adaptation_diversity_component: summary
+                .aggregate_score
+                .adaptation_diversity_component,
             timeseries_label: "mean across seeds".to_owned(),
             per_seed_rows: seed_run_summaries
                 .iter()
@@ -303,7 +321,6 @@ pub(crate) fn run_single_seed_validation(
         &options.out_dir,
         &HtmlReportMeta {
             title: summary.title.clone(),
-            seed_label: summary.seed.to_string(),
             seed_count: 1,
             ticks: summary.ticks,
             report_every: options.report_every,
@@ -318,31 +335,50 @@ pub(crate) fn run_single_seed_validation(
             aggregate_score_max: summary.aggregate_score.score_max,
             aggregate_window_start_tick: summary.aggregate_score.window_start_tick,
             aggregate_window_end_tick: summary.aggregate_score.window_end_tick,
-            aggregate_p_component: summary.aggregate_score.p_component,
-            aggregate_mi_component: summary.aggregate_score.mi_component,
-            aggregate_entropy_component: summary.aggregate_score.entropy_component,
-            aggregate_predation_component: summary.aggregate_score.predation_component,
-            aggregate_mean_p_fwd_food: summary.aggregate_score.mean_p_fwd_food,
-            aggregate_mean_mi_sa: summary.aggregate_score.mean_mi_sa,
-            aggregate_mean_mi_sa_juvenile: summary.aggregate_score.mean_mi_sa_juvenile,
-            aggregate_mean_mi_sa_adult: summary.aggregate_score.mean_mi_sa_adult,
-            aggregate_mean_h_action: summary.aggregate_score.mean_h_action,
-            aggregate_mean_predation_rate: summary.aggregate_score.mean_predation_rate,
-            aggregate_mean_foraging_rate: summary.aggregate_score.mean_foraging_rate,
-            aggregate_mean_attack_attempt_rate: summary.aggregate_score.mean_attack_attempt_rate,
-            aggregate_mean_attack_success_rate: summary.aggregate_score.mean_attack_success_rate,
-            aggregate_mean_idle_fraction: summary.aggregate_score.mean_idle_fraction,
-            aggregate_mean_reproduction_efficiency: summary
+            aggregate_viability_pillar: summary.aggregate_score.viability_pillar,
+            aggregate_foraging_pillar: summary.aggregate_score.foraging_pillar,
+            aggregate_control_pillar: summary.aggregate_score.control_pillar,
+            aggregate_competition_pillar: summary.aggregate_score.competition_pillar,
+            aggregate_adaptation_pillar: summary.aggregate_score.adaptation_pillar,
+            aggregate_viability_life_component: summary.aggregate_score.viability_life_component,
+            aggregate_viability_reproduction_component: summary
                 .aggregate_score
-                .mean_reproduction_efficiency,
-            aggregate_mean_lineage_diversity: summary.aggregate_score.mean_lineage_diversity,
-            aggregate_mean_damage_avoidance: summary.aggregate_score.mean_damage_avoidance,
-            aggregate_mean_reward_reversal_shift: summary
+                .viability_reproduction_component,
+            aggregate_viability_damage_component: summary
                 .aggregate_score
-                .mean_reward_reversal_shift,
-            aggregate_reward_reversal_adaptation_ticks: summary
+                .viability_damage_component,
+            aggregate_foraging_p_fwd_food_component: summary
                 .aggregate_score
-                .reward_reversal_adaptation_ticks,
+                .foraging_p_fwd_food_component,
+            aggregate_foraging_rate_component: summary.aggregate_score.foraging_rate_component,
+            aggregate_control_adult_mi_component: summary
+                .aggregate_score
+                .control_adult_mi_component,
+            aggregate_control_entropy_component: summary
+                .aggregate_score
+                .control_entropy_component,
+            aggregate_control_anti_idle_component: summary
+                .aggregate_score
+                .control_anti_idle_component,
+            aggregate_control_util_component: summary.aggregate_score.control_util_component,
+            aggregate_competition_predation_component: summary
+                .aggregate_score
+                .competition_predation_component,
+            aggregate_competition_attack_success_component: summary
+                .aggregate_score
+                .competition_attack_success_component,
+            aggregate_competition_attack_attempt_component: summary
+                .aggregate_score
+                .competition_attack_attempt_component,
+            aggregate_adaptation_reversal_component: summary
+                .aggregate_score
+                .adaptation_reversal_component,
+            aggregate_adaptation_juvenile_mi_component: summary
+                .aggregate_score
+                .adaptation_juvenile_mi_component,
+            aggregate_adaptation_diversity_component: summary
+                .aggregate_score
+                .adaptation_diversity_component,
             timeseries_label: "per-seed timeseries".to_owned(),
             per_seed_rows: Vec::new(),
         },
