@@ -284,6 +284,8 @@ fn stable_perf_config() -> WorldConfig {
         food_regrowth_jitter: 2,
         terrain_noise_scale: 0.02,
         terrain_threshold: 1.0,
+        spike_noise_scale: 0.02,
+        spike_threshold: 1.0,
         max_organism_age: u32::MAX,
         global_mutation_rate_modifier: 1.0,
         meta_mutation_enabled: true,

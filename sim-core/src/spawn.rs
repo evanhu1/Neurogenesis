@@ -13,6 +13,7 @@ const DEFAULT_TERRAIN_THRESHOLD: f64 = 0.86;
 const NO_REGROWTH_SCHEDULED: u64 = u64::MAX;
 const FOOD_FERTILITY_SEED_MIX: u64 = 0x6A09_E667_F3BC_C909;
 const FOOD_FERTILITY_JITTER_SEED_MIX: u64 = 0x510E_527F_9B05_688C;
+const SPIKE_TERRAIN_SEED_MIX: u64 = 0xCBBB_9D5D_C105_9ED8;
 const FOOD_FERTILITY_NOISE_SCALE: f64 = 0.012;
 const FOOD_FERTILITY_THRESHOLD: f64 = 0.6;
 
@@ -248,7 +249,7 @@ impl Simulation {
             .abs()
             > f64::EPSILON
         {
-            build_terrain_map_with_threshold(
+            build_noise_mask_with_threshold(
                 width,
                 width,
                 self.config.terrain_noise_scale as f64,
@@ -263,9 +264,18 @@ impl Simulation {
                 terrain_seed,
             )
         };
+        let spike_seed = self.seed ^ SPIKE_TERRAIN_SEED_MIX;
+        self.spike_map = build_noise_mask_with_threshold(
+            width,
+            width,
+            self.config.spike_noise_scale as f64,
+            spike_seed,
+            self.config.spike_threshold as f64,
+        );
         for (idx, blocked) in self.terrain_map.iter().copied().enumerate() {
             if blocked {
                 self.occupancy[idx] = Some(Occupant::Wall);
+                self.spike_map[idx] = false;
             }
         }
     }
@@ -462,15 +472,15 @@ fn build_fertility_map(world_width: u32, seed: u64) -> Vec<bool> {
 }
 
 pub(crate) fn build_terrain_map(width: u32, height: u32, scale: f64, seed: u64) -> Vec<bool> {
-    build_terrain_map_with_threshold(width, height, scale, seed, DEFAULT_TERRAIN_THRESHOLD)
+    build_noise_mask_with_threshold(width, height, scale, seed, DEFAULT_TERRAIN_THRESHOLD)
 }
 
-fn build_terrain_map_with_threshold(
+fn build_noise_mask_with_threshold(
     width: u32,
     height: u32,
     scale: f64,
     seed: u64,
-    terrain_threshold: f64,
+    threshold: f64,
 ) -> Vec<bool> {
     let width = width as usize;
     let height = height as usize;
@@ -481,7 +491,7 @@ fn build_terrain_map_with_threshold(
             let y = r as f64 * scale;
             let value = fractal_perlin_2d(x, y, seed);
             let normalized = ((value + 1.0) * 0.5).clamp(0.0, 1.0);
-            blocked.push(normalized > terrain_threshold);
+            blocked.push(normalized > threshold);
         }
     }
     blocked

@@ -163,6 +163,39 @@ fn move_resolution_blocks_wall_cells() {
 }
 
 #[test]
+fn moving_onto_spikes_applies_same_tick_health_damage() {
+    let cfg = test_config(5, 1);
+    let mut sim = Simulation::new(cfg, 2031).expect("simulation should initialize");
+    configure_sim(
+        &mut sim,
+        vec![make_organism(
+            0,
+            1,
+            1,
+            FacingDirection::East,
+            true,
+            false,
+            false,
+            0.9,
+            50.0,
+        )],
+    );
+    let spike_idx = sim.cell_index(2, 1);
+    sim.spike_map[spike_idx] = true;
+
+    let delta = tick_once(&mut sim);
+    assert_eq!(move_map(&delta).get(&OrganismId(0)), Some(&((1, 1), (2, 1))));
+    let organism = sim
+        .organisms
+        .iter()
+        .find(|item| item.id == OrganismId(0))
+        .expect("organism should survive spike damage");
+    assert_eq!((organism.q, organism.r), (2, 1));
+    assert_eq!(organism.damage_taken_last_turn, 5.0);
+    assert_eq!(organism.health, 45.0);
+}
+
+#[test]
 fn eat_only_interacts_with_food() {
     let cfg = test_config(5, 2);
     let mut sim = Simulation::new(cfg, 204).expect("simulation should initialize");

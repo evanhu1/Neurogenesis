@@ -117,6 +117,10 @@ impl Simulation {
                         "occupancy must point at wall for blocked terrain cells",
                     );
                 }
+                debug_assert!(
+                    !(blocked && self.spike_map[idx]),
+                    "cell cannot simultaneously be wall terrain and spikes",
+                );
             }
         }
     }

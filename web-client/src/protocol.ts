@@ -6,6 +6,7 @@ import type {
   ApiListArchivedWorldsResponse,
   ApiMetricsSnapshot,
   ApiOccupancyCell,
+  ApiTerrainCell,
   ApiOccupant,
   ApiOrganismGenome,
   ApiOrganismState,
@@ -26,6 +27,7 @@ import type {
   NeuronId,
   NeuronState,
   OccupancyCell,
+  TerrainCell,
   Occupant,
   OrganismGenome,
   OrganismId,
@@ -179,6 +181,14 @@ function normalizeOccupancyCell(cell: ApiOccupancyCell): OccupancyCell {
   };
 }
 
+function normalizeTerrainCell(cell: ApiTerrainCell): TerrainCell {
+  return {
+    q: cell.q,
+    r: cell.r,
+    terrain_type: cell.terrain_type,
+  };
+}
+
 function normalizeEntityId(entityId: ApiEntityId): EntityId {
   if (entityId.entity_type === 'Organism') {
     return {
@@ -250,6 +260,7 @@ export function normalizeWorldSnapshot(
     config: snapshot.config,
     organisms,
     foods: snapshot.foods.map(normalizeFoodState),
+    terrain: snapshot.terrain.map(normalizeTerrainCell),
     occupancy: snapshot.occupancy.map(normalizeOccupancyCell),
     metrics: normalizeMetrics(snapshot.metrics, organisms, previousTotalSpeciesCreated),
   };
@@ -357,6 +368,7 @@ export function applyTickDelta(snapshot: WorldSnapshot, delta: TickDelta): World
     ),
     organisms,
     foods,
+    terrain: snapshot.terrain,
   };
 }
 

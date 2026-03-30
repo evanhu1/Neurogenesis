@@ -515,13 +515,18 @@ impl Simulation {
                     organism.energy.max(0.0),
                 )
             };
-            let cell_idx = r as usize * world_width_usize + q as usize;
-            if !self.spike_map[cell_idx] {
+            if !self.cell_has_spikes(q, r) {
                 continue;
             }
 
-            let spike_damage =
-                (max_health * SPIKE_DAMAGE_FRACTION).min(current_health);
+            let spike_damage = (max_health * SPIKE_DAMAGE_FRACTION)
+                .max(0.0)
+                .min(current_health);
+            if spike_damage <= 0.0 {
+                continue;
+            }
+
+            let cell_idx = r as usize * world_width_usize + q as usize;
             let organism = &mut self.organisms[idx];
             organism.health = (organism.health - spike_damage).max(0.0);
             organism.damage_taken_last_turn += spike_damage;

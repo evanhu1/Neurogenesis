@@ -20,6 +20,7 @@ export type ActionType =
   | 'Reproduce';
 
 export type FoodKind = 'Plant' | 'Corpse';
+export type TerrainType = 'Spikes';
 
 export type NeuronType = 'Sensory' | 'Inter' | 'Action';
 
@@ -31,7 +32,7 @@ export type FacingDirection =
   | 'SouthWest'
   | 'SouthEast';
 
-export type EntityType = 'Food' | 'Organism' | 'Wall';
+export type EntityType = 'Food' | 'Organism' | 'Wall' | 'Spikes';
 
 type GenomeCoreParams = {
   num_neurons: number;
@@ -81,6 +82,8 @@ export type WorldConfig = {
   food_regrowth_jitter: number;
   terrain_noise_scale: number;
   terrain_threshold: number;
+  spike_noise_scale: number;
+  spike_threshold: number;
   max_organism_age: number;
   speciation_threshold: number;
   global_mutation_rate_modifier: number;
@@ -351,12 +354,25 @@ export type OccupancyCell = {
   occupant: Occupant;
 };
 
+export type ApiTerrainCell = {
+  q: number;
+  r: number;
+  terrain_type: TerrainType;
+};
+
+export type TerrainCell = {
+  q: number;
+  r: number;
+  terrain_type: TerrainType;
+};
+
 export type ApiWorldSnapshot = {
   turn: number;
   rng_seed: number;
   config: WorldConfig;
   organisms: ApiWorldOrganismState[];
   foods: ApiFoodState[];
+  terrain: ApiTerrainCell[];
   occupancy: ApiOccupancyCell[];
   metrics: ApiMetricsSnapshot;
 };
@@ -367,6 +383,7 @@ export type WorldSnapshot = {
   config: WorldConfig;
   organisms: WorldOrganismState[];
   foods: FoodState[];
+  terrain: TerrainCell[];
   occupancy: OccupancyCell[];
   metrics: MetricsSnapshot;
 };

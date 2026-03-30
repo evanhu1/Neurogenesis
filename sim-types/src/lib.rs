@@ -104,6 +104,12 @@ pub enum EntityType {
     Food,
     Organism,
     Wall,
+    Spikes,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TerrainType {
+    Spikes,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -129,7 +135,7 @@ impl SensoryReceptor {
     /// Fixed relative ray offsets around facing direction.
     pub const LOOK_RAY_OFFSETS: [i8; 1] = [0];
     /// Number of entity classes available to look-ray sensors.
-    pub const LOOK_TARGET_COUNT: u32 = 3;
+    pub const LOOK_TARGET_COUNT: u32 = 4;
     /// Number of look-based sensory neurons (ray count x object type count).
     pub const LOOK_NEURON_COUNT: u32 =
         (Self::LOOK_RAY_OFFSETS.len() as u32) * Self::LOOK_TARGET_COUNT;
@@ -329,6 +335,7 @@ pub struct WorldSnapshot {
     pub config: WorldConfig,
     pub organisms: Vec<OrganismState>,
     pub foods: Vec<FoodState>,
+    pub terrain: Vec<TerrainCell>,
     pub occupancy: Vec<OccupancyCell>,
     pub metrics: MetricsSnapshot,
 }
@@ -346,6 +353,13 @@ pub struct OccupancyCell {
     pub q: i32,
     pub r: i32,
     pub occupant: Occupant,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TerrainCell {
+    pub q: i32,
+    pub r: i32,
+    pub terrain_type: TerrainType,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

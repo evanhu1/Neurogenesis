@@ -8,6 +8,7 @@ pub(super) use sim_types::{
 pub(super) use std::collections::{HashMap, HashSet};
 
 mod config_and_seed;
+mod genome_mutation;
 mod lifecycle_and_invariants;
 mod movement_resolution;
 mod plasticity_learning;

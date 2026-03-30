@@ -65,6 +65,10 @@ pub struct WorldConfig {
     pub terrain_noise_scale: f32,
     #[serde(default = "default_terrain_threshold")]
     pub terrain_threshold: f32,
+    #[serde(default = "default_spike_noise_scale")]
+    pub spike_noise_scale: f32,
+    #[serde(default = "default_spike_threshold")]
+    pub spike_threshold: f32,
     pub max_organism_age: u32,
     #[serde(default = "default_global_mutation_rate_modifier")]
     pub global_mutation_rate_modifier: f32,
@@ -109,6 +113,10 @@ struct WorldConfigDeserialize {
     terrain_noise_scale: f32,
     #[serde(default = "default_terrain_threshold")]
     terrain_threshold: f32,
+    #[serde(default = "default_spike_noise_scale")]
+    spike_noise_scale: f32,
+    #[serde(default = "default_spike_threshold")]
+    spike_threshold: f32,
     max_organism_age: u32,
     #[serde(default = "default_global_mutation_rate_modifier")]
     global_mutation_rate_modifier: f32,
@@ -149,6 +157,8 @@ impl<'de> Deserialize<'de> for WorldConfig {
             food_regrowth_jitter: raw.food_regrowth_jitter,
             terrain_noise_scale: raw.terrain_noise_scale,
             terrain_threshold: raw.terrain_threshold,
+            spike_noise_scale: raw.spike_noise_scale,
+            spike_threshold: raw.spike_threshold,
             max_organism_age: raw.max_organism_age,
             global_mutation_rate_modifier: raw.global_mutation_rate_modifier,
             meta_mutation_enabled: raw.meta_mutation_enabled,
@@ -226,6 +236,12 @@ pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
     }
     if !(0.0..=1.0).contains(&config.terrain_threshold) {
         return Err("terrain_threshold must be in [0.0, 1.0]".to_owned());
+    }
+    if config.spike_noise_scale <= 0.0 {
+        return Err("spike_noise_scale must be greater than zero".to_owned());
+    }
+    if !(0.0..=1.0).contains(&config.spike_threshold) {
+        return Err("spike_threshold must be in [0.0, 1.0]".to_owned());
     }
     if !config.global_mutation_rate_modifier.is_finite()
         || config.global_mutation_rate_modifier < 0.0
@@ -330,6 +346,14 @@ fn default_terrain_noise_scale() -> f32 {
 
 fn default_terrain_threshold() -> f32 {
     0.86
+}
+
+fn default_spike_noise_scale() -> f32 {
+    0.025
+}
+
+fn default_spike_threshold() -> f32 {
+    0.75
 }
 
 fn default_action_temperature() -> f32 {

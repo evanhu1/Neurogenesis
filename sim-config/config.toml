@@ -1,7 +1,7 @@
 world_width = 250
 num_organisms = 5000
 periodic_injection_count = 200
-food_energy = 100
+food_energy = 75
 move_action_energy_cost = 1.0
 reproduction_investment_energy = 500.0
 action_temperature = 0.08
@@ -10,6 +10,8 @@ food_regrowth_interval = 200
 food_regrowth_jitter = 50
 terrain_noise_scale = 0.01
 terrain_threshold = 0.70
+spike_noise_scale = 0.025
+spike_threshold = 0.75
 global_mutation_rate_modifier = 1.0
 meta_mutation_enabled = true
 runtime_plasticity_enabled = true

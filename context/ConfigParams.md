@@ -1,17 +1,17 @@
+## Config Params
+
+```toml
 world_width = 250
 num_organisms = 5000
 periodic_injection_count = 200
 food_energy = 100
 move_action_energy_cost = 1.0
-reproduction_investment_energy = 500.0
 action_temperature = 0.08
 intent_parallel_threads = 8
 food_regrowth_interval = 200
 food_regrowth_jitter = 50
 terrain_noise_scale = 0.01
 terrain_threshold = 0.70
-spike_noise_scale = 0.025
-spike_threshold = 0.75
 global_mutation_rate_modifier = 1.0
 meta_mutation_enabled = true
 runtime_plasticity_enabled = true
@@ -24,11 +24,8 @@ spatial_prior_sigma = 3.0
 vision_distance = 10
 starting_energy = 500.0
 age_of_maturity = 50
-plasticity_start_age = 0
 hebb_eta_gain = 0.01
-juvenile_eta_scale = 0.5
 eligibility_retention = 0.95
-max_weight_delta_per_tick = 0.05
 synapse_prune_threshold = 0.05
 mutation_rate_age_of_maturity = 0.1
 mutation_rate_vision_distance = 0.1
@@ -42,3 +39,4 @@ mutation_rate_add_synapse = 0.1
 mutation_rate_remove_synapse = 0.1
 mutation_rate_remove_neuron = 0.05
 mutation_rate_add_neuron_split_edge = 0.1
+```

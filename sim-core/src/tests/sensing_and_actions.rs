@@ -18,6 +18,10 @@ fn deterministic_action_policy() -> f32 {
     0.5
 }
 
+fn no_spikes(cell_count: usize) -> Vec<bool> {
+    vec![false; cell_count]
+}
+
 fn simple_weighted_action_organism(
     forward_weight: f32,
     reproduce_weight: f32,
@@ -177,6 +181,7 @@ fn stochastic_action_selection_is_seed_deterministic() {
     let mut organism_a = simple_weighted_action_organism(0.8, 0.7, 10.0);
     let mut organism_b = organism_a.clone();
     let occupancy = vec![None; 9];
+    let spike_map = no_spikes(occupancy.len());
     let mut scratch_a = BrainScratch::new();
     let mut scratch_b = BrainScratch::new();
     let vision_distance_a = organism_a.genome.vision_distance;
@@ -187,6 +192,7 @@ fn stochastic_action_selection_is_seed_deterministic() {
         &mut organism_a,
         3,
         &occupancy,
+        &spike_map,
         vision_distance_a,
         action_temperature,
         true,
@@ -198,6 +204,7 @@ fn stochastic_action_selection_is_seed_deterministic() {
         &mut organism_b,
         3,
         &occupancy,
+        &spike_map,
         vision_distance_b,
         action_temperature,
         true,
@@ -242,6 +249,7 @@ fn scan_rays_stops_at_wall_occluders() {
     occupancy[wall_idx] = Some(Occupant::Wall);
     occupancy[food_idx] = Some(Occupant::Food(FoodId(1)));
     occupancy[organism_idx] = Some(Occupant::Organism(OrganismId(2)));
+    let spike_map = no_spikes(occupancy.len());
 
     let scans = scan_rays(
         (1, 1),
@@ -249,16 +257,79 @@ fn scan_rays_stops_at_wall_occluders() {
         OrganismId(0),
         world_width as i32,
         &occupancy,
+        &spike_map,
         5,
     );
     let center_ray_idx = SensoryReceptor::LOOK_RAY_OFFSETS
         .iter()
         .position(|offset| *offset == 0)
         .expect("center ray offset should exist");
-    let center_ray = scans[center_ray_idx]
-        .as_ref()
-        .expect("center ray should detect wall");
-    assert_eq!(center_ray.target, EntityType::Wall);
+    let center_ray = scans[center_ray_idx];
+    assert!(center_ray.wall_signal > 0.0);
+    assert_eq!(center_ray.food_signal, 0.0);
+    assert_eq!(center_ray.organism_signal, 0.0);
+    assert_eq!(center_ray.spike_signal, 0.0);
+}
+
+#[test]
+fn scan_rays_detect_empty_spike_tiles() {
+    let world_width = 6;
+    let center_idx = 1 * world_width + 1;
+    let spike_idx = 1 * world_width + 2;
+    let mut occupancy = vec![None; world_width * world_width];
+    let mut spike_map = no_spikes(occupancy.len());
+    occupancy[center_idx] = Some(Occupant::Organism(OrganismId(0)));
+    spike_map[spike_idx] = true;
+
+    let scans = scan_rays(
+        (1, 1),
+        FacingDirection::East,
+        OrganismId(0),
+        world_width as i32,
+        &occupancy,
+        &spike_map,
+        5,
+    );
+    let center_ray_idx = SensoryReceptor::LOOK_RAY_OFFSETS
+        .iter()
+        .position(|offset| *offset == 0)
+        .expect("center ray offset should exist");
+    let center_ray = scans[center_ray_idx];
+    assert!(center_ray.spike_signal > 0.0);
+    assert_eq!(center_ray.food_signal, 0.0);
+    assert_eq!(center_ray.organism_signal, 0.0);
+    assert_eq!(center_ray.wall_signal, 0.0);
+}
+
+#[test]
+fn scan_rays_report_food_and_spikes_for_shared_cell() {
+    let world_width = 6;
+    let center_idx = 1 * world_width + 1;
+    let target_idx = 1 * world_width + 2;
+    let mut occupancy = vec![None; world_width * world_width];
+    let mut spike_map = no_spikes(occupancy.len());
+    occupancy[center_idx] = Some(Occupant::Organism(OrganismId(0)));
+    occupancy[target_idx] = Some(Occupant::Food(FoodId(1)));
+    spike_map[target_idx] = true;
+
+    let scans = scan_rays(
+        (1, 1),
+        FacingDirection::East,
+        OrganismId(0),
+        world_width as i32,
+        &occupancy,
+        &spike_map,
+        5,
+    );
+    let center_ray_idx = SensoryReceptor::LOOK_RAY_OFFSETS
+        .iter()
+        .position(|offset| *offset == 0)
+        .expect("center ray offset should exist");
+    let center_ray = scans[center_ray_idx];
+    assert!(center_ray.food_signal > 0.0);
+    assert!(center_ray.spike_signal > 0.0);
+    assert_eq!(center_ray.organism_signal, 0.0);
+    assert_eq!(center_ray.wall_signal, 0.0);
 }
 
 #[test]
@@ -313,12 +384,14 @@ fn contact_and_damage_sensors_encode_local_state() {
 
     let mut occupancy = vec![None; 9];
     occupancy[1 * 3 + 2] = Some(Occupant::Wall);
+    let spike_map = no_spikes(occupancy.len());
     let mut scratch = BrainScratch::new();
     let vision_distance = organism.genome.vision_distance;
     let _ = evaluate_brain(
         &mut organism,
         3,
         &occupancy,
+        &spike_map,
         vision_distance,
         deterministic_action_policy(),
         true,
@@ -393,12 +466,14 @@ fn runtime_plasticity_updates_weights() {
     };
 
     let occupancy = vec![None; 9];
+    let spike_map = no_spikes(occupancy.len());
     let mut scratch = BrainScratch::new();
     let vision_distance = organism.genome.vision_distance;
     let _ = evaluate_brain(
         &mut organism,
         3,
         &occupancy,
+        &spike_map,
         vision_distance,
         deterministic_action_policy(),
         true,
@@ -479,12 +554,14 @@ fn runtime_plasticity_neutralizes_passive_metabolism_for_dopamine() {
     };
 
     let occupancy = vec![None; 9];
+    let spike_map = no_spikes(occupancy.len());
     let mut scratch = BrainScratch::new();
     let vision_distance = organism.genome.vision_distance;
     let _ = evaluate_brain(
         &mut organism,
         3,
         &occupancy,
+        &spike_map,
         vision_distance,
         deterministic_action_policy(),
         true,
@@ -565,12 +642,14 @@ fn juvenile_plasticity_updates_weights_before_maturity() {
     };
 
     let occupancy = vec![None; 9];
+    let spike_map = no_spikes(occupancy.len());
     let mut scratch = BrainScratch::new();
     let vision_distance = organism.genome.vision_distance;
     let _ = evaluate_brain(
         &mut organism,
         3,
         &occupancy,
+        &spike_map,
         vision_distance,
         deterministic_action_policy(),
         true,
@@ -757,12 +836,14 @@ fn inter_recurrent_eligibility_uses_prev_inter_pre_signal_only_for_inter_targets
     };
 
     let occupancy = vec![None; 9];
+    let spike_map = no_spikes(occupancy.len());
     let mut scratch = BrainScratch::new();
     let vision_distance = organism.genome.vision_distance;
     let _ = evaluate_brain(
         &mut organism,
         3,
         &occupancy,
+        &spike_map,
         vision_distance,
         deterministic_action_policy(),
         true,
@@ -850,12 +931,14 @@ fn action_target_eligibility_only_credits_the_executed_action() {
     };
 
     let occupancy = vec![None; 9];
+    let spike_map = no_spikes(occupancy.len());
     let mut scratch = BrainScratch::new();
     let vision_distance = organism.genome.vision_distance;
     let _ = evaluate_brain(
         &mut organism,
         3,
         &occupancy,
+        &spike_map,
         vision_distance,
         deterministic_action_policy(),
         true,
@@ -922,6 +1005,7 @@ fn energy_sensor_clamps_and_scales_with_starting_energy() {
     };
 
     let occupancy = vec![None; 9];
+    let spike_map = no_spikes(occupancy.len());
     let mut scratch = BrainScratch::new();
     let vision_distance = organism.genome.vision_distance;
 
@@ -929,6 +1013,7 @@ fn energy_sensor_clamps_and_scales_with_starting_energy() {
         &mut organism,
         3,
         &occupancy,
+        &spike_map,
         vision_distance,
         deterministic_action_policy(),
         true,
@@ -943,6 +1028,7 @@ fn energy_sensor_clamps_and_scales_with_starting_energy() {
         &mut organism,
         3,
         &occupancy,
+        &spike_map,
         vision_distance,
         deterministic_action_policy(),
         true,
@@ -957,6 +1043,7 @@ fn energy_sensor_clamps_and_scales_with_starting_energy() {
         &mut organism,
         3,
         &occupancy,
+        &spike_map,
         vision_distance,
         deterministic_action_policy(),
         true,
@@ -971,6 +1058,7 @@ fn energy_sensor_clamps_and_scales_with_starting_energy() {
         &mut organism,
         3,
         &occupancy,
+        &spike_map,
         vision_distance,
         deterministic_action_policy(),
         true,

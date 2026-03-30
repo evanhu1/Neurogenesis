@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use sim_types::ActionRecord;
 use sim_types::{
     FoodState, MetricsSnapshot, OccupancyCell, Occupant, OrganismGenome, OrganismId, OrganismState,
-    TickDelta, WorldConfig, WorldSnapshot,
+    TerrainCell, TerrainType, TickDelta, WorldConfig, WorldSnapshot,
 };
 use std::collections::BTreeMap;
 use thiserror::Error;
@@ -54,6 +54,8 @@ pub struct Simulation {
     occupancy: Vec<Option<Occupant>>,
     #[serde(default)]
     terrain_map: Vec<bool>,
+    #[serde(default)]
+    spike_map: Vec<bool>,
     #[serde(default)]
     food_fertility: Vec<bool>,
     #[serde(default)]
@@ -163,6 +165,7 @@ impl Simulation {
             foods: Vec::new(),
             occupancy: vec![None; capacity],
             terrain_map: Vec::new(),
+            spike_map: Vec::new(),
             food_fertility: Vec::new(),
             food_regrowth_due_turn: Vec::new(),
             food_regrowth_schedule: BTreeMap::new(),
@@ -200,16 +203,25 @@ impl Simulation {
         organisms.sort_by_key(|o| o.id);
         let mut foods = self.foods.clone();
         foods.sort_by_key(|food| food.id);
+        let mut terrain = Vec::new();
 
         let width = self.config.world_width as usize;
         let mut occupancy = Vec::with_capacity(self.occupancy.iter().flatten().count());
         for (idx, maybe_entity) in self.occupancy.iter().enumerate() {
+            let q = (idx % width) as i32;
+            let r = (idx / width) as i32;
+            if self.spike_map[idx] {
+                terrain.push(TerrainCell {
+                    q,
+                    r,
+                    terrain_type: TerrainType::Spikes,
+                });
+            }
             if let Some(occupant) = *maybe_entity {
-                let q = (idx % width) as i32;
-                let r = (idx / width) as i32;
                 occupancy.push(OccupancyCell { q, r, occupant });
             }
         }
+        terrain.sort_by_key(|cell| (cell.q, cell.r));
         occupancy.sort_by_key(|cell| (cell.q, cell.r));
 
         WorldSnapshot {
@@ -218,6 +230,7 @@ impl Simulation {
             config: self.config.clone(),
             organisms,
             foods,
+            terrain,
             occupancy,
             metrics: self.metrics.clone(),
         }
@@ -244,6 +257,7 @@ impl Simulation {
         self.foods.clear();
         self.occupancy.fill(None);
         self.terrain_map.clear();
+        self.spike_map.clear();
         self.food_fertility.clear();
         self.food_regrowth_due_turn.clear();
         self.food_regrowth_schedule.clear();
@@ -306,6 +320,13 @@ impl Simulation {
             return Err(SimError::InvalidState(format!(
                 "terrain_map length {} does not match expected capacity {}",
                 self.terrain_map.len(),
+                expected_capacity
+            )));
+        }
+        if self.spike_map.len() != expected_capacity {
+            return Err(SimError::InvalidState(format!(
+                "spike_map length {} does not match expected capacity {}",
+                self.spike_map.len(),
                 expected_capacity
             )));
         }
@@ -373,6 +394,12 @@ impl Simulation {
         for (idx, blocked) in self.terrain_map.iter().copied().enumerate() {
             if blocked {
                 expected_occupancy[idx] = Some(Occupant::Wall);
+            }
+            if blocked && self.spike_map[idx] {
+                return Err(SimError::InvalidState(format!(
+                    "cell index {} cannot be both wall terrain and spikes",
+                    idx
+                )));
             }
         }
 

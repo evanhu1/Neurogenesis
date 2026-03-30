@@ -5,6 +5,11 @@ import { colorForSpeciesId } from '../../speciesColor';
 const SQRT_3 = Math.sqrt(3);
 const PLANT_COLOR = '#16a34a';
 const WALL_COLOR = '#5f6572';
+const SPIKE_COLOR = '#ef4444';
+const SPIKE_STROKE_COLOR = '#7f1d1d';
+const SPIKE_HIGHLIGHT_COLOR = '#fca5a5';
+const SPIKE_STROKE_WIDTH = 0.32;
+const SPIKE_HIGHLIGHT_SCALE = 0.52;
 const BASE_HEX_SIZE_AT_900PX = 8;
 const BASE_HEX_MIN_SIZE_PX = 6;
 const BASE_HEX_REFERENCE_CANVAS_PX = 900;
@@ -72,6 +77,7 @@ type TerrainLayerCache = {
   worldWidth: number;
   terrainSeed: number;
   wallMask: Uint8Array | null;
+  spikeMask: Uint8Array | null;
 };
 
 type PlantLayerCache = {
@@ -124,6 +130,7 @@ export function createWorldRenderCache(): WorldRenderCache {
       worldWidth: 0,
       terrainSeed: Number.NaN,
       wallMask: null,
+      spikeMask: null,
     },
     plants: {
       surface: null,
@@ -401,6 +408,17 @@ function buildWallMask(snapshot: WorldSnapshot) {
   return wallMask;
 }
 
+function buildSpikeMask(snapshot: WorldSnapshot) {
+  const worldWidth = snapshot.config.world_width;
+  const spikeMask = new Uint8Array(worldWidth * worldWidth);
+  const terrain = Array.isArray(snapshot.terrain) ? snapshot.terrain : [];
+  for (const cell of terrain) {
+    if (cell.terrain_type !== 'Spikes') continue;
+    spikeMask[cellIndex(worldWidth, cell.q, cell.r)] = 1;
+  }
+  return spikeMask;
+}
+
 function getWallMask(cache: WorldRenderCache, snapshot: WorldSnapshot): Uint8Array {
   const worldWidth = snapshot.config.world_width;
   const terrainSeed = snapshot.rng_seed;
@@ -416,6 +434,23 @@ function getWallMask(cache: WorldRenderCache, snapshot: WorldSnapshot): Uint8Arr
   cache.terrain.terrainSeed = terrainSeed;
   cache.terrain.wallMask = wallMask;
   return wallMask;
+}
+
+function getSpikeMask(cache: WorldRenderCache, snapshot: WorldSnapshot): Uint8Array {
+  const worldWidth = snapshot.config.world_width;
+  const terrainSeed = snapshot.rng_seed;
+  const shouldReuse =
+    cache.terrain.spikeMask != null &&
+    cache.terrain.worldWidth === worldWidth &&
+    cache.terrain.terrainSeed === terrainSeed;
+  if (shouldReuse) {
+    return cache.terrain.spikeMask as Uint8Array;
+  }
+  const spikeMask = buildSpikeMask(snapshot);
+  cache.terrain.worldWidth = worldWidth;
+  cache.terrain.terrainSeed = terrainSeed;
+  cache.terrain.spikeMask = spikeMask;
+  return spikeMask;
 }
 
 function buildFoodMask(snapshot: WorldSnapshot) {
@@ -480,10 +515,33 @@ function renderTerrainLayer(
   const geometry = getLayoutGeometry(cache, width, height, snapshot.config.world_width);
   const earthHex = getHexSprite(cache, canvas, geometry.layout.size, EARTH_COLOR, GRID_STROKE_COLOR, GRID_STROKE_WIDTH);
   const wallHex = getHexSprite(cache, canvas, geometry.layout.size, WALL_COLOR, WALL_STROKE_COLOR, GRID_STROKE_WIDTH);
-  if (!earthHex || !wallHex) return;
+  const spikeHex = getHexSprite(
+    cache,
+    canvas,
+    geometry.layout.size,
+    SPIKE_COLOR,
+    SPIKE_STROKE_COLOR,
+    SPIKE_STROKE_WIDTH,
+  );
+  const spikeHighlightHex = getHexSprite(
+    cache,
+    canvas,
+    geometry.layout.size * SPIKE_HIGHLIGHT_SCALE,
+    SPIKE_HIGHLIGHT_COLOR,
+    SPIKE_STROKE_COLOR,
+    GRID_STROKE_WIDTH,
+  );
+  if (!earthHex || !wallHex || !spikeHex || !spikeHighlightHex) return;
 
   for (let index = 0; index < geometry.centerXs.length; index += 1) {
     drawHexSpriteAt(ctx, earthHex, geometry.centerXs[index], geometry.centerYs[index]);
+  }
+
+  const spikeMask = getSpikeMask(cache, snapshot);
+  for (let index = 0; index < geometry.centerXs.length; index += 1) {
+    if (spikeMask[index] === 0) continue;
+    drawHexSpriteAt(ctx, spikeHex, geometry.centerXs[index], geometry.centerYs[index]);
+    drawHexSpriteAt(ctx, spikeHighlightHex, geometry.centerXs[index], geometry.centerYs[index]);
   }
 
   const occupancy = Array.isArray(snapshot.occupancy) ? snapshot.occupancy : [];
@@ -594,6 +652,7 @@ function getTerrainLayer(
     worldWidth,
     terrainSeed,
     wallMask: cache.terrain.wallMask,
+    spikeMask: cache.terrain.spikeMask,
   };
   return surface;
 }
@@ -681,6 +740,7 @@ function renderVisibleTerrain(
   const geometry = getLayoutGeometry(cache, width, height, snapshot.config.world_width);
   const range = computeVisibleHexRange(geometry.layout, width, height, viewport);
   const wallMask = getWallMask(cache, snapshot);
+  const spikeMask = getSpikeMask(cache, snapshot);
 
   ctx.beginPath();
   forEachVisibleCell(geometry, range, (_index, centerX, centerY) => {
@@ -689,6 +749,28 @@ function renderVisibleTerrain(
   ctx.fillStyle = EARTH_COLOR;
   ctx.fill();
   ctx.strokeStyle = GRID_STROKE_COLOR;
+  ctx.lineWidth = GRID_STROKE_WIDTH;
+  ctx.stroke();
+
+  ctx.beginPath();
+  forEachVisibleCell(geometry, range, (index, centerX, centerY) => {
+    if (spikeMask[index] === 0) return;
+    traceHex(ctx, centerX, centerY, geometry.layout.size);
+  });
+  ctx.fillStyle = SPIKE_COLOR;
+  ctx.fill();
+  ctx.strokeStyle = SPIKE_STROKE_COLOR;
+  ctx.lineWidth = SPIKE_STROKE_WIDTH;
+  ctx.stroke();
+
+  ctx.beginPath();
+  forEachVisibleCell(geometry, range, (index, centerX, centerY) => {
+    if (spikeMask[index] === 0) return;
+    traceHex(ctx, centerX, centerY, geometry.layout.size * SPIKE_HIGHLIGHT_SCALE);
+  });
+  ctx.fillStyle = SPIKE_HIGHLIGHT_COLOR;
+  ctx.fill();
+  ctx.strokeStyle = SPIKE_STROKE_COLOR;
   ctx.lineWidth = GRID_STROKE_WIDTH;
   ctx.stroke();
 
