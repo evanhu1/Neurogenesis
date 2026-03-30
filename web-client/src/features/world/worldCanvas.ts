@@ -4,6 +4,7 @@ import { colorForSpeciesId } from '../../speciesColor';
 
 const SQRT_3 = Math.sqrt(3);
 const PLANT_COLOR = '#16a34a';
+const CORPSE_COLOR = '#f97316';
 const WALL_COLOR = '#5f6572';
 const SPIKE_COLOR = '#ef4444';
 const SPIKE_STROKE_COLOR = '#7f1d1d';
@@ -458,7 +459,7 @@ function buildFoodMask(snapshot: WorldSnapshot) {
   const foodMask = new Uint8Array(worldWidth * worldWidth);
   const foods = Array.isArray(snapshot.foods) ? snapshot.foods : [];
   for (const food of foods) {
-    foodMask[cellIndex(worldWidth, food.q, food.r)] = 1;
+    foodMask[cellIndex(worldWidth, food.q, food.r)] = food.kind === 'Corpse' ? 2 : 1;
   }
   return foodMask;
 }
@@ -562,13 +563,34 @@ function renderPlantLayer(
 ) {
   ctx.clearRect(0, 0, width, height);
   const geometry = getLayoutGeometry(cache, width, height, snapshot.config.world_width);
-  const plantHex = getHexSprite(cache, canvas, geometry.layout.size, PLANT_COLOR, GRID_STROKE_COLOR, GRID_STROKE_WIDTH);
-  if (!plantHex) return;
+  const plantHex = getHexSprite(
+    cache,
+    canvas,
+    geometry.layout.size,
+    PLANT_COLOR,
+    GRID_STROKE_COLOR,
+    GRID_STROKE_WIDTH,
+  );
+  const corpseHex = getHexSprite(
+    cache,
+    canvas,
+    geometry.layout.size,
+    CORPSE_COLOR,
+    GRID_STROKE_COLOR,
+    GRID_STROKE_WIDTH,
+  );
+  if (!plantHex || !corpseHex) return;
 
-  const plants = Array.isArray(snapshot.foods) ? snapshot.foods : [];
-  for (const plant of plants) {
-    const index = cellIndex(geometry.worldWidth, plant.q, plant.r);
-    drawHexSpriteAt(ctx, plantHex, geometry.centerXs[index], geometry.centerYs[index]);
+  const foodMask = getFoodMask(cache, snapshot);
+  for (let index = 0; index < geometry.centerXs.length; index += 1) {
+    const foodKind = foodMask[index];
+    if (foodKind === 0) continue;
+    drawHexSpriteAt(
+      ctx,
+      foodKind === 2 ? corpseHex : plantHex,
+      geometry.centerXs[index],
+      geometry.centerYs[index],
+    );
   }
 }
 
@@ -800,11 +822,20 @@ function renderVisiblePlants(
 
   ctx.beginPath();
   forEachVisibleCell(geometry, range, (index, centerX, centerY) => {
-    if (foodMask[index] === 0) return;
+    if (foodMask[index] !== 1) return;
     traceHex(ctx, centerX, centerY, geometry.layout.size);
   });
   ctx.fillStyle = PLANT_COLOR;
   ctx.fill();
+
+  ctx.beginPath();
+  forEachVisibleCell(geometry, range, (index, centerX, centerY) => {
+    if (foodMask[index] !== 2) return;
+    traceHex(ctx, centerX, centerY, geometry.layout.size);
+  });
+  ctx.fillStyle = CORPSE_COLOR;
+  ctx.fill();
+
   ctx.strokeStyle = GRID_STROKE_COLOR;
   ctx.lineWidth = GRID_STROKE_WIDTH;
   ctx.stroke();
