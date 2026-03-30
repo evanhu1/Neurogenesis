@@ -19,11 +19,13 @@ const HEBB_WEIGHT_CLAMP_ENABLED: bool = true;
 const MIN_ENERGY_SENSOR_SCALE: f32 = 1.0;
 const ENERGY_SENSOR_CURVE_EXPONENT: f32 = 2.0;
 const MIN_ACTION_TEMPERATURE: f32 = 1.0e-6;
-pub(crate) const BASELINE_ACTION_LOGIT: f32 = -0.01;
+pub(crate) const EXPLICIT_IDLE_LOGIT_BIAS: f32 = -0.01;
 const LOOK_TARGETS: [EntityType; 3] = [EntityType::Food, EntityType::Organism, EntityType::Wall];
 const LOOK_RAY_COUNT: usize = SensoryReceptor::LOOK_RAY_OFFSETS.len();
-pub(crate) const SENSORY_COUNT: u32 = SensoryReceptor::LOOK_NEURON_COUNT + 1;
-pub(crate) const ENERGY_SENSORY_ID: u32 = SensoryReceptor::LOOK_NEURON_COUNT;
+pub(crate) const CONTACT_SENSORY_ID: u32 = SensoryReceptor::LOOK_NEURON_COUNT;
+pub(crate) const DAMAGE_SENSORY_ID: u32 = CONTACT_SENSORY_ID + 1;
+pub(crate) const ENERGY_SENSORY_ID: u32 = DAMAGE_SENSORY_ID + 1;
+pub(crate) const SENSORY_COUNT: u32 = ENERGY_SENSORY_ID + 1;
 pub(crate) const ACTION_COUNT: usize = ActionType::ALL.len();
 pub(crate) const ACTION_COUNT_U32: u32 = ACTION_COUNT as u32;
 pub(crate) const INTER_ID_BASE: u32 = 1000;
@@ -50,7 +52,9 @@ pub(crate) struct BrainScratch {
     pub(crate) prev_inter: Vec<f32>,
     pub(crate) prev_inter_states: Vec<f32>,
     pub(crate) inter_activations: Vec<f32>,
-    pub(crate) action_post_signals: [f32; ACTION_COUNT],
+    pub(crate) centered_action_post_signals: [f32; ACTION_COUNT],
+    pub(crate) selected_action_index: Option<usize>,
+    pub(crate) selected_action_confidence: f32,
 }
 
 impl BrainScratch {
@@ -60,9 +64,17 @@ impl BrainScratch {
             prev_inter: Vec::new(),
             prev_inter_states: Vec::new(),
             inter_activations: Vec::new(),
-            action_post_signals: [0.0; ACTION_COUNT],
+            centered_action_post_signals: [0.0; ACTION_COUNT],
+            selected_action_index: None,
+            selected_action_confidence: 0.0,
         }
     }
+}
+
+#[derive(Clone, Copy)]
+struct SampledAction {
+    action: ActionType,
+    confidence: f32,
 }
 
 /// Build a BrainState from inherited neuron genes and stored synapse topology.
@@ -85,7 +97,17 @@ pub(crate) fn express_genome<R: Rng + ?Sized>(genome: &OrganismGenome, _rng: &mu
             sensory_id = sensory_id.saturating_add(1);
         }
     }
-    debug_assert_eq!(sensory_id, ENERGY_SENSORY_ID);
+    debug_assert_eq!(sensory_id, CONTACT_SENSORY_ID);
+    sensory.push(make_sensory_neuron(
+        CONTACT_SENSORY_ID,
+        SensoryReceptor::ContactAhead,
+        sensory_spawn,
+    ));
+    sensory.push(make_sensory_neuron(
+        DAMAGE_SENSORY_ID,
+        SensoryReceptor::Damage,
+        sensory_spawn,
+    ));
     sensory.push(make_sensory_neuron(
         ENERGY_SENSORY_ID,
         SensoryReceptor::Energy,
@@ -142,8 +164,9 @@ pub(crate) fn action_index(action: ActionType) -> usize {
         ActionType::TurnLeft => 0,
         ActionType::TurnRight => 1,
         ActionType::Forward => 2,
-        ActionType::Consume => 3,
-        ActionType::Reproduce => 4,
+        ActionType::Eat => 3,
+        ActionType::Attack => 4,
+        ActionType::Reproduce => 5,
     }
 }
 
@@ -282,6 +305,8 @@ pub(crate) fn evaluate_brain(
     occupancy: &[Option<Occupant>],
     vision_distance: u32,
     action_temperature: f32,
+    explicit_idle_softmax: bool,
+    split_attack_actions: bool,
     action_sample: f32,
     scratch: &mut BrainScratch,
 ) -> BrainEvaluation {
@@ -297,6 +322,10 @@ pub(crate) fn evaluate_brain(
         occupancy,
         vision_distance,
     );
+    let contact_ahead = hex_neighbor((organism.q, organism.r), organism.facing, world_width);
+    let contact_ahead_idx =
+        contact_ahead.1 as usize * world_width as usize + contact_ahead.0 as usize;
+    let contact_ahead_signal = occupancy[contact_ahead_idx].map_or(0.0, |_| 1.0);
     #[cfg(feature = "instrumentation")]
     {
         result.food_ahead = look_ray_signal(&ray_scans, 0, EntityType::Food) > 0.0;
@@ -311,6 +340,13 @@ pub(crate) fn evaluate_brain(
         organism.energy,
         organism.genome.starting_energy.max(MIN_ENERGY_SENSOR_SCALE),
     );
+    let damage_signal = if split_attack_actions {
+        (organism.damage_taken_last_turn
+            / organism.genome.starting_energy.max(MIN_ENERGY_SENSOR_SCALE))
+        .clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
 
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
@@ -320,6 +356,14 @@ pub(crate) fn evaluate_brain(
                 ray_offset,
                 look_target,
             } => look_ray_signal(&ray_scans, *ray_offset, *look_target),
+            SensoryReceptor::ContactAhead => {
+                if split_attack_actions {
+                    contact_ahead_signal
+                } else {
+                    0.0
+                }
+            }
+            SensoryReceptor::Damage => damage_signal,
             SensoryReceptor::Energy => energy_signal,
         };
     }
@@ -346,7 +390,7 @@ pub(crate) fn evaluate_brain(
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::InterSetup, stage_started.elapsed());
 
-    let mut action_inputs = [BASELINE_ACTION_LOGIT; ACTION_COUNT];
+    let mut action_inputs = [0.0; ACTION_COUNT];
 
     // Accumulate sensory → inter.
     #[cfg(feature = "profiling")]
@@ -397,17 +441,36 @@ pub(crate) fn evaluate_brain(
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     result.action_logits = action_inputs;
-    let logit_mean = action_inputs.iter().sum::<f32>() / ACTION_COUNT as f32;
-    for (idx, logit) in action_inputs.iter().copied().enumerate() {
-        scratch.action_post_signals[idx] = logit - logit_mean;
-    }
     for (idx, action) in brain.action.iter_mut().enumerate() {
         debug_assert_eq!(action_index(action.action_type), idx);
         action.logit = action_inputs[idx];
+        scratch.centered_action_post_signals[idx] =
+            action_inputs[idx] - action_inputs.iter().sum::<f32>() / ACTION_COUNT as f32;
     }
 
-    result.selected_action =
-        select_action_from_logits(result.action_logits, action_temperature, action_sample);
+    let sampled_action = if explicit_idle_softmax {
+        sample_action_from_logits(
+            result.action_logits,
+            EXPLICIT_IDLE_LOGIT_BIAS,
+            action_temperature,
+            action_sample,
+        )
+    } else {
+        SampledAction {
+            action: select_action_from_positive_logits(
+                result.action_logits,
+                action_temperature,
+                action_sample,
+            ),
+            confidence: 1.0,
+        }
+    };
+    scratch.selected_action_index = match sampled_action.action {
+        ActionType::Idle => None,
+        selected_action => Some(action_index(selected_action)),
+    };
+    scratch.selected_action_confidence = sampled_action.confidence;
+    result.selected_action = sampled_action.action;
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::ActionActivationResolve, stage_started.elapsed());
 
@@ -424,7 +487,83 @@ pub fn derive_active_action_neuron_id(organism: &OrganismState) -> Option<Neuron
         .map(|action_neuron| action_neuron.neuron_id)
 }
 
-fn select_action_from_logits(
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn select_action_from_logits(
+    action_logits: [f32; ACTION_COUNT],
+    idle_bias: f32,
+    action_temperature: f32,
+    action_sample: f32,
+) -> ActionType {
+    sample_action_from_logits(action_logits, idle_bias, action_temperature, action_sample).action
+}
+
+fn sample_action_from_logits(
+    action_logits: [f32; ACTION_COUNT],
+    idle_bias: f32,
+    action_temperature: f32,
+    action_sample: f32,
+) -> SampledAction {
+    let temperature = action_temperature.max(MIN_ACTION_TEMPERATURE);
+    let max_logit = action_logits
+        .iter()
+        .copied()
+        .fold(idle_bias, f32::max);
+    let mut weights = [0.0_f32; ACTION_COUNT];
+    let mut weight_sum = 0.0_f32;
+    for (idx, logit) in action_logits.iter().copied().enumerate() {
+        let scaled = (logit - max_logit) / temperature;
+        let weight = scaled.exp();
+        if weight.is_finite() {
+            weights[idx] = weight;
+            weight_sum += weight;
+        }
+    }
+    let idle_weight = ((idle_bias - max_logit) / temperature).exp();
+    if idle_weight.is_finite() {
+        weight_sum += idle_weight;
+    }
+
+    if !weight_sum.is_finite() || weight_sum <= 0.0 {
+        let best_idx = argmax_index(&action_logits);
+        return if action_logits[best_idx] >= idle_bias {
+            SampledAction {
+                action: ActionType::ALL[best_idx],
+                confidence: 1.0,
+            }
+        } else {
+            SampledAction {
+                action: ActionType::Idle,
+                confidence: 1.0,
+            }
+        };
+    }
+
+    let sample = action_sample.clamp(0.0, 1.0 - f32::EPSILON) * weight_sum;
+    let mut cumulative = 0.0_f32;
+    for (idx, weight) in weights.iter().copied().enumerate() {
+        cumulative += weight;
+        if sample < cumulative {
+            return SampledAction {
+                action: ActionType::ALL[idx],
+                confidence: weight / weight_sum,
+            };
+        }
+    }
+    if idle_weight.is_finite() && sample < cumulative + idle_weight {
+        SampledAction {
+            action: ActionType::Idle,
+            confidence: idle_weight / weight_sum,
+        }
+    } else {
+        let final_weight = weights[ACTION_COUNT - 1];
+        SampledAction {
+            action: ActionType::ALL[ACTION_COUNT - 1],
+            confidence: final_weight / weight_sum,
+        }
+    }
+}
+
+fn select_action_from_positive_logits(
     action_logits: [f32; ACTION_COUNT],
     action_temperature: f32,
     action_sample: f32,
@@ -444,17 +583,17 @@ fn select_action_from_logits(
         return ActionType::Idle;
     }
 
-    for positive_logit in &mut weights {
-        if *positive_logit <= 0.0 {
+    for weight in &mut weights {
+        if *weight <= 0.0 {
             continue;
         }
-        let scaled = (*positive_logit - best_positive_logit) / temperature;
-        let weight = scaled.exp();
-        if weight.is_finite() {
-            *positive_logit = weight;
-            weight_sum += weight;
+        let scaled = (*weight - best_positive_logit) / temperature;
+        let softmax_weight = scaled.exp();
+        if softmax_weight.is_finite() {
+            *weight = softmax_weight;
+            weight_sum += softmax_weight;
         } else {
-            *positive_logit = 0.0;
+            *weight = 0.0;
         }
     }
 
