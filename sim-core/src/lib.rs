@@ -46,6 +46,10 @@ pub struct Simulation {
     organisms: Vec<OrganismState>,
     #[serde(default)]
     pending_actions: Vec<PendingActionState>,
+    #[serde(skip)]
+    reward_ledgers: Vec<RewardLedger>,
+    #[serde(skip)]
+    reward_signal_multiplier: f32,
     foods: Vec<FoodState>,
     occupancy: Vec<Option<Occupant>>,
     #[serde(default)]
@@ -66,7 +70,6 @@ pub struct Simulation {
 pub(crate) enum PendingActionKind {
     #[default]
     None,
-    Consume,
     Reproduce,
 }
 
@@ -74,6 +77,62 @@ pub(crate) enum PendingActionKind {
 pub(crate) struct PendingActionState {
     pub(crate) kind: PendingActionKind,
     pub(crate) turns_remaining: u8,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum RewardEvent {
+    FoodConsumed { energy: f32 },
+    PredationSucceeded { energy: f32 },
+    DamageTaken { energy: f32 },
+    MoveCost { energy: f32 },
+    ReproductionInvested { energy: f32 },
+    OffspringSpawned { reward: f32 },
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct RewardLedger {
+    pub(crate) food_consumed_energy: f32,
+    pub(crate) predation_energy: f32,
+    pub(crate) damage_taken_energy: f32,
+    pub(crate) move_cost_energy: f32,
+    pub(crate) reproduction_investment_energy: f32,
+    pub(crate) offspring_spawn_reward: f32,
+}
+
+impl RewardLedger {
+    pub(crate) fn clear(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(crate) fn record(&mut self, event: RewardEvent) {
+        match event {
+            RewardEvent::FoodConsumed { energy } => {
+                self.food_consumed_energy += energy.max(0.0);
+            }
+            RewardEvent::PredationSucceeded { energy } => {
+                self.predation_energy += energy.max(0.0);
+            }
+            RewardEvent::DamageTaken { energy } => {
+                self.damage_taken_energy += energy.max(0.0);
+            }
+            RewardEvent::MoveCost { energy } => {
+                self.move_cost_energy += energy.max(0.0);
+            }
+            RewardEvent::ReproductionInvested { energy } => {
+                self.reproduction_investment_energy += energy.max(0.0);
+            }
+            RewardEvent::OffspringSpawned { reward } => {
+                self.offspring_spawn_reward += reward.max(0.0);
+            }
+        }
+    }
+
+    pub(crate) fn reward_signal(self) -> f32 {
+        self.food_consumed_energy + self.predation_energy + self.offspring_spawn_reward
+            - self.move_cost_energy
+            - self.damage_taken_energy
+    }
 }
 
 impl Simulation {
@@ -99,6 +158,8 @@ impl Simulation {
             next_food_id: 0,
             organisms: Vec::new(),
             pending_actions: Vec::new(),
+            reward_ledgers: Vec::new(),
+            reward_signal_multiplier: 1.0,
             foods: Vec::new(),
             occupancy: vec![None; capacity],
             terrain_map: Vec::new(),
@@ -120,6 +181,14 @@ impl Simulation {
 
     pub fn config(&self) -> &WorldConfig {
         &self.config
+    }
+
+    pub fn set_reward_signal_multiplier(&mut self, multiplier: f32) {
+        self.reward_signal_multiplier = if multiplier.is_finite() && multiplier != 0.0 {
+            multiplier
+        } else {
+            1.0
+        };
     }
 
     pub fn turn(&self) -> u64 {
@@ -171,6 +240,7 @@ impl Simulation {
         self.next_food_id = 0;
         self.organisms.clear();
         self.pending_actions.clear();
+        self.reward_ledgers.clear();
         self.foods.clear();
         self.occupancy.fill(None);
         self.terrain_map.clear();

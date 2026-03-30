@@ -13,8 +13,14 @@ pub struct SeedGenomeConfig {
     #[serde(default = "default_starting_energy")]
     pub starting_energy: f32,
     pub age_of_maturity: u32,
+    #[serde(default)]
+    pub plasticity_start_age: u32,
     pub hebb_eta_gain: f32,
+    #[serde(default = "default_juvenile_eta_scale")]
+    pub juvenile_eta_scale: f32,
     pub eligibility_retention: f32,
+    #[serde(default = "default_max_weight_delta_per_tick")]
+    pub max_weight_delta_per_tick: f32,
     pub synapse_prune_threshold: f32,
     pub mutation_rate_age_of_maturity: f32,
     pub mutation_rate_vision_distance: f32,
@@ -45,6 +51,8 @@ pub struct WorldConfig {
     pub periodic_injection_count: u32,
     pub food_energy: f32,
     pub move_action_energy_cost: f32,
+    #[serde(default = "default_reproduction_investment_energy")]
+    pub reproduction_investment_energy: f32,
     #[serde(default = "default_action_temperature")]
     pub action_temperature: f32,
     #[serde(default = "default_intent_parallel_threads")]
@@ -64,6 +72,14 @@ pub struct WorldConfig {
     pub meta_mutation_enabled: bool,
     #[serde(default = "default_runtime_plasticity_enabled")]
     pub runtime_plasticity_enabled: bool,
+    #[serde(default = "default_feature_toggle_enabled")]
+    pub explicit_idle_softmax: bool,
+    #[serde(default = "default_feature_toggle_enabled")]
+    pub executed_action_credit: bool,
+    #[serde(default = "default_feature_toggle_enabled")]
+    pub juvenile_plasticity_enabled: bool,
+    #[serde(default = "default_feature_toggle_enabled")]
+    pub split_attack_actions: bool,
     #[serde(default = "default_force_random_actions")]
     pub force_random_actions: bool,
     pub seed_genome_config: SeedGenomeConfig,
@@ -79,6 +95,8 @@ struct WorldConfigDeserialize {
     periodic_injection_count: u32,
     food_energy: f32,
     move_action_energy_cost: f32,
+    #[serde(default = "default_reproduction_investment_energy")]
+    reproduction_investment_energy: f32,
     #[serde(default = "default_action_temperature")]
     action_temperature: f32,
     #[serde(default = "default_intent_parallel_threads")]
@@ -98,6 +116,14 @@ struct WorldConfigDeserialize {
     meta_mutation_enabled: bool,
     #[serde(default = "default_runtime_plasticity_enabled")]
     runtime_plasticity_enabled: bool,
+    #[serde(default = "default_feature_toggle_enabled")]
+    explicit_idle_softmax: bool,
+    #[serde(default = "default_feature_toggle_enabled")]
+    executed_action_credit: bool,
+    #[serde(default = "default_feature_toggle_enabled")]
+    juvenile_plasticity_enabled: bool,
+    #[serde(default = "default_feature_toggle_enabled")]
+    split_attack_actions: bool,
     #[serde(default = "default_force_random_actions")]
     force_random_actions: bool,
     seed_genome_config: SeedGenomeConfig,
@@ -116,6 +142,7 @@ impl<'de> Deserialize<'de> for WorldConfig {
             periodic_injection_count: raw.periodic_injection_count,
             food_energy: raw.food_energy,
             move_action_energy_cost: raw.move_action_energy_cost,
+            reproduction_investment_energy: raw.reproduction_investment_energy,
             action_temperature: raw.action_temperature,
             intent_parallel_threads: raw.intent_parallel_threads,
             food_regrowth_interval: raw.food_regrowth_interval,
@@ -126,6 +153,10 @@ impl<'de> Deserialize<'de> for WorldConfig {
             global_mutation_rate_modifier: raw.global_mutation_rate_modifier,
             meta_mutation_enabled: raw.meta_mutation_enabled,
             runtime_plasticity_enabled: raw.runtime_plasticity_enabled,
+            explicit_idle_softmax: raw.explicit_idle_softmax,
+            executed_action_credit: raw.executed_action_credit,
+            juvenile_plasticity_enabled: raw.juvenile_plasticity_enabled,
+            split_attack_actions: raw.split_attack_actions,
             force_random_actions: raw.force_random_actions,
             seed_genome_config: raw.seed_genome_config,
         })
@@ -178,6 +209,9 @@ pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
     if config.move_action_energy_cost < 0.0 {
         return Err("move_action_energy_cost must be >= 0".to_owned());
     }
+    if config.reproduction_investment_energy < 0.0 {
+        return Err("reproduction_investment_energy must be >= 0".to_owned());
+    }
     if !config.action_temperature.is_finite() || config.action_temperature <= 0.0 {
         return Err("action_temperature must be finite and greater than zero".to_owned());
     }
@@ -197,6 +231,18 @@ pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
         || config.global_mutation_rate_modifier < 0.0
     {
         return Err("global_mutation_rate_modifier must be finite and >= 0".to_owned());
+    }
+    if !config.seed_genome_config.juvenile_eta_scale.is_finite()
+        || config.seed_genome_config.juvenile_eta_scale < 0.0
+    {
+        return Err("seed_genome_config.juvenile_eta_scale must be finite and >= 0".to_owned());
+    }
+    if !config.seed_genome_config.max_weight_delta_per_tick.is_finite()
+        || config.seed_genome_config.max_weight_delta_per_tick < 0.0
+    {
+        return Err(
+            "seed_genome_config.max_weight_delta_per_tick must be finite and >= 0".to_owned(),
+        );
     }
     Ok(())
 }
@@ -246,6 +292,18 @@ fn default_starting_energy() -> f32 {
     1.0
 }
 
+fn default_reproduction_investment_energy() -> f32 {
+    100.0
+}
+
+fn default_juvenile_eta_scale() -> f32 {
+    0.5
+}
+
+fn default_max_weight_delta_per_tick() -> f32 {
+    0.05
+}
+
 fn default_food_regrowth_interval() -> u32 {
     10
 }
@@ -291,6 +349,10 @@ fn default_meta_mutation_enabled() -> bool {
 }
 
 fn default_runtime_plasticity_enabled() -> bool {
+    true
+}
+
+fn default_feature_toggle_enabled() -> bool {
     true
 }
 

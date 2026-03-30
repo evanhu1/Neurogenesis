@@ -133,6 +133,7 @@ impl Simulation {
         self.occupancy[cell_idx] = Some(Occupant::Organism(organism.id));
         self.organisms.push(organism);
         self.pending_actions.push(PendingActionState::default());
+        self.reward_ledgers.push(crate::RewardLedger::default());
         true
     }
 

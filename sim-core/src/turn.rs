@@ -2,11 +2,11 @@
 use crate::brain::scan_rays;
 use crate::brain::{action_index, evaluate_brain, BrainScratch, ACTION_COUNT};
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right, wrap_position};
-use crate::plasticity::{apply_runtime_weight_updates, compute_pending_coactivations};
+use crate::plasticity::{apply_runtime_weight_updates_with_mode, compute_pending_coactivations};
 use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 #[cfg(feature = "profiling")]
 use crate::{profiling, profiling::TurnPhase};
-use crate::{PendingActionKind, PendingActionState, Simulation};
+use crate::{PendingActionKind, PendingActionState, RewardEvent, Simulation};
 use rayon::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 #[cfg(feature = "instrumentation")]
@@ -28,8 +28,7 @@ const RNG_TURN_MIX: u64 = 0x9E37_79B9_7F4A_7C15;
 const RNG_ORGANISM_MIX: u64 = 0xBF58_476D_1CE4_E5B9;
 const REPRODUCE_LOCK_DURATION_TURNS: u8 = 2;
 const CONSUMPTION_ENERGY_FRACTION: f32 = 0.20;
-const FAILED_PREDATION_ACTION_COST_MULTIPLIER: f32 = 10.0;
-const RNG_PREY_MIX: u64 = 0xD6E8_FF3A_5A9C_31F1;
+const ATTACK_DAMAGE_FRACTION: f32 = 0.20;
 const INTENT_PARALLEL_MIN_LEN: usize = 64;
 
 #[derive(Clone, Copy)]
@@ -54,10 +53,11 @@ struct OrganismIntent {
     from: (i32, i32),
     facing_after_actions: FacingDirection,
     wants_move: bool,
-    wants_consume: bool,
+    wants_eat: bool,
+    wants_attack: bool,
     wants_reproduce: bool,
     move_target: Option<(i32, i32)>,
-    consume_target: Option<(i32, i32)>,
+    interaction_target: Option<(i32, i32)>,
     move_confidence: f32,
     action_cost_count: u8,
     synapse_ops: u64,
@@ -121,6 +121,8 @@ fn sim_parallel_pool(thread_count: u32) -> Arc<ThreadPool> {
 impl Simulation {
     pub fn tick(&mut self) -> TickDelta {
         self.reconcile_pending_actions();
+        self.reconcile_reward_ledgers();
+        self.clear_reward_ledgers();
 
         #[cfg(feature = "profiling")]
         let tick_started = Instant::now();
@@ -140,6 +142,7 @@ impl Simulation {
         #[cfg(feature = "profiling")]
         let phase_started = Instant::now();
         let intents = self.build_intents(&snapshot);
+        self.clear_damage_state();
         #[cfg(feature = "profiling")]
         profiling::record_turn_phase(TurnPhase::Intents, phase_started.elapsed());
 
@@ -152,10 +155,11 @@ impl Simulation {
         Self::reproduction_phase(
             &mut self.organisms,
             &mut self.pending_actions,
+            &mut self.reward_ledgers,
             &intents,
             &self.occupancy,
             snapshot.world_width,
-            self.config.seed_genome_config.starting_energy,
+            self.config.reproduction_investment_energy,
             &mut skip_pending_action_decrement,
         );
         #[cfg(feature = "profiling")]
@@ -180,7 +184,6 @@ impl Simulation {
             &mut spawn_requests,
             &skip_pending_action_decrement,
         );
-        self.apply_post_commit_runtime_weight_updates();
         #[cfg(feature = "profiling")]
         profiling::record_turn_phase(TurnPhase::Commit, phase_started.elapsed());
 
@@ -194,6 +197,7 @@ impl Simulation {
         let phase_started = Instant::now();
         self.enqueue_periodic_injections(&mut spawn_requests);
         let spawned = self.resolve_spawn_requests(&spawn_requests);
+        self.apply_post_commit_runtime_weight_updates();
         #[cfg(feature = "profiling")]
         profiling::record_turn_phase(TurnPhase::Spawn, phase_started.elapsed());
         let reproductions = spawned.len() as u64;
@@ -265,10 +269,32 @@ impl Simulation {
         }
     }
 
+    fn reconcile_reward_ledgers(&mut self) {
+        if self.reward_ledgers.len() != self.organisms.len() {
+            self.reward_ledgers
+                .resize(self.organisms.len(), crate::RewardLedger::default());
+        }
+    }
+
+    fn clear_reward_ledgers(&mut self) {
+        for ledger in &mut self.reward_ledgers {
+            ledger.clear();
+        }
+    }
+
+    fn clear_damage_state(&mut self) {
+        for organism in &mut self.organisms {
+            organism.damage_taken_last_turn = 0.0;
+        }
+    }
+
     fn build_intents(&mut self, snapshot: &TurnSnapshot) -> Vec<OrganismIntent> {
         let occupancy = &self.occupancy;
         let pending_actions = &self.pending_actions;
         let runtime_plasticity_enabled = self.config.runtime_plasticity_enabled;
+        let explicit_idle_softmax = self.config.explicit_idle_softmax;
+        let executed_action_credit = self.config.executed_action_credit;
+        let split_attack_actions = self.config.split_attack_actions;
         let force_random_actions = self.config.force_random_actions;
         let action_temperature = self.config.action_temperature;
         let thread_pool = sim_parallel_pool(self.config.intent_parallel_threads);
@@ -294,6 +320,9 @@ impl Simulation {
                         tick,
                         action_temperature,
                         runtime_plasticity_enabled,
+                        explicit_idle_softmax,
+                        executed_action_credit,
+                        split_attack_actions,
                         force_random_actions,
                         scratch,
                     )
@@ -330,21 +359,21 @@ impl Simulation {
             return;
         }
 
-        let food_energy = self.config.food_energy;
         let thread_pool = sim_parallel_pool(self.config.intent_parallel_threads);
         #[cfg(feature = "profiling")]
         let plasticity_started = Instant::now();
         thread_pool.install(|| {
             self.organisms
                 .par_iter_mut()
+                .zip(self.reward_ledgers.par_iter())
                 .with_min_len(INTENT_PARALLEL_MIN_LEN)
-                .for_each(|organism| {
-                    let passive_energy_baseline =
-                        organism_passive_metabolic_energy_cost_from_food_energy(
-                            food_energy,
-                            organism,
-                        );
-                    apply_runtime_weight_updates(organism, passive_energy_baseline);
+                .for_each(|(organism, reward_ledger)| {
+                    apply_runtime_weight_updates_with_mode(
+                        organism,
+                        *reward_ledger,
+                        self.config.juvenile_plasticity_enabled,
+                        self.reward_signal_multiplier,
+                    );
                 });
         });
         #[cfg(feature = "profiling")]
@@ -419,6 +448,7 @@ impl Simulation {
         let mut facing_updates = Vec::new();
         let mut actions_applied = 0_u64;
         let action_energy_cost = self.config.move_action_energy_cost;
+        let split_attack_actions = self.config.split_attack_actions;
         for (idx, intent) in intents.iter().enumerate() {
             debug_assert_eq!(intent.idx, idx);
             let organism = &mut self.organisms[idx];
@@ -432,7 +462,11 @@ impl Simulation {
             let action_count = u64::from(intent.action_cost_count);
             actions_applied += action_count;
             if action_count > 0 {
-                organism.energy -= action_energy_cost * intent.action_cost_count as f32;
+                let energy_cost = action_energy_cost * intent.action_cost_count as f32;
+                organism.energy -= energy_cost;
+                self.reward_ledgers[idx].record(RewardEvent::MoveCost {
+                    energy: energy_cost,
+                });
             }
         }
 
@@ -461,54 +495,143 @@ impl Simulation {
         }
 
         for (idx, intent) in intents.iter().enumerate() {
-            if !intent.wants_consume || dead_organisms[idx] {
+            if (!intent.wants_eat && !intent.wants_attack) || dead_organisms[idx] {
                 continue;
             }
-            let Some((target_q, target_r)) = intent.consume_target else {
+            let Some((target_q, target_r)) = intent.interaction_target else {
                 continue;
             };
             let target_idx = target_r as usize * world_width_usize + target_q as usize;
 
-            match self.occupancy[target_idx] {
-                Some(Occupant::Food(food_id)) => {
-                    let Some(food_idx) = food_index_by_id(&self.foods, food_id) else {
-                        continue;
-                    };
-                    if removed_food[food_idx] {
-                        continue;
+            if split_attack_actions {
+                match self.occupancy[target_idx] {
+                    Some(Occupant::Food(food_id)) if intent.wants_eat => {
+                        let Some(food_idx) = food_index_by_id(&self.foods, food_id) else {
+                            continue;
+                        };
+                        if removed_food[food_idx] {
+                            continue;
+                        }
+                        removed_food[food_idx] = true;
+                        self.occupancy[target_idx] = None;
+                        self.schedule_food_regrowth(target_idx);
+                        let consumed_energy = self.config.food_energy;
+                        let predator = &mut self.organisms[idx];
+                        let gained_energy = consumed_energy * CONSUMPTION_ENERGY_FRACTION;
+                        predator.energy += gained_energy;
+                        predator.consumptions_count =
+                            predator.consumptions_count.saturating_add(1);
+                        self.reward_ledgers[idx].record(RewardEvent::FoodConsumed {
+                            energy: gained_energy,
+                        });
+                        consumptions += 1;
+                        let food = &self.foods[food_idx];
+                        removed_positions.push(RemovedEntityPosition {
+                            entity_id: EntityId::Food(food_id),
+                            q: food.q,
+                            r: food.r,
+                        });
                     }
-                    removed_food[food_idx] = true;
-                    self.occupancy[target_idx] = None;
-                    self.schedule_food_regrowth(target_idx);
-                    let consumed_energy = self.config.food_energy;
-                    let predator = &mut self.organisms[idx];
-                    predator.energy += consumed_energy * CONSUMPTION_ENERGY_FRACTION;
-                    predator.consumptions_count = predator.consumptions_count.saturating_add(1);
-                    consumptions += 1;
-                    let food = &self.foods[food_idx];
-                    removed_positions.push(RemovedEntityPosition {
-                        entity_id: EntityId::Food(food_id),
-                        q: food.q,
-                        r: food.r,
-                    });
-                }
-                Some(Occupant::Organism(prey_id)) => {
-                    let Some(prey_idx) = organism_index_by_id(&self.organisms, prey_id) else {
-                        continue;
-                    };
-                    if idx == prey_idx || dead_organisms[prey_idx] {
-                        continue;
-                    }
+                    Some(Occupant::Organism(prey_id)) if intent.wants_attack => {
+                        let Some(prey_idx) = organism_index_by_id(&self.organisms, prey_id) else {
+                            continue;
+                        };
+                        if idx == prey_idx || dead_organisms[prey_idx] {
+                            continue;
+                        }
+                        let prey_energy = self.organisms[prey_idx].energy.max(0.0);
+                        if prey_energy <= 0.0 {
+                            continue;
+                        }
+                        let attack_damage =
+                            (prey_energy * ATTACK_DAMAGE_FRACTION).max(1.0).min(prey_energy);
+                        let (prey_q, prey_r) =
+                            (self.organisms[prey_idx].q, self.organisms[prey_idx].r);
 
-                    let success_probability =
-                        prey_probability(&self.organisms[idx], &self.organisms[prey_idx]);
-                    let success_sample = deterministic_predation_sample(
-                        self.seed,
-                        self.turn,
-                        self.organisms[idx].id,
-                        prey_id,
-                    );
-                    if success_sample <= success_probability {
+                        if idx < prey_idx {
+                            let (left, right) = self.organisms.split_at_mut(prey_idx);
+                            let predator = &mut left[idx];
+                            let prey = &mut right[0];
+                            prey.energy = (prey.energy - attack_damage).max(0.0);
+                            prey.damage_taken_last_turn += attack_damage;
+                            if prey.energy <= 0.0 {
+                                let gained_energy = prey_energy * CONSUMPTION_ENERGY_FRACTION;
+                                predator.energy += gained_energy;
+                                predator.consumptions_count =
+                                    predator.consumptions_count.saturating_add(1);
+                            }
+                        } else {
+                            let (left, right) = self.organisms.split_at_mut(idx);
+                            let predator = &mut right[0];
+                            let prey = &mut left[prey_idx];
+                            prey.energy = (prey.energy - attack_damage).max(0.0);
+                            prey.damage_taken_last_turn += attack_damage;
+                            if prey.energy <= 0.0 {
+                                let gained_energy = prey_energy * CONSUMPTION_ENERGY_FRACTION;
+                                predator.energy += gained_energy;
+                                predator.consumptions_count =
+                                    predator.consumptions_count.saturating_add(1);
+                            }
+                        }
+                        self.reward_ledgers[prey_idx].record(RewardEvent::DamageTaken {
+                            energy: attack_damage,
+                        });
+
+                        if self.organisms[prey_idx].energy <= 0.0 {
+                            let gained_energy = prey_energy * CONSUMPTION_ENERGY_FRACTION;
+                            self.reward_ledgers[idx].record(RewardEvent::PredationSucceeded {
+                                energy: gained_energy,
+                            });
+                            dead_organisms[prey_idx] = true;
+                            removed_positions.push(RemovedEntityPosition {
+                                entity_id: EntityId::Organism(prey_id),
+                                q: prey_q,
+                                r: prey_r,
+                            });
+                            self.occupancy[target_idx] = None;
+                            consumptions += 1;
+                            predations += 1;
+                        }
+                    }
+                    None | Some(Occupant::Wall) => {}
+                    Some(Occupant::Food(_)) | Some(Occupant::Organism(_)) => {}
+                }
+            } else if !dead_organisms[idx] {
+                match self.occupancy[target_idx] {
+                    Some(Occupant::Food(food_id)) => {
+                        let Some(food_idx) = food_index_by_id(&self.foods, food_id) else {
+                            continue;
+                        };
+                        if removed_food[food_idx] {
+                            continue;
+                        }
+                        removed_food[food_idx] = true;
+                        self.occupancy[target_idx] = None;
+                        self.schedule_food_regrowth(target_idx);
+                        let consumed_energy = self.config.food_energy;
+                        let predator = &mut self.organisms[idx];
+                        let gained_energy = consumed_energy * CONSUMPTION_ENERGY_FRACTION;
+                        predator.energy += gained_energy;
+                        predator.consumptions_count =
+                            predator.consumptions_count.saturating_add(1);
+                        self.reward_ledgers[idx].record(RewardEvent::FoodConsumed {
+                            energy: gained_energy,
+                        });
+                        consumptions += 1;
+                        let food = &self.foods[food_idx];
+                        removed_positions.push(RemovedEntityPosition {
+                            entity_id: EntityId::Food(food_id),
+                            q: food.q,
+                            r: food.r,
+                        });
+                    }
+                    Some(Occupant::Organism(prey_id)) => {
+                        let Some(prey_idx) = organism_index_by_id(&self.organisms, prey_id) else {
+                            continue;
+                        };
+                        if idx == prey_idx || dead_organisms[prey_idx] {
+                            continue;
+                        }
                         let prey_energy = self.organisms[prey_idx].energy.max(0.0);
                         let gained_energy = prey_energy * CONSUMPTION_ENERGY_FRACTION;
                         let (prey_q, prey_r) =
@@ -528,7 +651,9 @@ impl Simulation {
                             predator.consumptions_count =
                                 predator.consumptions_count.saturating_add(1);
                         }
-
+                        self.reward_ledgers[idx].record(RewardEvent::PredationSucceeded {
+                            energy: gained_energy,
+                        });
                         dead_organisms[prey_idx] = true;
                         removed_positions.push(RemovedEntityPosition {
                             entity_id: EntityId::Organism(prey_id),
@@ -538,34 +663,34 @@ impl Simulation {
                         self.occupancy[target_idx] = None;
                         consumptions += 1;
                         predations += 1;
-                    } else {
-                        self.organisms[idx].energy -=
-                            action_energy_cost * (FAILED_PREDATION_ACTION_COST_MULTIPLIER - 1.0);
                     }
+                    None | Some(Occupant::Wall) => {}
                 }
-                None => {}
-                Some(Occupant::Wall) => {}
             }
         }
 
         if dead_organisms.iter().any(|dead| *dead) {
             let mut survivors = Vec::with_capacity(self.organisms.len());
             let mut survivor_pending_actions = Vec::with_capacity(self.pending_actions.len());
+            let mut survivor_reward_ledgers = Vec::with_capacity(self.reward_ledgers.len());
             let mut survivor_skip = Vec::with_capacity(skip_pending_action_decrement.len());
-            for (idx, (organism, pending_action)) in self
+            for (idx, ((organism, pending_action), reward_ledger)) in self
                 .organisms
                 .drain(..)
                 .zip(self.pending_actions.drain(..))
+                .zip(self.reward_ledgers.drain(..))
                 .enumerate()
             {
                 if !dead_organisms[idx] {
                     survivors.push(organism);
                     survivor_pending_actions.push(pending_action);
+                    survivor_reward_ledgers.push(reward_ledger);
                     survivor_skip.push(skip_pending_action_decrement[idx]);
                 }
             }
             self.organisms = survivors;
             self.pending_actions = survivor_pending_actions;
+            self.reward_ledgers = survivor_reward_ledgers;
             *skip_pending_action_decrement = survivor_skip;
         }
 
@@ -602,6 +727,7 @@ impl Simulation {
     fn reproduction_phase(
         organisms: &mut [OrganismState],
         pending_actions: &mut [PendingActionState],
+        reward_ledgers: &mut [crate::RewardLedger],
         intents: &[OrganismIntent],
         occupancy: &[Option<Occupant>],
         world_width: i32,
@@ -636,6 +762,9 @@ impl Simulation {
 
             organism.energy -= reproduction_investment_energy;
             organism.reproductions_count = organism.reproductions_count.saturating_add(1);
+            reward_ledgers[org_idx].record(RewardEvent::ReproductionInvested {
+                energy: reproduction_investment_energy,
+            });
             pending_actions[org_idx] = PendingActionState {
                 kind: PendingActionKind::Reproduce,
                 turns_remaining: REPRODUCE_LOCK_DURATION_TURNS,
@@ -672,6 +801,9 @@ impl Simulation {
                 if occupancy_snapshot_cell(&self.occupancy, world_width, q, r).is_none()
                     && reserved_spawn_cells.insert((q, r))
                 {
+                    self.reward_ledgers[idx].record(RewardEvent::OffspringSpawned {
+                        reward: self.config.food_energy * CONSUMPTION_ENERGY_FRACTION,
+                    });
                     spawn_requests.push(SpawnRequest {
                         kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
                             parent_genome: parent.genome.clone(),
@@ -718,19 +850,23 @@ impl Simulation {
 
         let mut new_organisms = Vec::with_capacity(self.organisms.len());
         let mut new_pending_actions = Vec::with_capacity(self.pending_actions.len());
-        for (idx, (organism, pending_action)) in self
+        let mut new_reward_ledgers = Vec::with_capacity(self.reward_ledgers.len());
+        for (idx, ((organism, pending_action), reward_ledger)) in self
             .organisms
             .drain(..)
             .zip(self.pending_actions.drain(..))
+            .zip(self.reward_ledgers.drain(..))
             .enumerate()
         {
             if !dead[idx] {
                 new_organisms.push(organism);
                 new_pending_actions.push(pending_action);
+                new_reward_ledgers.push(reward_ledger);
             }
         }
         self.organisms = new_organisms;
         self.pending_actions = new_pending_actions;
+        self.reward_ledgers = new_reward_ledgers;
 
         (starvation_count, starved_positions)
     }
@@ -784,6 +920,9 @@ fn build_intent_for_organism(
     tick: u64,
     action_temperature: f32,
     runtime_plasticity_enabled: bool,
+    explicit_idle_softmax: bool,
+    executed_action_credit: bool,
+    split_attack_actions: bool,
     force_random_actions: bool,
     scratch: &mut BrainScratch,
 ) -> BuiltIntent {
@@ -795,10 +934,11 @@ fn build_intent_for_organism(
                 from: (snapshot_state.q, snapshot_state.r),
                 facing_after_actions: snapshot_state.facing,
                 wants_move: false,
-                wants_consume: false,
+                wants_eat: false,
+                wants_attack: false,
                 wants_reproduce: false,
                 move_target: None,
-                consume_target: None,
+                interaction_target: None,
                 move_confidence: 0.0,
                 action_cost_count: 0,
                 synapse_ops: 0,
@@ -853,11 +993,13 @@ fn build_intent_for_organism(
             occupancy,
             vision_distance,
             action_temperature,
+            explicit_idle_softmax,
+            split_attack_actions,
             action_sample,
             scratch,
         );
         if runtime_plasticity_enabled {
-            compute_pending_coactivations(organism, scratch);
+            compute_pending_coactivations(organism, scratch, executed_action_credit);
         }
         selected_action = evaluation.selected_action;
         selected_action_logit = if selected_action == ActionType::Idle {
@@ -884,10 +1026,11 @@ fn build_intent_for_organism(
     let (
         facing_after_actions,
         wants_move,
-        wants_consume,
+        wants_eat,
+        wants_attack,
         wants_reproduce,
         move_target,
-        consume_target,
+        interaction_target,
     ) = intent_from_selected_action(selected_action, snapshot_state, world_width);
     let move_confidence = if wants_move {
         selected_action_logit
@@ -902,10 +1045,11 @@ fn build_intent_for_organism(
             from: (snapshot_state.q, snapshot_state.r),
             facing_after_actions,
             wants_move,
-            wants_consume,
+            wants_eat,
+            wants_attack,
             wants_reproduce,
             move_target,
-            consume_target,
+            interaction_target,
             move_confidence,
             action_cost_count: u8::from(selected_action != ActionType::Idle),
             synapse_ops,
@@ -913,11 +1057,15 @@ fn build_intent_for_organism(
         #[cfg(feature = "instrumentation")]
         action_record: Some(ActionRecord {
             organism_id,
+            species_id: organism.species_id,
             selected_action,
             food_ahead,
             food_left,
             food_right,
             food_behind,
+            damage_taken_last_turn: organism.damage_taken_last_turn,
+            age_turns: organism.age_turns,
+            age_of_maturity: organism.genome.age_of_maturity,
             inter_activations: organism
                 .brain
                 .inter
@@ -938,6 +1086,7 @@ fn intent_from_selected_action(
     bool,
     bool,
     bool,
+    bool,
     Option<(i32, i32)>,
     Option<(i32, i32)>,
 ) {
@@ -945,10 +1094,11 @@ fn intent_from_selected_action(
     let current_facing = snapshot_state.facing;
 
     match selected_action {
-        ActionType::Idle => (current_facing, false, false, false, None, None),
-        ActionType::TurnLeft => (rotate_left(current_facing), false, false, false, None, None),
+        ActionType::Idle => (current_facing, false, false, false, false, None, None),
+        ActionType::TurnLeft => (rotate_left(current_facing), false, false, false, false, None, None),
         ActionType::TurnRight => (
             rotate_right(current_facing),
+            false,
             false,
             false,
             false,
@@ -960,18 +1110,29 @@ fn intent_from_selected_action(
             true,
             false,
             false,
+            false,
             Some(hex_neighbor(from, current_facing, world_width)),
             None,
         ),
-        ActionType::Consume => (
+        ActionType::Eat => (
             current_facing,
+            false,
+            true,
+            false,
+            false,
+            None,
+            Some(hex_neighbor(from, current_facing, world_width)),
+        ),
+        ActionType::Attack => (
+            current_facing,
+            false,
             false,
             true,
             false,
             None,
             Some(hex_neighbor(from, current_facing, world_width)),
         ),
-        ActionType::Reproduce => (current_facing, false, false, true, None, None),
+        ActionType::Reproduce => (current_facing, false, false, false, true, None, None),
     }
 }
 
@@ -1019,30 +1180,6 @@ fn uniform_random_action(action_sample: f32) -> ActionType {
     let scaled = action_sample.clamp(0.0, 1.0 - f32::EPSILON) * ACTION_COUNT as f32;
     let idx = scaled.floor() as usize;
     ActionType::ALL[idx.min(ACTION_COUNT - 1)]
-}
-
-fn deterministic_predation_sample(
-    sim_seed: u64,
-    tick: u64,
-    predator_id: OrganismId,
-    prey_id: OrganismId,
-) -> f32 {
-    let mixed = sim_seed
-        ^ tick.wrapping_mul(RNG_TURN_MIX)
-        ^ predator_id.0.wrapping_mul(RNG_ORGANISM_MIX)
-        ^ prey_id.0.wrapping_mul(RNG_PREY_MIX);
-    let sample = (mix_u64(mixed) >> 40) as u32;
-    sample as f32 / ((1_u32 << 24) - 1) as f32
-}
-
-fn prey_probability(predator: &OrganismState, prey: &OrganismState) -> f32 {
-    let predator_energy = predator.energy.max(0.0);
-    let prey_energy = prey.energy.max(0.0);
-    let total_energy = predator_energy + prey_energy;
-    if total_energy <= f32::EPSILON {
-        return 0.0;
-    }
-    (predator_energy / total_energy).clamp(0.0, 1.0)
 }
 
 fn mix_u64(mut value: u64) -> u64 {

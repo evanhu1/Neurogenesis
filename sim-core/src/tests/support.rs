@@ -38,8 +38,11 @@ pub(super) fn test_genome() -> OrganismGenome {
         vision_distance: 2,
         starting_energy: 100.0,
         age_of_maturity: 0,
+        plasticity_start_age: 0,
         hebb_eta_gain: 0.0,
+        juvenile_eta_scale: 0.5,
         eligibility_retention: 0.9,
+        max_weight_delta_per_tick: 0.05,
         synapse_prune_threshold: 0.01,
         mutation_rate_age_of_maturity: 0.0,
         mutation_rate_vision_distance: 0.0,
@@ -70,6 +73,7 @@ pub(super) fn stable_test_config() -> WorldConfig {
         periodic_injection_count: 0,
         food_energy: 50.0,
         move_action_energy_cost: 1.0,
+        reproduction_investment_energy: 100.0,
         action_temperature: 0.5,
         intent_parallel_threads: 8,
         food_regrowth_interval: 10,
@@ -80,6 +84,10 @@ pub(super) fn stable_test_config() -> WorldConfig {
         global_mutation_rate_modifier: 1.0,
         meta_mutation_enabled: true,
         runtime_plasticity_enabled: true,
+        explicit_idle_softmax: true,
+        executed_action_credit: true,
+        juvenile_plasticity_enabled: true,
+        split_attack_actions: true,
         force_random_actions: false,
         seed_genome_config: SeedGenomeConfig {
             num_neurons: 1,
@@ -88,8 +96,11 @@ pub(super) fn stable_test_config() -> WorldConfig {
             vision_distance: 2,
             starting_energy: 100.0,
             age_of_maturity: 0,
+            plasticity_start_age: 0,
             hebb_eta_gain: 0.0,
+            juvenile_eta_scale: 0.5,
             eligibility_retention: 0.9,
+            max_weight_delta_per_tick: 0.05,
             synapse_prune_threshold: 0.01,
             mutation_rate_age_of_maturity: 0.0,
             mutation_rate_vision_distance: 0.0,
@@ -120,6 +131,19 @@ fn forced_brain(
     turn_right: bool,
     confidence: f32,
 ) -> BrainState {
+    let preferred_action = if wants_move {
+        ActionType::Forward
+    } else if turn_left && !turn_right {
+        ActionType::TurnLeft
+    } else if turn_right && !turn_left {
+        ActionType::TurnRight
+    } else {
+        ActionType::Idle
+    };
+    forced_brain_with_action(preferred_action, confidence)
+}
+
+fn forced_brain_with_action(preferred_action: ActionType, confidence: f32) -> BrainState {
     let sensory = vec![make_sensory_neuron(
         0,
         SensoryReceptor::LookRay {
@@ -130,15 +154,6 @@ fn forced_brain(
     )];
     let inter_id = NeuronId(1000);
     let inter_bias = confidence;
-    let preferred_action = if wants_move {
-        ActionType::Forward
-    } else if turn_left && !turn_right {
-        ActionType::TurnLeft
-    } else if turn_right && !turn_left {
-        ActionType::TurnRight
-    } else {
-        ActionType::Idle
-    };
     let inter_synapses: Vec<SynapseEdge> = ActionType::ALL
         .into_iter()
         .copied()
@@ -198,6 +213,37 @@ fn forced_brain(
     }
 }
 
+pub(super) fn make_single_action_organism(
+    id: u64,
+    q: i32,
+    r: i32,
+    facing: FacingDirection,
+    preferred_action: ActionType,
+    confidence: f32,
+    energy: impl IntoEnergy,
+) -> OrganismState {
+    let energy = energy.into_energy();
+    let initial_energy = if energy <= 0.0 { 10.0 } else { energy };
+    OrganismState {
+        id: OrganismId(id),
+        species_id: sim_types::SpeciesId(id),
+        q,
+        r,
+        generation: 0,
+        age_turns: 0,
+        facing,
+        energy: initial_energy,
+        energy_prev: initial_energy,
+        dopamine: 0.0,
+        damage_taken_last_turn: 0.0,
+        consumptions_count: 0,
+        reproductions_count: 0,
+        last_action_taken: ActionType::Idle,
+        brain: forced_brain_with_action(preferred_action, confidence),
+        genome: test_genome(),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn make_organism(
     id: u64,
@@ -223,6 +269,7 @@ pub(super) fn make_organism(
         energy: initial_energy,
         energy_prev: initial_energy,
         dopamine: 0.0,
+        damage_taken_last_turn: 0.0,
         consumptions_count: 0,
         reproductions_count: 0,
         last_action_taken: ActionType::Idle,
