@@ -1,5 +1,7 @@
 use super::*;
-use crate::brain::sensing::{encode_sensory_inputs, look_ray_signal};
+use crate::brain::sensing::encode_sensory_inputs;
+#[cfg(feature = "instrumentation")]
+use crate::brain::sensing::look_ray_signal;
 
 #[derive(Clone, Copy)]
 struct SampledAction {
@@ -23,6 +25,7 @@ pub(crate) fn evaluate_brain(
 
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
+    #[cfg_attr(not(feature = "instrumentation"), allow(unused_variables))]
     let ray_scans = encode_sensory_inputs(
         organism,
         world_width,

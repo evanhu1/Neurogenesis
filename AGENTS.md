@@ -3,21 +3,29 @@
 ## Project Structure
 
 - `sim-types/`: shared domain types used across all Rust crates.
-- `sim-config/`: world + seed-genome config crate (`config.toml`, typed loader/validation).
+- `sim-config/`: world + seed-genome config crate (`config.toml`, typed
+  loader/validation, owned defaults/policies, generated config reference).
 - `sim-core/`: deterministic simulation engine:
   - `lib.rs`: `Simulation` struct, config validation.
-  - `turn.rs`: turn pipeline, intent resolution, movement, consume/predation, commit.
-  - `brain.rs`: neural network evaluation and genome expression.
+  - `turn.rs` + `turn/`: tick orchestration, lifecycle, snapshot, intents,
+    movement, reproduction, and commit phases.
+  - `brain.rs` + `brain/`: neural network evaluation, genome expression, and
+    sensing helpers.
   - `plasticity.rs`: runtime eligibility/coactivation and Hebbian updates.
-  - `genome.rs`: genome generation and mutation operators.
-  - `spawn.rs`: initial population spawn and reproduction placement.
+  - `genome.rs` + `genome/`: seed generation, mutation-rate accessors, scalar
+    mutation, topology mutation, spatial prior, and sanitization.
+  - `spawn.rs` + `spawn/`: organism spawning, world generation, and food
+    ecology/regrowth.
+  - `topology.rs`: shared neuron/synapse topology helpers and invariants.
   - `grid.rs`: hex-grid geometry and occupancy helpers.
-- `sim-validation/`: headless validation harness for benchmarking the
-  evolutionary loop and reporting adaptation metrics.
+- `sim-validation/`: headless validation harness split into CLI,
+  orchestration, aggregation, comparison, output, and reporting modules.
 - `sim-server/`: Axum HTTP + WebSocket server (`src/main.rs`), with server-only
   API types in `src/protocol.rs`.
 - `web-client/`: React + TailwindCSS + Vite canvas UI (`src/`).
 - `sim-config/config.toml`: baseline simulation configuration.
+- `sim-config/CONFIG_REFERENCE.md`: generated config reference derived from
+  `sim-config/src/config.rs`.
 - `sim-validation/config.toml`: stable validation benchmark configuration.
   Keep this in sync with `sim-config/config.toml` when config-schema or baseline
   tuning changes affect validation assumptions.
@@ -26,6 +34,8 @@
 
 - `cargo check --workspace`: fast compile check.
 - `cargo test --workspace`: run all Rust tests.
+- `cargo run -p sim-config --bin generate_config_docs`: regenerate
+  `sim-config/CONFIG_REFERENCE.md`.
 - `make fmt`: format Rust code.
 - `make lint`: clippy with warnings as errors.
 - `cargo run -p sim-validation --release --`: run the default 10-seed
@@ -87,9 +97,10 @@ axes. Occupancy is a dense `Vec<Option<Occupant>>`
 from Perlin noise at world init (`terrain_noise_scale`, `terrain_threshold`) and
 block spawn, movement, and ray vision.
 
-Food fertility is binary (boolean per cell), generated from Perlin noise in
-`spawn.rs` using hardcoded constants:
-`FOOD_FERTILITY_NOISE_SCALE = 0.012`, `FOOD_FERTILITY_THRESHOLD = 0.83`.
+Food fertility is binary (boolean per cell), generated from Perlin noise using
+the hidden food-ecology policy owned by `sim-config` and documented in
+`sim-config/CONFIG_REFERENCE.md`:
+`FOOD_FERTILITY_NOISE_SCALE = 0.012`, `FOOD_FERTILITY_THRESHOLD = 0.6`.
 Terrain-wall cells are infertile.
 
 ### Turn Pipeline (execution order)
@@ -100,54 +111,61 @@ Terrain-wall cells are infertile.
 2. **Snapshot** — freeze occupancy + organism state, stable ID ordering.
 3. **Intent** — evaluate brains, sample one action per organism from
    temperature-scaled softmax logits (deterministic sample stream), derive
-   facing/move/consume/reproduce intent. Any non-`Idle` action pays one
+   facing/move/eat/attack/reproduce intent. Any non-`Idle` action pays one
    `move_action_energy_cost`. When runtime plasticity is enabled, compute
    per-edge pending coactivations (`pre * post`).
 4. **Reproduction trigger** — `Reproduce` starts a 2-turn lock if mature and
    energy is sufficient; parent energy is debited immediately by
-   `seed_genome_config.starting_energy`.
+   `reproduction_investment_energy`.
 5. **Move resolution** — simultaneous movement into empty targets only; highest
    confidence wins, ties broken by lower ID. Occupied cells and walls block.
-6. **Commit** — apply facing + moves + action costs; resolve `Consume` on forward
-   cell: food grants `10% * food_energy`, predation succeeds with probability
-   `predator_energy / (predator_energy + prey_energy)` and grants `10%` of prey
-   energy. Failed predation applies extra action-energy penalty. Process due food
-   regrowth and runtime weight updates.
+6. **Commit** — apply facing + moves + action costs; resolve forward-cell
+   interactions. With `split_attack_actions = true`, `Eat` only consumes food
+   and `Attack` only damages organisms. Plant food grants `20%` of stored
+   energy, corpse food grants `80%`, lethal attacks spawn corpse food, and
+   spike tiles damage organisms after movement. Process due food regrowth here.
 7. **Age** — increment `age_turns`.
 8. **Spawn** — complete reproduction locks into spawn requests (if cells are
    free), mutate genomes for offspring, and process periodic seed-genome
-   injections.
+   injections. Post-commit runtime weight updates run after spawning.
 9. **Metrics & delta** — update counters and emit `TickDelta`.
 
 ### Brain
 
-Sensory receptors are multi-ray:
-`LookRay { ray_offset in [-2,-1,0,1,2,3], target in {Food, Organism, Wall} }`
-plus `Energy` (19 sensory neurons total). Ray scans are cached per tick and stop on
-first blocking entity (including walls), with signal
+Sensory receptors are:
+`LookRay { ray_offset = 0, target in {Food, Organism, Wall, Spikes} }`
+plus `ContactAhead`, `Damage`, and `Energy` (7 sensory neurons total). Ray
+scans are cached per tick and stop on first blocking entity (including walls),
+with signal
 `(max_dist - dist + 1) / max_dist`.
 
-Inter neurons are `1000..1000+n`. Action neurons are `2000..2005` mapped to:
-`Idle`, `TurnLeft`, `TurnRight`, `Forward`, `Consume`, `Reproduce`.
-Policy is single-choice categorical sampling per tick from softmax logits.
+Inter neurons are `1000..1000+n`. Action neurons are `2000..2005` and map to
+the non-idle action set: `TurnLeft`, `TurnRight`, `Forward`, `Eat`, `Attack`,
+`Reproduce`. `Idle` is handled separately by the policy logic. Policy is
+single-choice categorical sampling per tick from softmax logits.
 
 Runtime plasticity:
 - Pending coactivation accumulation: `pending = pre * post` during intent eval.
-- Reward signal:
-  `dopamine = tanh((energy - energy_prev + passive_metabolism_baseline) / 10.0)`.
-- Mature-only update: `w += eta * dopamine * e - 0.001 * w`,
-  where `eta = max(0, hebb_eta_gain)`.
+- Reward signal: dopamine is derived from the reward ledger signal, scaled by
+  `20.0`, passed through `tanh`, and multiplied by the optional reward-signal
+  override used by the validation harness.
+- Weight update: mature organisms use `hebb_eta_gain`; juveniles may also learn
+  when `juvenile_plasticity_enabled` is on, scaled by `juvenile_eta_scale`.
+  Per-tick updates are clamped by `max_weight_delta_per_tick`.
 - Eligibility fold: `e = retention * e + (1 - retention) * pending`.
-- Synapse pruning is maturity-gated (every 10 ticks) using weight+eligibility thresholds.
+- Synapse pruning is maturity-gated (every 10 ticks) using weight+eligibility
+  thresholds.
 
 ### Genome
 
 `OrganismGenome` has `num_neurons`, `num_synapses`, `spatial_prior_sigma`,
-`vision_distance`, `starting_energy`, `age_of_maturity`, `hebb_eta_gain`,
-`eligibility_retention`, `synapse_prune_threshold`, `inter_biases`,
-`inter_log_time_constants`, `action_biases`, neuron-location vectors
-(`sensory_locations`, `inter_locations`, `action_locations`), sorted `edges`
-(with runtime traces), and per-operator mutation-rate genes.
+`vision_distance`, `starting_energy`, `age_of_maturity`,
+`plasticity_start_age`, `hebb_eta_gain`, `juvenile_eta_scale`,
+`eligibility_retention`, `max_weight_delta_per_tick`,
+`synapse_prune_threshold`, `inter_biases`, `inter_log_time_constants`,
+neuron-location vectors (`sensory_locations`, `inter_locations`,
+`action_locations`), sorted `edges` (with runtime traces), and per-operator
+mutation-rate genes.
 
 Implemented mutation operators include: age/maturity and vision step mutation,
 bias/time-constant/retention/prune-threshold perturbation, neuron-location
