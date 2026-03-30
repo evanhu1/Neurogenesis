@@ -120,10 +120,10 @@ Terrain-wall cells are infertile.
 5. **Move resolution** — simultaneous movement into empty targets only; highest
    confidence wins, ties broken by lower ID. Occupied cells and walls block.
 6. **Commit** — apply facing + moves + action costs; resolve forward-cell
-   interactions. With `split_attack_actions = true`, `Eat` only consumes food
-   and `Attack` only damages organisms. Plant food grants `20%` of stored
-   energy, corpse food grants `80%`, lethal attacks spawn corpse food, and
-   spike tiles damage organisms after movement. Process due food regrowth here.
+   interactions. `Eat` only consumes food and `Attack` only damages organisms.
+   Plant food grants `20%` of stored energy, corpse food grants `80%`, lethal
+   attacks spawn corpse food, and spike tiles damage organisms after movement.
+   Process due food regrowth here.
 7. **Age** — increment `age_turns`.
 8. **Spawn** — complete reproduction locks into spawn requests (if cells are
    free), mutate genomes for offspring, and process periodic seed-genome
@@ -149,9 +149,9 @@ Runtime plasticity:
 - Reward signal: dopamine is derived from the reward ledger signal, scaled by
   `20.0`, passed through `tanh`, and multiplied by the optional reward-signal
   override used by the validation harness.
-- Weight update: mature organisms use `hebb_eta_gain`; juveniles may also learn
-  when `juvenile_plasticity_enabled` is on, scaled by `juvenile_eta_scale`.
-  Per-tick updates are clamped by `max_weight_delta_per_tick`.
+- Weight update: mature organisms use `hebb_eta_gain`; juveniles also learn
+  before maturity, scaled by `juvenile_eta_scale`. Per-tick updates are
+  clamped by `max_weight_delta_per_tick`.
 - Eligibility fold: `e = retention * e + (1 - retention) * pending`.
 - Synapse pruning is maturity-gated (every 10 ticks) using weight+eligibility
   thresholds.

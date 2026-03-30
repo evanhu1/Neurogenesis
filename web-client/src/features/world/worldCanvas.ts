@@ -6,11 +6,7 @@ const SQRT_3 = Math.sqrt(3);
 const PLANT_COLOR = '#16a34a';
 const CORPSE_COLOR = '#f97316';
 const WALL_COLOR = '#5f6572';
-const SPIKE_COLOR = '#ef4444';
-const SPIKE_STROKE_COLOR = '#7f1d1d';
-const SPIKE_HIGHLIGHT_COLOR = '#fca5a5';
-const SPIKE_STROKE_WIDTH = 0.32;
-const SPIKE_HIGHLIGHT_SCALE = 0.52;
+const SPIKE_COLOR = '#fca5a5';
 const BASE_HEX_SIZE_AT_900PX = 8;
 const BASE_HEX_MIN_SIZE_PX = 6;
 const BASE_HEX_REFERENCE_CANVAS_PX = 900;
@@ -323,9 +319,11 @@ function getHexSprite(
   traceHex(context, anchorX, anchorY, size);
   context.fillStyle = fillColor;
   context.fill();
-  context.strokeStyle = strokeColor;
-  context.lineWidth = lineWidth;
-  context.stroke();
+  if (lineWidth > 0) {
+    context.strokeStyle = strokeColor;
+    context.lineWidth = lineWidth;
+    context.stroke();
+  }
 
   const sprite = { surface, anchorX, anchorY };
   cache.hexSprites.set(key, sprite);
@@ -521,18 +519,10 @@ function renderTerrainLayer(
     canvas,
     geometry.layout.size,
     SPIKE_COLOR,
-    SPIKE_STROKE_COLOR,
-    SPIKE_STROKE_WIDTH,
+    GRID_STROKE_COLOR,
+    0,
   );
-  const spikeHighlightHex = getHexSprite(
-    cache,
-    canvas,
-    geometry.layout.size * SPIKE_HIGHLIGHT_SCALE,
-    SPIKE_HIGHLIGHT_COLOR,
-    SPIKE_STROKE_COLOR,
-    GRID_STROKE_WIDTH,
-  );
-  if (!earthHex || !wallHex || !spikeHex || !spikeHighlightHex) return;
+  if (!earthHex || !wallHex || !spikeHex) return;
 
   for (let index = 0; index < geometry.centerXs.length; index += 1) {
     drawHexSpriteAt(ctx, earthHex, geometry.centerXs[index], geometry.centerYs[index]);
@@ -542,7 +532,6 @@ function renderTerrainLayer(
   for (let index = 0; index < geometry.centerXs.length; index += 1) {
     if (spikeMask[index] === 0) continue;
     drawHexSpriteAt(ctx, spikeHex, geometry.centerXs[index], geometry.centerYs[index]);
-    drawHexSpriteAt(ctx, spikeHighlightHex, geometry.centerXs[index], geometry.centerYs[index]);
   }
 
   const occupancy = Array.isArray(snapshot.occupancy) ? snapshot.occupancy : [];
@@ -781,20 +770,6 @@ function renderVisibleTerrain(
   });
   ctx.fillStyle = SPIKE_COLOR;
   ctx.fill();
-  ctx.strokeStyle = SPIKE_STROKE_COLOR;
-  ctx.lineWidth = SPIKE_STROKE_WIDTH;
-  ctx.stroke();
-
-  ctx.beginPath();
-  forEachVisibleCell(geometry, range, (index, centerX, centerY) => {
-    if (spikeMask[index] === 0) return;
-    traceHex(ctx, centerX, centerY, geometry.layout.size * SPIKE_HIGHLIGHT_SCALE);
-  });
-  ctx.fillStyle = SPIKE_HIGHLIGHT_COLOR;
-  ctx.fill();
-  ctx.strokeStyle = SPIKE_STROKE_COLOR;
-  ctx.lineWidth = GRID_STROKE_WIDTH;
-  ctx.stroke();
 
   ctx.beginPath();
   forEachVisibleCell(geometry, range, (index, centerX, centerY) => {

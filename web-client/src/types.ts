@@ -82,17 +82,12 @@ export type WorldConfig = {
   food_regrowth_jitter: number;
   terrain_noise_scale: number;
   terrain_threshold: number;
-  spike_noise_scale: number;
-  spike_threshold: number;
+  spike_density: number;
   max_organism_age: number;
   speciation_threshold: number;
   global_mutation_rate_modifier: number;
   meta_mutation_enabled: boolean;
   runtime_plasticity_enabled: boolean;
-  explicit_idle_softmax: boolean;
-  executed_action_credit: boolean;
-  juvenile_plasticity_enabled: boolean;
-  split_attack_actions: boolean;
   force_random_actions: boolean;
   seed_genome_config: SeedGenomeConfig;
 };

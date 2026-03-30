@@ -28,8 +28,7 @@ pub struct FoodRegrowthDefaults {
 pub struct TerrainDefaults {
     pub terrain_noise_scale: f32,
     pub terrain_threshold: f32,
-    pub spike_noise_scale: f32,
-    pub spike_threshold: f32,
+    pub spike_density: f32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
@@ -37,7 +36,6 @@ pub struct EvolutionDefaults {
     pub global_mutation_rate_modifier: f32,
     pub meta_mutation_enabled: bool,
     pub runtime_plasticity_enabled: bool,
-    pub feature_toggle_enabled: bool,
     pub force_random_actions: bool,
 }
 
@@ -96,14 +94,12 @@ pub fn world_config_defaults() -> WorldConfigDefaults {
         terrain: TerrainDefaults {
             terrain_noise_scale: 0.02,
             terrain_threshold: 0.86,
-            spike_noise_scale: 0.025,
-            spike_threshold: 0.75,
+            spike_density: 0.10,
         },
         evolution: EvolutionDefaults {
             global_mutation_rate_modifier: 1.0,
             meta_mutation_enabled: true,
             runtime_plasticity_enabled: true,
-            feature_toggle_enabled: true,
             force_random_actions: false,
         },
     }
@@ -255,14 +251,9 @@ pub fn world_config_reference_markdown() -> String {
                 "Wall cutoff used by default terrain generation.",
             ),
             (
-                "spike_noise_scale",
-                world.terrain.spike_noise_scale.to_string(),
-                "Perlin input scale for spike terrain.",
-            ),
-            (
-                "spike_threshold",
-                world.terrain.spike_threshold.to_string(),
-                "Spike cutoff threshold.",
+                "spike_density",
+                world.terrain.spike_density.to_string(),
+                "Fraction of non-wall cells assigned spikes by deterministic per-cell scatter.",
             ),
         ],
     );
@@ -285,26 +276,6 @@ pub fn world_config_reference_markdown() -> String {
                 "runtime_plasticity_enabled",
                 bool_label(world.evolution.runtime_plasticity_enabled).to_owned(),
                 "Master toggle for mature runtime plasticity updates.",
-            ),
-            (
-                "explicit_idle_softmax",
-                bool_label(world.evolution.feature_toggle_enabled).to_owned(),
-                "Feature flag default for explicit idle logits.",
-            ),
-            (
-                "executed_action_credit",
-                bool_label(world.evolution.feature_toggle_enabled).to_owned(),
-                "Feature flag default for executed-action reward crediting.",
-            ),
-            (
-                "juvenile_plasticity_enabled",
-                bool_label(world.evolution.feature_toggle_enabled).to_owned(),
-                "Feature flag default for juvenile plasticity.",
-            ),
-            (
-                "split_attack_actions",
-                bool_label(world.evolution.feature_toggle_enabled).to_owned(),
-                "Feature flag default for split eat/attack actions.",
             ),
             (
                 "force_random_actions",
@@ -472,7 +443,7 @@ pub fn world_config_reference_markdown() -> String {
             (
                 "spike_seed_mix",
                 format!("0x{:X}", terrain_policy.spike_seed_mix),
-                "Seed xor used to derive spike noise from the run seed.",
+                "Seed xor used to derive spike scatter hashes from the run seed.",
             ),
         ],
     );
@@ -568,10 +539,8 @@ pub struct WorldConfig {
     pub terrain_noise_scale: f32,
     #[serde(default = "default_terrain_threshold")]
     pub terrain_threshold: f32,
-    #[serde(default = "default_spike_noise_scale")]
-    pub spike_noise_scale: f32,
-    #[serde(default = "default_spike_threshold")]
-    pub spike_threshold: f32,
+    #[serde(default = "default_spike_density")]
+    pub spike_density: f32,
     pub max_organism_age: u32,
     #[serde(default = "default_global_mutation_rate_modifier")]
     pub global_mutation_rate_modifier: f32,
@@ -579,14 +548,6 @@ pub struct WorldConfig {
     pub meta_mutation_enabled: bool,
     #[serde(default = "default_runtime_plasticity_enabled")]
     pub runtime_plasticity_enabled: bool,
-    #[serde(default = "default_feature_toggle_enabled")]
-    pub explicit_idle_softmax: bool,
-    #[serde(default = "default_feature_toggle_enabled")]
-    pub executed_action_credit: bool,
-    #[serde(default = "default_feature_toggle_enabled")]
-    pub juvenile_plasticity_enabled: bool,
-    #[serde(default = "default_feature_toggle_enabled")]
-    pub split_attack_actions: bool,
     #[serde(default = "default_force_random_actions")]
     pub force_random_actions: bool,
     pub seed_genome_config: SeedGenomeConfig,
@@ -616,10 +577,8 @@ struct WorldConfigDeserialize {
     terrain_noise_scale: f32,
     #[serde(default = "default_terrain_threshold")]
     terrain_threshold: f32,
-    #[serde(default = "default_spike_noise_scale")]
-    spike_noise_scale: f32,
-    #[serde(default = "default_spike_threshold")]
-    spike_threshold: f32,
+    #[serde(default = "default_spike_density")]
+    spike_density: f32,
     max_organism_age: u32,
     #[serde(default = "default_global_mutation_rate_modifier")]
     global_mutation_rate_modifier: f32,
@@ -627,14 +586,6 @@ struct WorldConfigDeserialize {
     meta_mutation_enabled: bool,
     #[serde(default = "default_runtime_plasticity_enabled")]
     runtime_plasticity_enabled: bool,
-    #[serde(default = "default_feature_toggle_enabled")]
-    explicit_idle_softmax: bool,
-    #[serde(default = "default_feature_toggle_enabled")]
-    executed_action_credit: bool,
-    #[serde(default = "default_feature_toggle_enabled")]
-    juvenile_plasticity_enabled: bool,
-    #[serde(default = "default_feature_toggle_enabled")]
-    split_attack_actions: bool,
     #[serde(default = "default_force_random_actions")]
     force_random_actions: bool,
     seed_genome_config: SeedGenomeConfig,
@@ -660,16 +611,11 @@ impl<'de> Deserialize<'de> for WorldConfig {
             food_regrowth_jitter: raw.food_regrowth_jitter,
             terrain_noise_scale: raw.terrain_noise_scale,
             terrain_threshold: raw.terrain_threshold,
-            spike_noise_scale: raw.spike_noise_scale,
-            spike_threshold: raw.spike_threshold,
+            spike_density: raw.spike_density,
             max_organism_age: raw.max_organism_age,
             global_mutation_rate_modifier: raw.global_mutation_rate_modifier,
             meta_mutation_enabled: raw.meta_mutation_enabled,
             runtime_plasticity_enabled: raw.runtime_plasticity_enabled,
-            explicit_idle_softmax: raw.explicit_idle_softmax,
-            executed_action_credit: raw.executed_action_credit,
-            juvenile_plasticity_enabled: raw.juvenile_plasticity_enabled,
-            split_attack_actions: raw.split_attack_actions,
             force_random_actions: raw.force_random_actions,
             seed_genome_config: raw.seed_genome_config,
         })
@@ -740,11 +686,8 @@ pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
     if !(0.0..=1.0).contains(&config.terrain_threshold) {
         return Err("terrain_threshold must be in [0.0, 1.0]".to_owned());
     }
-    if config.spike_noise_scale <= 0.0 {
-        return Err("spike_noise_scale must be greater than zero".to_owned());
-    }
-    if !(0.0..=1.0).contains(&config.spike_threshold) {
-        return Err("spike_threshold must be in [0.0, 1.0]".to_owned());
+    if !(0.0..=1.0).contains(&config.spike_density) {
+        return Err("spike_density must be in [0.0, 1.0]".to_owned());
     }
     if !config.global_mutation_rate_modifier.is_finite()
         || config.global_mutation_rate_modifier < 0.0
@@ -858,12 +801,8 @@ fn default_terrain_threshold() -> f32 {
     world_config_defaults().terrain.terrain_threshold
 }
 
-fn default_spike_noise_scale() -> f32 {
-    world_config_defaults().terrain.spike_noise_scale
-}
-
-fn default_spike_threshold() -> f32 {
-    world_config_defaults().terrain.spike_threshold
+fn default_spike_density() -> f32 {
+    world_config_defaults().terrain.spike_density
 }
 
 fn default_action_temperature() -> f32 {
@@ -886,10 +825,6 @@ fn default_meta_mutation_enabled() -> bool {
 
 fn default_runtime_plasticity_enabled() -> bool {
     world_config_defaults().evolution.runtime_plasticity_enabled
-}
-
-fn default_feature_toggle_enabled() -> bool {
-    world_config_defaults().evolution.feature_toggle_enabled
 }
 
 fn default_force_random_actions() -> bool {

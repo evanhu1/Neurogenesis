@@ -16,8 +16,6 @@ pub(crate) fn evaluate_brain(
     spike_map: &[bool],
     vision_distance: u32,
     action_temperature: f32,
-    explicit_idle_softmax: bool,
-    split_attack_actions: bool,
     action_sample: f32,
     scratch: &mut BrainScratch,
 ) -> BrainEvaluation {
@@ -26,14 +24,8 @@ pub(crate) fn evaluate_brain(
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     #[cfg_attr(not(feature = "instrumentation"), allow(unused_variables))]
-    let ray_scans = encode_sensory_inputs(
-        organism,
-        world_width,
-        occupancy,
-        spike_map,
-        vision_distance,
-        split_attack_actions,
-    );
+    let ray_scans =
+        encode_sensory_inputs(organism, world_width, occupancy, spike_map, vision_distance);
     #[cfg(feature = "instrumentation")]
     {
         result.food_ahead = look_ray_signal(&ray_scans, 0, EntityType::Food) > 0.0;
@@ -105,23 +97,12 @@ pub(crate) fn evaluate_brain(
     }
     scratch.update_action_post_signals(&action_inputs);
 
-    let sampled_action = if explicit_idle_softmax {
-        sample_action_from_logits(
-            result.action_logits,
-            EXPLICIT_IDLE_LOGIT_BIAS,
-            action_temperature,
-            action_sample,
-        )
-    } else {
-        SampledAction {
-            action: select_action_from_positive_logits(
-                result.action_logits,
-                action_temperature,
-                action_sample,
-            ),
-            confidence: 1.0,
-        }
-    };
+    let sampled_action = sample_action_from_logits(
+        result.action_logits,
+        EXPLICIT_IDLE_LOGIT_BIAS,
+        action_temperature,
+        action_sample,
+    );
     scratch.selected_action_index = match sampled_action.action {
         ActionType::Idle => None,
         selected_action => Some(action_index(selected_action)),
@@ -214,60 +195,6 @@ fn sample_action_from_logits(
             confidence: final_weight / weight_sum,
         }
     }
-}
-
-fn select_action_from_positive_logits(
-    action_logits: [f32; ACTION_COUNT],
-    action_temperature: f32,
-    action_sample: f32,
-) -> ActionType {
-    let temperature = action_temperature.max(MIN_ACTION_TEMPERATURE);
-    let mut weights = [0.0_f32; ACTION_COUNT];
-    let mut weight_sum = 0.0_f32;
-    let mut best_positive_logit = f32::NEG_INFINITY;
-    for (idx, logit) in action_logits.iter().copied().enumerate() {
-        if logit > 0.0 {
-            best_positive_logit = best_positive_logit.max(logit);
-            weights[idx] = logit;
-        }
-    }
-
-    if !best_positive_logit.is_finite() {
-        return ActionType::Idle;
-    }
-
-    for weight in &mut weights {
-        if *weight <= 0.0 {
-            continue;
-        }
-        let scaled = (*weight - best_positive_logit) / temperature;
-        let softmax_weight = scaled.exp();
-        if softmax_weight.is_finite() {
-            *weight = softmax_weight;
-            weight_sum += softmax_weight;
-        } else {
-            *weight = 0.0;
-        }
-    }
-
-    if !weight_sum.is_finite() || weight_sum <= 0.0 {
-        let best_idx = argmax_index(&action_logits);
-        return if action_logits[best_idx] > 0.0 {
-            ActionType::ALL[best_idx]
-        } else {
-            ActionType::Idle
-        };
-    }
-
-    let sample = action_sample.clamp(0.0, 1.0 - f32::EPSILON) * weight_sum;
-    let mut cumulative = 0.0_f32;
-    for (idx, weight) in weights.iter().copied().enumerate() {
-        cumulative += weight;
-        if sample < cumulative {
-            return ActionType::ALL[idx];
-        }
-    }
-    ActionType::ALL[ACTION_COUNT - 1]
 }
 
 fn argmax_index(values: &[f32]) -> usize {

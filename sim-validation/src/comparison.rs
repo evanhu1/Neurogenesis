@@ -20,18 +20,6 @@ pub(crate) fn apply_feature_overrides(
     if overrides.disable_plasticity {
         config.runtime_plasticity_enabled = false;
     }
-    if let Some(value) = overrides.executed_action_credit {
-        config.executed_action_credit = value;
-    }
-    if let Some(value) = overrides.explicit_idle_softmax {
-        config.explicit_idle_softmax = value;
-    }
-    if let Some(value) = overrides.juvenile_plasticity {
-        config.juvenile_plasticity_enabled = value;
-    }
-    if let Some(value) = overrides.split_attack {
-        config.split_attack_actions = value;
-    }
     config
 }
 

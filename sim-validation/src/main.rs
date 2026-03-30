@@ -33,10 +33,6 @@ fn main() -> Result<()> {
     }
     let overrides = FeatureOverrides {
         disable_plasticity: cli.disable_plasticity,
-        executed_action_credit: cli.executed_action_credit,
-        explicit_idle_softmax: cli.explicit_idle_softmax,
-        juvenile_plasticity: cli.juvenile_plasticity,
-        split_attack: cli.split_attack,
     };
 
     let seeds = normalize_seeds(cli.seeds);

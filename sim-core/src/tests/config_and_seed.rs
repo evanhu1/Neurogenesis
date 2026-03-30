@@ -57,6 +57,38 @@ fn fertility_map_is_seed_deterministic_with_cell_jitter() {
 }
 
 #[test]
+fn spike_map_is_seed_deterministic_and_density_controlled() {
+    let mut low_density_cfg = stable_test_config();
+    low_density_cfg.world_width = 48;
+    low_density_cfg.num_organisms = 1;
+    low_density_cfg.terrain_threshold = 1.0;
+    low_density_cfg.spike_density = 0.05;
+    let mut high_density_cfg = low_density_cfg.clone();
+    high_density_cfg.spike_density = 0.25;
+
+    let sim_a = Simulation::new(low_density_cfg.clone(), 2026).expect("simulation should init");
+    let sim_b = Simulation::new(low_density_cfg, 2026).expect("simulation should init");
+    let sim_c = Simulation::new(high_density_cfg, 2026).expect("simulation should init");
+
+    let mut other_seed_cfg = stable_test_config();
+    other_seed_cfg.world_width = 48;
+    other_seed_cfg.num_organisms = 1;
+    other_seed_cfg.terrain_threshold = 1.0;
+    other_seed_cfg.spike_density = 0.05;
+    let sim_other_seed = Simulation::new(other_seed_cfg, 2027).expect("simulation should init");
+
+    assert_eq!(sim_a.spike_map, sim_b.spike_map);
+    assert_ne!(sim_a.spike_map, sim_other_seed.spike_map);
+
+    let low_spikes = sim_a.spike_map.iter().filter(|blocked| **blocked).count();
+    let high_spikes = sim_c.spike_map.iter().filter(|blocked| **blocked).count();
+    assert!(
+        high_spikes > low_spikes,
+        "higher density should produce more scattered spikes: low={low_spikes} high={high_spikes}",
+    );
+}
+
+#[test]
 fn stochastic_action_sampling_is_deterministic_for_repeated_runs() {
     let mut cfg = stable_test_config();
     cfg.world_width = 30;

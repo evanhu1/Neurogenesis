@@ -8,9 +8,6 @@ struct IntentBuildContext<'a> {
     pending_actions: &'a [PendingActionState],
     action_temperature: f32,
     runtime_plasticity_enabled: bool,
-    explicit_idle_softmax: bool,
-    executed_action_credit: bool,
-    split_attack_actions: bool,
     force_random_actions: bool,
     sim_seed: u64,
     tick: u64,
@@ -34,9 +31,6 @@ impl Simulation {
             pending_actions: &self.pending_actions,
             action_temperature: self.config.action_temperature,
             runtime_plasticity_enabled: self.config.runtime_plasticity_enabled,
-            explicit_idle_softmax: self.config.explicit_idle_softmax,
-            executed_action_credit: self.config.executed_action_credit,
-            split_attack_actions: self.config.split_attack_actions,
             force_random_actions: self.config.force_random_actions,
             sim_seed: self.seed,
             tick: self.turn,
@@ -205,13 +199,11 @@ fn select_action_for_organism(
         context.spike_map,
         vision_distance,
         context.action_temperature,
-        context.explicit_idle_softmax,
-        context.split_attack_actions,
         action_sample,
         scratch,
     );
     if context.runtime_plasticity_enabled {
-        compute_pending_coactivations(organism, scratch, context.executed_action_credit);
+        compute_pending_coactivations(organism, scratch);
     }
 
     let selected_action = evaluation.selected_action;

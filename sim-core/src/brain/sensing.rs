@@ -27,7 +27,6 @@ pub(super) fn encode_sensory_inputs(
     occupancy: &[Option<Occupant>],
     spike_map: &[bool],
     vision_distance: u32,
-    split_attack_actions: bool,
 ) -> RayScans {
     let ray_scans = scan_rays(
         (organism.q, organism.r),
@@ -46,13 +45,9 @@ pub(super) fn encode_sensory_inputs(
         organism.energy,
         organism.genome.starting_energy.max(MIN_ENERGY_SENSOR_SCALE),
     );
-    let damage_signal = if split_attack_actions {
-        (organism.damage_taken_last_turn
-            / organism.genome.starting_energy.max(MIN_ENERGY_SENSOR_SCALE))
-        .clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
+    let damage_signal = (organism.damage_taken_last_turn
+        / organism.genome.starting_energy.max(MIN_ENERGY_SENSOR_SCALE))
+    .clamp(0.0, 1.0);
 
     for sensory in &mut organism.brain.sensory {
         sensory.neuron.activation = match &sensory.receptor {
@@ -60,13 +55,7 @@ pub(super) fn encode_sensory_inputs(
                 ray_offset,
                 look_target,
             } => look_ray_signal(&ray_scans, *ray_offset, *look_target),
-            SensoryReceptor::ContactAhead => {
-                if split_attack_actions {
-                    contact_ahead_signal
-                } else {
-                    0.0
-                }
-            }
+            SensoryReceptor::ContactAhead => contact_ahead_signal,
             SensoryReceptor::Damage => damage_signal,
             SensoryReceptor::Energy => energy_signal,
         };

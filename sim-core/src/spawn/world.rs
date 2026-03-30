@@ -26,12 +26,11 @@ impl Simulation {
             )
         };
         let spike_seed = self.seed ^ policy.spike_seed_mix;
-        self.spike_map = build_noise_mask_with_threshold(
+        self.spike_map = build_random_mask_with_density(
             width,
             width,
-            self.config.spike_noise_scale as f64,
             spike_seed,
-            self.config.spike_threshold as f64,
+            self.config.spike_density as f64,
         );
         for (idx, blocked) in self.terrain_map.iter().copied().enumerate() {
             if blocked {
@@ -69,6 +68,27 @@ fn build_noise_mask_with_threshold(
             let value = fractal_perlin_2d(x, y, seed);
             let normalized = ((value + 1.0) * 0.5).clamp(0.0, 1.0);
             blocked.push(normalized > threshold);
+        }
+    }
+    blocked
+}
+
+fn build_random_mask_with_density(width: u32, height: u32, seed: u64, density: f64) -> Vec<bool> {
+    let width = width as usize;
+    let height = height as usize;
+    let density = density.clamp(0.0, 1.0);
+    if density <= 0.0 {
+        return vec![false; width * height];
+    }
+    if density >= 1.0 {
+        return vec![true; width * height];
+    }
+
+    let mut blocked = Vec::with_capacity(width * height);
+    for r in 0..height {
+        for q in 0..width {
+            let sample = hash_to_unit_interval(hash_2d(q as i64, r as i64, seed));
+            blocked.push(sample < density);
         }
     }
     blocked
@@ -128,6 +148,11 @@ pub(super) fn hash_2d(x: i64, y: i64, seed: u64) -> u64 {
     z = z.wrapping_mul(0x94D0_49BB_1331_11EB);
     z ^= z >> 31;
     z
+}
+
+fn hash_to_unit_interval(hash: u64) -> f64 {
+    const HASH_TO_UNIT_F64_SCALE: f64 = 1.0 / ((1_u64 << 53) as f64);
+    ((hash >> 11) as f64) * HASH_TO_UNIT_F64_SCALE
 }
 
 fn grad(hash: u64, x: f64, y: f64) -> f64 {

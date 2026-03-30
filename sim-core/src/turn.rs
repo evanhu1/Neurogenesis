@@ -9,7 +9,9 @@ mod snapshot;
 use crate::brain::scan_rays;
 use crate::brain::{action_index, evaluate_brain, BrainScratch, ACTION_COUNT};
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right, wrap_position};
-use crate::plasticity::{apply_runtime_weight_updates_with_mode, compute_pending_coactivations};
+use crate::plasticity::{
+    apply_runtime_weight_updates_with_multiplier, compute_pending_coactivations,
+};
 use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 #[cfg(feature = "profiling")]
 use crate::{profiling, profiling::TurnPhase};
@@ -251,10 +253,9 @@ impl Simulation {
                 .zip(self.reward_ledgers.par_iter())
                 .with_min_len(INTENT_PARALLEL_MIN_LEN)
                 .for_each(|(organism, reward_ledger)| {
-                    apply_runtime_weight_updates_with_mode(
+                    apply_runtime_weight_updates_with_multiplier(
                         organism,
                         *reward_ledger,
-                        self.config.juvenile_plasticity_enabled,
                         self.reward_signal_multiplier,
                     );
                 });

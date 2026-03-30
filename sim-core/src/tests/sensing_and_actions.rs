@@ -190,8 +190,6 @@ fn stochastic_action_selection_is_seed_deterministic() {
         &spike_map,
         vision_distance_a,
         action_temperature,
-        true,
-        true,
         0.25,
         &mut scratch_a,
     );
@@ -202,8 +200,6 @@ fn stochastic_action_selection_is_seed_deterministic() {
         &spike_map,
         vision_distance_b,
         action_temperature,
-        true,
-        true,
         0.25,
         &mut scratch_b,
     );
@@ -393,8 +389,6 @@ fn contact_and_damage_sensors_encode_local_state() {
         &spike_map,
         vision_distance,
         deterministic_action_policy(),
-        true,
-        true,
         0.5,
         &mut scratch,
     );
@@ -475,14 +469,12 @@ fn runtime_plasticity_updates_weights() {
         &spike_map,
         vision_distance,
         deterministic_action_policy(),
-        true,
-        true,
         0.5,
         &mut scratch,
     );
 
     let before = organism.brain.sensory[0].synapses[0].weight;
-    compute_pending_coactivations(&mut organism, &mut scratch, true);
+    compute_pending_coactivations(&mut organism, &mut scratch);
     apply_runtime_weight_updates(
         &mut organism,
         RewardLedger {
@@ -563,15 +555,13 @@ fn runtime_plasticity_neutralizes_passive_metabolism_for_dopamine() {
         &spike_map,
         vision_distance,
         deterministic_action_policy(),
-        true,
-        true,
         0.5,
         &mut scratch,
     );
 
     let before = organism.brain.sensory[0].synapses[0].weight;
     // Passive drain baseline (1.0) exactly cancels the raw -1.0 energy delta.
-    compute_pending_coactivations(&mut organism, &mut scratch, true);
+    compute_pending_coactivations(&mut organism, &mut scratch);
     apply_runtime_weight_updates(&mut organism, RewardLedger::default());
     let after = organism.brain.sensory[0].synapses[0].weight;
 
@@ -651,14 +641,12 @@ fn juvenile_plasticity_updates_weights_before_maturity() {
         &spike_map,
         vision_distance,
         deterministic_action_policy(),
-        true,
-        true,
         0.5,
         &mut scratch,
     );
 
     let before = organism.brain.sensory[0].synapses[0].weight;
-    compute_pending_coactivations(&mut organism, &mut scratch, true);
+    compute_pending_coactivations(&mut organism, &mut scratch);
     apply_runtime_weight_updates(
         &mut organism,
         RewardLedger {
@@ -845,12 +833,10 @@ fn inter_recurrent_eligibility_uses_prev_inter_pre_signal_only_for_inter_targets
         &spike_map,
         vision_distance,
         deterministic_action_policy(),
-        true,
-        true,
         0.5,
         &mut scratch,
     );
-    compute_pending_coactivations(&mut organism, &mut scratch, true);
+    compute_pending_coactivations(&mut organism, &mut scratch);
 
     let inter1_current = organism.brain.inter[1].neuron.activation;
     let recurrent_pending = organism.brain.inter[0].synapses[0].pending_coactivation;
@@ -940,12 +926,10 @@ fn action_target_eligibility_only_credits_the_executed_action() {
         &spike_map,
         vision_distance,
         deterministic_action_policy(),
-        true,
-        true,
         0.5,
         &mut scratch,
     );
-    compute_pending_coactivations(&mut organism, &mut scratch, true);
+    compute_pending_coactivations(&mut organism, &mut scratch);
 
     let sensory_activation = organism.brain.sensory[0].neuron.activation;
     let executed_pending = organism.brain.sensory[0].synapses[0].pending_coactivation;
@@ -1015,8 +999,6 @@ fn energy_sensor_clamps_and_scales_with_starting_energy() {
         &spike_map,
         vision_distance,
         deterministic_action_policy(),
-        true,
-        true,
         0.5,
         &mut scratch,
     );
@@ -1030,8 +1012,6 @@ fn energy_sensor_clamps_and_scales_with_starting_energy() {
         &spike_map,
         vision_distance,
         deterministic_action_policy(),
-        true,
-        true,
         0.5,
         &mut scratch,
     );
@@ -1045,8 +1025,6 @@ fn energy_sensor_clamps_and_scales_with_starting_energy() {
         &spike_map,
         vision_distance,
         deterministic_action_policy(),
-        true,
-        true,
         0.5,
         &mut scratch,
     );
@@ -1060,8 +1038,6 @@ fn energy_sensor_clamps_and_scales_with_starting_energy() {
         &spike_map,
         vision_distance,
         deterministic_action_policy(),
-        true,
-        true,
         0.5,
         &mut scratch,
     );

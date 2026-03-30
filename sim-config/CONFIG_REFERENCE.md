@@ -35,8 +35,7 @@ Generated from `sim-config/src/config.rs`.
 | --- | --- | --- |
 | `terrain_noise_scale` | `0.02` | Perlin input scale for terrain walls. |
 | `terrain_threshold` | `0.86` | Wall cutoff used by default terrain generation. |
-| `spike_noise_scale` | `0.025` | Perlin input scale for spike terrain. |
-| `spike_threshold` | `0.75` | Spike cutoff threshold. |
+| `spike_density` | `0.1` | Fraction of non-wall cells assigned spikes by deterministic per-cell scatter. |
 
 ## World Config: Evolution Features
 
@@ -45,10 +44,6 @@ Generated from `sim-config/src/config.rs`.
 | `global_mutation_rate_modifier` | `1` | Global multiplier applied to mutation-rate genes. |
 | `meta_mutation_enabled` | `true` | Enables mutation of the mutation-rate genes themselves. |
 | `runtime_plasticity_enabled` | `true` | Master toggle for mature runtime plasticity updates. |
-| `explicit_idle_softmax` | `true` | Feature flag default for explicit idle logits. |
-| `executed_action_credit` | `true` | Feature flag default for executed-action reward crediting. |
-| `juvenile_plasticity_enabled` | `true` | Feature flag default for juvenile plasticity. |
-| `split_attack_actions` | `true` | Feature flag default for split eat/attack actions. |
 | `force_random_actions` | `false` | Validation/debug override for random policy execution. |
 
 ## Seed Genome Config: Core
@@ -96,7 +91,7 @@ Generated from `sim-config/src/config.rs`.
 | --- | --- | --- |
 | `terrain_seed_mix` | `0xA5A5A5A5` | Seed xor used to derive terrain noise from the run seed. |
 | `default_threshold` | `0.86` | Canonical terrain-wall threshold used by `build_terrain_map`. |
-| `spike_seed_mix` | `0xCBBB9D5DC1059ED8` | Seed xor used to derive spike noise from the run seed. |
+| `spike_seed_mix` | `0xCBBB9D5DC1059ED8` | Seed xor used to derive spike scatter hashes from the run seed. |
 
 ## Hidden Policies: Food Ecology
 

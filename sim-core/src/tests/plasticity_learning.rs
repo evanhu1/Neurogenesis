@@ -575,7 +575,7 @@ fn set_pending_food_consume_coactivation(
     organism.brain.sensory[0].neuron.activation = sensory_activation;
     scratch.selected_action_index = Some(action_index(ActionType::Eat));
     scratch.selected_action_confidence = consume_post_signal;
-    compute_pending_coactivations(organism, scratch, true);
+    compute_pending_coactivations(organism, scratch);
 }
 
 fn run_delayed_reward_sequence(

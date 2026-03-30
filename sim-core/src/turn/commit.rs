@@ -5,7 +5,6 @@ struct CommitPhaseContext<'a> {
     intents: &'a [OrganismIntent],
     resolutions: &'a [MoveResolution],
     world_width_usize: usize,
-    split_attack_actions: bool,
     removed_food: Vec<bool>,
     dead_organisms: Vec<bool>,
     result: CommitResult,
@@ -33,13 +32,11 @@ impl<'a> CommitPhaseContext<'a> {
     ) -> Self {
         let org_count = sim.organisms.len();
         let food_count = sim.foods.len();
-        let split_attack_actions = sim.config.split_attack_actions;
         Self {
             sim,
             intents,
             resolutions,
             world_width_usize: snapshot.world_width as usize,
-            split_attack_actions,
             removed_food: vec![false; food_count],
             dead_organisms: vec![false; org_count],
             result: CommitResult::default(),
@@ -144,25 +141,15 @@ impl<'a> CommitPhaseContext<'a> {
             };
             let target_idx = target_r as usize * self.world_width_usize + target_q as usize;
 
-            if self.split_attack_actions {
-                match self.sim.occupancy[target_idx] {
-                    Some(Occupant::Food(food_id)) if intent.wants_eat => {
-                        self.consume_food(idx, target_idx, food_id);
-                    }
-                    Some(Occupant::Organism(prey_id)) if intent.wants_attack => {
-                        self.resolve_attack_damage(idx, prey_id, target_idx);
-                    }
-                    None | Some(Occupant::Wall) => {}
-                    Some(Occupant::Food(_)) | Some(Occupant::Organism(_)) => {}
+            match self.sim.occupancy[target_idx] {
+                Some(Occupant::Food(food_id)) if intent.wants_eat => {
+                    self.consume_food(idx, target_idx, food_id);
                 }
-            } else {
-                match self.sim.occupancy[target_idx] {
-                    Some(Occupant::Food(food_id)) => self.consume_food(idx, target_idx, food_id),
-                    Some(Occupant::Organism(prey_id)) => {
-                        self.resolve_instant_predation(idx, prey_id, target_idx)
-                    }
-                    None | Some(Occupant::Wall) => {}
+                Some(Occupant::Organism(prey_id)) if intent.wants_attack => {
+                    self.resolve_attack_damage(idx, prey_id, target_idx);
                 }
+                None | Some(Occupant::Wall) => {}
+                Some(Occupant::Food(_)) | Some(Occupant::Organism(_)) => {}
             }
         }
     }
@@ -247,31 +234,6 @@ impl<'a> CommitPhaseContext<'a> {
             self.result.predations += 1;
             self.mark_organism_dead(prey_idx, prey_id, target_idx, (prey_q, prey_r), prey_energy);
         }
-    }
-
-    fn resolve_instant_predation(
-        &mut self,
-        predator_idx: usize,
-        prey_id: OrganismId,
-        target_idx: usize,
-    ) {
-        let Some(prey_idx) = organism_index_by_id(&self.sim.organisms, prey_id) else {
-            return;
-        };
-        if predator_idx == prey_idx || self.dead_organisms[prey_idx] {
-            return;
-        }
-
-        let prey_energy = self.sim.organisms[prey_idx].energy.max(0.0);
-        let (prey_q, prey_r) = (
-            self.sim.organisms[prey_idx].q,
-            self.sim.organisms[prey_idx].r,
-        );
-        self.sim.reward_ledgers[predator_idx].record(RewardEvent::PredationSucceeded {
-            energy: prey_energy,
-        });
-        self.result.predations += 1;
-        self.mark_organism_dead(prey_idx, prey_id, target_idx, (prey_q, prey_r), prey_energy);
     }
 
     fn mark_organism_dead(

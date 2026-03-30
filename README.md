@@ -168,11 +168,11 @@ Phases execute in this order each tick:
    immediately.
 5. **Move resolution** — resolve all move intents simultaneously. Contenders for
    the same empty cell: highest confidence wins, ties broken by lower ID.
-6. **Commit** — apply facing/moves/action costs, then resolve interactions. With
-   `split_attack_actions = true`, `Eat` only consumes food and `Attack` only
-   damages organisms. Plant food grants `20%` of stored energy, corpse food
-   grants `80%`, lethal attacks spawn corpse food, and spike tiles damage
-   organisms after movement. Due food regrowth is processed here.
+6. **Commit** — apply facing/moves/action costs, then resolve interactions.
+   `Eat` only consumes food and `Attack` only damages organisms. Plant food
+   grants `20%` of stored energy, corpse food grants `80%`, lethal attacks
+   spawn corpse food, and spike tiles damage organisms after movement. Due food
+   regrowth is processed here.
 7. **Age** — increment `age_turns` for all survivors.
 8. **Spawn** — complete reproduction locks into spawn requests (if back cell is
    free), apply genome mutation, and inject periodic seed-genome spawns.
@@ -221,10 +221,9 @@ updates weights:
 2. **Reward signal** — dopamine is derived from the reward ledger signal,
    scaled by `20.0`, passed through `tanh`, and multiplied by the optional
    reward-signal override used by the validation harness.
-3. **Weight update** — mature organisms use `hebb_eta_gain`; juveniles may also
-   learn when `juvenile_plasticity_enabled` is on, scaled by
-   `juvenile_eta_scale`. Per-tick updates are clamped by
-   `max_weight_delta_per_tick`.
+3. **Weight update** — mature organisms use `hebb_eta_gain`; juveniles also
+   learn before maturity, scaled by `juvenile_eta_scale`. Per-tick updates are
+   clamped by `max_weight_delta_per_tick`.
 4. **Eligibility fold-in** — each tick:
    `e = eligibility_retention * e + (1 - eligibility_retention) * pending_coactivation`.
 5. **Synapse pruning** — mature organisms prune every 10 ticks when both weight

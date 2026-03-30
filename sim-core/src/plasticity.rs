@@ -28,7 +28,6 @@ struct PlasticityStepParams {
 pub(crate) fn compute_pending_coactivations(
     organism: &mut OrganismState,
     scratch: &mut BrainScratch,
-    executed_action_credit: bool,
 ) {
     if organism.genome.hebb_eta_gain <= 0.0 {
         return;
@@ -53,7 +52,6 @@ pub(crate) fn compute_pending_coactivations(
             sensory.neuron.activation,
             &scratch.inter_activations,
             scratch,
-            executed_action_credit,
         );
     }
     #[cfg(feature = "profiling")]
@@ -74,7 +72,6 @@ pub(crate) fn compute_pending_coactivations(
             pre_current,
             &scratch.inter_activations,
             scratch,
-            executed_action_credit,
         );
     }
     #[cfg(feature = "profiling")]
@@ -91,23 +88,18 @@ pub(crate) fn apply_runtime_weight_updates(
     organism: &mut OrganismState,
     reward_ledger: RewardLedger,
 ) {
-    apply_runtime_weight_updates_with_mode(organism, reward_ledger, true, 1.0);
+    apply_runtime_weight_updates_with_multiplier(organism, reward_ledger, 1.0);
 }
 
-pub(crate) fn apply_runtime_weight_updates_with_mode(
+pub(crate) fn apply_runtime_weight_updates_with_multiplier(
     organism: &mut OrganismState,
     reward_ledger: RewardLedger,
-    juvenile_plasticity_enabled: bool,
     reward_signal_multiplier: f32,
 ) {
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
-    let params = PlasticityStepParams::from_organism(
-        organism,
-        reward_ledger,
-        juvenile_plasticity_enabled,
-        reward_signal_multiplier,
-    );
+    let params =
+        PlasticityStepParams::from_organism(organism, reward_ledger, reward_signal_multiplier);
     organism.dopamine = params.dopamine_signal;
     organism.energy_prev = organism.energy;
     #[cfg(feature = "profiling")]
@@ -146,20 +138,13 @@ impl PlasticityStepParams {
     fn from_organism(
         organism: &OrganismState,
         reward_ledger: RewardLedger,
-        juvenile_plasticity_enabled: bool,
         reward_signal_multiplier: f32,
     ) -> Self {
         let is_mature = organism.age_turns >= u64::from(organism.genome.age_of_maturity);
         let plasticity_started =
             organism.age_turns >= u64::from(organism.genome.plasticity_start_age);
         let juvenile_eta_scale = organism.genome.juvenile_eta_scale.max(0.0);
-        let eta = if !juvenile_plasticity_enabled {
-            if is_mature {
-                organism.genome.hebb_eta_gain.max(0.0)
-            } else {
-                0.0
-            }
-        } else if is_mature {
+        let eta = if is_mature {
             organism.genome.hebb_eta_gain.max(0.0)
         } else {
             organism.genome.hebb_eta_gain.max(0.0) * juvenile_eta_scale
@@ -170,7 +155,7 @@ impl PlasticityStepParams {
                 / DOPAMINE_ENERGY_DELTA_SCALE)
                 .tanh(),
             eta,
-            apply_weight_update: plasticity_started && (juvenile_plasticity_enabled || is_mature),
+            apply_weight_update: plasticity_started,
             eligibility_retention: organism.genome.eligibility_retention.clamp(0.0, 1.0),
             max_weight_delta_per_tick: organism.genome.max_weight_delta_per_tick.max(0.0),
             should_prune: should_prune_synapses(
@@ -188,7 +173,6 @@ fn compute_pending_edge_coactivations(
     action_pre_signal: f32,
     inter_activations: &[f32],
     scratch: &BrainScratch,
-    executed_action_credit: bool,
 ) {
     let (inter_edges, action_edges) = split_inter_and_action_edges_mut(edges);
 
@@ -206,14 +190,10 @@ fn compute_pending_edge_coactivations(
         let Some(idx) = action_array_index(edge.post_neuron_id) else {
             continue;
         };
-        edge.pending_coactivation = if executed_action_credit {
-            if Some(idx) == scratch.selected_action_index {
-                action_pre_signal * scratch.selected_action_confidence
-            } else {
-                0.0
-            }
+        edge.pending_coactivation = if Some(idx) == scratch.selected_action_index {
+            action_pre_signal * scratch.selected_action_confidence
         } else {
-            action_pre_signal * scratch.centered_action_post_signals[idx]
+            0.0
         };
     }
 }
