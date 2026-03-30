@@ -22,7 +22,8 @@ pub enum ActionType {
     TurnLeft,
     TurnRight,
     Forward,
-    Consume,
+    Eat,
+    Attack,
     Reproduce,
 }
 impl ActionType {
@@ -30,7 +31,8 @@ impl ActionType {
         ActionType::TurnLeft,
         ActionType::TurnRight,
         ActionType::Forward,
-        ActionType::Consume,
+        ActionType::Eat,
+        ActionType::Attack,
         ActionType::Reproduce,
     ];
 }
@@ -45,11 +47,15 @@ impl Default for ActionType {
 #[derive(Debug, Clone)]
 pub struct ActionRecord {
     pub organism_id: OrganismId,
+    pub species_id: SpeciesId,
     pub selected_action: ActionType,
     pub food_ahead: bool,
     pub food_left: bool,
     pub food_right: bool,
     pub food_behind: bool,
+    pub damage_taken_last_turn: f32,
+    pub age_turns: u64,
+    pub age_of_maturity: u32,
     pub inter_activations: Vec<f32>,
     pub consumptions_count: u64,
 }
@@ -102,6 +108,8 @@ pub enum SensoryReceptor {
         ray_offset: i8,
         look_target: EntityType,
     },
+    ContactAhead,
+    Damage,
     Energy,
 }
 
@@ -125,10 +133,16 @@ pub struct OrganismGenome {
     pub starting_energy: f32,
     #[serde(default = "default_age_of_maturity")]
     pub age_of_maturity: u32,
+    #[serde(default = "default_plasticity_start_age")]
+    pub plasticity_start_age: u32,
     #[serde(default)]
     pub hebb_eta_gain: f32,
+    #[serde(default = "default_juvenile_eta_scale")]
+    pub juvenile_eta_scale: f32,
     #[serde(default = "default_eligibility_retention")]
     pub eligibility_retention: f32,
+    #[serde(default = "default_max_weight_delta_per_tick")]
+    pub max_weight_delta_per_tick: f32,
     #[serde(default)]
     pub synapse_prune_threshold: f32,
     #[serde(default)]
@@ -182,8 +196,20 @@ fn default_age_of_maturity() -> u32 {
     0
 }
 
+fn default_plasticity_start_age() -> u32 {
+    0
+}
+
 fn default_starting_energy() -> f32 {
     1.0
+}
+
+fn default_juvenile_eta_scale() -> f32 {
+    0.5
+}
+
+fn default_max_weight_delta_per_tick() -> f32 {
+    0.05
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -247,6 +273,8 @@ pub struct OrganismState {
     pub energy_prev: f32,
     #[serde(default)]
     pub dopamine: f32,
+    #[serde(default)]
+    pub damage_taken_last_turn: f32,
     pub consumptions_count: u64,
     pub reproductions_count: u64,
     #[serde(default)]
