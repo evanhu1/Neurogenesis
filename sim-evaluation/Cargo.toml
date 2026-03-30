@@ -1,5 +1,5 @@
 [package]
-name = "sim-validation"
+name = "sim-evaluation"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

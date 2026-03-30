@@ -1,5 +1,7 @@
 # Neurogenesis
 
+![Screenshot](docs/screenshot.png)
+
 Neurogenesis is a Rust-based neuroevolution artificial-life simulation.
 
 Its overarching goal is to simulate the real world open-ended evolution of
@@ -26,6 +28,8 @@ The main challenge is creating an evolutionary curriculum that scales
 environment complexity alongside cognitive evolution while avoiding convergence
 to degenerate niches along the way.
 
+![Screenshot](docs/evaluation.png)
+
 ## High level design
 
 - Brain:
@@ -38,8 +42,8 @@ to degenerate niches along the way.
   - Action policy is categorical sampling from softmax logits with configurable
     `action_temperature`; sampling is deterministic for fixed seed + turn +
     organism ID.
-  - Runtime plasticity uses coactivation traces, dopamine from baseline-corrected
-    energy delta, weight decay, and maturity-gated pruning.
+  - Runtime plasticity uses coactivation traces, dopamine from
+    baseline-corrected energy delta, weight decay, and maturity-gated pruning.
 - Environment:
   - Toroidal axial hex grid with static terrain walls generated from Perlin
     noise.
@@ -48,7 +52,8 @@ to degenerate niches along the way.
   - Occupancy is single-entity per cell (`Organism`, `Food`, or `Wall`).
 - Algorithms:
   - Simulation advances in deterministic tick phases with stable tie-breaking.
-  - Batch world runs are supported on the server and execute in parallel workers.
+  - Batch world runs are supported on the server and execute in parallel
+    workers.
 - Evolution:
   - Reproduction is asexual with per-operator mutation-rate genes and optional
     meta-mutation.
@@ -86,8 +91,8 @@ to degenerate niches along the way.
     ecology/regrowth.
   - `topology.rs` — shared neuron/synapse topology helpers and invariants.
   - `grid.rs` — hex-grid geometry and occupancy helpers.
-- `sim-validation/` — headless validation harness split into CLI,
-  orchestration, aggregation, comparison, output, and report modules.
+- `sim-evaluation/` — headless evaluation harness split into CLI, orchestration,
+  aggregation, comparison, output, and report modules.
 - `sim-server/` — Axum HTTP + WebSocket server. Server-only API types live in
   `src/protocol.rs`.
 - `web-client/` — React + TailwindCSS + Vite canvas UI.
@@ -103,24 +108,24 @@ to degenerate niches along the way.
 4. In another shell: `cd web-client && npm install && npm run dev`
 5. Open `http://127.0.0.1:5173`
 
-## Validation Harness
+## Evaluation Harness
 
-Use `sim-validation` to benchmark the evolution loop and inspect whether
+Use `sim-evaluation` to benchmark the evolution loop and inspect whether
 behavioral adaptation is emerging.
 
 - Cargo command (release):
-  - `cargo run -p sim-validation --release --`
+  - `cargo run -p sim-evaluation --release --`
 - Make command:
-  - `make validate`
+  - `make evaluate`
 - Baseline/random-action control:
-  - `cargo run -p sim-validation --release -- --baseline`
+  - `cargo run -p sim-evaluation --release -- --baseline`
 - Faster smoke run:
-  - `cargo run -p sim-validation --release -- --ticks 1000 --report-every 250`
+  - `cargo run -p sim-evaluation --release -- --ticks 1000 --report-every 250`
 
 By default the harness runs a fixed 10-seed benchmark suite. You can override it
 with `--seed` and a comma-separated list such as `--seed 42,123,7`.
 
-Each run writes artifacts under `artifacts/validation/...` including
+Each run writes artifacts under `artifacts/evaluation/...` including
 `timeseries.csv`, `summary.json`, and `report.html`.
 
 ## World Model
@@ -159,19 +164,19 @@ Phases execute in this order each tick:
    Remove any with `energy <= 0` or `age_turns >= max_organism_age`.
 2. **Snapshot** — freeze occupancy and organism state. Stable ordering by ID.
 3. **Intent** — evaluate each brain against the frozen snapshot. Select exactly
-   one action per organism (softmax categorical sample with deterministic per-org
-   RNG), then derive facing/move/consume/reproduce intents. Any non-`Idle`
-   action pays one `move_action_energy_cost`. Runtime plasticity coactivations
-   are accumulated here.
-4. **Reproduction trigger** — `Reproduce` starts a lock (`2` turns) if mature and
-   energy is sufficient. Parent pays `reproduction_investment_energy`
+   one action per organism (softmax categorical sample with deterministic
+   per-org RNG), then derive facing/move/consume/reproduce intents. Any
+   non-`Idle` action pays one `move_action_energy_cost`. Runtime plasticity
+   coactivations are accumulated here.
+4. **Reproduction trigger** — `Reproduce` starts a lock (`2` turns) if mature
+   and energy is sufficient. Parent pays `reproduction_investment_energy`
    immediately.
 5. **Move resolution** — resolve all move intents simultaneously. Contenders for
    the same empty cell: highest confidence wins, ties broken by lower ID.
 6. **Commit** — apply facing/moves/action costs, then resolve interactions.
    `Eat` only consumes food and `Attack` only damages organisms. Plant food
-   grants `20%` of stored energy, corpse food grants `80%`, lethal attacks
-   spawn corpse food, and spike tiles damage organisms after movement. Due food
+   grants `20%` of stored energy, corpse food grants `80%`, lethal attacks spawn
+   corpse food, and spike tiles damage organisms after movement. Due food
    regrowth is processed here.
 7. **Age** — increment `age_turns` for all survivors.
 8. **Spawn** — complete reproduction locks into spawn requests (if back cell is
@@ -216,11 +221,11 @@ After brain evaluation, pending coactivations are accumulated. After commit and
 spawn, runtime plasticity folds those traces into eligibilities and optionally
 updates weights:
 
-1. **Pending coactivation** — for every synapse, store instantaneous `pre * post`
-   during intent evaluation.
-2. **Reward signal** — dopamine is derived from the reward ledger signal,
-   scaled by `20.0`, passed through `tanh`, and multiplied by the optional
-   reward-signal override used by the validation harness.
+1. **Pending coactivation** — for every synapse, store instantaneous
+   `pre * post` during intent evaluation.
+2. **Reward signal** — dopamine is derived from the reward ledger signal, scaled
+   by `20.0`, passed through `tanh`, and multiplied by the optional
+   reward-signal override used by the evaluation harness.
 3. **Weight update** — mature organisms use `hebb_eta_gain`; juveniles also
    learn before maturity, scaled by `juvenile_eta_scale`. Per-tick updates are
    clamped by `max_weight_delta_per_tick`.
@@ -232,13 +237,12 @@ updates weights:
 ## Genome & Mutation
 
 `OrganismGenome`: `num_neurons`, `num_synapses`, `spatial_prior_sigma`,
-`vision_distance`, `starting_energy`, `age_of_maturity`,
-`plasticity_start_age`, `hebb_eta_gain`, `juvenile_eta_scale`,
-`eligibility_retention`, `max_weight_delta_per_tick`,
-`synapse_prune_threshold`, per-operator mutation-rate genes, `inter_biases`,
-`inter_log_time_constants`, `sensory_locations`, `inter_locations`,
-`action_locations`, and sorted `edges` (`SynapseEdge`) with runtime
-`eligibility` + `pending_coactivation`.
+`vision_distance`, `starting_energy`, `age_of_maturity`, `plasticity_start_age`,
+`hebb_eta_gain`, `juvenile_eta_scale`, `eligibility_retention`,
+`max_weight_delta_per_tick`, `synapse_prune_threshold`, per-operator
+mutation-rate genes, `inter_biases`, `inter_log_time_constants`,
+`sensory_locations`, `inter_locations`, `action_locations`, and sorted `edges`
+(`SynapseEdge`) with runtime `eligibility` + `pending_coactivation`.
 
 Mutation applies to offspring only. Each operator is gated by its own mutation
 rate gene. With `meta_mutation_enabled = true`, mutation-rate genes are
@@ -310,15 +314,14 @@ WS commands: `Start { ticks_per_second }` (`0` means unbounded/headless speed),
 contains tagged occupancy cells for `Organism`, `Food`, and `Wall`. Clients
 apply deltas incrementally; periodic full `WorldSnapshot`s serve as sync points.
 
-`WorldSnapshotView` and `TickDeltaView.spawned` use compact
-`WorldOrganismState` payloads. Full organism brain/genome state is sent via
-`FocusBrain`.
+`WorldSnapshotView` and `TickDeltaView.spawned` use compact `WorldOrganismState`
+payloads. Full organism brain/genome state is sent via `FocusBrain`.
 
 ## Web API Normalization
 
-`web-client/src/types.ts` separates wire-facing `Api*` types from normalized
-UI types. `web-client/src/protocol.ts` unwraps scalar IDs, normalizes snapshot
-and delta payloads, and derives UI-only fields at the HTTP/WS boundary.
+`web-client/src/types.ts` separates wire-facing `Api*` types from normalized UI
+types. `web-client/src/protocol.ts` unwraps scalar IDs, normalizes snapshot and
+delta payloads, and derives UI-only fields at the HTTP/WS boundary.
 
 ## Performance
 

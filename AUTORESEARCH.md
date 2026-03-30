@@ -26,15 +26,15 @@ Once done, kick off the experimentation.
 
 ## Experimentation
 
-Each experiment runs the validation harness for a fixed tick budget (default
+Each experiment runs the evaluation harness for a fixed tick budget (default
 50,000 ticks). You launch it as:
 
 ```
-cargo run -p sim-validation --release -- --seed 42 --ticks 50000 --out .autoresearch_archive/artifacts/validation/exp_name > .autoresearch_archive/run.log 2>&1
+cargo run -p sim-evaluation --release -- --seed 42 --ticks 50000 --out .autoresearch_archive/artifacts/evaluation/exp_name > .autoresearch_archive/run.log 2>&1
 ```
 
 Always use `--release` mode. Always redirect output — do NOT use tee or let
-output flood your context. All logs and validation outputs must live under
+output flood your context. All logs and evaluation outputs must live under
 `.autoresearch_archive/`.
 
 **What you CAN modify:**
@@ -47,7 +47,7 @@ output flood your context. All logs and validation outputs must live under
   rates logic.
 - `sim-config/config.toml` — world parameters, seed genome config, mutation
   rates.
-- `sim-validation/config.toml` — validation config (keep in sync with sim-config
+- `sim-evaluation/config.toml` — evaluation config (keep in sync with sim-config
   when needed).
 
 **What you CANNOT modify:**
@@ -59,12 +59,12 @@ output flood your context. All logs and validation outputs must live under
 - `sim-core/src/lib.rs` — simulation initialization and config wiring.
 - `sim-types/src/lib.rs` — shared types (when needed to support sim-core
   changes).
-- `sim-validation/src/main.rs` — the validation harness and aggregate scoring
+- `sim-evaluation/src/main.rs` — the evaluation harness and aggregate scoring
   function are the ground truth.
-- `sim-validation/src/metrics.rs` — the metric definitions (p_fwd_food, MI,
+- `sim-evaluation/src/metrics.rs` — the metric definitions (p_fwd_food, MI,
   entropy) are fixed.
-- `sim-validation/src/ledger.rs` — lifetime tracking is fixed.
-- `sim-validation/src/report.rs` — report generation is fixed.
+- `sim-evaluation/src/ledger.rs` — lifetime tracking is fixed.
+- `sim-evaluation/src/report.rs` — report generation is fixed.
 
 **What you MUST preserve:**
 
@@ -84,7 +84,7 @@ stimuli, and maintain diverse behavioral repertoires.
 
 **Everything in the brain, organism, and genome is fair game**: The only
 constraints are that the code compiles, determinism is preserved, and the
-validation harness/metrics are untouched.
+evaluation harness/metrics are untouched.
 
 **Task-preservation constraint**: Do not improve `aggregate_score` by making the
 world easier or by collapsing behaviors the agents are supposed to learn.
@@ -109,11 +109,11 @@ getting equal or better results is a great outcome. When evaluating whether to
 keep a change, weigh the complexity cost against the improvement magnitude.
 
 **The first run**: Your very first run should always be to establish the
-baseline — run the validation harness on unmodified code.
+baseline — run the evaluation harness on unmodified code.
 
 ## Output format
 
-The validation harness prints a final summary:
+The evaluation harness prints a final summary:
 
 ```
 aggregate_score: 42.31
@@ -129,7 +129,7 @@ grep "^aggregate_score:" .autoresearch_archive/run.log
 And from the generated `summary.json` for detailed breakdown:
 
 ```
-cat .autoresearch_archive/artifacts/validation/*/summary.json | python3 -c "import sys,json; d=json.load(sys.stdin); s=d['aggregate_score']; print(f'score={s[\"score\"]:.2f} p={s.get(\"mean_p_fwd_food\",0):.4f} mi={s.get(\"mean_mi_sa\",0):.4f} h={s.get(\"mean_h_action\",0):.4f} pred={s.get(\"mean_predation_rate\",0):.6f}')"
+cat .autoresearch_archive/artifacts/evaluation/*/summary.json | python3 -c "import sys,json; d=json.load(sys.stdin); s=d['aggregate_score']; print(f'score={s[\"score\"]:.2f} p={s.get(\"mean_p_fwd_food\",0):.4f} mi={s.get(\"mean_mi_sa\",0):.4f} h={s.get(\"mean_h_action\",0):.4f} pred={s.get(\"mean_predation_rate\",0):.6f}')"
 ```
 
 ## Logging results
@@ -159,12 +159,12 @@ c3d4e5f	38.90	185.3	discard	remove sensory ray offsets
 d4e5f6g	0.00	0.0	crash	add recurrent connections (type error)
 ```
 
-## Multi-seed validation
+## Multi-seed evaluation
 
 The default validation command already runs the fixed benchmark seed suite:
 
 ```
-cargo run -p sim-validation --release -- --ticks 50000 --out .autoresearch_archive/artifacts/validation/full_suite > .autoresearch_archive/run_full_suite.log 2>&1
+cargo run -p sim-evaluation --release -- --ticks 50000 --out .autoresearch_archive/artifacts/evaluation/full_suite > .autoresearch_archive/run_full_suite.log 2>&1
 ```
 
 A change that improves the mean but regresses the median or has a much worse
@@ -182,7 +182,7 @@ LOOP FOREVER:
 3. Implement the change in the in-scope files.
 4. git commit the change.
 5. Run the experiment:
-   `cargo run -p sim-validation --release -- --seed 42 --ticks 50000 --out .autoresearch_archive/artifacts/validation/exp_name > .autoresearch_archive/run.log 2>&1`
+   `cargo run -p sim-evaluation --release -- --seed 42 --ticks 50000 --out .autoresearch_archive/artifacts/evaluation/exp_name > .autoresearch_archive/run.log 2>&1`
    (redirect everything — do NOT use tee or let output flood your context).
 6. Read out the results:
    `grep "^aggregate_score:\|^aggregate_score_median:\|^aggregate_score_stddev:\|^aggregate_score_min:\|^aggregate_score_max:\|^total_time_seconds:" .autoresearch_archive/run.log`

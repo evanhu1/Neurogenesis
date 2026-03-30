@@ -159,7 +159,7 @@ pub fn write_html_report(
     html.push_str(
         "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
     );
-    html.push_str("<title>Sim Validation Report</title>");
+    html.push_str("<title>Sim Evaluation Report</title>");
     html.push_str(
         "<style>\
         :root{--bg:#f5f7fb;--panel:#ffffff;--ink:#0f172a;--muted:#64748b;--line:#dbe2ea;--accent:#0f766e;--base:#b45309;}\
@@ -174,13 +174,21 @@ pub fn write_html_report(
         .note{color:var(--muted);font-size:12px}\
         .score-big{font-size:42px;font-weight:700;line-height:1;margin:0}\
         .score-sub{margin:8px 0 0 0;color:var(--muted);font-size:12px}\
-        .score-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:12px}\
+        .pillar-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;margin-top:16px}\
+        .pillar-card{border:1px solid var(--line);border-radius:14px;padding:16px;background:linear-gradient(180deg,#fff 0%,#f8fafc 100%)}\
+        .pillar-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:12px}\
+        .pillar-title{font-size:18px;font-weight:700;line-height:1.1}\
+        .pillar-score{font-size:28px;font-weight:700;line-height:1}\
+        .pillar-subscores{display:grid;gap:8px}\
+        .pillar-subscore{display:flex;justify-content:space-between;gap:12px;padding-top:8px;border-top:1px solid var(--line);font-size:13px}\
+        .pillar-subscore-name{color:var(--muted)}\
+        .pillar-subscore-value{font-weight:600}\
         .guide h3{margin:14px 0 8px 0;font-size:16px}.guide p{margin:0 0 10px 0;line-height:1.45}.guide ul{margin:0 0 12px 20px;line-height:1.45}\
         .guide li{margin:4px 0}.guide code{background:#f1f5f9;padding:1px 5px;border-radius:4px;border:1px solid #e2e8f0}\
         </style></head><body><div class=\"wrap\">",
     );
 
-    html.push_str("<div class=\"panel\"><h1>Simulation Validation Report</h1><div class=\"meta\">");
+    html.push_str("<div class=\"panel\"><h1>Simulation Evaluation Report</h1><div class=\"meta\">");
     if let Some(title) = &meta.title {
         kv(&mut html, "Title", title);
     }
@@ -223,128 +231,71 @@ pub fn write_html_report(
             meta.aggregate_window_end_tick
         );
     }
-    html.push_str("<div class=\"score-grid\">");
-    if meta.seed_count > 1 {
-        kv(
-            &mut html,
-            "Median Score",
-            &format!("{:.2}", meta.aggregate_score_median),
-        );
-        kv(
-            &mut html,
-            "Score Stddev",
-            &format!("{:.2}", meta.aggregate_score_stddev),
-        );
-        kv(
-            &mut html,
-            "Score Min",
-            &format!("{:.2}", meta.aggregate_score_min),
-        );
-        kv(
-            &mut html,
-            "Score Max",
-            &format!("{:.2}", meta.aggregate_score_max),
-        );
-    }
-    kv(
+    html.push_str("<div class=\"pillar-list\">");
+    pillar_card(
         &mut html,
-        "Viability pillar",
+        "Viability",
         &format!("{:.3}", meta.aggregate_viability_pillar),
+        &[
+            ("Life", meta.aggregate_viability_life_component),
+            (
+                "Reproduction",
+                meta.aggregate_viability_reproduction_component,
+            ),
+            (
+                "Damage avoidance",
+                meta.aggregate_viability_damage_component,
+            ),
+        ],
     );
-    kv(
+    pillar_card(
         &mut html,
-        "Viability / life",
-        &format!("{:.3}", meta.aggregate_viability_life_component),
-    );
-    kv(
-        &mut html,
-        "Viability / reproduction",
-        &format!("{:.3}", meta.aggregate_viability_reproduction_component),
-    );
-    kv(
-        &mut html,
-        "Viability / damage avoidance",
-        &format!("{:.3}", meta.aggregate_viability_damage_component),
-    );
-    kv(
-        &mut html,
-        "Foraging pillar",
+        "Foraging",
         &format!("{:.3}", meta.aggregate_foraging_pillar),
+        &[
+            ("P(Fwd|food)", meta.aggregate_foraging_p_fwd_food_component),
+            ("Foraging rate", meta.aggregate_foraging_rate_component),
+        ],
     );
-    kv(
+    pillar_card(
         &mut html,
-        "Foraging / P(Fwd|food)",
-        &format!("{:.3}", meta.aggregate_foraging_p_fwd_food_component),
-    );
-    kv(
-        &mut html,
-        "Foraging / rate",
-        &format!("{:.3}", meta.aggregate_foraging_rate_component),
-    );
-    kv(
-        &mut html,
-        "Behavioral control pillar",
+        "Behavioral Control",
         &format!("{:.3}", meta.aggregate_control_pillar),
+        &[
+            ("Adult MI", meta.aggregate_control_adult_mi_component),
+            ("Entropy", meta.aggregate_control_entropy_component),
+            ("Anti-idle", meta.aggregate_control_anti_idle_component),
+            ("Util", meta.aggregate_control_util_component),
+        ],
     );
-    kv(
+    pillar_card(
         &mut html,
-        "Control / adult MI",
-        &format!("{:.3}", meta.aggregate_control_adult_mi_component),
-    );
-    kv(
-        &mut html,
-        "Control / entropy",
-        &format!("{:.3}", meta.aggregate_control_entropy_component),
-    );
-    kv(
-        &mut html,
-        "Control / anti-idle",
-        &format!("{:.3}", meta.aggregate_control_anti_idle_component),
-    );
-    kv(
-        &mut html,
-        "Control / util",
-        &format!("{:.3}", meta.aggregate_control_util_component),
-    );
-    kv(
-        &mut html,
-        "Competition pillar",
+        "Competition",
         &format!("{:.3}", meta.aggregate_competition_pillar),
+        &[
+            ("Predation", meta.aggregate_competition_predation_component),
+            (
+                "Attack success",
+                meta.aggregate_competition_attack_success_component,
+            ),
+            (
+                "Attack attempts",
+                meta.aggregate_competition_attack_attempt_component,
+            ),
+        ],
     );
-    kv(
+    pillar_card(
         &mut html,
-        "Competition / predation",
-        &format!("{:.3}", meta.aggregate_competition_predation_component),
-    );
-    kv(
-        &mut html,
-        "Competition / attack success",
-        &format!("{:.3}", meta.aggregate_competition_attack_success_component),
-    );
-    kv(
-        &mut html,
-        "Competition / attack attempts",
-        &format!("{:.3}", meta.aggregate_competition_attack_attempt_component),
-    );
-    kv(
-        &mut html,
-        "Adaptation pillar",
+        "Adaptation",
         &format!("{:.3}", meta.aggregate_adaptation_pillar),
-    );
-    kv(
-        &mut html,
-        "Adaptation / reversal",
-        &format!("{:.3}", meta.aggregate_adaptation_reversal_component),
-    );
-    kv(
-        &mut html,
-        "Adaptation / juvenile MI",
-        &format!("{:.3}", meta.aggregate_adaptation_juvenile_mi_component),
-    );
-    kv(
-        &mut html,
-        "Adaptation / diversity",
-        &format!("{:.3}", meta.aggregate_adaptation_diversity_component),
+        &[
+            ("Reversal", meta.aggregate_adaptation_reversal_component),
+            (
+                "Juvenile MI",
+                meta.aggregate_adaptation_juvenile_mi_component,
+            ),
+            ("Diversity", meta.aggregate_adaptation_diversity_component),
+        ],
     );
     html.push_str("</div></div>");
 
@@ -605,7 +556,7 @@ pub fn write_comparison_html_report(out_dir: &Path, meta: &ComparisonHtmlReportM
     html.push_str(
         "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
     );
-    html.push_str("<title>Sim Validation Comparison</title>");
+    html.push_str("<title>Sim Evaluation Comparison</title>");
     html.push_str(
         "<style>\
         :root{--bg:#f5f7fb;--panel:#ffffff;--ink:#0f172a;--muted:#64748b;--line:#dbe2ea;}\
@@ -620,7 +571,7 @@ pub fn write_comparison_html_report(out_dir: &Path, meta: &ComparisonHtmlReportM
         </style></head><body><div class=\"wrap\">",
     );
     html.push_str(
-        "<div class=\"panel\"><h1>Simulation Validation Comparison</h1><div class=\"meta\">",
+        "<div class=\"panel\"><h1>Simulation Evaluation Comparison</h1><div class=\"meta\">",
     );
     if let Some(title) = &meta.title {
         kv(&mut html, "Title", title);
@@ -731,6 +682,20 @@ fn kv(html: &mut String, key: &str, value: &str) {
         html,
         "<div><div class=\"k\">{key}</div><div class=\"v\">{value}</div></div>"
     );
+}
+
+fn pillar_card(html: &mut String, title: &str, score: &str, subscores: &[(&str, f64)]) {
+    let _ = write!(
+        html,
+        "<div class=\"pillar-card\"><div class=\"pillar-head\"><div class=\"pillar-title\">{title}</div><div class=\"pillar-score\">{score}</div></div><div class=\"pillar-subscores\">"
+    );
+    for (name, value) in subscores {
+        let _ = write!(
+            html,
+            "<div class=\"pillar-subscore\"><span class=\"pillar-subscore-name\">{name}</span><span class=\"pillar-subscore-value\">{value:.3}</span></div>"
+        );
+    }
+    html.push_str("</div></div>");
 }
 
 fn metric_series<F>(rows: &[IntervalMetrics], mut accessor: F) -> Vec<(u64, f64)>

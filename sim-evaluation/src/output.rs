@@ -2,7 +2,7 @@ use crate::{
     ledger::N_ACTIONS,
     metrics::IntervalMetrics,
     report::Reporter,
-    types::{ComparisonSummary, ValidationSummary},
+    types::{ComparisonSummary, EvaluationSummary},
 };
 use anyhow::Result;
 use serde::Serialize;
@@ -29,12 +29,12 @@ pub(crate) fn default_output_dir(seeds: &[u64]) -> PathBuf {
     let timestamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
     if seeds.len() == 1 {
         return PathBuf::from(format!(
-            "artifacts/validation/{}_seed_{}",
+            "artifacts/evaluation/{}_seed_{}",
             timestamp, seeds[0]
         ));
     }
     PathBuf::from(format!(
-        "artifacts/validation/{}_seeds_{}",
+        "artifacts/evaluation/{}_seeds_{}",
         timestamp,
         seed_slug(seeds)
     ))
@@ -80,7 +80,7 @@ pub(crate) fn print_comparison_summary(out_dir: &Path, comparison: &ComparisonSu
     println!("total_time_seconds: {:.3}", comparison.total_time_seconds);
 }
 
-pub(crate) fn print_validation_summary(out_dir: &Path, summary: &ValidationSummary) {
+pub(crate) fn print_evaluation_summary(out_dir: &Path, summary: &EvaluationSummary) {
     let report_path = out_dir.join("report.html");
     println!("wrote artifacts to {}", out_dir.display());
     println!("html_report: {}", report_path.display());

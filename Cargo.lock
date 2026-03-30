@@ -1683,6 +1683,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sim-evaluation"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "serde",
+ "serde_json",
+ "sim-config",
+ "sim-core",
+ "sim-types",
+]
+
+[[package]]
 name = "sim-server"
 version = "0.1.0"
 dependencies = [
@@ -1711,20 +1725,6 @@ dependencies = [
  "serde",
  "sim-config",
  "strum",
-]
-
-[[package]]
-name = "sim-validation"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "serde",
- "serde_json",
- "sim-config",
- "sim-core",
- "sim-types",
 ]
 
 [[package]]

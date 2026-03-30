@@ -47,7 +47,7 @@ fn advance_learning_harness(sim: &mut Simulation, ticks: u32, food_q: i32, food_
 /// plastic organism's synapse weight strengthens through the dopamine-gated
 /// Hebbian update, while the static organism's weight stays unchanged.
 #[test]
-#[ignore = "tuning-sensitive smoke test; use sim-validation for parameter assessment"]
+#[ignore = "tuning-sensitive smoke test; use sim-evaluation for parameter assessment"]
 fn lifetime_plasticity_strengthens_food_consume_synapse() {
     let max_age: u32 = 500;
     let initial_weight: f32 = 0.2;
@@ -210,7 +210,7 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
 }
 
 #[test]
-#[ignore = "tuning-sensitive smoke test; use sim-validation for parameter assessment"]
+#[ignore = "tuning-sensitive smoke test; use sim-evaluation for parameter assessment"]
 fn repo_default_plasticity_params_still_produce_learning_signal() {
     let default_cfg = repo_default_world_config();
     let default_seed = &default_cfg.seed_genome_config;
@@ -352,7 +352,7 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
 }
 
 #[test]
-#[ignore = "tuning-sensitive smoke test; use sim-validation for parameter assessment"]
+#[ignore = "tuning-sensitive smoke test; use sim-evaluation for parameter assessment"]
 fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
     let default_cfg = repo_default_world_config();
     let default_seed = &default_cfg.seed_genome_config;

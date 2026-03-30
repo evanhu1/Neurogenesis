@@ -1,12 +1,12 @@
 use crate::{
     cli::FeatureOverrides,
-    orchestration::run_validation_across_seeds,
+    orchestration::run_evaluation_across_seeds,
     output::{mean_option, write_summary_json},
     report::{
         write_comparison_html_report, ComparisonHtmlReportMeta, ComparisonMetricRow,
         PerSeedComparisonRow,
     },
-    types::{ComparisonSummary, HarnessRunOptions, ValidationSummary},
+    types::{ComparisonSummary, EvaluationSummary, HarnessRunOptions},
 };
 use anyhow::Result;
 use sim_types::WorldConfig;
@@ -23,7 +23,7 @@ pub(crate) fn apply_feature_overrides(
     config
 }
 
-pub(crate) fn run_comparison_validation(
+pub(crate) fn run_comparison_evaluation(
     control_config: WorldConfig,
     treatment_config: WorldConfig,
     options: &HarnessRunOptions,
@@ -32,7 +32,7 @@ pub(crate) fn run_comparison_validation(
     let run_started = Instant::now();
     fs::create_dir_all(&options.out_dir)?;
 
-    let control = run_validation_across_seeds(
+    let control = run_evaluation_across_seeds(
         control_config,
         &HarnessRunOptions {
             out_dir: options.out_dir.join("control"),
@@ -43,7 +43,7 @@ pub(crate) fn run_comparison_validation(
             ..options.clone()
         },
     )?;
-    let treatment = run_validation_across_seeds(
+    let treatment = run_evaluation_across_seeds(
         treatment_config,
         &HarnessRunOptions {
             out_dir: options.out_dir.join("treatment"),
@@ -106,8 +106,8 @@ pub(crate) fn run_comparison_validation(
 }
 
 fn comparison_metric_rows(
-    control: &ValidationSummary,
-    treatment: &ValidationSummary,
+    control: &EvaluationSummary,
+    treatment: &EvaluationSummary,
 ) -> Vec<ComparisonMetricRow> {
     vec![
         paired_metric_row(

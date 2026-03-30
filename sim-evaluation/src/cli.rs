@@ -1,12 +1,12 @@
 use clap::Parser;
 use std::path::PathBuf;
 
-const DEFAULT_CONFIG_PATH: &str = "sim-validation/config.toml";
+const DEFAULT_CONFIG_PATH: &str = "sim-evaluation/config.toml";
 const DEFAULT_SEEDS: &str = "42,123,7,2026,99,314,2718,4242,9001,65537";
 
 #[derive(Debug, Clone, Parser)]
-#[command(name = "sim-validation")]
-#[command(about = "Headless validation harness for the deterministic simulation")]
+#[command(name = "sim-evaluation")]
+#[command(about = "Headless evaluation harness for the deterministic simulation")]
 pub(crate) struct Cli {
     #[arg(long, default_value = DEFAULT_CONFIG_PATH)]
     pub(crate) config: PathBuf,

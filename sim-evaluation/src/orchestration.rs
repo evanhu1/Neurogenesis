@@ -7,7 +7,7 @@ use crate::{
     output::{write_summary_json, write_timeseries_csv},
     report::{write_html_report, HtmlReportMeta, PerSeedReportRow, Reporter},
     types::{
-        HarnessRunOptions, SeedRunOptions, SeedRunSummary, SeedValidationSummary, ValidationSummary,
+        EvaluationSummary, HarnessRunOptions, SeedEvaluationSummary, SeedRunOptions, SeedRunSummary,
     },
 };
 use anyhow::{anyhow, Result};
@@ -21,10 +21,10 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
-pub(crate) fn run_validation_across_seeds(
+pub(crate) fn run_evaluation_across_seeds(
     config: WorldConfig,
     options: &HarnessRunOptions,
-) -> Result<ValidationSummary> {
+) -> Result<EvaluationSummary> {
     let run_started = Instant::now();
     fs::create_dir_all(&options.out_dir)?;
     let worker_threads = default_worker_threads(options.seeds.len());
@@ -64,7 +64,7 @@ pub(crate) fn run_validation_across_seeds(
                 baseline,
                 reward_reversal_tick: reward_reversal_tick_for_run(ticks),
             };
-            let result = run_single_seed_validation(config.clone(), seed_options);
+            let result = run_single_seed_evaluation(config.clone(), seed_options);
             if tx.send((seed, result)).is_err() {
                 break;
             }
@@ -76,13 +76,13 @@ pub(crate) fn run_validation_across_seeds(
     for _ in 0..options.seeds.len() {
         let (_seed, result) = rx
             .recv()
-            .map_err(|_| anyhow!("validation worker exited before reporting all seeds"))?;
+            .map_err(|_| anyhow!("evaluation worker exited before reporting all seeds"))?;
         seed_summaries.push(result?);
     }
     for handle in handles {
         handle
             .join()
-            .map_err(|_| anyhow!("validation worker panicked"))?;
+            .map_err(|_| anyhow!("evaluation worker panicked"))?;
     }
     seed_summaries.sort_by_key(|summary| summary.seed);
 
@@ -104,7 +104,7 @@ pub(crate) fn run_validation_across_seeds(
         })
         .collect::<Vec<_>>();
 
-    let summary = ValidationSummary {
+    let summary = EvaluationSummary {
         title: options.title.clone(),
         seeds: options.seeds.clone(),
         ticks: options.ticks,
@@ -154,9 +154,7 @@ pub(crate) fn run_validation_across_seeds(
             aggregate_control_adult_mi_component: summary
                 .aggregate_score
                 .control_adult_mi_component,
-            aggregate_control_entropy_component: summary
-                .aggregate_score
-                .control_entropy_component,
+            aggregate_control_entropy_component: summary.aggregate_score.control_entropy_component,
             aggregate_control_anti_idle_component: summary
                 .aggregate_score
                 .control_anti_idle_component,
@@ -197,10 +195,10 @@ pub(crate) fn run_validation_across_seeds(
     Ok(summary)
 }
 
-pub(crate) fn run_single_seed_validation(
+pub(crate) fn run_single_seed_evaluation(
     config: WorldConfig,
     options: SeedRunOptions,
-) -> Result<SeedValidationSummary> {
+) -> Result<SeedEvaluationSummary> {
     let run_started = Instant::now();
     fs::create_dir_all(&options.out_dir)?;
 
@@ -306,7 +304,7 @@ pub(crate) fn run_single_seed_validation(
     let generated_at_utc = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
     let aggregate_score = compute_aggregate_score(&timeseries, options.reward_reversal_tick);
 
-    let summary = SeedValidationSummary {
+    let summary = SeedEvaluationSummary {
         title: options.title.clone(),
         seed: options.seed,
         ticks: options.ticks,
@@ -354,9 +352,7 @@ pub(crate) fn run_single_seed_validation(
             aggregate_control_adult_mi_component: summary
                 .aggregate_score
                 .control_adult_mi_component,
-            aggregate_control_entropy_component: summary
-                .aggregate_score
-                .control_entropy_component,
+            aggregate_control_entropy_component: summary.aggregate_score.control_entropy_component,
             aggregate_control_anti_idle_component: summary
                 .aggregate_score
                 .control_anti_idle_component,
@@ -435,9 +431,9 @@ mod tests {
         };
 
         let summary_a =
-            run_single_seed_validation(cfg.clone(), options_a).expect("first run should succeed");
+            run_single_seed_evaluation(cfg.clone(), options_a).expect("first run should succeed");
         let summary_b =
-            run_single_seed_validation(cfg, options_b).expect("second run should succeed");
+            run_single_seed_evaluation(cfg, options_b).expect("second run should succeed");
 
         assert_eq!(summary_a.state_hash, summary_b.state_hash);
         assert_eq!(
@@ -454,6 +450,6 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock should be after UNIX_EPOCH")
             .as_nanos();
-        std::env::temp_dir().join(format!("sim-validation-test-{suffix}-{nanos}"))
+        std::env::temp_dir().join(format!("sim-evaluation-test-{suffix}-{nanos}"))
     }
 }

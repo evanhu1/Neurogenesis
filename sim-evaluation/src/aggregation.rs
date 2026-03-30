@@ -3,7 +3,7 @@ use crate::{
     output::{
         mean_f64, mean_histogram, mean_option, mean_option_u64, mean_round_u32, mean_round_u64,
     },
-    types::{AggregateScore, SeedValidationSummary},
+    types::{AggregateScore, SeedEvaluationSummary},
 };
 use sim_types::OrganismState;
 use std::collections::hash_map::DefaultHasher;
@@ -190,10 +190,10 @@ pub(crate) fn compute_aggregate_score(
     }
 }
 
-pub(crate) fn average_aggregate_scores(seed_summaries: &[SeedValidationSummary]) -> AggregateScore {
+pub(crate) fn average_aggregate_scores(seed_summaries: &[SeedEvaluationSummary]) -> AggregateScore {
     let first = seed_summaries
         .first()
-        .expect("multi-seed validation requires at least one seed");
+        .expect("multi-seed evaluation requires at least one seed");
     let score_stats = score_stats(
         seed_summaries
             .iter()
@@ -400,7 +400,7 @@ pub(crate) fn average_aggregate_scores(seed_summaries: &[SeedValidationSummary])
     }
 }
 
-pub(crate) fn average_timeseries(seed_summaries: &[SeedValidationSummary]) -> Vec<IntervalMetrics> {
+pub(crate) fn average_timeseries(seed_summaries: &[SeedEvaluationSummary]) -> Vec<IntervalMetrics> {
     let Some(first_summary) = seed_summaries.first() else {
         return Vec::new();
     };

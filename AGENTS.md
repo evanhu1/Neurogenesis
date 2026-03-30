@@ -18,7 +18,7 @@
     ecology/regrowth.
   - `topology.rs`: shared neuron/synapse topology helpers and invariants.
   - `grid.rs`: hex-grid geometry and occupancy helpers.
-- `sim-validation/`: headless validation harness split into CLI,
+- `sim-evaluation/`: headless evaluation harness split into CLI,
   orchestration, aggregation, comparison, output, and reporting modules.
 - `sim-server/`: Axum HTTP + WebSocket server (`src/main.rs`), with server-only
   API types in `src/protocol.rs`.
@@ -26,9 +26,9 @@
 - `sim-config/config.toml`: baseline simulation configuration.
 - `sim-config/CONFIG_REFERENCE.md`: generated config reference derived from
   `sim-config/src/config.rs`.
-- `sim-validation/config.toml`: stable validation benchmark configuration.
+- `sim-evaluation/config.toml`: stable evaluation benchmark configuration.
   Keep this in sync with `sim-config/config.toml` when config-schema or baseline
-  tuning changes affect validation assumptions.
+  tuning changes affect evaluation assumptions.
 
 ## Build & Test
 
@@ -38,12 +38,12 @@
   `sim-config/CONFIG_REFERENCE.md`.
 - `make fmt`: format Rust code.
 - `make lint`: clippy with warnings as errors.
-- `cargo run -p sim-validation --release --`: run the default 10-seed
-  evolution-loop validation harness and generate
+- `cargo run -p sim-evaluation --release --`: run the default 10-seed
+  evolution-loop evaluation harness and generate
   `report.html`/`timeseries.csv`/`summary.json`.
-- `cargo run -p sim-validation --release -- --seed <u64>[,<u64>...]`: override
+- `cargo run -p sim-evaluation --release -- --seed <u64>[,<u64>...]`: override
   the default seed suite.
-- `make validate ARGS="--seed <u64>[,<u64>...]"`: same harness via Makefile
+- `make evaluate ARGS="--seed <u64>[,<u64>...]"`: same harness via Makefile
   wrapper.
 - `cargo run -p sim-server`: start backend on `127.0.0.1:8080`.
 - `cd web-client && npm run dev`: run frontend (Vite).
@@ -73,7 +73,7 @@
 - Primary runner: `cargo test --workspace`.
 - Add deterministic tests for simulation behavior changes (fixed seeds, snapshot
   assertions).
-- For evolution-loop benchmarking and regression checks, run `sim-validation`
+- For evolution-loop benchmarking and regression checks, run `sim-evaluation`
   (prefer release mode) and compare outputs across seeds/configs.
 
 ## Frontend Browser Testing
@@ -148,7 +148,7 @@ Runtime plasticity:
 - Pending coactivation accumulation: `pending = pre * post` during intent eval.
 - Reward signal: dopamine is derived from the reward ledger signal, scaled by
   `20.0`, passed through `tanh`, and multiplied by the optional reward-signal
-  override used by the validation harness.
+  override used by the evaluation harness.
 - Weight update: mature organisms use `hebb_eta_gain`; juveniles also learn
   before maturity, scaled by `juvenile_eta_scale`. Per-tick updates are
   clamped by `max_weight_delta_per_tick`.

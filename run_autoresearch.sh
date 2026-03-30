@@ -31,7 +31,7 @@ RESULTS_REL="${ARCHIVE_DIR_REL}/results.tsv"
 RUN_LOG_REL="${ARCHIVE_DIR_REL}/run.log"
 TIMING_REL="${ARCHIVE_DIR_REL}/timing.log"
 OUTPUT_REL="${ARCHIVE_DIR_REL}/output.log"
-ARTIFACTS_REL="${ARCHIVE_DIR_REL}/artifacts/validation"
+ARTIFACTS_REL="${ARCHIVE_DIR_REL}/artifacts/evaluation"
 
 ARCHIVE_DIR="${WORK_DIR}/${ARCHIVE_DIR_REL}"
 RESULTS_FILE="${WORK_DIR}/${RESULTS_REL}"
@@ -120,12 +120,12 @@ Archive rules:
 - Put all autoresearch logs and outputs under ${ARCHIVE_DIR_REL}/.
 - Use ${RUN_LOG_REL} for the validation log.
 - Use ${RESULTS_REL} for the experiment ledger.
-- Use ${ITER_ARTIFACT_REL} as the validation harness output directory.
+- Use ${ITER_ARTIFACT_REL} as the evaluation harness output directory.
 - Do not leave run logs, TSVs, or experiment artifacts in the repo root.
 
 Project-specific rules:
-- This repo's validation harness already averages multiple seeds by default.
-- Run: cargo run -p sim-validation --release -- --ticks 50000 --out ${ITER_ARTIFACT_REL} > ${RUN_LOG_REL} 2>&1
+- This repo's evaluation harness already averages multiple seeds by default.
+- Run: cargo run -p sim-evaluation --release -- --ticks 50000 --out ${ITER_ARTIFACT_REL} > ${RUN_LOG_REL} 2>&1
 - After the run, use: grep \"^aggregate_score:\\|^aggregate_score_median:\\|^aggregate_score_stddev:\\|^aggregate_score_min:\\|^aggregate_score_max:\\|^total_time_seconds:\\|^seed_score\\|^seeds:\" ${RUN_LOG_REL}
 - If grep output is empty, the run crashed. Inspect with: tail -n 50 ${RUN_LOG_REL}
 - Log every result to ${RESULTS_REL} as tab-separated columns:
@@ -147,7 +147,7 @@ This is iteration ${ITER}. Run exactly ONE complete experiment cycle:
 3. If no baseline exists yet, run the unmodified baseline.
 4. Otherwise, propose one change in the allowed sim-core/config files, implement it, and git commit it.
 5. Run cargo test --workspace.
-6. Run the validation harness in release mode, writing logs and artifacts under ${ARCHIVE_DIR_REL}/.
+6. Run the evaluation harness in release mode, writing logs and artifacts under ${ARCHIVE_DIR_REL}/.
 7. Read the results, append one row to ${RESULTS_REL}, and keep or discard the commit.
 Then stop. The shell wrapper will call you again for the next iteration."
 

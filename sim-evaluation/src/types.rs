@@ -26,7 +26,7 @@ pub(crate) struct SeedRunOptions {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub(crate) struct SeedValidationSummary {
+pub(crate) struct SeedEvaluationSummary {
     pub(crate) title: Option<String>,
     pub(crate) seed: u64,
     pub(crate) ticks: u64,
@@ -38,7 +38,7 @@ pub(crate) struct SeedValidationSummary {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub(crate) struct ValidationSummary {
+pub(crate) struct EvaluationSummary {
     pub(crate) title: Option<String>,
     pub(crate) seeds: Vec<u64>,
     pub(crate) ticks: u64,
@@ -116,7 +116,7 @@ pub(crate) struct ComparisonSummary {
     pub(crate) control_label: String,
     pub(crate) treatment_label: String,
     pub(crate) total_time_seconds: f64,
-    pub(crate) control: ValidationSummary,
-    pub(crate) treatment: ValidationSummary,
+    pub(crate) control: EvaluationSummary,
+    pub(crate) treatment: EvaluationSummary,
     pub(crate) metric_rows: Vec<ComparisonMetricRow>,
 }
