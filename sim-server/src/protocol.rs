@@ -152,6 +152,9 @@ pub struct WorldOrganismState {
     pub age_turns: u64,
     pub facing: FacingDirection,
     pub energy: f32,
+    pub health: f32,
+    pub max_health: f32,
+    pub damage_taken_last_turn: f32,
     pub consumptions_count: u64,
     pub reproductions_count: u64,
 }
@@ -167,6 +170,9 @@ impl From<&OrganismState> for WorldOrganismState {
             age_turns: organism.age_turns,
             facing: organism.facing,
             energy: organism.energy,
+            health: organism.health,
+            max_health: organism.max_health,
+            damage_taken_last_turn: organism.damage_taken_last_turn,
             consumptions_count: organism.consumptions_count,
             reproductions_count: organism.reproductions_count,
         }

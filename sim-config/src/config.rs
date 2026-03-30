@@ -293,7 +293,7 @@ fn default_starting_energy() -> f32 {
 }
 
 fn default_reproduction_investment_energy() -> f32 {
-    100.0
+    500.0
 }
 
 fn default_juvenile_eta_scale() -> f32 {

@@ -110,6 +110,7 @@ function normalizeFoodState(food: ApiFoodState): FoodState {
     q: food.q,
     r: food.r,
     energy: food.energy,
+    kind: food.kind,
   };
 }
 
@@ -123,6 +124,8 @@ function normalizeWorldOrganismState(organism: ApiWorldOrganismState): WorldOrga
     age_turns: organism.age_turns,
     facing: organism.facing,
     energy: organism.energy,
+    health: organism.health,
+    max_health: organism.max_health,
     damage_taken_last_turn: organism.damage_taken_last_turn,
     consumptions_count: organism.consumptions_count,
     reproductions_count: organism.reproductions_count,
@@ -139,6 +142,8 @@ function normalizeOrganismState(organism: ApiOrganismState): OrganismState {
     age_turns: organism.age_turns,
     facing: organism.facing,
     energy: organism.energy,
+    health: organism.health,
+    max_health: organism.max_health,
     energy_prev: organism.energy_prev,
     dopamine: organism.dopamine,
     damage_taken_last_turn: organism.damage_taken_last_turn,

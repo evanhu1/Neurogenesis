@@ -16,6 +16,18 @@ id_newtype!(SpeciesId, u64);
 id_newtype!(NeuronId, u32);
 id_newtype!(FoodId, u64);
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum FoodKind {
+    Plant,
+    Corpse,
+}
+
+impl Default for FoodKind {
+    fn default() -> Self {
+        Self::Plant
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, VariantArray)]
 pub enum ActionType {
     Idle,
@@ -270,6 +282,10 @@ pub struct OrganismState {
     pub facing: FacingDirection,
     pub energy: f32,
     #[serde(default)]
+    pub health: f32,
+    #[serde(default)]
+    pub max_health: f32,
+    #[serde(default)]
     pub energy_prev: f32,
     #[serde(default)]
     pub dopamine: f32,
@@ -289,6 +305,8 @@ pub struct FoodState {
     pub q: i32,
     pub r: i32,
     pub energy: f32,
+    #[serde(default)]
+    pub kind: FoodKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]

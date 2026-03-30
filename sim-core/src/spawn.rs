@@ -5,8 +5,8 @@ use crate::Simulation;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use sim_types::{
-    FacingDirection, FoodId, FoodState, Occupant, OrganismGenome, OrganismId, OrganismState,
-    SpeciesId,
+    FacingDirection, FoodId, FoodKind, FoodState, Occupant, OrganismGenome, OrganismId,
+    OrganismState, SpeciesId,
 };
 
 const DEFAULT_TERRAIN_THRESHOLD: f64 = 0.86;
@@ -83,6 +83,8 @@ impl Simulation {
                         age_turns: 0,
                         facing: opposite_direction(reproduction.parent_facing),
                         energy: child_genome.starting_energy,
+                        health: child_genome.starting_energy.max(1.0),
+                        max_health: child_genome.starting_energy.max(1.0),
                         energy_prev: child_genome.starting_energy,
                         dopamine: 0.0,
                         damage_taken_last_turn: 0.0,
@@ -107,6 +109,8 @@ impl Simulation {
                         age_turns: 0,
                         facing: self.random_facing(),
                         energy: genome.starting_energy,
+                        health: genome.starting_energy.max(1.0),
+                        max_health: genome.starting_energy.max(1.0),
                         energy_prev: genome.starting_energy,
                         dopamine: 0.0,
                         damage_taken_last_turn: 0.0,
@@ -195,6 +199,8 @@ impl Simulation {
                 age_turns: 0,
                 facing,
                 energy: genome.starting_energy,
+                health: genome.starting_energy.max(1.0),
+                max_health: genome.starting_energy.max(1.0),
                 energy_prev: genome.starting_energy,
                 dopamine: 0.0,
                 damage_taken_last_turn: 0.0,
@@ -319,7 +325,7 @@ impl Simulation {
                     if let Some(food) = self.spawn_food_at_cell(cell_idx) {
                         spawned.push(food);
                     }
-                } else if matches!(self.occupancy[cell_idx], Some(Occupant::Organism(_))) {
+                } else if self.occupancy[cell_idx].is_some() {
                     self.defer_food_regrowth(cell_idx);
                 }
             }
@@ -392,10 +398,30 @@ impl Simulation {
             q,
             r,
             energy: self.config.food_energy,
+            kind: FoodKind::Plant,
         };
         self.occupancy[cell_idx] = Some(Occupant::Food(food.id));
         self.foods.push(food.clone());
         Some(food)
+    }
+
+    pub(crate) fn spawn_corpse_at_cell(&mut self, cell_idx: usize, energy: f32) -> Option<FoodState> {
+        if self.occupancy[cell_idx].is_some() || energy <= 0.0 {
+            return None;
+        }
+        let width = self.config.world_width as usize;
+        let q = (cell_idx % width) as i32;
+        let r = (cell_idx / width) as i32;
+        let corpse = FoodState {
+            id: self.alloc_food_id(),
+            q,
+            r,
+            energy,
+            kind: FoodKind::Corpse,
+        };
+        self.occupancy[cell_idx] = Some(Occupant::Food(corpse.id));
+        self.foods.push(corpse.clone());
+        Some(corpse)
     }
 
     fn empty_positions(&self) -> Vec<(i32, i32)> {

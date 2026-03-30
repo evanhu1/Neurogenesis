@@ -54,8 +54,7 @@ pub fn compute_interval_metrics(
     let brain_stats = living_brain_stats(living);
     let max_generation = living.iter().map(|organism| organism.generation).max();
     let predation_rate = event_rate(interval_predations, interval_population_exposure);
-    let foraging_events = interval_consumptions.saturating_sub(interval_predations);
-    let foraging_rate = event_rate(foraging_events, interval_population_exposure);
+    let foraging_rate = event_rate(interval_consumptions, interval_population_exposure);
 
     let total_actions = action_stats.total_actions();
     let attack_attempts = action_stats.action_counts[5];

@@ -128,6 +128,15 @@ impl Simulation {
             return false;
         }
 
+        if organism.max_health <= 0.0 {
+            organism.max_health = organism.genome.starting_energy.max(1.0);
+        }
+        if organism.health <= 0.0 {
+            organism.health = organism.max_health;
+        } else {
+            organism.health = organism.health.min(organism.max_health);
+        }
+
         organism.q = q;
         organism.r = r;
         self.occupancy[cell_idx] = Some(Occupant::Organism(organism.id));

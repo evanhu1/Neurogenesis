@@ -19,6 +19,8 @@ export type ActionType =
   | 'Attack'
   | 'Reproduce';
 
+export type FoodKind = 'Plant' | 'Corpse';
+
 export type NeuronType = 'Sensory' | 'Inter' | 'Action';
 
 export type FacingDirection =
@@ -229,6 +231,8 @@ export type ApiOrganismState = {
   age_turns: number;
   facing: FacingDirection;
   energy: number;
+  health: number;
+  max_health: number;
   energy_prev: number;
   dopamine: number;
   damage_taken_last_turn: number;
@@ -248,6 +252,8 @@ export type OrganismState = {
   age_turns: number;
   facing: FacingDirection;
   energy: number;
+  health: number;
+  max_health: number;
   energy_prev: number;
   dopamine: number;
   damage_taken_last_turn: number;
@@ -267,6 +273,8 @@ export type ApiWorldOrganismState = {
   age_turns: number;
   facing: FacingDirection;
   energy: number;
+  health: number;
+  max_health: number;
   damage_taken_last_turn: number;
   consumptions_count: number;
   reproductions_count: number;
@@ -281,6 +289,8 @@ export type WorldOrganismState = {
   age_turns: number;
   facing: FacingDirection;
   energy: number;
+  health: number;
+  max_health: number;
   damage_taken_last_turn: number;
   consumptions_count: number;
   reproductions_count: number;
@@ -291,6 +301,7 @@ export type ApiFoodState = {
   q: number;
   r: number;
   energy: number;
+  kind: FoodKind;
 };
 
 export type FoodState = {
@@ -298,6 +309,7 @@ export type FoodState = {
   q: number;
   r: number;
   energy: number;
+  kind: FoodKind;
 };
 
 export type ApiMetricsSnapshot = {

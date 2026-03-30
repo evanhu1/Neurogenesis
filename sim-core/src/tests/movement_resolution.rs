@@ -210,8 +210,128 @@ fn attack_only_interacts_with_organisms_and_applies_damage() {
         .iter()
         .find(|organism| organism.id == OrganismId(1))
         .expect("prey should survive a single attack");
-    assert!(prey.damage_taken_last_turn > 0.0);
-    assert!(prey.energy < 50.0);
+    assert_eq!(prey.damage_taken_last_turn, 25.0);
+    assert_eq!(prey.health, 25.0);
+    assert!(prey.energy > 0.0);
+}
+
+#[test]
+fn lethal_attack_spawns_corpse_food_without_feeding_attacker() {
+    let cfg = test_config(5, 2);
+    let mut sim = Simulation::new(cfg, 206).expect("simulation should initialize");
+    let mut prey =
+        make_single_action_organism(1, 2, 1, FacingDirection::East, ActionType::Idle, 0.1, 50.0);
+    prey.health = 5.0;
+    prey.max_health = 50.0;
+    configure_sim(
+        &mut sim,
+        vec![
+            make_single_action_organism(
+                0,
+                1,
+                1,
+                FacingDirection::East,
+                ActionType::Attack,
+                0.9,
+                50.0,
+            ),
+            prey,
+        ],
+    );
+
+    let delta = tick_once(&mut sim);
+    assert_eq!(delta.metrics.predations_last_turn, 1);
+    assert_eq!(delta.metrics.consumptions_last_turn, 0);
+    assert!(sim.organisms.iter().all(|organism| organism.id != OrganismId(1)));
+    assert!(
+        delta.food_spawned
+            .iter()
+            .any(|food| food.kind == sim_types::FoodKind::Corpse && (food.q, food.r) == (2, 1))
+    );
+}
+
+#[test]
+fn health_regenerates_slowly_over_time() {
+    let cfg = test_config(5, 1);
+    let mut sim = Simulation::new(cfg, 207).expect("simulation should initialize");
+    let mut organism =
+        make_single_action_organism(0, 1, 1, FacingDirection::East, ActionType::Idle, 0.9, 50.0);
+    organism.health = 40.0;
+    organism.max_health = 50.0;
+    configure_sim(&mut sim, vec![organism]);
+
+    let _ = tick_once(&mut sim);
+    let organism = sim
+        .organisms
+        .iter()
+        .find(|organism| organism.id == OrganismId(0))
+        .expect("organism should survive");
+    assert!(organism.health > 40.0);
+    assert!(organism.health < organism.max_health);
+}
+
+#[test]
+fn corpse_eating_returns_more_energy_than_plant_eating() {
+    let cfg = test_config(5, 1);
+
+    let plant_energy = {
+        let mut sim = Simulation::new(cfg.clone(), 208).expect("simulation should initialize");
+        configure_sim(
+            &mut sim,
+            vec![make_single_action_organism(
+                0,
+                1,
+                1,
+                FacingDirection::East,
+                ActionType::Eat,
+                0.9,
+                50.0,
+            )],
+        );
+        sim.foods.push(sim_types::FoodState {
+            id: sim_types::FoodId(0),
+            q: 2,
+            r: 1,
+            energy: 100.0,
+            kind: sim_types::FoodKind::Plant,
+        });
+        let food_idx = sim.cell_index(2, 1);
+        sim.occupancy[food_idx] = Some(Occupant::Food(sim_types::FoodId(0)));
+        sim.next_food_id = 1;
+        let _ = tick_once(&mut sim);
+        sim.organisms[0].energy
+    };
+
+    let corpse_energy = {
+        let mut sim = Simulation::new(cfg, 209).expect("simulation should initialize");
+        configure_sim(
+            &mut sim,
+            vec![make_single_action_organism(
+                0,
+                1,
+                1,
+                FacingDirection::East,
+                ActionType::Eat,
+                0.9,
+                50.0,
+            )],
+        );
+        sim.foods.push(sim_types::FoodState {
+            id: sim_types::FoodId(0),
+            q: 2,
+            r: 1,
+            energy: 100.0,
+            kind: sim_types::FoodKind::Corpse,
+        });
+        let food_idx = sim.cell_index(2, 1);
+        sim.occupancy[food_idx] = Some(Occupant::Food(sim_types::FoodId(0)));
+        sim.next_food_id = 1;
+        let _ = tick_once(&mut sim);
+        sim.organisms[0].energy
+    };
+
+    assert!(corpse_energy > plant_energy);
+    assert!((corpse_energy - plant_energy) >= 50.0);
 }
 
 #[test]

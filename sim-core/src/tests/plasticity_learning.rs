@@ -6,9 +6,41 @@ use crate::plasticity::{apply_runtime_weight_updates, compute_pending_coactivati
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
+const NO_REPRODUCTION_INVESTMENT: f32 = 1.0e12;
 fn repo_default_world_config() -> WorldConfig {
     sim_types::world_config_from_toml_str(include_str!("../../../sim-config/config.toml"))
         .expect("repo default config should parse")
+}
+
+fn seed_learning_food_if_missing(sim: &mut Simulation, food_q: i32, food_r: i32) {
+    let width = sim.config.world_width as usize;
+    let food_idx = food_r as usize * width + food_q as usize;
+    match sim.occupancy[food_idx] {
+        None => {
+            let food_id = sim_types::FoodId(sim.next_food_id);
+            sim.next_food_id += 1;
+            sim.foods.push(sim_types::FoodState {
+                id: food_id,
+                q: food_q,
+                r: food_r,
+                energy: sim.config.food_energy,
+                kind: sim_types::FoodKind::Plant,
+            });
+            sim.occupancy[food_idx] = Some(Occupant::Food(food_id));
+        }
+        Some(Occupant::Food(_)) => {}
+        Some(occupant) => panic!(
+            "learning harness expected food cell to stay available, found {occupant:?}"
+        ),
+    }
+}
+
+fn advance_learning_harness(sim: &mut Simulation, ticks: u32, food_q: i32, food_r: i32) {
+    seed_learning_food_if_missing(sim, food_q, food_r);
+    for _ in 0..ticks {
+        sim.advance_n(1);
+        seed_learning_food_if_missing(sim, food_q, food_r);
+    }
 }
 
 /// Integration test: a single organism with one weak food→consume synapse faces
@@ -60,6 +92,7 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
         cfg.action_temperature = 0.08;
         cfg.max_organism_age = max_age;
         cfg.seed_genome_config.starting_energy = 10_000.0;
+        cfg.reproduction_investment_energy = NO_REPRODUCTION_INVESTMENT;
         cfg
     };
 
@@ -86,6 +119,8 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
             age_turns: 0,
             facing: FacingDirection::East,
             energy: initial_energy,
+            health: initial_energy.max(1.0),
+            max_health: initial_energy.max(1.0),
             energy_prev: initial_energy,
             dopamine: 0.0,
             damage_taken_last_turn: 0.0,
@@ -106,6 +141,7 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
             q: food_q,
             r: food_r,
             energy: sim.config.food_energy,
+            kind: sim_types::FoodKind::Plant,
         });
         sim.occupancy[food_idx] = Some(Occupant::Food(sim_types::FoodId(0)));
         sim.next_food_id = 1;
@@ -123,8 +159,8 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
     let mut sim_static = setup(false);
 
     // Run for the organism's full lifetime.
-    sim_plastic.advance_n(max_age as u32);
-    sim_static.advance_n(max_age as u32);
+    advance_learning_harness(&mut sim_plastic, max_age as u32, food_q, food_r);
+    advance_learning_harness(&mut sim_static, max_age as u32, food_q, food_r);
 
     // Both organisms must survive the full run (they die at the START of the
     // tick after age_turns reaches max_organism_age, so after advance_n(max_age)
@@ -220,6 +256,7 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
         cfg.terrain_threshold = 1.0;
         cfg.max_organism_age = max_age;
         cfg.seed_genome_config.starting_energy = 10_000.0;
+        cfg.reproduction_investment_energy = NO_REPRODUCTION_INVESTMENT;
         cfg
     };
 
@@ -245,6 +282,8 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
             age_turns: 0,
             facing: FacingDirection::East,
             energy: initial_energy,
+            health: initial_energy.max(1.0),
+            max_health: initial_energy.max(1.0),
             energy_prev: initial_energy,
             dopamine: 0.0,
             damage_taken_last_turn: 0.0,
@@ -264,6 +303,7 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
             q: food_q,
             r: food_r,
             energy: sim.config.food_energy,
+            kind: sim_types::FoodKind::Plant,
         });
         sim.occupancy[food_idx] = Some(Occupant::Food(sim_types::FoodId(0)));
         sim.next_food_id = 1;
@@ -279,8 +319,8 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
     let mut sim_plastic = setup(true);
     let mut sim_static = setup(false);
 
-    sim_plastic.advance_n(max_age as u32);
-    sim_static.advance_n(max_age as u32);
+    advance_learning_harness(&mut sim_plastic, max_age as u32, food_q, food_r);
+    advance_learning_harness(&mut sim_static, max_age as u32, food_q, food_r);
 
     let synapse_weight = |sim: &Simulation| -> f32 {
         sim.organisms()[0].brain.sensory[food_ahead_sensory_id as usize]
@@ -368,6 +408,7 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
         cfg.terrain_threshold = 1.0;
         cfg.max_organism_age = max_age;
         cfg.seed_genome_config.starting_energy = 10_000.0;
+        cfg.reproduction_investment_energy = NO_REPRODUCTION_INVESTMENT;
         cfg
     };
 
@@ -393,6 +434,8 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
             age_turns: 0,
             facing: FacingDirection::East,
             energy: initial_energy,
+            health: initial_energy.max(1.0),
+            max_health: initial_energy.max(1.0),
             energy_prev: initial_energy,
             dopamine: 0.0,
             damage_taken_last_turn: 0.0,
@@ -412,6 +455,7 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
             q: food_q,
             r: food_r,
             energy: sim.config.food_energy,
+            kind: sim_types::FoodKind::Plant,
         });
         sim.occupancy[food_idx] = Some(Occupant::Food(sim_types::FoodId(0)));
         sim.next_food_id = 1;
@@ -427,8 +471,8 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
     let mut sim_plastic = setup(true);
     let mut sim_static = setup(false);
 
-    sim_plastic.advance_n(max_age as u32);
-    sim_static.advance_n(max_age as u32);
+    advance_learning_harness(&mut sim_plastic, max_age as u32, food_q, food_r);
+    advance_learning_harness(&mut sim_static, max_age as u32, food_q, food_r);
 
     let edge_weight = |sim: &Simulation, post_neuron_id: NeuronId| -> f32 {
         sim.organisms()[0].brain.sensory[food_ahead_sensory_id as usize]
@@ -465,147 +509,6 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
         plastic_consumptions > static_consumptions + 10,
         "plasticity should increase successful consumptions over one lifetime in the \
          forward-vs-consume competition setup (plastic={plastic_consumptions}, static={static_consumptions})"
-    );
-}
-
-#[test]
-#[ignore = "known limitation of centered-logit action credit; validation currently favors this rule"]
-fn sampled_action_credit_breaks_symmetric_forward_consume_tie() {
-    let max_age = 500_u32;
-    let initial_energy = 5_000.0_f32;
-    let seed = 45_u64;
-
-    let food_ahead_sensory_id = 0_u32;
-    let forward_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Forward) as u32);
-    let consume_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Eat) as u32);
-
-    let mut genome = test_genome();
-    genome.num_neurons = 0;
-    genome.num_synapses = 2;
-    genome.inter_biases.clear();
-    genome.inter_log_time_constants.clear();
-    genome.inter_locations.clear();
-    genome.hebb_eta_gain = 0.05;
-    genome.eligibility_retention = 0.9;
-    genome.synapse_prune_threshold = 0.0;
-    genome.age_of_maturity = 0;
-    genome.starting_energy = 500.0;
-    genome.vision_distance = 5;
-    genome.edges = vec![
-        SynapseEdge {
-            pre_neuron_id: NeuronId(food_ahead_sensory_id),
-            post_neuron_id: forward_action_id,
-            weight: 0.3,
-            eligibility: 0.0,
-            pending_coactivation: 0.0,
-        },
-        SynapseEdge {
-            pre_neuron_id: NeuronId(food_ahead_sensory_id),
-            post_neuron_id: consume_action_id,
-            weight: 0.3,
-            eligibility: 0.0,
-            pending_coactivation: 0.0,
-        },
-    ];
-
-    let base_cfg = {
-        let mut cfg = super::support::stable_test_config();
-        cfg.world_width = 6;
-        cfg.num_organisms = 1;
-        cfg.food_energy = 100.0;
-        cfg.food_regrowth_interval = 1;
-        cfg.food_regrowth_jitter = 0;
-        cfg.action_temperature = 0.08;
-        cfg.max_organism_age = max_age;
-        cfg.seed_genome_config.starting_energy = 10_000.0;
-        cfg
-    };
-
-    let organism_q = 2;
-    let organism_r = 2;
-    let food_q = 3;
-    let food_r = 2;
-
-    let setup = |plasticity_enabled: bool| -> Simulation {
-        let mut cfg = base_cfg.clone();
-        cfg.runtime_plasticity_enabled = plasticity_enabled;
-
-        let mut sim = Simulation::new(cfg, seed).expect("sim should init");
-
-        let mut rng = ChaCha8Rng::seed_from_u64(seed);
-        let brain = express_genome(&genome, &mut rng);
-        let organism = OrganismState {
-            id: sim_types::OrganismId(0),
-            species_id: sim_types::SpeciesId(0),
-            q: organism_q,
-            r: organism_r,
-            generation: 0,
-            age_turns: 0,
-            facing: FacingDirection::East,
-            energy: initial_energy,
-            energy_prev: initial_energy,
-            dopamine: 0.0,
-            damage_taken_last_turn: 0.0,
-            consumptions_count: 0,
-            reproductions_count: 0,
-            last_action_taken: ActionType::Idle,
-            brain,
-            genome: genome.clone(),
-        };
-
-        configure_sim(&mut sim, vec![organism]);
-
-        let width = sim.config.world_width as usize;
-        let food_idx = food_r as usize * width + food_q as usize;
-        sim.foods.push(sim_types::FoodState {
-            id: sim_types::FoodId(0),
-            q: food_q,
-            r: food_r,
-            energy: sim.config.food_energy,
-        });
-        sim.occupancy[food_idx] = Some(Occupant::Food(sim_types::FoodId(0)));
-        sim.next_food_id = 1;
-
-        let capacity = world_capacity(sim.config.world_width);
-        sim.food_fertility = vec![false; capacity];
-        sim.food_fertility[food_idx] = true;
-        sim.food_regrowth_due_turn = vec![u64::MAX; capacity];
-
-        sim
-    };
-
-    let mut sim_plastic = setup(true);
-    let mut sim_static = setup(false);
-
-    sim_plastic.advance_n(max_age as u32);
-    sim_static.advance_n(max_age as u32);
-
-    let edge_weight = |sim: &Simulation, post_neuron_id: NeuronId| -> f32 {
-        sim.organisms()[0].brain.sensory[food_ahead_sensory_id as usize]
-            .synapses
-            .iter()
-            .find(|s| s.post_neuron_id == post_neuron_id)
-            .map_or(0.0, |synapse| synapse.weight)
-    };
-
-    let plastic_forward_weight = edge_weight(&sim_plastic, forward_action_id);
-    let plastic_consume_weight = edge_weight(&sim_plastic, consume_action_id);
-    let static_forward_weight = edge_weight(&sim_static, forward_action_id);
-    let static_consume_weight = edge_weight(&sim_static, consume_action_id);
-    let plastic_consumptions = sim_plastic.organisms()[0].consumptions_count;
-    let static_consumptions = sim_static.organisms()[0].consumptions_count;
-
-    assert_eq!(static_forward_weight, 0.3);
-    assert_eq!(static_consume_weight, 0.3);
-    assert!(
-        plastic_consume_weight > plastic_forward_weight,
-        "sampled-action credit should break the symmetric forward-vs-consume tie in favor \
-         of the rewarded consume action (consume={plastic_consume_weight}, forward={plastic_forward_weight})"
-    );
-    assert!(
-        plastic_consumptions > static_consumptions + 5,
-        "sampled-action credit should convert the symmetric tie into more successful \
-         consumptions over one lifetime (plastic={plastic_consumptions}, static={static_consumptions})"
     );
 }
 
@@ -647,6 +550,8 @@ fn delayed_credit_assignment_organism(
         age_turns: 0,
         facing: FacingDirection::East,
         energy: genome.starting_energy,
+        health: genome.starting_energy.max(1.0),
+        max_health: genome.starting_energy.max(1.0),
         energy_prev: genome.starting_energy,
         dopamine: 0.0,
         damage_taken_last_turn: 0.0,

@@ -12,8 +12,8 @@ use rayon::{ThreadPool, ThreadPoolBuilder};
 #[cfg(feature = "instrumentation")]
 use sim_types::ActionRecord;
 use sim_types::{
-    ActionType, EntityId, FacingDirection, FoodState, Occupant, OrganismFacing, OrganismId,
-    OrganismMove, OrganismState, RemovedEntityPosition, TickDelta, WorldConfig,
+    ActionType, EntityId, FacingDirection, FoodKind, FoodState, Occupant, OrganismFacing,
+    OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, TickDelta, WorldConfig,
 };
 #[cfg(feature = "instrumentation")]
 use sim_types::{EntityType, SensoryReceptor};
@@ -27,8 +27,10 @@ const FOOD_ENERGY_METABOLISM_DIVISOR: f32 = 10000.0;
 const RNG_TURN_MIX: u64 = 0x9E37_79B9_7F4A_7C15;
 const RNG_ORGANISM_MIX: u64 = 0xBF58_476D_1CE4_E5B9;
 const REPRODUCE_LOCK_DURATION_TURNS: u8 = 2;
-const CONSUMPTION_ENERGY_FRACTION: f32 = 0.20;
-const ATTACK_DAMAGE_FRACTION: f32 = 0.20;
+const PLANT_CONSUMPTION_ENERGY_FRACTION: f32 = 0.20;
+const CORPSE_CONSUMPTION_ENERGY_FRACTION: f32 = 0.80;
+const ATTACK_DAMAGE_FRACTION: f32 = 0.50;
+const HEALTH_REGEN_FRACTION: f32 = 0.01;
 const INTENT_PARALLEL_MIN_LEN: usize = 64;
 
 #[derive(Clone, Copy)]
@@ -474,6 +476,7 @@ impl Simulation {
         let food_count = self.foods.len();
         let mut removed_food = vec![false; food_count];
         let mut removed_positions = Vec::new();
+        let mut food_spawned = Vec::new();
         let mut consumptions = 0_u64;
         let mut predations = 0_u64;
         let mut dead_organisms = vec![false; org_count];
@@ -509,15 +512,22 @@ impl Simulation {
                         let Some(food_idx) = food_index_by_id(&self.foods, food_id) else {
                             continue;
                         };
+                        if food_idx >= food_count {
+                            continue;
+                        }
                         if removed_food[food_idx] {
                             continue;
                         }
+                        let food = self.foods[food_idx].clone();
                         removed_food[food_idx] = true;
                         self.occupancy[target_idx] = None;
-                        self.schedule_food_regrowth(target_idx);
-                        let consumed_energy = self.config.food_energy;
+                        if food.kind == FoodKind::Plant {
+                            self.schedule_food_regrowth(target_idx);
+                        }
+                        let consumed_energy = food.energy.max(0.0);
                         let predator = &mut self.organisms[idx];
-                        let gained_energy = consumed_energy * CONSUMPTION_ENERGY_FRACTION;
+                        let gained_energy =
+                            consumed_energy * food_consumption_energy_fraction(food.kind);
                         predator.energy += gained_energy;
                         predator.consumptions_count =
                             predator.consumptions_count.saturating_add(1);
@@ -525,7 +535,6 @@ impl Simulation {
                             energy: gained_energy,
                         });
                         consumptions += 1;
-                        let food = &self.foods[food_idx];
                         removed_positions.push(RemovedEntityPosition {
                             entity_id: EntityId::Food(food_id),
                             q: food.q,
@@ -540,47 +549,37 @@ impl Simulation {
                             continue;
                         }
                         let prey_energy = self.organisms[prey_idx].energy.max(0.0);
-                        if prey_energy <= 0.0 {
-                            continue;
-                        }
-                        let attack_damage =
-                            (prey_energy * ATTACK_DAMAGE_FRACTION).max(1.0).min(prey_energy);
+                        let prey_max_health = self.organisms[prey_idx].max_health.max(1.0);
+                        let attack_damage = (prey_max_health * ATTACK_DAMAGE_FRACTION)
+                            .max(1.0)
+                            .min(self.organisms[prey_idx].health.max(0.0));
                         let (prey_q, prey_r) =
                             (self.organisms[prey_idx].q, self.organisms[prey_idx].r);
+                        if attack_damage <= 0.0 {
+                            continue;
+                        }
 
                         if idx < prey_idx {
                             let (left, right) = self.organisms.split_at_mut(prey_idx);
-                            let predator = &mut left[idx];
+                            let _predator = &mut left[idx];
                             let prey = &mut right[0];
-                            prey.energy = (prey.energy - attack_damage).max(0.0);
+                            prey.health = (prey.health - attack_damage).max(0.0);
                             prey.damage_taken_last_turn += attack_damage;
-                            if prey.energy <= 0.0 {
-                                let gained_energy = prey_energy * CONSUMPTION_ENERGY_FRACTION;
-                                predator.energy += gained_energy;
-                                predator.consumptions_count =
-                                    predator.consumptions_count.saturating_add(1);
-                            }
                         } else {
                             let (left, right) = self.organisms.split_at_mut(idx);
-                            let predator = &mut right[0];
+                            let _predator = &mut right[0];
                             let prey = &mut left[prey_idx];
-                            prey.energy = (prey.energy - attack_damage).max(0.0);
+                            prey.health = (prey.health - attack_damage).max(0.0);
                             prey.damage_taken_last_turn += attack_damage;
-                            if prey.energy <= 0.0 {
-                                let gained_energy = prey_energy * CONSUMPTION_ENERGY_FRACTION;
-                                predator.energy += gained_energy;
-                                predator.consumptions_count =
-                                    predator.consumptions_count.saturating_add(1);
-                            }
                         }
                         self.reward_ledgers[prey_idx].record(RewardEvent::DamageTaken {
                             energy: attack_damage,
                         });
 
-                        if self.organisms[prey_idx].energy <= 0.0 {
-                            let gained_energy = prey_energy * CONSUMPTION_ENERGY_FRACTION;
+                        if self.organisms[prey_idx].health <= 0.0 {
+                            let corpse_energy = prey_energy;
                             self.reward_ledgers[idx].record(RewardEvent::PredationSucceeded {
-                                energy: gained_energy,
+                                energy: corpse_energy,
                             });
                             dead_organisms[prey_idx] = true;
                             removed_positions.push(RemovedEntityPosition {
@@ -589,8 +588,12 @@ impl Simulation {
                                 r: prey_r,
                             });
                             self.occupancy[target_idx] = None;
-                            consumptions += 1;
                             predations += 1;
+                            if let Some(corpse) =
+                                self.spawn_corpse_at_cell(target_idx, corpse_energy)
+                            {
+                                food_spawned.push(corpse);
+                            }
                         }
                     }
                     None | Some(Occupant::Wall) => {}
@@ -602,15 +605,22 @@ impl Simulation {
                         let Some(food_idx) = food_index_by_id(&self.foods, food_id) else {
                             continue;
                         };
+                        if food_idx >= food_count {
+                            continue;
+                        }
                         if removed_food[food_idx] {
                             continue;
                         }
+                        let food = self.foods[food_idx].clone();
                         removed_food[food_idx] = true;
                         self.occupancy[target_idx] = None;
-                        self.schedule_food_regrowth(target_idx);
-                        let consumed_energy = self.config.food_energy;
+                        if food.kind == FoodKind::Plant {
+                            self.schedule_food_regrowth(target_idx);
+                        }
+                        let consumed_energy = food.energy.max(0.0);
                         let predator = &mut self.organisms[idx];
-                        let gained_energy = consumed_energy * CONSUMPTION_ENERGY_FRACTION;
+                        let gained_energy =
+                            consumed_energy * food_consumption_energy_fraction(food.kind);
                         predator.energy += gained_energy;
                         predator.consumptions_count =
                             predator.consumptions_count.saturating_add(1);
@@ -618,7 +628,6 @@ impl Simulation {
                             energy: gained_energy,
                         });
                         consumptions += 1;
-                        let food = &self.foods[food_idx];
                         removed_positions.push(RemovedEntityPosition {
                             entity_id: EntityId::Food(food_id),
                             q: food.q,
@@ -633,26 +642,10 @@ impl Simulation {
                             continue;
                         }
                         let prey_energy = self.organisms[prey_idx].energy.max(0.0);
-                        let gained_energy = prey_energy * CONSUMPTION_ENERGY_FRACTION;
                         let (prey_q, prey_r) =
                             (self.organisms[prey_idx].q, self.organisms[prey_idx].r);
-
-                        if idx < prey_idx {
-                            let (left, _) = self.organisms.split_at_mut(prey_idx);
-                            let predator = &mut left[idx];
-                            predator.energy += gained_energy;
-                            predator.consumptions_count =
-                                predator.consumptions_count.saturating_add(1);
-                        } else {
-                            let (left, right) = self.organisms.split_at_mut(idx);
-                            let predator = &mut right[0];
-                            debug_assert!(prey_idx < left.len());
-                            predator.energy += gained_energy;
-                            predator.consumptions_count =
-                                predator.consumptions_count.saturating_add(1);
-                        }
                         self.reward_ledgers[idx].record(RewardEvent::PredationSucceeded {
-                            energy: gained_energy,
+                            energy: prey_energy,
                         });
                         dead_organisms[prey_idx] = true;
                         removed_positions.push(RemovedEntityPosition {
@@ -661,8 +654,10 @@ impl Simulation {
                             r: prey_r,
                         });
                         self.occupancy[target_idx] = None;
-                        consumptions += 1;
                         predations += 1;
+                        if let Some(corpse) = self.spawn_corpse_at_cell(target_idx, prey_energy) {
+                            food_spawned.push(corpse);
+                        }
                     }
                     None | Some(Occupant::Wall) => {}
                 }
@@ -694,15 +689,15 @@ impl Simulation {
             *skip_pending_action_decrement = survivor_skip;
         }
 
-        let mut new_foods = Vec::with_capacity(food_count);
+        let mut new_foods = Vec::with_capacity(self.foods.len());
         for (idx, food) in self.foods.drain(..).enumerate() {
-            if !removed_food[idx] {
+            if idx >= food_count || !removed_food[idx] {
                 new_foods.push(food);
             }
         }
         self.foods = new_foods;
 
-        let food_spawned = self.replenish_food_supply();
+        food_spawned.extend(self.replenish_food_supply());
 
         let moves = resolutions
             .iter()
@@ -802,7 +797,7 @@ impl Simulation {
                     && reserved_spawn_cells.insert((q, r))
                 {
                     self.reward_ledgers[idx].record(RewardEvent::OffspringSpawned {
-                        reward: self.config.food_energy * CONSUMPTION_ENERGY_FRACTION,
+                        reward: self.config.food_energy * PLANT_CONSUMPTION_ENERGY_FRACTION,
                     });
                     spawn_requests.push(SpawnRequest {
                         kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
@@ -831,6 +826,8 @@ impl Simulation {
             let passive_metabolic_energy_cost =
                 organism_passive_metabolic_energy_cost(&self.config, organism);
             organism.energy -= passive_metabolic_energy_cost;
+            organism.health = (organism.health + organism_health_regeneration(organism))
+                .min(organism.max_health.max(1.0));
             if organism.energy <= 0.0 || organism.age_turns >= max_age {
                 dead[idx] = true;
                 let cell_idx = organism.r as usize * world_width + organism.q as usize;
@@ -874,6 +871,17 @@ impl Simulation {
 
 fn organism_passive_metabolic_energy_cost(config: &WorldConfig, organism: &OrganismState) -> f32 {
     organism_passive_metabolic_energy_cost_from_food_energy(config.food_energy, organism)
+}
+
+fn organism_health_regeneration(organism: &OrganismState) -> f32 {
+    (organism.max_health.max(1.0) * HEALTH_REGEN_FRACTION).max(0.0)
+}
+
+fn food_consumption_energy_fraction(kind: FoodKind) -> f32 {
+    match kind {
+        FoodKind::Plant => PLANT_CONSUMPTION_ENERGY_FRACTION,
+        FoodKind::Corpse => CORPSE_CONSUMPTION_ENERGY_FRACTION,
+    }
 }
 
 fn organism_passive_metabolic_energy_cost_from_food_energy(
