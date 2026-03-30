@@ -26,7 +26,7 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
 
     // Sensory neuron 0 = LookRay { offset: 0, target: Food } (food directly ahead).
     let food_ahead_sensory_id = 0_u32;
-    let consume_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Consume) as u32);
+    let consume_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Eat) as u32);
 
     // Genome: zero inter neurons, one sensory→action synapse.
     let mut genome = test_genome();
@@ -88,6 +88,7 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
             energy: initial_energy,
             energy_prev: initial_energy,
             dopamine: 0.0,
+            damage_taken_last_turn: 0.0,
             consumptions_count: 0,
             reproductions_count: 0,
             last_action_taken: ActionType::Idle,
@@ -186,7 +187,7 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
     let seed = 43_u64;
 
     let food_ahead_sensory_id = 0_u32;
-    let consume_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Consume) as u32);
+    let consume_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Eat) as u32);
 
     let mut genome = test_genome();
     genome.num_neurons = 0;
@@ -246,6 +247,7 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
             energy: initial_energy,
             energy_prev: initial_energy,
             dopamine: 0.0,
+            damage_taken_last_turn: 0.0,
             consumptions_count: 0,
             reproductions_count: 0,
             last_action_taken: ActionType::Idle,
@@ -324,7 +326,7 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
 
     let food_ahead_sensory_id = 0_u32;
     let forward_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Forward) as u32);
-    let consume_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Consume) as u32);
+    let consume_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Eat) as u32);
 
     let mut genome = test_genome();
     genome.num_neurons = 0;
@@ -393,6 +395,7 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
             energy: initial_energy,
             energy_prev: initial_energy,
             dopamine: 0.0,
+            damage_taken_last_turn: 0.0,
             consumptions_count: 0,
             reproductions_count: 0,
             last_action_taken: ActionType::Idle,
@@ -474,7 +477,7 @@ fn sampled_action_credit_breaks_symmetric_forward_consume_tie() {
 
     let food_ahead_sensory_id = 0_u32;
     let forward_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Forward) as u32);
-    let consume_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Consume) as u32);
+    let consume_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Eat) as u32);
 
     let mut genome = test_genome();
     genome.num_neurons = 0;
@@ -542,6 +545,7 @@ fn sampled_action_credit_breaks_symmetric_forward_consume_tie() {
             energy: initial_energy,
             energy_prev: initial_energy,
             dopamine: 0.0,
+            damage_taken_last_turn: 0.0,
             consumptions_count: 0,
             reproductions_count: 0,
             last_action_taken: ActionType::Idle,
@@ -611,7 +615,7 @@ fn delayed_credit_assignment_organism(
     eligibility_retention: f32,
 ) -> OrganismState {
     let food_ahead_sensory_id = 0_u32;
-    let consume_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Consume) as u32);
+    let consume_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Eat) as u32);
 
     let mut genome = test_genome();
     genome.num_neurons = 0;
@@ -645,6 +649,7 @@ fn delayed_credit_assignment_organism(
         energy: genome.starting_energy,
         energy_prev: genome.starting_energy,
         dopamine: 0.0,
+        damage_taken_last_turn: 0.0,
         consumptions_count: 0,
         reproductions_count: 0,
         last_action_taken: ActionType::Idle,
@@ -654,7 +659,7 @@ fn delayed_credit_assignment_organism(
 }
 
 fn food_consume_edge(organism: &OrganismState) -> &SynapseEdge {
-    let consume_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Consume) as u32);
+    let consume_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Eat) as u32);
     organism.brain.sensory[0]
         .synapses
         .iter()
@@ -669,9 +674,9 @@ fn set_pending_food_consume_coactivation(
     consume_post_signal: f32,
 ) {
     organism.brain.sensory[0].neuron.activation = sensory_activation;
-    scratch.action_post_signals.fill(0.0);
-    scratch.action_post_signals[action_index(ActionType::Consume)] = consume_post_signal;
-    compute_pending_coactivations(organism, scratch);
+    scratch.selected_action_index = Some(action_index(ActionType::Eat));
+    scratch.selected_action_confidence = consume_post_signal;
+    compute_pending_coactivations(organism, scratch, true);
 }
 
 fn run_delayed_reward_sequence(
@@ -684,13 +689,13 @@ fn run_delayed_reward_sequence(
     // Tick 0: coactivation occurs, but reward is absent. This should only write
     // into the eligibility trace, not strengthen the weight yet.
     set_pending_food_consume_coactivation(&mut organism, &mut scratch, 1.0, 1.0);
-    apply_runtime_weight_updates(&mut organism, 0.0);
+    apply_runtime_weight_updates(&mut organism, RewardLedger::default());
 
     // Intermediate ticks: no coactivation and no reward, so only the trace
     // should decay according to eligibility_retention.
     for _ in 0..blank_ticks_before_reward {
         set_pending_food_consume_coactivation(&mut organism, &mut scratch, 0.0, 0.0);
-        apply_runtime_weight_updates(&mut organism, 0.0);
+        apply_runtime_weight_updates(&mut organism, RewardLedger::default());
     }
 
     let eligibility_before_reward = food_consume_edge(&organism).eligibility;
@@ -699,7 +704,13 @@ fn run_delayed_reward_sequence(
     // increase therefore has to come from the retained eligibility trace.
     set_pending_food_consume_coactivation(&mut organism, &mut scratch, 0.0, 0.0);
     organism.energy += 20.0;
-    apply_runtime_weight_updates(&mut organism, 0.0);
+    apply_runtime_weight_updates(
+        &mut organism,
+        RewardLedger {
+            food_consumed_energy: 20.0,
+            ..RewardLedger::default()
+        },
+    );
 
     (
         food_consume_edge(&organism).weight,
