@@ -18,6 +18,7 @@ mod plasticity;
 #[path = "../profiling/profiling.rs"]
 pub mod profiling;
 mod spawn;
+mod topology;
 mod turn;
 
 pub use brain::derive_active_action_neuron_id;

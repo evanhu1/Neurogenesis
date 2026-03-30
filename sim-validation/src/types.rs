@@ -1,0 +1,104 @@
+use crate::{ledger::N_ACTIONS, metrics::IntervalMetrics, report::ComparisonMetricRow};
+use serde::Serialize;
+use std::path::PathBuf;
+
+#[derive(Debug, Clone)]
+pub(crate) struct HarnessRunOptions {
+    pub(crate) seeds: Vec<u64>,
+    pub(crate) ticks: u64,
+    pub(crate) report_every: u64,
+    pub(crate) min_lifetime: u64,
+    pub(crate) out_dir: PathBuf,
+    pub(crate) title: Option<String>,
+    pub(crate) baseline: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SeedRunOptions {
+    pub(crate) seed: u64,
+    pub(crate) ticks: u64,
+    pub(crate) report_every: u64,
+    pub(crate) min_lifetime: u64,
+    pub(crate) out_dir: PathBuf,
+    pub(crate) title: Option<String>,
+    pub(crate) baseline: bool,
+    pub(crate) reward_reversal_tick: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct SeedValidationSummary {
+    pub(crate) title: Option<String>,
+    pub(crate) seed: u64,
+    pub(crate) ticks: u64,
+    pub(crate) baseline: bool,
+    pub(crate) total_time_seconds: f64,
+    pub(crate) aggregate_score: AggregateScore,
+    pub(crate) state_hash: String,
+    pub(crate) timeseries: Vec<IntervalMetrics>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ValidationSummary {
+    pub(crate) title: Option<String>,
+    pub(crate) seeds: Vec<u64>,
+    pub(crate) ticks: u64,
+    pub(crate) baseline: bool,
+    pub(crate) worker_threads: usize,
+    pub(crate) total_time_seconds: f64,
+    pub(crate) aggregate_score: AggregateScore,
+    pub(crate) seed_summaries: Vec<SeedRunSummary>,
+    pub(crate) timeseries: Vec<IntervalMetrics>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct SeedRunSummary {
+    pub(crate) seed: u64,
+    pub(crate) out_dir: PathBuf,
+    pub(crate) total_time_seconds: f64,
+    pub(crate) aggregate_score: AggregateScore,
+    pub(crate) state_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct AggregateScore {
+    pub(crate) score: f64,
+    pub(crate) score_median: f64,
+    pub(crate) score_stddev: f64,
+    pub(crate) score_min: f64,
+    pub(crate) score_max: f64,
+    pub(crate) window_start_tick: u64,
+    pub(crate) window_end_tick: u64,
+    pub(crate) mean_p_fwd_food: Option<f64>,
+    pub(crate) mean_mi_sa: Option<f64>,
+    pub(crate) mean_mi_sa_juvenile: Option<f64>,
+    pub(crate) mean_mi_sa_adult: Option<f64>,
+    pub(crate) mean_h_action: Option<f64>,
+    pub(crate) mean_predation_rate: Option<f64>,
+    pub(crate) mean_foraging_rate: Option<f64>,
+    pub(crate) mean_attack_attempt_rate: Option<f64>,
+    pub(crate) mean_attack_success_rate: Option<f64>,
+    pub(crate) mean_idle_fraction: Option<f64>,
+    pub(crate) mean_reproduction_efficiency: Option<f64>,
+    pub(crate) mean_lineage_diversity: Option<f64>,
+    pub(crate) mean_damage_avoidance: Option<f64>,
+    pub(crate) mean_reward_reversal_shift: Option<f64>,
+    pub(crate) mean_action_histogram: [f64; N_ACTIONS],
+    pub(crate) reward_reversal_adaptation_ticks: Option<u64>,
+    pub(crate) p_component: f64,
+    pub(crate) mi_component: f64,
+    pub(crate) entropy_component: f64,
+    pub(crate) predation_component: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ComparisonSummary {
+    pub(crate) title: Option<String>,
+    pub(crate) seeds: Vec<u64>,
+    pub(crate) ticks: u64,
+    pub(crate) control_label: String,
+    pub(crate) treatment_label: String,
+    pub(crate) total_time_seconds: f64,
+    pub(crate) control: ValidationSummary,
+    pub(crate) treatment: ValidationSummary,
+    pub(crate) metric_rows: Vec<ComparisonMetricRow>,
+}

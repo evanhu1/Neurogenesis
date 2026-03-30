@@ -3,8 +3,6 @@ use super::*;
 use crate::brain::{action_index, express_genome, BrainScratch, ACTION_ID_BASE};
 use crate::grid::world_capacity;
 use crate::plasticity::{apply_runtime_weight_updates, compute_pending_coactivations};
-use rand::SeedableRng;
-use rand_chacha::ChaCha8Rng;
 
 const NO_REPRODUCTION_INVESTMENT: f32 = 1.0e12;
 fn repo_default_world_config() -> WorldConfig {
@@ -29,9 +27,9 @@ fn seed_learning_food_if_missing(sim: &mut Simulation, food_q: i32, food_r: i32)
             sim.occupancy[food_idx] = Some(Occupant::Food(food_id));
         }
         Some(Occupant::Food(_)) => {}
-        Some(occupant) => panic!(
-            "learning harness expected food cell to stay available, found {occupant:?}"
-        ),
+        Some(occupant) => {
+            panic!("learning harness expected food cell to stay available, found {occupant:?}")
+        }
     }
 }
 
@@ -108,8 +106,7 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
 
         let mut sim = Simulation::new(cfg, seed).expect("sim should init");
 
-        let mut rng = ChaCha8Rng::seed_from_u64(seed);
-        let brain = express_genome(&genome, &mut rng);
+        let brain = express_genome(&genome);
         let organism = OrganismState {
             id: sim_types::OrganismId(0),
             species_id: sim_types::SpeciesId(0),
@@ -271,8 +268,7 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
 
         let mut sim = Simulation::new(cfg, seed).expect("sim should init");
 
-        let mut rng = ChaCha8Rng::seed_from_u64(seed);
-        let brain = express_genome(&genome, &mut rng);
+        let brain = express_genome(&genome);
         let organism = OrganismState {
             id: sim_types::OrganismId(0),
             species_id: sim_types::SpeciesId(0),
@@ -423,8 +419,7 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
 
         let mut sim = Simulation::new(cfg, seed).expect("sim should init");
 
-        let mut rng = ChaCha8Rng::seed_from_u64(seed);
-        let brain = express_genome(&genome, &mut rng);
+        let brain = express_genome(&genome);
         let organism = OrganismState {
             id: sim_types::OrganismId(0),
             species_id: sim_types::SpeciesId(0),
@@ -539,8 +534,7 @@ fn delayed_credit_assignment_organism(
         pending_coactivation: 0.0,
     }];
 
-    let mut rng = ChaCha8Rng::seed_from_u64(7);
-    let brain = express_genome(&genome, &mut rng);
+    let brain = express_genome(&genome);
     OrganismState {
         id: sim_types::OrganismId(0),
         species_id: sim_types::SpeciesId(0),

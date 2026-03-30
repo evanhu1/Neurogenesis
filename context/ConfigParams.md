@@ -1,42 +1,10 @@
 ## Config Params
 
-```toml
-world_width = 250
-num_organisms = 5000
-periodic_injection_count = 200
-food_energy = 100
-move_action_energy_cost = 1.0
-action_temperature = 0.08
-intent_parallel_threads = 8
-food_regrowth_interval = 200
-food_regrowth_jitter = 50
-terrain_noise_scale = 0.01
-terrain_threshold = 0.70
-global_mutation_rate_modifier = 1.0
-meta_mutation_enabled = true
-runtime_plasticity_enabled = true
-force_random_actions = false
+The generated config reference now lives at:
 
-[seed_genome_config]
-num_neurons = 3
-num_synapses = 20
-spatial_prior_sigma = 3.0
-vision_distance = 10
-starting_energy = 500.0
-age_of_maturity = 50
-hebb_eta_gain = 0.01
-eligibility_retention = 0.95
-synapse_prune_threshold = 0.05
-mutation_rate_age_of_maturity = 0.1
-mutation_rate_vision_distance = 0.1
-mutation_rate_inter_bias = 0.1
-mutation_rate_inter_update_rate = 0.1
-mutation_rate_eligibility_retention = 0.1
-mutation_rate_synapse_prune_threshold = 0.05
-mutation_rate_neuron_location = 0.1
-mutation_rate_synapse_weight_perturbation = 0.5
-mutation_rate_add_synapse = 0.1
-mutation_rate_remove_synapse = 0.1
-mutation_rate_remove_neuron = 0.05
-mutation_rate_add_neuron_split_edge = 0.1
-```
+- `sim-config/CONFIG_REFERENCE.md`
+
+Baseline runtime values remain in:
+
+- `sim-config/config.toml`
+- `sim-validation/config.toml`

@@ -604,10 +604,7 @@ pub fn write_html_report(
     Ok(())
 }
 
-pub fn write_comparison_html_report(
-    out_dir: &Path,
-    meta: &ComparisonHtmlReportMeta,
-) -> Result<()> {
+pub fn write_comparison_html_report(out_dir: &Path, meta: &ComparisonHtmlReportMeta) -> Result<()> {
     let report_path = out_dir.join("comparison_report.html");
     let mut html = String::new();
     html.push_str(
@@ -627,7 +624,9 @@ pub fn write_comparison_html_report(
         a{color:#1d4ed8;text-decoration:none}a:hover{text-decoration:underline}\
         </style></head><body><div class=\"wrap\">",
     );
-    html.push_str("<div class=\"panel\"><h1>Simulation Validation Comparison</h1><div class=\"meta\">");
+    html.push_str(
+        "<div class=\"panel\"><h1>Simulation Validation Comparison</h1><div class=\"meta\">",
+    );
     if let Some(title) = &meta.title {
         kv(&mut html, "Title", title);
     }

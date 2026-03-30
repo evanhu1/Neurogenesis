@@ -114,7 +114,8 @@ impl Ledger {
 
         entry.last_consumptions = record.consumptions_count;
         entry.action_counts[action_idx] = entry.action_counts[action_idx].saturating_add(1);
-        entry.joint[sensory_bin][action_idx] = entry.joint[sensory_bin][action_idx].saturating_add(1);
+        entry.joint[sensory_bin][action_idx] =
+            entry.joint[sensory_bin][action_idx].saturating_add(1);
 
         if record.food_ahead {
             entry.food_ahead_ticks = entry.food_ahead_ticks.saturating_add(1);

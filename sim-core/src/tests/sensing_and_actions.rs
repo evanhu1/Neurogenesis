@@ -7,8 +7,6 @@ use crate::brain::{
 };
 use crate::genome::{BRAIN_SPACE_MAX, BRAIN_SPACE_MIN};
 use crate::plasticity::{apply_runtime_weight_updates, compute_pending_coactivations};
-use rand::SeedableRng;
-use rand_chacha::ChaCha8Rng;
 
 fn loc(x: f32, y: f32) -> BrainLocation {
     BrainLocation { x, y }
@@ -50,8 +48,7 @@ fn simple_weighted_action_organism(
         },
     ];
 
-    let mut rng = ChaCha8Rng::seed_from_u64(55);
-    let brain = express_genome(&genome, &mut rng);
+    let brain = express_genome(&genome);
     OrganismState {
         id: OrganismId(0),
         species_id: sim_types::SpeciesId(0),
@@ -152,10 +149,8 @@ fn express_genome_uses_stored_synapse_topology() {
     genome.edges = dense_edges(genome.num_neurons, 20);
     genome.num_synapses = genome.edges.len() as u32;
 
-    let mut rng_a = ChaCha8Rng::seed_from_u64(11);
-    let mut rng_b = ChaCha8Rng::seed_from_u64(19);
-    let brain_a = express_genome(&genome, &mut rng_a);
-    let brain_b = express_genome(&genome, &mut rng_b);
+    let brain_a = express_genome(&genome);
+    let brain_b = express_genome(&genome);
 
     assert_eq!(brain_a.synapse_count, 20);
     assert_eq!(brain_a.synapse_count, brain_b.synapse_count);
@@ -352,7 +347,11 @@ fn contact_and_damage_sensors_encode_local_state() {
         .copied()
         .enumerate()
         .map(|(idx, action_type)| {
-            make_action_neuron(ACTION_ID_BASE + idx as u32, action_type, loc(2.0, idx as f32))
+            make_action_neuron(
+                ACTION_ID_BASE + idx as u32,
+                action_type,
+                loc(2.0, idx as f32),
+            )
         })
         .collect();
     let brain = BrainState {

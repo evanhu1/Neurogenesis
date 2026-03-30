@@ -1,5 +1,5 @@
-use super::*;
 use super::support::test_genome;
+use super::*;
 use crate::brain::{action_index, ACTION_ID_BASE, ENERGY_SENSORY_ID, INTER_ID_BASE};
 use crate::genome::{mutate_add_neuron_split_edge, mutate_remove_neuron};
 use rand::SeedableRng;

@@ -184,7 +184,10 @@ fn moving_onto_spikes_applies_same_tick_health_damage() {
     sim.spike_map[spike_idx] = true;
 
     let delta = tick_once(&mut sim);
-    assert_eq!(move_map(&delta).get(&OrganismId(0)), Some(&((1, 1), (2, 1))));
+    assert_eq!(
+        move_map(&delta).get(&OrganismId(0)),
+        Some(&((1, 1), (2, 1)))
+    );
     let organism = sim
         .organisms
         .iter()
@@ -203,7 +206,15 @@ fn eat_only_interacts_with_food() {
         &mut sim,
         vec![
             make_single_action_organism(0, 1, 1, FacingDirection::East, ActionType::Eat, 0.9, 50.0),
-            make_single_action_organism(1, 2, 1, FacingDirection::East, ActionType::Idle, 0.1, 50.0),
+            make_single_action_organism(
+                1,
+                2,
+                1,
+                FacingDirection::East,
+                ActionType::Idle,
+                0.1,
+                50.0,
+            ),
         ],
     );
 
@@ -233,7 +244,15 @@ fn attack_only_interacts_with_organisms_and_applies_damage() {
                 0.9,
                 50.0,
             ),
-            make_single_action_organism(1, 2, 1, FacingDirection::East, ActionType::Idle, 0.1, 50.0),
+            make_single_action_organism(
+                1,
+                2,
+                1,
+                FacingDirection::East,
+                ActionType::Idle,
+                0.1,
+                50.0,
+            ),
         ],
     );
 
@@ -275,12 +294,14 @@ fn lethal_attack_spawns_corpse_food_without_feeding_attacker() {
     let delta = tick_once(&mut sim);
     assert_eq!(delta.metrics.predations_last_turn, 1);
     assert_eq!(delta.metrics.consumptions_last_turn, 0);
-    assert!(sim.organisms.iter().all(|organism| organism.id != OrganismId(1)));
-    assert!(
-        delta.food_spawned
-            .iter()
-            .any(|food| food.kind == sim_types::FoodKind::Corpse && (food.q, food.r) == (2, 1))
-    );
+    assert!(sim
+        .organisms
+        .iter()
+        .all(|organism| organism.id != OrganismId(1)));
+    assert!(delta
+        .food_spawned
+        .iter()
+        .any(|food| food.kind == sim_types::FoodKind::Corpse && (food.q, food.r) == (2, 1)));
 }
 
 #[test]
