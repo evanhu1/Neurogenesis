@@ -10,11 +10,10 @@ type SimulationControlsPanelProps = {
   speedLevelIndex: number;
   speedLevelCount: number;
   onNewSession: (seedInput: string) => void;
-  onReset: (seedInput: string) => void;
+  onSaveChampions: () => void;
   onToggleRun: () => void;
   onSpeedLevelChange: (levelIndex: number) => void;
   onStep: (count: number) => void;
-  onSaveCurrentWorld: () => void;
 };
 
 export function SimulationControlsPanel({
@@ -25,11 +24,10 @@ export function SimulationControlsPanel({
   speedLevelIndex,
   speedLevelCount,
   onNewSession,
-  onReset,
+  onSaveChampions,
   onToggleRun,
   onSpeedLevelChange,
   onStep,
-  onSaveCurrentWorld,
 }: SimulationControlsPanelProps) {
   const [skipCountInput, setSkipCountInput] = useState('1000');
   const [seedInput, setSeedInput] = useState('');
@@ -77,8 +75,7 @@ export function SimulationControlsPanel({
     <>
       <div className="mt-3 flex flex-wrap gap-2">
         <ControlButton label="New Session" onClick={() => onNewSession(seedInput)} />
-        <ControlButton label="Reset" onClick={() => onReset(seedInput)} />
-        <ControlButton label="Save World" onClick={onSaveCurrentWorld} disabled={!snapshot} />
+        <ControlButton label="Save Champions" onClick={onSaveChampions} disabled={!snapshot} />
         <div className="flex w-full items-center gap-2 rounded-lg bg-white/70 px-2 py-1">
           <ControlButton
             label={isRunning ? 'Stop' : 'Start'}

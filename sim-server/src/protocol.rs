@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use sim_types::{
     FacingDirection, FoodState, MetricsSnapshot, NeuronId, OccupancyCell, OrganismFacing,
-    OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId, TerrainCell,
-    TickDelta, WorldConfig, WorldSnapshot,
+    OrganismGenome, OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId,
+    TerrainCell, TickDelta, WorldConfig, WorldSnapshot,
 };
 use uuid::Uuid;
 
@@ -26,87 +26,26 @@ pub struct CreateSessionResponse {
     pub snapshot: WorldSnapshotView,
 }
 
-fn default_ticks_per_world() -> u64 {
-    1_000
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ChampionPoolEntry {
+    pub genome: OrganismGenome,
+    pub source_turn: u64,
+    pub source_created_at_unix_ms: u128,
+    pub generation: u64,
+    pub age_turns: u64,
+    pub reproductions_count: u64,
+    pub consumptions_count: u64,
+    pub energy: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct CreateBatchRunRequest {
-    pub world_count: u32,
-    pub universe_seed: u64,
-    #[serde(default = "default_ticks_per_world")]
-    pub ticks_per_world: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct CreateBatchRunResponse {
-    pub run_id: Uuid,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum BatchRunStatus {
-    Running,
-    Completed,
-    Failed,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct BatchAggregateStats {
-    pub total_organisms_alive: u64,
-    pub mean_organisms_alive: f64,
-    pub min_organisms_alive: u32,
-    pub max_organisms_alive: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", content = "data")]
-pub enum ArchivedWorldSource {
-    BatchRun {
-        run_id: Uuid,
-        world_index: u32,
-        universe_seed: u64,
-        world_seed: u64,
-        ticks_simulated: u64,
-    },
-    Session {
-        session_id: Uuid,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ArchivedWorldSummary {
-    pub world_id: Uuid,
-    pub created_at_unix_ms: u128,
-    pub turn: u64,
-    pub organisms_alive: u32,
-    pub source: ArchivedWorldSource,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct BatchRunStatusResponse {
-    pub run_id: Uuid,
-    pub created_at_unix_ms: u128,
-    pub status: BatchRunStatus,
-    pub total_worlds: u32,
-    pub completed_worlds: u32,
-    pub aggregate: Option<BatchAggregateStats>,
-    pub worlds: Vec<ArchivedWorldSummary>,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ListArchivedWorldsResponse {
-    pub worlds: Vec<ArchivedWorldSummary>,
+pub struct ChampionPoolResponse {
+    pub entries: Vec<ChampionPoolEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CountRequest {
     pub count: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ResetRequest {
-    pub seed: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

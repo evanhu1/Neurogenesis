@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   applyTickDelta,
+  normalizeChampionPoolResponse,
   normalizeCreateSessionResponse,
   normalizeFocusBrainData,
   normalizeTickDelta,
   normalizeWorldSnapshot,
 } from '../../../protocol';
 import type {
+  ApiChampionPoolResponse,
   ApiCreateSessionResponse,
   ApiServerEvent,
   ApiWorldSnapshot,
-  ArchivedWorldSummary,
+  ChampionPoolEntry,
   OrganismState,
   SessionMetadata,
   StepProgressData,
@@ -21,7 +23,6 @@ import { createSimHttpClient } from '../api/simHttpClient';
 import { apiBase } from '../constants';
 import { clearPersistedSessionId, loadPersistedSessionId, persistSessionId } from '../storage';
 import { captureError } from './captureError';
-import { useSimulationArchive } from './useSimulationArchive';
 import { useSimulationConnection } from './useSimulationConnection';
 import { useSimulationControls } from './useSimulationControls';
 import { NO_FOCUS_TURN, useSimulationFocus } from './useSimulationFocus';
@@ -96,7 +97,7 @@ function upsertSpeciesPopulationHistory(
 export type SimulationSessionState = {
   session: SessionMetadata | null;
   snapshot: WorldSnapshot | null;
-  archivedWorlds: ArchivedWorldSummary[];
+  championPool: ChampionPoolEntry[];
   speciesPopulationHistory: SpeciesPopulationPoint[];
   focusedOrganismId: number | null;
   focusedOrganism: OrganismState | null;
@@ -108,17 +109,15 @@ export type SimulationSessionState = {
   speedLevelIndex: number;
   errorText: string | null;
   createSession: (seedInput?: string) => Promise<void>;
-  resetSession: (seedInput?: string) => void;
+  saveChampions: () => Promise<void>;
   toggleRun: () => void;
   setSpeedLevelIndex: (levelIndex: number) => void;
   step: (count: number) => void;
   focusOrganism: (organism: WorldOrganismState) => void;
   defocusOrganism: () => void;
-  saveCurrentWorld: () => Promise<void>;
-  deleteArchivedWorld: (worldId: string) => Promise<void>;
-  deleteAllArchivedWorlds: () => Promise<void>;
-  loadArchivedWorld: (worldId: string) => Promise<void>;
-  refreshArchivedWorlds: () => Promise<void>;
+  refreshChampionPool: () => Promise<void>;
+  deleteChampionPoolEntry: (index: number) => Promise<void>;
+  clearChampionPool: () => Promise<void>;
 };
 
 function parseSessionSeedInput(seedInput?: string): { seed: number | null; error: string | null } {
@@ -148,6 +147,7 @@ export function useSimulationSession(): SimulationSessionState {
   const [speciesPopulationHistory, setSpeciesPopulationHistory] = useState<
     SpeciesPopulationPoint[]
   >([]);
+  const [championPool, setChampionPool] = useState<ChampionPoolEntry[]>([]);
   const [errorText, setErrorText] = useState<string | null>(null);
   const latestSnapshotTurnRef = useRef<number>(NO_FOCUS_TURN);
   const snapshotRef = useRef<WorldSnapshot | null>(snapshot);
@@ -297,12 +297,33 @@ export function useSimulationSession(): SimulationSessionState {
     [connectWs, resetFocusState, syncSessionState],
   );
 
-  const archive = useSimulationArchive({
-    request,
-    session,
-    applyLoadedSession,
-    setErrorText,
-  });
+  const refreshChampionPool = useCallback(async () => {
+    const payload = await request<ApiChampionPoolResponse>('/v1/champion-pool', 'GET');
+    setChampionPool(normalizeChampionPoolResponse(payload).entries);
+  }, [request]);
+
+  const deleteChampionPoolEntry = useCallback(
+    async (index: number) => {
+      try {
+        setErrorText(null);
+        await request<ApiChampionPoolResponse>(`/v1/champion-pool/${index}`, 'DELETE');
+        await refreshChampionPool();
+      } catch (err) {
+        captureError(setErrorText, err, 'Failed to delete champion genome');
+      }
+    },
+    [refreshChampionPool, request],
+  );
+
+  const clearChampionPool = useCallback(async () => {
+    try {
+      setErrorText(null);
+      await request<ApiChampionPoolResponse>('/v1/champion-pool', 'DELETE');
+      await refreshChampionPool();
+    } catch (err) {
+      captureError(setErrorText, err, 'Failed to clear champion pool');
+    }
+  }, [refreshChampionPool, request]);
 
   const createSession = useCallback(
     async (seedInput?: string) => {
@@ -319,11 +340,12 @@ export function useSimulationSession(): SimulationSessionState {
         });
         const normalized = normalizeCreateSessionResponse(payload);
         applyLoadedSession(normalized.metadata, normalized.snapshot);
+        await refreshChampionPool();
       } catch (err) {
         captureError(setErrorText, err, 'Failed to create session');
       }
     },
-    [applyLoadedSession, request],
+    [applyLoadedSession, refreshChampionPool, request],
   );
 
   const restoreSession = useCallback(
@@ -343,39 +365,16 @@ export function useSimulationSession(): SimulationSessionState {
     [applyLoadedSession, request],
   );
 
-  const resetSession = useCallback(
-    (seedInput?: string) => {
-      if (!session) return;
-      const { seed, error } = parseSessionSeedInput(seedInput);
-      if (error) {
-        setErrorText(error);
-        return;
-      }
+  const saveChampions = useCallback(async () => {
+    if (!session) return;
+    try {
       setErrorText(null);
-      if (isRunning) {
-        sendCommand({ type: 'Pause' });
-      }
-      void request<ApiWorldSnapshot>(`/v1/sessions/${session.id}/reset`, 'POST', { seed })
-        .then((nextSnapshot) => {
-          const normalized = normalizeWorldSnapshot(nextSnapshot);
-          latestSnapshotTurnRef.current = normalized.turn;
-          snapshotRef.current = normalized;
-          syncSessionState(false, 0);
-          setSnapshot(normalized);
-          setSpeciesPopulationHistory([
-            {
-              turn: normalized.turn,
-              speciesCounts: cloneSpeciesCounts(normalized.metrics.species_counts),
-            },
-          ]);
-          resetFocusState(true);
-        })
-        .catch((err) => {
-          captureError(setErrorText, err, 'Failed to reset session');
-        });
-    },
-    [isRunning, request, resetFocusState, sendCommand, session, syncSessionState],
-  );
+      await request<ApiChampionPoolResponse>(`/v1/sessions/${session.id}/champions`, 'POST');
+      await refreshChampionPool();
+    } catch (err) {
+      captureError(setErrorText, err, 'Failed to save champions');
+    }
+  }, [refreshChampionPool, request, session]);
 
   useEffect(() => {
     let cancelled = false;
@@ -397,10 +396,27 @@ export function useSimulationSession(): SimulationSessionState {
     };
   }, [createSession, restoreSession]);
 
+  useEffect(() => {
+    void refreshChampionPool().catch((err: unknown) => {
+      captureError(setErrorText, err, 'Failed to load champion pool');
+    });
+  }, [refreshChampionPool]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      void refreshChampionPool().catch((err: unknown) => {
+        captureError(setErrorText, err, 'Failed to refresh champion pool');
+      });
+    }, 5_000);
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [refreshChampionPool]);
+
   return {
     session,
     snapshot,
-    archivedWorlds: archive.archivedWorlds,
+    championPool,
     speciesPopulationHistory,
     focusedOrganismId,
     focusedOrganism,
@@ -412,16 +428,14 @@ export function useSimulationSession(): SimulationSessionState {
     speedLevelIndex,
     errorText,
     createSession,
-    resetSession,
+    saveChampions,
     toggleRun,
     setSpeedLevelIndex,
     step,
     focusOrganism,
     defocusOrganism,
-    saveCurrentWorld: archive.saveCurrentWorld,
-    deleteArchivedWorld: archive.deleteArchivedWorld,
-    deleteAllArchivedWorlds: archive.deleteAllArchivedWorlds,
-    loadArchivedWorld: archive.loadArchivedWorld,
-    refreshArchivedWorlds: archive.refreshArchivedWorlds,
+    refreshChampionPool,
+    deleteChampionPoolEntry,
+    clearChampionPool,
   };
 }

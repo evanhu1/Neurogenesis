@@ -1,12 +1,7 @@
 import { useCallback, useRef, type MutableRefObject } from 'react';
-import type {
-  ArchivedWorldSummary,
-  StepProgressData,
-  WorldOrganismState,
-  WorldSnapshot,
-} from '../../types';
+import type { ChampionPoolEntry, StepProgressData, WorldOrganismState, WorldSnapshot } from '../../types';
 import type { SpeciesPopulationPoint } from '../sim/hooks/useSimulationSession';
-import { ArchivedWorldsPanel } from './ArchivedWorldsPanel';
+import { ChampionPoolPanel } from './ChampionPoolPanel';
 import { SessionOverviewPanel } from './SessionOverviewPanel';
 import { SimulationControlsPanel } from './SimulationControlsPanel';
 import { SpeciesPopulationChart } from './SpeciesPopulationChart';
@@ -23,6 +18,11 @@ type ControlPanelProps = {
     onFocusOrganism: (organism: WorldOrganismState) => void;
     panToHexRef: MutableRefObject<((q: number, r: number) => void) | null>;
   };
+  championPool: {
+    entries: ChampionPoolEntry[];
+    onDeleteEntry: (index: number) => void;
+    onClearAll: () => void;
+  };
   controls: {
     snapshot: WorldSnapshot | null;
     isRunning: boolean;
@@ -31,17 +31,10 @@ type ControlPanelProps = {
     speedLevelIndex: number;
     speedLevelCount: number;
     onNewSession: (seedInput: string) => void;
-    onReset: (seedInput: string) => void;
+    onSaveChampions: () => void;
     onToggleRun: () => void;
     onSpeedLevelChange: (levelIndex: number) => void;
     onStep: (count: number) => void;
-    onSaveCurrentWorld: () => void;
-  };
-  archive: {
-    archivedWorlds: ArchivedWorldSummary[];
-    onLoadArchivedWorld: (worldId: string) => void;
-    onDeleteArchivedWorld: (worldId: string) => void;
-    onDeleteAllArchivedWorlds: () => void;
   };
   errorText: string | null;
 };
@@ -49,8 +42,8 @@ type ControlPanelProps = {
 export function ControlPanel({
   overview,
   species,
+  championPool,
   controls,
-  archive,
   errorText,
 }: ControlPanelProps) {
   const speciesCycleRef = useRef<{ speciesId: string; index: number } | null>(null);
@@ -97,18 +90,10 @@ export function ControlPanel({
         speedLevelIndex={controls.speedLevelIndex}
         speedLevelCount={controls.speedLevelCount}
         onNewSession={controls.onNewSession}
-        onReset={controls.onReset}
+        onSaveChampions={controls.onSaveChampions}
         onToggleRun={controls.onToggleRun}
         onSpeedLevelChange={controls.onSpeedLevelChange}
         onStep={controls.onStep}
-        onSaveCurrentWorld={controls.onSaveCurrentWorld}
-      />
-
-      <ArchivedWorldsPanel
-        archivedWorlds={archive.archivedWorlds}
-        onLoadArchivedWorld={archive.onLoadArchivedWorld}
-        onDeleteArchivedWorld={archive.onDeleteArchivedWorld}
-        onDeleteAllArchivedWorlds={archive.onDeleteAllArchivedWorlds}
       />
 
       {errorText ? (
@@ -116,6 +101,12 @@ export function ControlPanel({
           {errorText}
         </div>
       ) : null}
+
+      <ChampionPoolPanel
+        entries={championPool.entries}
+        onDeleteEntry={championPool.onDeleteEntry}
+        onClearAll={championPool.onClearAll}
+      />
     </aside>
   );
 }

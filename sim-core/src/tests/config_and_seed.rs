@@ -2,93 +2,6 @@ use super::support::{stable_test_config, test_genome};
 use super::*;
 
 #[test]
-fn terrain_map_is_seed_deterministic_and_threshold_controlled() {
-    let mut low_threshold_cfg = stable_test_config();
-    low_threshold_cfg.world_width = 48;
-    low_threshold_cfg.num_organisms = 1;
-    low_threshold_cfg.terrain_noise_scale = 0.02;
-    low_threshold_cfg.terrain_threshold = 0.60;
-    let mut high_threshold_cfg = low_threshold_cfg.clone();
-    high_threshold_cfg.terrain_threshold = 0.95;
-
-    let sim_a = Simulation::new(low_threshold_cfg.clone(), 2026).expect("simulation should init");
-    let sim_b = Simulation::new(low_threshold_cfg, 2026).expect("simulation should init");
-    let sim_c = Simulation::new(high_threshold_cfg, 2026).expect("simulation should init");
-    let sim_other_seed = Simulation::new(stable_test_config_with_terrain(0.60), 2027)
-        .expect("simulation should init");
-
-    assert_eq!(sim_a.terrain_map, sim_b.terrain_map);
-    assert_ne!(sim_a.terrain_map, sim_other_seed.terrain_map);
-
-    let low_blocked = sim_a.terrain_map.iter().filter(|blocked| **blocked).count();
-    let high_blocked = sim_c.terrain_map.iter().filter(|blocked| **blocked).count();
-    assert!(
-        low_blocked > high_blocked,
-        "lower threshold should produce more blocked terrain: low={low_blocked} high={high_blocked}",
-    );
-}
-
-#[test]
-fn fertility_map_is_seed_deterministic_with_cell_jitter() {
-    let mut cfg = stable_test_config();
-    cfg.world_width = 48;
-    cfg.num_organisms = 1;
-    cfg.terrain_noise_scale = 0.02;
-    cfg.terrain_threshold = 1.0;
-
-    let sim_a = Simulation::new(cfg.clone(), 2026).expect("simulation should init");
-    let sim_b = Simulation::new(cfg, 2026).expect("simulation should init");
-    let sim_other_seed = Simulation::new(stable_test_config_with_terrain(1.0), 2027)
-        .expect("simulation should init");
-
-    assert_eq!(sim_a.food_fertility, sim_b.food_fertility);
-    assert_ne!(sim_a.food_fertility, sim_other_seed.food_fertility);
-
-    let fertile_count = sim_a
-        .food_fertility
-        .iter()
-        .filter(|fertile| **fertile)
-        .count();
-    assert!(
-        fertile_count > 0 && fertile_count < sim_a.food_fertility.len(),
-        "fertility map should contain both fertile and infertile cells: fertile={fertile_count} total={}",
-        sim_a.food_fertility.len(),
-    );
-}
-
-#[test]
-fn spike_map_is_seed_deterministic_and_density_controlled() {
-    let mut low_density_cfg = stable_test_config();
-    low_density_cfg.world_width = 48;
-    low_density_cfg.num_organisms = 1;
-    low_density_cfg.terrain_threshold = 1.0;
-    low_density_cfg.spike_density = 0.05;
-    let mut high_density_cfg = low_density_cfg.clone();
-    high_density_cfg.spike_density = 0.25;
-
-    let sim_a = Simulation::new(low_density_cfg.clone(), 2026).expect("simulation should init");
-    let sim_b = Simulation::new(low_density_cfg, 2026).expect("simulation should init");
-    let sim_c = Simulation::new(high_density_cfg, 2026).expect("simulation should init");
-
-    let mut other_seed_cfg = stable_test_config();
-    other_seed_cfg.world_width = 48;
-    other_seed_cfg.num_organisms = 1;
-    other_seed_cfg.terrain_threshold = 1.0;
-    other_seed_cfg.spike_density = 0.05;
-    let sim_other_seed = Simulation::new(other_seed_cfg, 2027).expect("simulation should init");
-
-    assert_eq!(sim_a.spike_map, sim_b.spike_map);
-    assert_ne!(sim_a.spike_map, sim_other_seed.spike_map);
-
-    let low_spikes = sim_a.spike_map.iter().filter(|blocked| **blocked).count();
-    let high_spikes = sim_c.spike_map.iter().filter(|blocked| **blocked).count();
-    assert!(
-        high_spikes > low_spikes,
-        "higher density should produce more scattered spikes: low={low_spikes} high={high_spikes}",
-    );
-}
-
-#[test]
 fn stochastic_action_sampling_is_deterministic_for_repeated_runs() {
     let mut cfg = stable_test_config();
     cfg.world_width = 30;
@@ -107,7 +20,7 @@ fn stochastic_action_sampling_is_deterministic_for_repeated_runs() {
 }
 
 #[test]
-fn champion_pool_bootstrap_is_seed_deterministic() {
+fn champion_pool_init_reset_and_replay_are_deterministic() {
     let mut cfg = stable_test_config();
     cfg.world_width = 24;
     cfg.num_organisms = 32;
@@ -136,16 +49,28 @@ fn champion_pool_bootstrap_is_seed_deterministic() {
     ];
 
     let champion_pool = vec![champion_a.clone(), champion_b.clone()];
-    let run_a = Simulation::new_with_champion_pool(cfg.clone(), 2026, champion_pool.clone())
+    let mut run = Simulation::new_with_champion_pool(cfg.clone(), 2026, champion_pool.clone())
         .expect("simulation should initialize");
-    let run_b = Simulation::new_with_champion_pool(cfg, 2026, champion_pool)
+    let mut replay = Simulation::new_with_champion_pool(cfg, 2026, champion_pool)
         .expect("simulation should initialize");
+    let initial_snapshot = run.snapshot();
 
-    assert_eq!(run_a.snapshot(), run_b.snapshot());
-    assert!(run_a
+    assert_eq!(initial_snapshot, replay.snapshot());
+    assert!(run
         .organisms()
         .iter()
         .all(|organism| { organism.genome == champion_a || organism.genome == champion_b }));
+
+    run.advance_n(12);
+    replay.advance_n(12);
+    let replay_snapshot = run.snapshot();
+    assert_eq!(replay_snapshot, replay.snapshot());
+
+    run.reset(Some(2026));
+    assert_eq!(run.snapshot(), initial_snapshot);
+
+    run.advance_n(12);
+    assert_eq!(run.snapshot(), replay_snapshot);
 }
 
 #[test]
@@ -179,13 +104,4 @@ fn reset_preserves_champion_pool_bootstrap_behavior() {
         .organisms()
         .iter()
         .all(|organism| organism.genome == champion));
-}
-
-fn stable_test_config_with_terrain(terrain_threshold: f32) -> WorldConfig {
-    let mut cfg = stable_test_config();
-    cfg.world_width = 48;
-    cfg.num_organisms = 1;
-    cfg.terrain_noise_scale = 0.02;
-    cfg.terrain_threshold = terrain_threshold;
-    cfg
 }

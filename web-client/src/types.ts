@@ -403,23 +403,34 @@ export type CreateSessionResponse = {
   snapshot: WorldSnapshot;
 };
 
-export type ApiArchivedWorldSummary = {
-  world_id: string;
-  created_at_unix_ms: number;
-  turn: number;
-  organisms_alive: number;
+export type ApiChampionPoolEntry = {
+  genome: ApiOrganismGenome;
+  source_turn: number;
+  source_created_at_unix_ms: number;
+  generation: number;
+  age_turns: number;
+  reproductions_count: number;
+  consumptions_count: number;
+  energy: number;
 };
 
-export type ArchivedWorldSummary = ApiArchivedWorldSummary & {
-  species_alive: number;
+export type ChampionPoolEntry = {
+  genome: OrganismGenome;
+  source_turn: number;
+  source_created_at_unix_ms: number;
+  generation: number;
+  age_turns: number;
+  reproductions_count: number;
+  consumptions_count: number;
+  energy: number;
 };
 
-export type ApiListArchivedWorldsResponse = {
-  worlds: ApiArchivedWorldSummary[];
+export type ApiChampionPoolResponse = {
+  entries: ApiChampionPoolEntry[];
 };
 
-export type ListArchivedWorldsResponse = {
-  worlds: ArchivedWorldSummary[];
+export type ChampionPoolResponse = {
+  entries: ChampionPoolEntry[];
 };
 
 export type ApiEntityId =

@@ -1,9 +1,10 @@
 import type {
+  ApiChampionPoolEntry,
+  ApiChampionPoolResponse,
   ApiCreateSessionResponse,
   ApiEntityId,
   ApiFocusBrainData,
   ApiFoodState,
-  ApiListArchivedWorldsResponse,
   ApiMetricsSnapshot,
   ApiOccupancyCell,
   ApiTerrainCell,
@@ -15,14 +16,13 @@ import type {
   ApiTickDelta,
   ApiWorldOrganismState,
   ApiWorldSnapshot,
-  ArchivedWorldSummary,
   BrainState,
+  ChampionPoolResponse,
   CreateSessionResponse,
   EntityId,
   FoodId,
   FoodState,
   FocusBrainData,
-  ListArchivedWorldsResponse,
   MetricsSnapshot,
   NeuronId,
   NeuronState,
@@ -76,6 +76,13 @@ function normalizeOrganismGenome(genome: ApiOrganismGenome): OrganismGenome {
   return {
     ...genome,
     edges: genome.edges.map(normalizeSynapseEdge),
+  };
+}
+
+function normalizeChampionPoolEntry(entry: ApiChampionPoolEntry) {
+  return {
+    ...entry,
+    genome: normalizeOrganismGenome(entry.genome),
   };
 }
 
@@ -237,15 +244,11 @@ function normalizeRemovedEntityPosition(entry: {
   };
 }
 
-function normalizeArchivedWorldSummary(world: {
-  world_id: string;
-  created_at_unix_ms: number;
-  turn: number;
-  organisms_alive: number;
-}): ArchivedWorldSummary {
+export function normalizeChampionPoolResponse(
+  response: ApiChampionPoolResponse,
+): ChampionPoolResponse {
   return {
-    ...world,
-    species_alive: 0,
+    entries: response.entries.map(normalizeChampionPoolEntry),
   };
 }
 
@@ -305,13 +308,6 @@ export function normalizeCreateSessionResponse(response: ApiCreateSessionRespons
   };
 }
 
-export function normalizeListArchivedWorldsResponse(
-  response: ApiListArchivedWorldsResponse,
-): ListArchivedWorldsResponse {
-  return {
-    worlds: response.worlds.map((world) => normalizeArchivedWorldSummary(world)),
-  };
-}
 
 export function applyTickDelta(snapshot: WorldSnapshot, delta: TickDelta): WorldSnapshot {
   const movements = new Map<number, [number, number]>();

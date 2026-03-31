@@ -24,6 +24,11 @@ export default function App() {
             sessionMeta,
             metricsText,
           }}
+          championPool={{
+            entries: simulation.championPool,
+            onDeleteEntry: (index) => void simulation.deleteChampionPoolEntry(index),
+            onClearAll: () => void simulation.clearChampionPool(),
+          }}
           species={{
             history: simulation.speciesPopulationHistory,
             focusedSpeciesId,
@@ -39,17 +44,10 @@ export default function App() {
             speedLevelIndex: simulation.speedLevelIndex,
             speedLevelCount: simulation.speedLevels.length,
             onNewSession: (seedInput) => void simulation.createSession(seedInput),
-            onReset: (seedInput) => simulation.resetSession(seedInput),
+            onSaveChampions: () => void simulation.saveChampions(),
             onToggleRun: simulation.toggleRun,
             onSpeedLevelChange: simulation.setSpeedLevelIndex,
             onStep: simulation.step,
-            onSaveCurrentWorld: () => void simulation.saveCurrentWorld(),
-          }}
-          archive={{
-            archivedWorlds: simulation.archivedWorlds,
-            onLoadArchivedWorld: (worldId) => void simulation.loadArchivedWorld(worldId),
-            onDeleteArchivedWorld: (worldId) => void simulation.deleteArchivedWorld(worldId),
-            onDeleteAllArchivedWorlds: () => void simulation.deleteAllArchivedWorlds(),
           }}
           errorText={simulation.errorText}
         />
