@@ -1,11 +1,5 @@
 use super::*;
 
-const AUX_SENSORY_RECEPTORS: [(u32, SensoryReceptor); 3] = [
-    (CONTACT_SENSORY_ID, SensoryReceptor::ContactAhead),
-    (DAMAGE_SENSORY_ID, SensoryReceptor::Damage),
-    (ENERGY_SENSORY_ID, SensoryReceptor::Energy),
-];
-
 pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
     let sensory_spawn = sensory_spawn_location();
     let action_spawn = action_spawn_location();
@@ -85,19 +79,9 @@ pub(crate) fn make_action_neuron(
 }
 
 fn sensory_receptors_in_order() -> impl Iterator<Item = (u32, SensoryReceptor)> {
-    let look_receptors = SensoryReceptor::LOOK_RAY_OFFSETS
-        .into_iter()
-        .flat_map(|ray_offset| {
-            LOOK_TARGETS
-                .into_iter()
-                .map(move |look_target| SensoryReceptor::LookRay {
-                    ray_offset,
-                    look_target,
-                })
-        })
+    SensoryReceptor::ordered()
         .enumerate()
-        .map(|(idx, receptor)| (idx as u32, receptor));
-    look_receptors.chain(AUX_SENSORY_RECEPTORS)
+        .map(|(idx, receptor)| (idx as u32, receptor))
 }
 
 fn location_or_default(locations: &[BrainLocation], index: usize) -> BrainLocation {

@@ -1,42 +1,34 @@
 # Neurogenesis
 
-![Screenshot](docs/screenshot.png)
+Neurogenesis is a neuroevolution artificial-life simulation built in Rust.
 
-Neurogenesis is a Rust-based neuroevolution artificial-life simulation.
-
-Its overarching goal is to simulate the real world open-ended evolution of
-cognition, from basic sensory-motor reactions in early bilaterians 600+ million
-years ago to complex intelligence.
-
-It adheres to an emergent design philosophy that combines biological realism
-(i.e. modeling biological evolution along with the most simple and general
-principles underlying life) with extreme computational efficiency (i.e.
-massively compressing the timeline).
-
-Inspirations:
-
-- The starting place of bilaterian organisms/brains and a
-  foraging/navigation-centric environment are directly inspired by Max Bennett’s
-  book A Brief History of Intelligence, which examines the phylogenetic history
-  of human intelligence starting at the very beginning of cellular life.
-- The brain’s design is a mix of ideas from biological and artificial neural
-  networks.
-- The design of the environment and ecological dynamics is heavily inspired by
-  real world evolutionary biology and ecology
+The goal is to achieve open-ended evolution of cognition, from basic
+sensory-motor reactions (see food ahead, move forward), to complex intelligent
+behavior (internal states, memory, navigation, predation), by evolving creatures
+in a 2D world.
 
 The main challenge is creating an evolutionary curriculum that scales
-environment complexity alongside cognitive evolution while avoiding convergence
-to degenerate niches along the way.
+environment complexity with cognitive evolution while avoiding convergence to
+degenerate niches along the way.
 
-![Screenshot](docs/evaluation.png)
+In designing the brain we take a neuromorphic approach that implements many
+structural (e.g. excitatory / inhibitory synapses) and algorithmic (e.g. Hebbian
+plasticity) priors from biological brains, while taking advantage of silicon
+hardware (e.g. floating point precision).
+
+| ![Simulation Screenshot](docs/screenshot.png) | ![Evaluation Screenshot](docs/evaluation.png) |
+| :-------------------------------------------: | :-------------------------------------------: |
 
 ## Quickstart
 
-1. `cargo check --workspace`
-2. `cargo test --workspace`
-3. Start server: `cargo run -p sim-server`
-4. In another shell: `cd web-client && npm install && npm run dev`
-5. Open `http://127.0.0.1:4173`
+Prerequisites: a recent Rust toolchain and Node.js with npm.
+
+1. Verify the workspace: `cargo test --workspace`
+2. Start the backend: `cargo run -p sim-server`
+3. In another shell, install frontend dependencies (first run only):
+   `cd web-client && npm install`
+4. Start the frontend: `cd web-client && npm run dev`
+5. Open `http://127.0.0.1:5173/`
 
 ## Evaluation Harness
 

@@ -1,7 +1,7 @@
 world_width = 250
 num_organisms = 5000
 periodic_injection_count = 200
-food_energy = 75
+food_energy = 50
 move_action_energy_cost = 1.0
 reproduction_investment_energy = 500.0
 action_temperature = 0.08

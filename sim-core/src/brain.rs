@@ -22,8 +22,7 @@ use sim_types::{
 use std::time::Instant;
 
 pub(crate) use crate::topology::{
-    action_index, ACTION_COUNT, ACTION_COUNT_U32, ACTION_ID_BASE, CONTACT_SENSORY_ID,
-    DAMAGE_SENSORY_ID, ENERGY_SENSORY_ID, INTER_ID_BASE, SENSORY_COUNT,
+    action_index, ACTION_COUNT, ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT,
 };
 #[cfg_attr(not(test), allow(unused_imports))]
 pub use evaluation::derive_active_action_neuron_id;
@@ -39,12 +38,6 @@ const MIN_ENERGY_SENSOR_SCALE: f32 = 1.0;
 const ENERGY_SENSOR_CURVE_EXPONENT: f32 = 2.0;
 const MIN_ACTION_TEMPERATURE: f32 = 1.0e-6;
 pub(crate) const EXPLICIT_IDLE_LOGIT_BIAS: f32 = -0.01;
-const LOOK_TARGETS: [EntityType; 4] = [
-    EntityType::Food,
-    EntityType::Organism,
-    EntityType::Wall,
-    EntityType::Spikes,
-];
 const LOOK_RAY_COUNT: usize = SensoryReceptor::LOOK_RAY_OFFSETS.len();
 
 #[derive(Default)]

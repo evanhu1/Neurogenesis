@@ -15,7 +15,10 @@ use sim_server::{
         SessionMetadata, StepProgressData, WorldSnapshotView,
     },
 };
-use sim_types::{OrganismGenome, OrganismState, WorldSnapshot};
+use sim_types::{
+    inter_neuron_id, inter_neuron_index, ActionType, BrainLocation, NeuronId, OrganismGenome,
+    OrganismState, SensoryReceptor, SynapseEdge, WorldSnapshot,
+};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -48,15 +51,16 @@ struct RuntimeState {
     runner: Option<JoinHandle<()>>,
 }
 
-const CHAMPION_POOL_SCHEMA_VERSION: u32 = 1;
+const CHAMPION_POOL_SCHEMA_VERSION: u32 = 2;
 const CHAMPION_POOL_MAX_GENOMES: usize = 32;
 const CHAMPION_POOL_MAX_CANDIDATES_PER_WORLD: usize = 32;
+const DEFAULT_PERSISTED_BRAIN_LOCATION: BrainLocation = BrainLocation { x: 5.0, y: 5.0 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ChampionPoolFile {
     schema_version: u32,
     updated_at_unix_ms: u128,
-    entries: Vec<ChampionGenomeRecord>,
+    entries: Vec<PersistedChampionGenomeRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -69,6 +73,79 @@ struct ChampionGenomeRecord {
     reproductions_count: u64,
     consumptions_count: u64,
     energy: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct PersistedChampionGenomeRecord {
+    genome: PersistedOrganismGenome,
+    source_turn: u64,
+    source_created_at_unix_ms: u128,
+    generation: u64,
+    age_turns: u64,
+    reproductions_count: u64,
+    consumptions_count: u64,
+    energy: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct PersistedOrganismGenome {
+    num_neurons: u32,
+    num_synapses: u32,
+    spatial_prior_sigma: f32,
+    vision_distance: u32,
+    starting_energy: f32,
+    age_of_maturity: u32,
+    plasticity_start_age: u32,
+    hebb_eta_gain: f32,
+    juvenile_eta_scale: f32,
+    eligibility_retention: f32,
+    max_weight_delta_per_tick: f32,
+    synapse_prune_threshold: f32,
+    mutation_rate_age_of_maturity: f32,
+    mutation_rate_vision_distance: f32,
+    mutation_rate_inter_bias: f32,
+    mutation_rate_inter_update_rate: f32,
+    mutation_rate_eligibility_retention: f32,
+    mutation_rate_synapse_prune_threshold: f32,
+    mutation_rate_neuron_location: f32,
+    mutation_rate_synapse_weight_perturbation: f32,
+    mutation_rate_add_synapse: f32,
+    mutation_rate_remove_synapse: f32,
+    mutation_rate_remove_neuron: f32,
+    mutation_rate_add_neuron_split_edge: f32,
+    inter_biases: Vec<f32>,
+    inter_log_time_constants: Vec<f32>,
+    sensory_locations: Vec<PersistedSensoryLocation>,
+    inter_locations: Vec<BrainLocation>,
+    action_locations: Vec<PersistedActionLocation>,
+    edges: Vec<PersistedSynapseEdge>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct PersistedSensoryLocation {
+    receptor: SensoryReceptor,
+    location: BrainLocation,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct PersistedActionLocation {
+    action_type: ActionType,
+    location: BrainLocation,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct PersistedSynapseEdge {
+    pre_neuron: PersistedNeuronRef,
+    post_neuron: PersistedNeuronRef,
+    weight: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "neuron_type", rename_all = "snake_case")]
+enum PersistedNeuronRef {
+    Sensory { receptor: SensoryReceptor },
+    Inter { index: u32 },
+    Action { action_type: ActionType },
 }
 
 struct ChampionPoolStore {
@@ -206,6 +283,217 @@ fn merge_champion_entries(
     unique
 }
 
+fn encode_champion_record(
+    entry: &ChampionGenomeRecord,
+) -> Result<PersistedChampionGenomeRecord, String> {
+    Ok(PersistedChampionGenomeRecord {
+        genome: encode_persisted_genome(&entry.genome)?,
+        source_turn: entry.source_turn,
+        source_created_at_unix_ms: entry.source_created_at_unix_ms,
+        generation: entry.generation,
+        age_turns: entry.age_turns,
+        reproductions_count: entry.reproductions_count,
+        consumptions_count: entry.consumptions_count,
+        energy: entry.energy,
+    })
+}
+
+fn decode_champion_record(entry: PersistedChampionGenomeRecord) -> ChampionGenomeRecord {
+    ChampionGenomeRecord {
+        genome: decode_persisted_genome(entry.genome),
+        source_turn: entry.source_turn,
+        source_created_at_unix_ms: entry.source_created_at_unix_ms,
+        generation: entry.generation,
+        age_turns: entry.age_turns,
+        reproductions_count: entry.reproductions_count,
+        consumptions_count: entry.consumptions_count,
+        energy: entry.energy,
+    }
+}
+
+fn encode_persisted_genome(genome: &OrganismGenome) -> Result<PersistedOrganismGenome, String> {
+    Ok(PersistedOrganismGenome {
+        num_neurons: genome.num_neurons,
+        num_synapses: genome.num_synapses,
+        spatial_prior_sigma: genome.spatial_prior_sigma,
+        vision_distance: genome.vision_distance,
+        starting_energy: genome.starting_energy,
+        age_of_maturity: genome.age_of_maturity,
+        plasticity_start_age: genome.plasticity_start_age,
+        hebb_eta_gain: genome.hebb_eta_gain,
+        juvenile_eta_scale: genome.juvenile_eta_scale,
+        eligibility_retention: genome.eligibility_retention,
+        max_weight_delta_per_tick: genome.max_weight_delta_per_tick,
+        synapse_prune_threshold: genome.synapse_prune_threshold,
+        mutation_rate_age_of_maturity: genome.mutation_rate_age_of_maturity,
+        mutation_rate_vision_distance: genome.mutation_rate_vision_distance,
+        mutation_rate_inter_bias: genome.mutation_rate_inter_bias,
+        mutation_rate_inter_update_rate: genome.mutation_rate_inter_update_rate,
+        mutation_rate_eligibility_retention: genome.mutation_rate_eligibility_retention,
+        mutation_rate_synapse_prune_threshold: genome.mutation_rate_synapse_prune_threshold,
+        mutation_rate_neuron_location: genome.mutation_rate_neuron_location,
+        mutation_rate_synapse_weight_perturbation: genome.mutation_rate_synapse_weight_perturbation,
+        mutation_rate_add_synapse: genome.mutation_rate_add_synapse,
+        mutation_rate_remove_synapse: genome.mutation_rate_remove_synapse,
+        mutation_rate_remove_neuron: genome.mutation_rate_remove_neuron,
+        mutation_rate_add_neuron_split_edge: genome.mutation_rate_add_neuron_split_edge,
+        inter_biases: genome.inter_biases.clone(),
+        inter_log_time_constants: genome.inter_log_time_constants.clone(),
+        sensory_locations: genome
+            .sensory_locations
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, location)| {
+                SensoryReceptor::from_neuron_id(NeuronId(idx as u32)).map(|receptor| {
+                    PersistedSensoryLocation {
+                        receptor,
+                        location: *location,
+                    }
+                })
+            })
+            .collect(),
+        inter_locations: genome.inter_locations.clone(),
+        action_locations: ActionType::ALL
+            .iter()
+            .copied()
+            .enumerate()
+            .filter_map(|(idx, action_type)| {
+                genome
+                    .action_locations
+                    .get(idx)
+                    .copied()
+                    .map(|location| PersistedActionLocation {
+                        action_type,
+                        location,
+                    })
+            })
+            .collect(),
+        edges: genome
+            .edges
+            .iter()
+            .map(|edge| encode_persisted_edge(edge, genome.num_neurons))
+            .collect::<Result<Vec<_>, _>>()?,
+    })
+}
+
+fn decode_persisted_genome(genome: PersistedOrganismGenome) -> OrganismGenome {
+    let sensory_count = SensoryReceptor::ordered().count();
+    let action_count = ActionType::ALL.len();
+    let mut sensory_locations = vec![DEFAULT_PERSISTED_BRAIN_LOCATION; sensory_count];
+    let mut action_locations = vec![DEFAULT_PERSISTED_BRAIN_LOCATION; action_count];
+
+    for sensory_location in genome.sensory_locations {
+        if let Some(idx) = sensory_location.receptor.current_index() {
+            sensory_locations[idx] = sensory_location.location;
+        }
+    }
+
+    for action_location in genome.action_locations {
+        if let Some(idx) = action_type_index(action_location.action_type) {
+            action_locations[idx] = action_location.location;
+        }
+    }
+
+    let mut edges = genome
+        .edges
+        .into_iter()
+        .filter_map(|edge| decode_persisted_edge(edge, genome.num_neurons))
+        .collect::<Vec<_>>();
+    edges.sort_unstable_by(|left, right| {
+        left.pre_neuron_id
+            .cmp(&right.pre_neuron_id)
+            .then_with(|| left.post_neuron_id.cmp(&right.post_neuron_id))
+            .then_with(|| left.weight.total_cmp(&right.weight))
+    });
+    edges.dedup_by(|left, right| {
+        left.pre_neuron_id == right.pre_neuron_id && left.post_neuron_id == right.post_neuron_id
+    });
+
+    OrganismGenome {
+        num_neurons: genome.num_neurons,
+        num_synapses: edges.len() as u32,
+        spatial_prior_sigma: genome.spatial_prior_sigma,
+        vision_distance: genome.vision_distance,
+        starting_energy: genome.starting_energy,
+        age_of_maturity: genome.age_of_maturity,
+        plasticity_start_age: genome.plasticity_start_age,
+        hebb_eta_gain: genome.hebb_eta_gain,
+        juvenile_eta_scale: genome.juvenile_eta_scale,
+        eligibility_retention: genome.eligibility_retention,
+        max_weight_delta_per_tick: genome.max_weight_delta_per_tick,
+        synapse_prune_threshold: genome.synapse_prune_threshold,
+        mutation_rate_age_of_maturity: genome.mutation_rate_age_of_maturity,
+        mutation_rate_vision_distance: genome.mutation_rate_vision_distance,
+        mutation_rate_inter_bias: genome.mutation_rate_inter_bias,
+        mutation_rate_inter_update_rate: genome.mutation_rate_inter_update_rate,
+        mutation_rate_eligibility_retention: genome.mutation_rate_eligibility_retention,
+        mutation_rate_synapse_prune_threshold: genome.mutation_rate_synapse_prune_threshold,
+        mutation_rate_neuron_location: genome.mutation_rate_neuron_location,
+        mutation_rate_synapse_weight_perturbation: genome.mutation_rate_synapse_weight_perturbation,
+        mutation_rate_add_synapse: genome.mutation_rate_add_synapse,
+        mutation_rate_remove_synapse: genome.mutation_rate_remove_synapse,
+        mutation_rate_remove_neuron: genome.mutation_rate_remove_neuron,
+        mutation_rate_add_neuron_split_edge: genome.mutation_rate_add_neuron_split_edge,
+        inter_biases: genome.inter_biases,
+        inter_log_time_constants: genome.inter_log_time_constants,
+        sensory_locations,
+        inter_locations: genome.inter_locations,
+        action_locations,
+        edges,
+    }
+}
+
+fn encode_persisted_edge(
+    edge: &SynapseEdge,
+    num_neurons: u32,
+) -> Result<PersistedSynapseEdge, String> {
+    Ok(PersistedSynapseEdge {
+        pre_neuron: encode_neuron_ref(edge.pre_neuron_id, num_neurons)?,
+        post_neuron: encode_neuron_ref(edge.post_neuron_id, num_neurons)?,
+        weight: edge.weight,
+    })
+}
+
+fn decode_persisted_edge(edge: PersistedSynapseEdge, num_neurons: u32) -> Option<SynapseEdge> {
+    Some(SynapseEdge {
+        pre_neuron_id: decode_neuron_ref(edge.pre_neuron, num_neurons)?,
+        post_neuron_id: decode_neuron_ref(edge.post_neuron, num_neurons)?,
+        weight: edge.weight,
+        eligibility: 0.0,
+        pending_coactivation: 0.0,
+    })
+}
+
+fn encode_neuron_ref(neuron_id: NeuronId, num_neurons: u32) -> Result<PersistedNeuronRef, String> {
+    if let Some(receptor) = SensoryReceptor::from_neuron_id(neuron_id) {
+        return Ok(PersistedNeuronRef::Sensory { receptor });
+    }
+    if let Some(index) = inter_neuron_index(neuron_id, num_neurons) {
+        return Ok(PersistedNeuronRef::Inter { index });
+    }
+    if let Some(action_type) = ActionType::from_neuron_id(neuron_id) {
+        return Ok(PersistedNeuronRef::Action { action_type });
+    }
+
+    Err(format!("unsupported neuron id {}", neuron_id.0))
+}
+
+fn decode_neuron_ref(neuron_ref: PersistedNeuronRef, num_neurons: u32) -> Option<NeuronId> {
+    match neuron_ref {
+        PersistedNeuronRef::Sensory { receptor } => receptor.neuron_id(),
+        PersistedNeuronRef::Inter { index } => {
+            (index < num_neurons).then(|| inter_neuron_id(index))
+        }
+        PersistedNeuronRef::Action { action_type } => action_type.neuron_id(),
+    }
+}
+
+fn action_type_index(action_type: ActionType) -> Option<usize> {
+    ActionType::ALL
+        .iter()
+        .position(|candidate| *candidate == action_type)
+}
+
 impl ChampionPoolStore {
     fn bootstrap(pool_path: PathBuf) -> Result<Self, AppError> {
         if let Some(parent) = pool_path.parent() {
@@ -219,7 +507,11 @@ impl ChampionPoolStore {
 
         let entries = match fs::read(&pool_path) {
             Ok(bytes) => match serde_json::from_slice::<ChampionPoolFile>(&bytes) {
-                Ok(file) if file.schema_version == CHAMPION_POOL_SCHEMA_VERSION => file.entries,
+                Ok(file) if file.schema_version == CHAMPION_POOL_SCHEMA_VERSION => file
+                    .entries
+                    .into_iter()
+                    .map(decode_champion_record)
+                    .collect(),
                 Ok(file) => {
                     warn!(
                         "ignoring champion pool {} with schema version {} (expected {})",
@@ -318,7 +610,16 @@ impl ChampionPoolStore {
         let file = ChampionPoolFile {
             schema_version: CHAMPION_POOL_SCHEMA_VERSION,
             updated_at_unix_ms: now_unix_ms()?,
-            entries: entries.to_vec(),
+            entries: entries
+                .iter()
+                .map(encode_champion_record)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|err| {
+                    AppError::Internal(format!(
+                        "failed to encode champion pool entries {}: {err}",
+                        self.pool_path.display()
+                    ))
+                })?,
         };
         let encoded = serde_json::to_vec_pretty(&file).map_err(|err| {
             AppError::Internal(format!(
@@ -853,7 +1154,7 @@ async fn get_session(state: &AppState, id: Uuid) -> Result<Arc<Session>, AppErro
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sim_types::{ActionType, BrainState, FacingDirection, OrganismId, SpeciesId};
+    use sim_types::{ActionType, BrainState, EntityType, FacingDirection, OrganismId, SpeciesId};
 
     fn make_record(
         generation: u64,
@@ -890,7 +1191,7 @@ mod tests {
             inter_log_time_constants: vec![0.0],
             sensory_locations: vec![
                 sim_types::BrainLocation { x: 0.0, y: 0.0 };
-                sim_types::SensoryReceptor::LOOK_NEURON_COUNT as usize + 3
+                sim_types::SensoryReceptor::ordered().count()
             ],
             inter_locations: vec![sim_types::BrainLocation { x: 1.0, y: 1.0 }],
             action_locations: vec![
@@ -996,5 +1297,103 @@ mod tests {
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].generation, strong.generation);
         assert_eq!(candidates[0].energy, strong.energy);
+    }
+
+    #[test]
+    fn champion_persistence_round_trip_preserves_brain_layout_and_edges() {
+        let food_receptor = SensoryReceptor::LookRay {
+            ray_offset: 0,
+            look_target: EntityType::Food,
+        };
+        let damage_receptor = SensoryReceptor::Damage;
+        let forward_action = ActionType::Forward;
+        let attack_action = ActionType::Attack;
+
+        let mut record = make_record(4, 2, 3, 25.0);
+        record.genome.num_neurons = 2;
+        record.genome.inter_biases = vec![0.1, -0.2];
+        record.genome.inter_log_time_constants = vec![0.0, 0.3];
+        record.genome.inter_locations = vec![
+            BrainLocation { x: 1.0, y: 2.0 },
+            BrainLocation { x: 3.0, y: 4.0 },
+        ];
+        record.genome.sensory_locations =
+            vec![BrainLocation { x: 0.0, y: 0.0 }; SensoryReceptor::ordered().count()];
+        record.genome.sensory_locations[food_receptor.current_index().unwrap()] =
+            BrainLocation { x: 7.0, y: 8.0 };
+        record.genome.sensory_locations[damage_receptor.current_index().unwrap()] =
+            BrainLocation { x: 9.0, y: 1.5 };
+        record.genome.action_locations[action_type_index(forward_action).unwrap()] =
+            BrainLocation { x: 6.0, y: 6.5 };
+        record.genome.action_locations[action_type_index(attack_action).unwrap()] =
+            BrainLocation { x: 8.0, y: 3.5 };
+        record.genome.edges = vec![
+            SynapseEdge {
+                pre_neuron_id: food_receptor.neuron_id().unwrap(),
+                post_neuron_id: inter_neuron_id(0),
+                weight: 0.75,
+                eligibility: 0.0,
+                pending_coactivation: 0.0,
+            },
+            SynapseEdge {
+                pre_neuron_id: damage_receptor.neuron_id().unwrap(),
+                post_neuron_id: attack_action.neuron_id().unwrap(),
+                weight: -0.5,
+                eligibility: 0.0,
+                pending_coactivation: 0.0,
+            },
+            SynapseEdge {
+                pre_neuron_id: inter_neuron_id(0),
+                post_neuron_id: forward_action.neuron_id().unwrap(),
+                weight: 1.25,
+                eligibility: 0.0,
+                pending_coactivation: 0.0,
+            },
+        ];
+        record.genome.num_synapses = record.genome.edges.len() as u32;
+
+        let persisted = encode_champion_record(&record).expect("record should encode");
+        let decoded = decode_champion_record(persisted);
+
+        assert_eq!(decoded, record);
+    }
+
+    #[test]
+    fn champion_persistence_json_uses_symbolic_neuron_refs() {
+        let food_receptor = SensoryReceptor::LookRay {
+            ray_offset: 0,
+            look_target: EntityType::Food,
+        };
+        let mut record = make_record(2, 1, 1, 10.0);
+        record.genome.edges = vec![SynapseEdge {
+            pre_neuron_id: food_receptor.neuron_id().unwrap(),
+            post_neuron_id: ActionType::Forward.neuron_id().unwrap(),
+            weight: 0.9,
+            eligibility: 0.0,
+            pending_coactivation: 0.0,
+        }];
+        record.genome.num_synapses = 1;
+
+        let persisted = encode_champion_record(&record).expect("record should encode");
+        let json = serde_json::to_value(&persisted).expect("persisted record should serialize");
+
+        assert_eq!(
+            json["genome"]["edges"][0]["pre_neuron"]["neuron_type"],
+            "sensory"
+        );
+        assert_eq!(
+            json["genome"]["edges"][0]["pre_neuron"]["receptor"]["receptor_type"],
+            "LookRay"
+        );
+        assert_eq!(
+            json["genome"]["edges"][0]["post_neuron"]["neuron_type"],
+            "action"
+        );
+        assert_eq!(
+            json["genome"]["edges"][0]["post_neuron"]["action_type"],
+            "Forward"
+        );
+        assert!(json["genome"]["edges"][0]["pre_neuron_id"].is_null());
+        assert!(json["genome"]["edges"][0]["post_neuron_id"].is_null());
     }
 }

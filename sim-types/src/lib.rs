@@ -16,6 +16,9 @@ id_newtype!(SpeciesId, u64);
 id_newtype!(NeuronId, u32);
 id_newtype!(FoodId, u64);
 
+pub const INTER_NEURON_ID_BASE: u32 = 1000;
+pub const ACTION_NEURON_ID_BASE: u32 = 2000;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum FoodKind {
     Plant,
@@ -47,6 +50,16 @@ impl ActionType {
         ActionType::Attack,
         ActionType::Reproduce,
     ];
+
+    pub fn neuron_id(self) -> Option<NeuronId> {
+        let idx = Self::ALL.iter().position(|candidate| *candidate == self)?;
+        Some(NeuronId(ACTION_NEURON_ID_BASE + idx as u32))
+    }
+
+    pub fn from_neuron_id(id: NeuronId) -> Option<Self> {
+        let idx = id.0.checked_sub(ACTION_NEURON_ID_BASE)? as usize;
+        Self::ALL.get(idx).copied()
+    }
 }
 
 impl Default for ActionType {
@@ -133,12 +146,54 @@ pub enum SensoryReceptor {
 
 impl SensoryReceptor {
     /// Fixed relative ray offsets around facing direction.
-    pub const LOOK_RAY_OFFSETS: [i8; 1] = [0];
+    pub const LOOK_RAY_OFFSETS: [i8; 3] = [-1, 0, 1];
+    /// Entity classes available to look-ray sensors.
+    pub const LOOK_TARGETS: [EntityType; 4] = [
+        EntityType::Food,
+        EntityType::Organism,
+        EntityType::Wall,
+        EntityType::Spikes,
+    ];
     /// Number of entity classes available to look-ray sensors.
-    pub const LOOK_TARGET_COUNT: u32 = 4;
+    pub const LOOK_TARGET_COUNT: u32 = Self::LOOK_TARGETS.len() as u32;
     /// Number of look-based sensory neurons (ray count x object type count).
     pub const LOOK_NEURON_COUNT: u32 =
         (Self::LOOK_RAY_OFFSETS.len() as u32) * Self::LOOK_TARGET_COUNT;
+
+    pub fn ordered() -> impl Iterator<Item = Self> {
+        Self::LOOK_RAY_OFFSETS
+            .into_iter()
+            .flat_map(|ray_offset| {
+                Self::LOOK_TARGETS
+                    .into_iter()
+                    .map(move |look_target| Self::LookRay {
+                        ray_offset,
+                        look_target,
+                    })
+            })
+            .chain([Self::ContactAhead, Self::Damage, Self::Energy])
+    }
+
+    pub fn current_index(self) -> Option<usize> {
+        Self::ordered().position(|candidate| candidate == self)
+    }
+
+    pub fn neuron_id(self) -> Option<NeuronId> {
+        self.current_index().map(|idx| NeuronId(idx as u32))
+    }
+
+    pub fn from_neuron_id(id: NeuronId) -> Option<Self> {
+        Self::ordered().nth(id.0 as usize)
+    }
+}
+
+pub fn inter_neuron_id(index: u32) -> NeuronId {
+    NeuronId(INTER_NEURON_ID_BASE + index)
+}
+
+pub fn inter_neuron_index(id: NeuronId, num_neurons: u32) -> Option<u32> {
+    let idx = id.0.checked_sub(INTER_NEURON_ID_BASE)?;
+    (idx < num_neurons).then_some(idx)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
