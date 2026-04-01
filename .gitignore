@@ -2,6 +2,8 @@
 web-client/node_modules/
 web-client/dist/
 .DS_Store
+.claude/
+.vscode/
 sim-server/worlds/
 artifacts/
 .autoresearch_archive/
