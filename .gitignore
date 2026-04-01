@@ -4,6 +4,7 @@ web-client/dist/
 .DS_Store
 .claude/
 .vscode/
+sim-server/champion_pool.json
 sim-server/worlds/
 artifacts/
 .autoresearch_archive/
