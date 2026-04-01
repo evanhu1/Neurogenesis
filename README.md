@@ -1,11 +1,17 @@
+<div align="center">
+
 # Neurogenesis
 
-Neurogenesis is a neuroevolution artificial-life simulation built in Rust.
+<p><strong>Neuroevolution artificial-life simulation built in Rust</strong></p>
 
-The goal is to achieve open-ended evolution of cognition, from basic
-sensory-motor reactions (see food ahead, move forward), to complex intelligent
-behavior (internal states, memory, navigation, predation), by evolving creatures
-in a 2D world.
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/evanhu1/Neurogenesis)
+
+</div>
+
+The goal of this project is to achieve open-ended evolution of cognition, from
+basic sensory-motor reactions (see food ahead, move forward), to complex
+intelligent behavior (internal states, memory, navigation, predation), by
+evolving creatures in a 2D world.
 
 The main challenge is creating an evolutionary curriculum that scales
 environment complexity with cognitive evolution while avoiding convergence to
