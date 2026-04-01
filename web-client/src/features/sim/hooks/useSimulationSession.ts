@@ -4,6 +4,7 @@ import {
   normalizeChampionPoolResponse,
   normalizeCreateSessionResponse,
   normalizeFocusBrainData,
+  normalizeLiveMetricsData,
   normalizeTickDelta,
   normalizeWorldSnapshot,
 } from '../../../protocol';
@@ -13,9 +14,11 @@ import type {
   ApiServerEvent,
   ApiWorldSnapshot,
   ChampionPoolEntry,
+  LiveMetricsData,
   OrganismState,
   SessionMetadata,
   StepProgressData,
+  StreamMode,
   WorldOrganismState,
   WorldSnapshot,
 } from '../../../types';
@@ -97,6 +100,7 @@ function upsertSpeciesPopulationHistory(
 export type SimulationSessionState = {
   session: SessionMetadata | null;
   snapshot: WorldSnapshot | null;
+  liveMetrics: LiveMetricsData | null;
   championPool: ChampionPoolEntry[];
   speciesPopulationHistory: SpeciesPopulationPoint[];
   focusedOrganismId: number | null;
@@ -107,10 +111,13 @@ export type SimulationSessionState = {
   stepProgress: StepProgressData | null;
   speedLevels: readonly number[];
   speedLevelIndex: number;
+  streamMode: StreamMode;
+  isFastMode: boolean;
   errorText: string | null;
   createSession: (seedInput?: string) => Promise<void>;
   saveChampions: () => Promise<void>;
   toggleRun: () => void;
+  toggleFastRun: () => void;
   setSpeedLevelIndex: (levelIndex: number) => void;
   step: (count: number) => void;
   focusOrganism: (organism: WorldOrganismState) => void;
@@ -141,9 +148,17 @@ function parseSessionSeedInput(seedInput?: string): { seed: number | null; error
   return { seed: parsed, error: null };
 }
 
+function liveMetricsFromSnapshot(snapshot: WorldSnapshot): LiveMetricsData {
+  return {
+    turn: snapshot.turn,
+    metrics: snapshot.metrics,
+  };
+}
+
 export function useSimulationSession(): SimulationSessionState {
   const [session, setSession] = useState<SessionMetadata | null>(null);
   const [snapshot, setSnapshot] = useState<WorldSnapshot | null>(null);
+  const [liveMetrics, setLiveMetrics] = useState<LiveMetricsData | null>(null);
   const [speciesPopulationHistory, setSpeciesPopulationHistory] = useState<
     SpeciesPopulationPoint[]
   >([]);
@@ -151,9 +166,11 @@ export function useSimulationSession(): SimulationSessionState {
   const [errorText, setErrorText] = useState<string | null>(null);
   const latestSnapshotTurnRef = useRef<number>(NO_FOCUS_TURN);
   const snapshotRef = useRef<WorldSnapshot | null>(snapshot);
+  const liveMetricsRef = useRef<LiveMetricsData | null>(liveMetrics);
   const request = useMemo(() => createSimHttpClient(apiBase), []);
   const sendCommandRef = useRef<(command: unknown) => boolean>(() => false);
   snapshotRef.current = snapshot;
+  liveMetricsRef.current = liveMetrics;
   const sendCommand = useCallback((command: unknown): boolean => {
     return sendCommandRef.current(command);
   }, []);
@@ -164,11 +181,13 @@ export function useSimulationSession(): SimulationSessionState {
     stepProgress,
     speedLevels,
     speedLevelIndex,
+    streamMode,
     clearPendingStep,
     handleSocketClose,
     handleStepProgress,
     syncSessionState,
     toggleRun,
+    toggleFastRun,
     setSpeedLevelIndex,
     step,
   } = useSimulationControls(sendCommand);
@@ -188,7 +207,9 @@ export function useSimulationSession(): SimulationSessionState {
     (event: ApiServerEvent) => {
       switch (event.type) {
         case 'StateSnapshot': {
-          const nextSnapshot = normalizeWorldSnapshot(event.data);
+          const previousTotalSpeciesCreated =
+            liveMetricsRef.current?.metrics.total_species_created ?? 0;
+          const nextSnapshot = normalizeWorldSnapshot(event.data, previousTotalSpeciesCreated);
           if (nextSnapshot.turn <= latestSnapshotTurnRef.current) {
             break;
           }
@@ -196,6 +217,7 @@ export function useSimulationSession(): SimulationSessionState {
           snapshotRef.current = nextSnapshot;
           clearPendingStep();
           setSnapshot(nextSnapshot);
+          setLiveMetrics(liveMetricsFromSnapshot(nextSnapshot));
           setSpeciesPopulationHistory((previous) =>
             upsertSpeciesPopulationHistory(previous, {
               turn: nextSnapshot.turn,
@@ -219,6 +241,7 @@ export function useSimulationSession(): SimulationSessionState {
           const nextSnapshot = applyTickDelta(previousSnapshot, delta);
           snapshotRef.current = nextSnapshot;
           setSnapshot(nextSnapshot);
+          setLiveMetrics(liveMetricsFromSnapshot(nextSnapshot));
           setSpeciesPopulationHistory((previous) =>
             upsertSpeciesPopulationHistory(previous, {
               turn: nextSnapshot.turn,
@@ -248,6 +271,21 @@ export function useSimulationSession(): SimulationSessionState {
           break;
         }
         case 'Metrics': {
+          clearPendingStep();
+          setLiveMetrics((previous) => {
+            const nextMetrics = normalizeLiveMetricsData(
+              event.data,
+              previous?.metrics.total_species_created ?? 0,
+            );
+            setSpeciesPopulationHistory((history) =>
+              upsertSpeciesPopulationHistory(history, {
+                turn: nextMetrics.turn,
+                speciesCounts: cloneSpeciesCounts(nextMetrics.metrics.species_counts),
+              }),
+            );
+            latestSnapshotTurnRef.current = Math.max(latestSnapshotTurnRef.current, nextMetrics.turn);
+            return nextMetrics;
+          });
           break;
         }
         case 'Error': {
@@ -283,8 +321,9 @@ export function useSimulationSession(): SimulationSessionState {
       latestSnapshotTurnRef.current = loadedSnapshot.turn;
       snapshotRef.current = loadedSnapshot;
       setSnapshot(loadedSnapshot);
+      setLiveMetrics(liveMetricsFromSnapshot(loadedSnapshot));
       resetFocusState(true);
-      syncSessionState(metadata.running, metadata.ticks_per_second);
+      syncSessionState(metadata.running, metadata.ticks_per_second, metadata.stream_mode);
       setSpeciesPopulationHistory([
         {
           turn: loadedSnapshot.turn,
@@ -416,6 +455,7 @@ export function useSimulationSession(): SimulationSessionState {
   return {
     session,
     snapshot,
+    liveMetrics,
     championPool,
     speciesPopulationHistory,
     focusedOrganismId,
@@ -426,10 +466,13 @@ export function useSimulationSession(): SimulationSessionState {
     stepProgress,
     speedLevels,
     speedLevelIndex,
+    streamMode,
+    isFastMode: isRunning && streamMode === 'metrics_only',
     errorText,
     createSession,
     saveChampions,
     toggleRun,
+    toggleFastRun,
     setSpeedLevelIndex,
     step,
     focusOrganism,

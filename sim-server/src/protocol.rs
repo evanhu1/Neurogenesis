@@ -4,7 +4,16 @@ use sim_types::{
     OrganismGenome, OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId,
     TerrainCell, TickDelta, WorldConfig, WorldSnapshot,
 };
+use std::collections::BTreeMap;
 use uuid::Uuid;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamMode {
+    #[default]
+    Full,
+    MetricsOnly,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionMetadata {
@@ -13,6 +22,8 @@ pub struct SessionMetadata {
     pub config: WorldConfig,
     pub running: bool,
     pub ticks_per_second: u32,
+    #[serde(default)]
+    pub stream_mode: StreamMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -62,7 +73,11 @@ pub struct ApiError {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data")]
 pub enum ClientCommand {
-    Start { ticks_per_second: u32 },
+    Start {
+        ticks_per_second: u32,
+        #[serde(default)]
+        stream_mode: StreamMode,
+    },
     Pause,
     Step { count: u32 },
     SetFocus { organism_id: OrganismId },
@@ -79,6 +94,13 @@ pub struct FocusBrainData {
 pub struct StepProgressData {
     pub requested_count: u32,
     pub completed_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LiveMetricsData {
+    pub turn: u64,
+    pub metrics: MetricsSnapshot,
+    pub species_counts: BTreeMap<String, u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -181,6 +203,6 @@ pub enum ServerEvent {
     TickDelta(TickDeltaView),
     StepProgress(StepProgressData),
     FocusBrain(FocusBrainData),
-    Metrics(MetricsSnapshot),
+    Metrics(LiveMetricsData),
     Error(ApiError),
 }

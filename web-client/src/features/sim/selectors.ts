@@ -1,4 +1,4 @@
-import type { OrganismState, SessionMetadata, WorldSnapshot } from '../../types';
+import type { LiveMetricsData, OrganismState, SessionMetadata } from '../../types';
 
 export function formatSessionMeta(session: SessionMetadata | null): string {
   if (!session) return 'No session';
@@ -7,25 +7,25 @@ export function formatSessionMeta(session: SessionMetadata | null): string {
     `created=${new Date(session.created_at_unix_ms).toISOString()}`,
     `running=${session.running}`,
     `ticks_per_second=${session.ticks_per_second}`,
+    `stream_mode=${session.stream_mode}`,
   ].join('\n');
 }
 
-export function formatMetrics(snapshot: WorldSnapshot | null): string {
-  if (!snapshot) return 'No metrics';
-  const speciesAlive = Object.keys(snapshot.metrics.species_counts).length;
+export function formatRuntimeMetrics(liveMetrics: LiveMetricsData | null): string {
+  if (!liveMetrics) return 'No metrics';
+  const speciesAlive = Object.keys(liveMetrics.metrics.species_counts).length;
   return [
-    `turn=${snapshot.turn}`,
-    `organisms=${snapshot.metrics.organisms}`,
+    `turn=${liveMetrics.turn}`,
+    `organisms=${liveMetrics.metrics.organisms}`,
     `species_alive=${speciesAlive}`,
-    `total_species_created=${snapshot.metrics.total_species_created}`,
-    `plants=${snapshot.foods.length}`,
-    `consumptions_last_turn=${snapshot.metrics.consumptions_last_turn}`,
-    `predations_last_turn=${snapshot.metrics.predations_last_turn ?? 0}`,
-    `total_plants_eaten=${snapshot.metrics.total_consumptions}`,
-    `reproductions_last_turn=${snapshot.metrics.reproductions_last_turn}`,
-    `starvations_last_turn=${snapshot.metrics.starvations_last_turn}`,
-    `synapse_ops_last_turn=${snapshot.metrics.synapse_ops_last_turn}`,
-    `actions_last_turn=${snapshot.metrics.actions_applied_last_turn}`,
+    `total_species_created=${liveMetrics.metrics.total_species_created}`,
+    `consumptions_last_turn=${liveMetrics.metrics.consumptions_last_turn}`,
+    `predations_last_turn=${liveMetrics.metrics.predations_last_turn ?? 0}`,
+    `total_plants_eaten=${liveMetrics.metrics.total_consumptions}`,
+    `reproductions_last_turn=${liveMetrics.metrics.reproductions_last_turn}`,
+    `starvations_last_turn=${liveMetrics.metrics.starvations_last_turn}`,
+    `synapse_ops_last_turn=${liveMetrics.metrics.synapse_ops_last_turn}`,
+    `actions_last_turn=${liveMetrics.metrics.actions_applied_last_turn}`,
   ].join('\n');
 }
 

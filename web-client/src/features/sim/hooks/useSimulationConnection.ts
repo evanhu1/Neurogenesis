@@ -16,15 +16,16 @@ export function useSimulationConnection({
 
   const connectWs = useCallback(
     (sessionId: string) => {
-      wsRef.current?.close();
+      const previousSocket = wsRef.current;
+      previousSocket?.close();
       let nextSocket: WebSocket;
       nextSocket = connectSimulationWs(
         wsBase,
         sessionId,
         onServerEvent,
         () => {
-          onSocketClose();
           if (wsRef.current === nextSocket) {
+            onSocketClose();
             wsRef.current = null;
           }
         },

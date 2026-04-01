@@ -5,6 +5,7 @@ import type {
   ApiEntityId,
   ApiFocusBrainData,
   ApiFoodState,
+  ApiLiveMetricsData,
   ApiMetricsSnapshot,
   ApiOccupancyCell,
   ApiTerrainCell,
@@ -23,6 +24,7 @@ import type {
   FoodId,
   FoodState,
   FocusBrainData,
+  LiveMetricsData,
   MetricsSnapshot,
   NeuronId,
   NeuronState,
@@ -305,6 +307,24 @@ export function normalizeCreateSessionResponse(response: ApiCreateSessionRespons
   return {
     metadata: response.metadata,
     snapshot: normalizeWorldSnapshot(response.snapshot),
+  };
+}
+
+export function normalizeLiveMetricsData(
+  data: ApiLiveMetricsData,
+  previousTotalSpeciesCreated = 0,
+): LiveMetricsData {
+  const species_counts = { ...data.species_counts };
+  return {
+    turn: data.turn,
+    metrics: {
+      ...data.metrics,
+      species_counts,
+      total_species_created: Math.max(
+        previousTotalSpeciesCreated,
+        Object.keys(species_counts).length,
+      ),
+    },
   };
 }
 

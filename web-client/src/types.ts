@@ -327,6 +327,8 @@ export type MetricsSnapshot = ApiMetricsSnapshot & {
   species_counts: Record<string, number>;
 };
 
+export type StreamMode = 'full' | 'metrics_only';
+
 export type ApiOccupant =
   | { type: 'Organism'; id: ApiOrganismId }
   | { type: 'Food'; id: ApiFoodId }
@@ -389,6 +391,7 @@ export type ApiSessionMetadata = {
   config: WorldConfig;
   running: boolean;
   ticks_per_second: number;
+  stream_mode: StreamMode;
 };
 
 export type SessionMetadata = ApiSessionMetadata;
@@ -486,6 +489,17 @@ export type ApiStepProgressData = {
 
 export type StepProgressData = ApiStepProgressData;
 
+export type ApiLiveMetricsData = {
+  turn: number;
+  metrics: ApiMetricsSnapshot;
+  species_counts: Record<string, number>;
+};
+
+export type LiveMetricsData = {
+  turn: number;
+  metrics: MetricsSnapshot;
+};
+
 export type ApiFocusBrainData = {
   turn: number;
   organism: ApiOrganismState;
@@ -508,7 +522,7 @@ export type ApiServerEvent =
   | { type: 'TickDelta'; data: ApiTickDelta }
   | { type: 'StepProgress'; data: ApiStepProgressData }
   | { type: 'FocusBrain'; data: ApiFocusBrainData }
-  | { type: 'Metrics'; data: ApiMetricsSnapshot }
+  | { type: 'Metrics'; data: ApiLiveMetricsData }
   | { type: 'Error'; data: ApiErrorData };
 
 export type ServerEvent = ApiServerEvent;

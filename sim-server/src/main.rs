@@ -11,15 +11,16 @@ use sim_server::{
     load_default_world_config,
     protocol::{
         ApiError, ChampionPoolEntry, ChampionPoolResponse, ClientCommand, CountRequest,
-        CreateSessionRequest, CreateSessionResponse, FocusBrainData, FocusRequest, ServerEvent,
-        SessionMetadata, StepProgressData, WorldSnapshotView,
+        CreateSessionRequest, CreateSessionResponse, FocusBrainData, FocusRequest,
+        LiveMetricsData, ServerEvent, SessionMetadata, StepProgressData, StreamMode,
+        WorldSnapshotView,
     },
 };
 use sim_types::{
     inter_neuron_id, inter_neuron_index, ActionType, BrainLocation, NeuronId, OrganismGenome,
-    OrganismState, SensoryReceptor, SynapseEdge, WorldSnapshot,
+    OrganismState, SensoryReceptor, SpeciesId, SynapseEdge, WorldSnapshot,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock as StdRwLock};
@@ -48,6 +49,7 @@ struct Session {
 struct RuntimeState {
     running: bool,
     ticks_per_second: u32,
+    stream_mode: StreamMode,
     runner: Option<JoinHandle<()>>,
 }
 
@@ -158,6 +160,7 @@ const STEP_PROGRESS_MIN_BATCH_SIZE: u32 = 32;
 const STEP_PROGRESS_MAX_BATCH_SIZE: u32 = 2_048;
 const STEP_PROGRESS_TARGET_UPDATES: u32 = 64;
 const UNBOUNDED_TICKS_PER_SECOND: u32 = 0;
+const METRICS_ONLY_STREAM_INTERVAL_TICKS: u32 = 100;
 
 fn step_batch_size(total_count: u32) -> u32 {
     let target = (total_count / STEP_PROGRESS_TARGET_BATCHES).max(1);
@@ -189,6 +192,25 @@ fn load_runtime_default_world_config() -> Result<sim_types::WorldConfig, AppErro
             sim_server::default_world_config_path().display()
         ))
     })
+}
+
+fn build_species_counts(organisms: &[OrganismState]) -> BTreeMap<String, u32> {
+    let mut counts = BTreeMap::<SpeciesId, u32>::new();
+    for organism in organisms {
+        *counts.entry(organism.species_id).or_default() += 1;
+    }
+    counts
+        .into_iter()
+        .map(|(species_id, count)| (species_id.0.to_string(), count))
+        .collect()
+}
+
+fn build_live_metrics_data(simulation: &Simulation) -> LiveMetricsData {
+    LiveMetricsData {
+        turn: simulation.turn(),
+        metrics: simulation.metrics().clone(),
+        species_counts: build_species_counts(simulation.organisms()),
+    }
 }
 
 fn compare_champion_records(
@@ -817,6 +839,7 @@ async fn create_runtime_session(
         config: simulation.config().clone(),
         running: false,
         ticks_per_second,
+        stream_mode: StreamMode::Full,
     };
 
     let (events_tx, _events_rx) = broadcast::channel(1024);
@@ -827,6 +850,7 @@ async fn create_runtime_session(
         runtime: Mutex::new(RuntimeState {
             running: false,
             ticks_per_second,
+            stream_mode: StreamMode::Full,
             runner: None,
         }),
     });
@@ -849,6 +873,7 @@ async fn get_session_metadata(
     let runtime = session.runtime.lock().await;
     metadata.running = runtime.running;
     metadata.ticks_per_second = runtime.ticks_per_second;
+    metadata.stream_mode = runtime.stream_mode;
     Ok(Json(metadata))
 }
 
@@ -943,7 +968,11 @@ async fn socket_loop(socket: WebSocket, session: Arc<Session>) {
 
     {
         let sim = session.simulation.lock().await;
-        let event = ServerEvent::StateSnapshot(sim.snapshot().into());
+        let runtime = session.runtime.lock().await;
+        let event = match runtime.stream_mode {
+            StreamMode::Full => ServerEvent::StateSnapshot(sim.snapshot().into()),
+            StreamMode::MetricsOnly => ServerEvent::Metrics(build_live_metrics_data(&sim)),
+        };
         if let Ok(text) = serde_json::to_string(&event) {
             if sender.send(Message::Text(text.into())).await.is_err() {
                 return;
@@ -958,11 +987,17 @@ async fn socket_loop(socket: WebSocket, session: Arc<Session>) {
                 Ok(event) => event,
                 Err(RecvError::Lagged(skipped)) => {
                     error!("ws receiver lagged by {skipped} events; sending state snapshot");
-                    let snapshot_event = {
+                    let refresh_event = {
                         let sim = session_for_send.simulation.lock().await;
-                        ServerEvent::StateSnapshot(sim.snapshot().into())
+                        let runtime = session_for_send.runtime.lock().await;
+                        match runtime.stream_mode {
+                            StreamMode::Full => ServerEvent::StateSnapshot(sim.snapshot().into()),
+                            StreamMode::MetricsOnly => {
+                                ServerEvent::Metrics(build_live_metrics_data(&sim))
+                            }
+                        }
                     };
-                    if send_ws_event(&mut sender, &snapshot_event).await.is_err() {
+                    if send_ws_event(&mut sender, &refresh_event).await.is_err() {
                         break;
                     }
                     continue;
@@ -1013,8 +1048,11 @@ async fn socket_loop(socket: WebSocket, session: Arc<Session>) {
 
 async fn handle_command(command: ClientCommand, session: Arc<Session>) -> Result<(), String> {
     match command {
-        ClientCommand::Start { ticks_per_second } => {
-            session_start(session, ticks_per_second).await;
+        ClientCommand::Start {
+            ticks_per_second,
+            stream_mode,
+        } => {
+            session_start(session, ticks_per_second, stream_mode).await;
             Ok(())
         }
         ClientCommand::Pause => {
@@ -1075,9 +1113,10 @@ async fn handle_command(command: ClientCommand, session: Arc<Session>) -> Result
     }
 }
 
-async fn session_start(session: Arc<Session>, ticks_per_second: u32) {
+async fn session_start(session: Arc<Session>, ticks_per_second: u32, stream_mode: StreamMode) {
     let mut runtime = session.runtime.lock().await;
     runtime.ticks_per_second = ticks_per_second;
+    runtime.stream_mode = stream_mode;
 
     if runtime.running {
         return;
@@ -1087,23 +1126,35 @@ async fn session_start(session: Arc<Session>, ticks_per_second: u32) {
     let session_for_task = session.clone();
     runtime.runner = Some(tokio::spawn(async move {
         loop {
-            let tps = {
+            let (tps, stream_mode) = {
                 let rt = session_for_task.runtime.lock().await;
                 if !rt.running {
                     break;
                 }
-                rt.ticks_per_second
+                (rt.ticks_per_second, rt.stream_mode)
             };
 
-            let delta = {
-                let mut sim = session_for_task.simulation.lock().await;
-                sim.step_n(1).into_iter().next()
-            };
+            match stream_mode {
+                StreamMode::Full => {
+                    let delta = {
+                        let mut sim = session_for_task.simulation.lock().await;
+                        sim.step_n(1).into_iter().next()
+                    };
 
-            if let Some(delta) = delta {
-                let _ = session_for_task
-                    .events
-                    .send(ServerEvent::TickDelta(delta.into()));
+                    if let Some(delta) = delta {
+                        let _ = session_for_task
+                            .events
+                            .send(ServerEvent::TickDelta(delta.into()));
+                    }
+                }
+                StreamMode::MetricsOnly => {
+                    let metrics = {
+                        let mut sim = session_for_task.simulation.lock().await;
+                        sim.advance_n(METRICS_ONLY_STREAM_INTERVAL_TICKS);
+                        build_live_metrics_data(&sim)
+                    };
+                    let _ = session_for_task.events.send(ServerEvent::Metrics(metrics));
+                }
             }
 
             if tps > 0 {

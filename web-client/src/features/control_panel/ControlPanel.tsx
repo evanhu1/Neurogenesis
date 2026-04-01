@@ -1,5 +1,11 @@
 import { useCallback, useRef, type MutableRefObject } from 'react';
-import type { ChampionPoolEntry, StepProgressData, WorldOrganismState, WorldSnapshot } from '../../types';
+import type {
+  ChampionPoolEntry,
+  StepProgressData,
+  StreamMode,
+  WorldOrganismState,
+  WorldSnapshot,
+} from '../../types';
 import type { SpeciesPopulationPoint } from '../sim/hooks/useSimulationSession';
 import { ChampionPoolPanel } from './ChampionPoolPanel';
 import { SessionOverviewPanel } from './SessionOverviewPanel';
@@ -8,12 +14,12 @@ import { SpeciesPopulationChart } from './SpeciesPopulationChart';
 
 type ControlPanelProps = {
   overview: {
-    sessionMeta: string;
     metricsText: string;
   };
   species: {
     history: SpeciesPopulationPoint[];
     focusedSpeciesId: number | null;
+    isFastMode: boolean;
     snapshot: WorldSnapshot | null;
     onFocusOrganism: (organism: WorldOrganismState) => void;
     panToHexRef: MutableRefObject<((q: number, r: number) => void) | null>;
@@ -30,9 +36,12 @@ type ControlPanelProps = {
     stepProgress: StepProgressData | null;
     speedLevelIndex: number;
     speedLevelCount: number;
+    streamMode: StreamMode;
+    isFastMode: boolean;
     onNewSession: (seedInput: string) => void;
     onSaveChampions: () => void;
     onToggleRun: () => void;
+    onToggleFastRun: () => void;
     onSpeedLevelChange: (levelIndex: number) => void;
     onStep: (count: number) => void;
   };
@@ -50,6 +59,7 @@ export function ControlPanel({
 
   const onSpeciesClick = useCallback(
     (speciesId: number) => {
+      if (species.isFastMode) return;
       if (!species.snapshot) return;
       const candidates = species.snapshot.organisms
         .filter((organism) => organism.species_id === speciesId)
@@ -71,7 +81,7 @@ export function ControlPanel({
 
   return (
     <aside className="h-full overflow-auto rounded-2xl border border-accent/15 bg-panel/95 p-4 shadow-panel">
-      <SessionOverviewPanel sessionMeta={overview.sessionMeta} metricsText={overview.metricsText} />
+      <SessionOverviewPanel metricsText={overview.metricsText} />
 
       <h3 className="mt-3 text-sm font-semibold uppercase tracking-wide text-ink/80">
         Species Population
@@ -89,9 +99,12 @@ export function ControlPanel({
         stepProgress={controls.stepProgress}
         speedLevelIndex={controls.speedLevelIndex}
         speedLevelCount={controls.speedLevelCount}
+        streamMode={controls.streamMode}
+        isFastMode={controls.isFastMode}
         onNewSession={controls.onNewSession}
         onSaveChampions={controls.onSaveChampions}
         onToggleRun={controls.onToggleRun}
+        onToggleFastRun={controls.onToggleFastRun}
         onSpeedLevelChange={controls.onSpeedLevelChange}
         onStep={controls.onStep}
       />

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react';
-import type { StepProgressData, WorldSnapshot } from '../../types';
+import type { StepProgressData, StreamMode, WorldSnapshot } from '../../types';
 import { ControlButton } from './ControlButton';
 
 type SimulationControlsPanelProps = {
@@ -9,9 +9,12 @@ type SimulationControlsPanelProps = {
   stepProgress: StepProgressData | null;
   speedLevelIndex: number;
   speedLevelCount: number;
+  streamMode: StreamMode;
+  isFastMode: boolean;
   onNewSession: (seedInput: string) => void;
   onSaveChampions: () => void;
   onToggleRun: () => void;
+  onToggleFastRun: () => void;
   onSpeedLevelChange: (levelIndex: number) => void;
   onStep: (count: number) => void;
 };
@@ -23,9 +26,12 @@ export function SimulationControlsPanel({
   stepProgress,
   speedLevelIndex,
   speedLevelCount,
+  streamMode,
+  isFastMode,
   onNewSession,
   onSaveChampions,
   onToggleRun,
+  onToggleFastRun,
   onSpeedLevelChange,
   onStep,
 }: SimulationControlsPanelProps) {
@@ -76,9 +82,14 @@ export function SimulationControlsPanel({
       <div className="mt-3 flex flex-wrap gap-2">
         <ControlButton label="New Session" onClick={() => onNewSession(seedInput)} />
         <ControlButton label="Save Champions" onClick={onSaveChampions} disabled={!snapshot} />
+        <ControlButton
+          label={isFastMode ? 'Stop Fast' : 'Fast Run'}
+          onClick={onToggleFastRun}
+          disabled={isStepPending}
+        />
         <div className="flex w-full items-center gap-2 rounded-lg bg-white/70 px-2 py-1">
           <ControlButton
-            label={isRunning ? 'Stop' : 'Start'}
+            label={isRunning && streamMode === 'full' ? 'Stop' : 'Start'}
             onClick={onToggleRun}
             disabled={isStepPending}
           />
@@ -93,7 +104,8 @@ export function SimulationControlsPanel({
             step={1}
             value={speedLevelIndex}
             onChange={handleSpeedLevelInput}
-            className="h-1.5 min-w-0 flex-1 cursor-pointer accent-accent"
+            disabled={isFastMode}
+            className="h-1.5 min-w-0 flex-1 cursor-pointer accent-accent disabled:cursor-not-allowed disabled:opacity-50"
           />
           <span className="text-xs" role="img" aria-label="rabbit">
             🐇

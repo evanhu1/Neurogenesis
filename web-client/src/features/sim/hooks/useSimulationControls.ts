@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import type { StepProgressData } from '../../../types';
+import type { StepProgressData, StreamMode } from '../../../types';
 import { SPEED_LEVELS } from '../constants';
 
 const DEFAULT_SPEED_LEVEL_INDEX = 1;
@@ -29,6 +29,7 @@ export function useSimulationControls(sendCommand: (command: unknown) => boolean
   const [isStepPending, setIsStepPending] = useState(false);
   const [stepProgress, setStepProgress] = useState<StepProgressData | null>(null);
   const [speedLevelIndex, setSpeedLevelIndex] = useState(DEFAULT_SPEED_LEVEL_INDEX);
+  const [streamMode, setStreamMode] = useState<StreamMode>('full');
 
   const clearPendingStep = useCallback(() => {
     setIsStepPending(false);
@@ -46,10 +47,11 @@ export function useSimulationControls(sendCommand: (command: unknown) => boolean
   }, []);
 
   const syncSessionState = useCallback(
-    (running: boolean, ticksPerSecond: number) => {
+    (running: boolean, ticksPerSecond: number, nextStreamMode: StreamMode) => {
       setIsRunning(running);
       clearPendingStep();
       setSpeedLevelIndex(speedLevelIndexForTicksPerSecond(ticksPerSecond));
+      setStreamMode(nextStreamMode);
     },
     [clearPendingStep],
   );
@@ -58,21 +60,41 @@ export function useSimulationControls(sendCommand: (command: unknown) => boolean
     (levelIndex: number) => {
       const nextLevel = Math.max(0, Math.min(SPEED_LEVELS.length - 1, levelIndex));
       setSpeedLevelIndex(nextLevel);
-      if (isRunning) {
-        sendCommand({ type: 'Start', data: { ticks_per_second: SPEED_LEVELS[nextLevel] } });
+      if (isRunning && streamMode === 'full') {
+        sendCommand({
+          type: 'Start',
+          data: { ticks_per_second: SPEED_LEVELS[nextLevel], stream_mode: 'full' },
+        });
       }
     },
-    [isRunning, sendCommand],
+    [isRunning, sendCommand, streamMode],
   );
 
   const toggleRun = useCallback(() => {
-    setIsRunning((currentlyRunning) => {
-      const nextCommand = currentlyRunning
+    const nextCommand =
+      isRunning && streamMode === 'full'
         ? { type: 'Pause' }
-        : { type: 'Start', data: { ticks_per_second: SPEED_LEVELS[speedLevelIndex] } };
-      return sendCommand(nextCommand) ? !currentlyRunning : currentlyRunning;
-    });
-  }, [sendCommand, speedLevelIndex]);
+        : {
+            type: 'Start',
+            data: { ticks_per_second: SPEED_LEVELS[speedLevelIndex], stream_mode: 'full' },
+          };
+    if (!sendCommand(nextCommand)) return;
+    setIsRunning(!(isRunning && streamMode === 'full'));
+    setStreamMode('full');
+  }, [isRunning, sendCommand, speedLevelIndex, streamMode]);
+
+  const toggleFastRun = useCallback(() => {
+    const nextCommand =
+      isRunning && streamMode === 'metrics_only'
+        ? { type: 'Pause' }
+        : {
+            type: 'Start',
+            data: { ticks_per_second: 0, stream_mode: 'metrics_only' },
+          };
+    if (!sendCommand(nextCommand)) return;
+    setIsRunning(!(isRunning && streamMode === 'metrics_only'));
+    setStreamMode('metrics_only');
+  }, [isRunning, sendCommand, streamMode]);
 
   const step = useCallback(
     (count: number) => {
@@ -100,11 +122,13 @@ export function useSimulationControls(sendCommand: (command: unknown) => boolean
     stepProgress,
     speedLevels: SPEED_LEVELS,
     speedLevelIndex,
+    streamMode,
     clearPendingStep,
     handleSocketClose,
     handleStepProgress,
     syncSessionState,
     toggleRun,
+    toggleFastRun,
     setSpeedLevelIndex: setSpeedLevel,
     step,
   };

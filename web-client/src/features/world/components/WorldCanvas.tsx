@@ -20,6 +20,7 @@ import { useWorldViewport } from '../hooks/useWorldViewport';
 type WorldCanvasProps = {
   snapshot: WorldSnapshot | null;
   focusedOrganismId: number | null;
+  showFastOverlay?: boolean;
   onOrganismSelect: (organism: WorldOrganismState) => void;
   panToHexRef?: RefObject<((q: number, r: number) => void) | null>;
 };
@@ -27,6 +28,7 @@ type WorldCanvasProps = {
 export function WorldCanvas({
   snapshot,
   focusedOrganismId,
+  showFastOverlay = false,
   onOrganismSelect,
   panToHexRef,
 }: WorldCanvasProps) {
@@ -162,6 +164,7 @@ export function WorldCanvas({
     (evt: MouseEvent<HTMLCanvasElement>) => {
       if (consumeSuppressedClick()) return;
       if (isSpacePressed) return;
+      if (showFastOverlay) return;
       if (!showOrganismsRef.current) return;
 
       const activeSnapshot = snapshotRef.current;
@@ -183,7 +186,7 @@ export function WorldCanvas({
       if (!picked) return;
       onOrganismSelectRef.current(picked.organism);
     },
-    [consumeSuppressedClick, isSpacePressed, viewportRef],
+    [consumeSuppressedClick, isSpacePressed, showFastOverlay, viewportRef],
   );
 
   useEffect(() => {
@@ -273,6 +276,24 @@ export function WorldCanvas({
           <span>Plants</span>
         </label>
       </div>
+
+      {showFastOverlay ? (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-slate-950/42 backdrop-blur-[1px]">
+          <div className="flex flex-col items-center gap-3 rounded-2xl border border-white/15 bg-slate-950/45 px-6 py-5 text-white shadow-2xl">
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              className="h-12 w-12 fill-current opacity-95"
+            >
+              <path d="M4 5.5v13l8-6.5-8-6.5Z" />
+              <path d="M12 5.5v13l8-6.5-8-6.5Z" />
+            </svg>
+            <div className="text-xs font-semibold uppercase tracking-[0.28em] text-white/80">
+              Fast Run
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
