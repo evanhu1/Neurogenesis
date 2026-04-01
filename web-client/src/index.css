@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -11,6 +11,39 @@
   }
   .scrollbar-none::-webkit-scrollbar {
     display: none;
+  }
+}
+
+@layer base {
+  ::selection {
+    background: rgba(56, 189, 248, 0.25);
+  }
+
+  input[type='range'] {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+  }
+
+  input[type='range']::-webkit-slider-track {
+    height: 3px;
+    border-radius: 2px;
+    background: #334155;
+  }
+
+  input[type='range']::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #38bdf8;
+    margin-top: -5px;
+    cursor: pointer;
+  }
+
+  input[type='range']:disabled::-webkit-slider-thumb {
+    background: #475569;
+    cursor: not-allowed;
   }
 }
 

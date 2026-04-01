@@ -80,10 +80,10 @@ export function ControlPanel({
   );
 
   return (
-    <aside className="h-full overflow-auto rounded-2xl border border-accent/15 bg-panel/95 p-4 shadow-panel">
+    <aside className="h-full overflow-auto rounded-xl bg-panel p-3">
       <SessionOverviewPanel metricsText={overview.metricsText} />
 
-      <h3 className="mt-3 text-sm font-semibold uppercase tracking-wide text-ink/80">
+      <h3 className="mt-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-ink/40">
         Species Population
       </h3>
       <SpeciesPopulationChart
@@ -110,7 +110,7 @@ export function ControlPanel({
       />
 
       {errorText ? (
-        <div className="mt-3 rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 font-mono text-xs text-rose-700">
+        <div className="mt-2 rounded bg-rose-500/10 px-2 py-1.5 font-mono text-[11px] text-rose-400">
           {errorText}
         </div>
       ) : null}

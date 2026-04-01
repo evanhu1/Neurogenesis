@@ -247,7 +247,7 @@ export function SpeciesPopulationChart({
 
   if (!chartData) {
     return (
-      <div className="mt-2 rounded-xl bg-slate-100/80 p-3 font-mono text-xs text-ink/70">
+      <div className="mt-1 font-mono text-[11px] text-ink/25">
         No species population history yet
       </div>
     );
@@ -256,7 +256,7 @@ export function SpeciesPopulationChart({
   const { displayPoints, series, maxCount, turnStart, turnEnd } = chartData;
 
   const chartWidth = 300;
-  const chartHeight = 180;
+  const chartHeight = 240;
   const padLeft = 36;
   const padRight = 12;
   const padTop = 10;
@@ -266,15 +266,15 @@ export function SpeciesPopulationChart({
   const turnSpan = Math.max(1, turnEnd - turnStart);
 
   return (
-    <div className="mt-2 rounded-xl bg-slate-100/80 p-3">
-      <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="h-44 w-full rounded-lg bg-white/70">
+    <div className="mt-1">
+      <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="h-60 w-full rounded bg-surface/40">
         <title>Species population over turns</title>
         <line
           x1={padLeft}
           y1={padTop}
           x2={padLeft}
           y2={chartHeight - padBottom}
-          stroke="#94a3b8"
+          stroke="#334155"
           strokeWidth={1}
         />
         <line
@@ -282,7 +282,7 @@ export function SpeciesPopulationChart({
           y1={chartHeight - padBottom}
           x2={chartWidth - padRight}
           y2={chartHeight - padBottom}
-          stroke="#94a3b8"
+          stroke="#334155"
           strokeWidth={1}
         />
         {series.map((item) => {
@@ -310,13 +310,13 @@ export function SpeciesPopulationChart({
             />
           );
         })}
-        <text x={4} y={padTop + 8} className="fill-slate-500 text-[10px] font-mono">
+        <text x={4} y={padTop + 8} className="fill-slate-400 text-[10px] font-mono">
           {maxCount}
         </text>
         <text
           x={padLeft}
           y={chartHeight - 6}
-          className="fill-slate-500 text-[10px] font-mono"
+          className="fill-slate-400 text-[10px] font-mono"
           textAnchor="start"
         >
           {turnStart}
@@ -324,13 +324,13 @@ export function SpeciesPopulationChart({
         <text
           x={chartWidth - padRight}
           y={chartHeight - 6}
-          className="fill-slate-500 text-[10px] font-mono"
+          className="fill-slate-400 text-[10px] font-mono"
           textAnchor="end"
         >
           {turnEnd}
         </text>
       </svg>
-      <div className="mt-2 flex gap-2 overflow-x-auto scrollbar-none font-mono text-[11px] text-ink/80">
+      <div className="mt-1.5 flex gap-1.5 overflow-x-auto scrollbar-none font-mono text-[11px] text-ink/70">
         {series
           .slice()
           .sort((a, b) => b.latestCount - a.latestCount)
@@ -340,8 +340,8 @@ export function SpeciesPopulationChart({
               onClick={() => {
                 onSpeciesSeriesClick(item.id);
               }}
-              className={`flex shrink-0 items-center gap-1 rounded bg-white/70 px-2 py-1 transition hover:bg-slate-200 ${
-                item.id === focusedSpeciesId ? 'ring-1 ring-ink/40' : ''
+              className={`flex shrink-0 items-center gap-1 rounded bg-surface/50 px-1.5 py-0.5 transition hover:bg-surface ${
+                item.id === focusedSpeciesId ? 'ring-1 ring-accent/40' : ''
               }`}
             >
               <span

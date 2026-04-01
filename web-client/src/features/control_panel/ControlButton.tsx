@@ -9,8 +9,8 @@ export function ControlButton({ label, onClick, disabled = false }: ControlButto
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white transition ${
-        disabled ? 'cursor-not-allowed opacity-50 grayscale' : 'hover:brightness-110'
+      className={`rounded bg-accent/15 px-2.5 py-1 text-xs font-medium text-accent transition ${
+        disabled ? 'cursor-not-allowed opacity-40' : 'hover:bg-accent/25'
       }`}
     >
       {label}

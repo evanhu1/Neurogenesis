@@ -252,11 +252,11 @@ export function WorldCanvas({
         id="world-canvas"
         width={900}
         height={900}
-        className={`block h-full w-full max-h-full max-w-full shrink-0 select-none bg-white ${cursorClass}`}
+        className={`block h-full w-full max-h-full max-w-full shrink-0 select-none bg-surface ${cursorClass}`}
       />
 
-      <div className="absolute bottom-3 left-3 z-10 rounded-lg border border-accent/25 bg-panel/90 px-3 py-2 shadow-panel backdrop-blur-sm">
-        <div className="text-[10px] font-semibold uppercase tracking-wide text-ink/70">Visibility</div>
+      <div className="absolute bottom-3 left-3 z-10 rounded bg-panel/85 px-2.5 py-1.5 shadow-panel backdrop-blur-sm">
+        <div className="text-[10px] font-semibold uppercase tracking-wide text-ink/50">Visibility</div>
         <label className="mt-1 flex cursor-pointer items-center gap-2 text-xs text-ink">
           <input
             type="checkbox"

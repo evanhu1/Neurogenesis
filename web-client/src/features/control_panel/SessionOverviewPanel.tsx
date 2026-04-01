@@ -4,21 +4,39 @@ type SessionOverviewPanelProps = {
   metricsText: string;
 };
 
+type MetricItem = { label: string; value: string };
+
 export function SessionOverviewPanel({ metricsText }: SessionOverviewPanelProps) {
-  const runtimeStatsText = useMemo(() => {
-    const visibleMetricPrefixes = ['turn=', 'organisms=', 'species_alive='];
-    const filtered = metricsText
-      .split('\n')
-      .filter((line) => visibleMetricPrefixes.some((prefix) => line.startsWith(prefix)));
-    return filtered.length > 0 ? filtered.join('\n') : 'No metrics';
+  const metrics = useMemo((): MetricItem[] => {
+    const mapping: Record<string, string> = {
+      turn: 'Turn',
+      organisms: 'Organisms',
+      species_alive: 'Species',
+    };
+    const items: MetricItem[] = [];
+    for (const line of metricsText.split('\n')) {
+      const eqIdx = line.indexOf('=');
+      if (eqIdx === -1) continue;
+      const key = line.slice(0, eqIdx);
+      const label = mapping[key];
+      if (label) items.push({ label, value: line.slice(eqIdx + 1) });
+    }
+    return items;
   }, [metricsText]);
 
   return (
-    <>
-      <h1 className="text-2xl font-semibold tracking-tight">Neurogenesis</h1>
-      <pre className="mt-3 whitespace-pre-wrap rounded-xl bg-slate-100/80 p-3 font-mono text-xs">
-        {runtimeStatsText}
-      </pre>
-    </>
+    <div className="mb-2">
+      <h1 className="text-xs font-semibold uppercase tracking-[0.2em] text-accent/80">
+        NeuroGenesis
+      </h1>
+      <div className="mt-1 flex gap-4 font-mono text-[11px]">
+        {metrics.map((m) => (
+          <div key={m.label}>
+            <span className="text-ink/35">{m.label}</span>{' '}
+            <span className="text-ink/80">{m.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

@@ -27,25 +27,16 @@ function formatFloat(value: number, digits = 3): string {
 }
 
 function formatPercent(value: number): string {
-  return `${(value * 100).toFixed(2)}%`;
+  return `${(value * 100).toFixed(1)}%`;
 }
 
-function statSection(title: string, stats: StatItem[]) {
+function statGrid(stats: StatItem[]) {
   return (
-    <section className="rounded-xl border border-accent/20 bg-white/85 p-3">
-      <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink/75">{title}</h3>
-      <div className="mt-2">{statList(stats)}</div>
-    </section>
-  );
-}
-
-function statList(stats: StatItem[]) {
-  return (
-    <dl className="grid grid-cols-[auto_1fr] items-baseline gap-x-3 gap-y-1 text-xs">
+    <dl className="grid grid-cols-[auto_1fr_auto_1fr] items-baseline gap-x-3 gap-y-0.5 text-[11px]">
       {stats.map((stat) => (
         <div key={stat.label} className="contents">
-          <dt className="font-medium text-ink/65">{stat.label}</dt>
-          <dd className="truncate text-right font-mono text-ink/95">{stat.value}</dd>
+          <dt className="text-ink/35">{stat.label}</dt>
+          <dd className="truncate font-mono text-ink/75">{stat.value}</dd>
         </div>
       ))}
     </dl>
@@ -77,174 +68,136 @@ export function InspectorPanel({
     const activeNeuronCount = activeActionNeuronId === null ? 0 : 1;
 
     const mutationRates: MutationRateItem[] = [
-      {
-        key: 'mutation_rate_age_of_maturity',
-        label: 'Age Maturity',
-        value: genome.mutation_rate_age_of_maturity,
-      },
-      {
-        key: 'mutation_rate_vision_distance',
-        label: 'Vision Distance',
-        value: genome.mutation_rate_vision_distance,
-      },
-      {
-        key: 'mutation_rate_neuron_location',
-        label: 'Neuron Location',
-        value: genome.mutation_rate_neuron_location,
-      },
-      {
-        key: 'mutation_rate_inter_bias',
-        label: 'Inter Bias',
-        value: genome.mutation_rate_inter_bias,
-      },
-      {
-        key: 'mutation_rate_inter_update_rate',
-        label: 'Inter Update',
-        value: genome.mutation_rate_inter_update_rate,
-      },
-      {
-        key: 'mutation_rate_eligibility_retention',
-        label: 'Elig Retention',
-        value: genome.mutation_rate_eligibility_retention,
-      },
-      {
-        key: 'mutation_rate_synapse_prune_threshold',
-        label: 'Prune Thresh',
-        value: genome.mutation_rate_synapse_prune_threshold,
-      },
-      {
-        key: 'mutation_rate_synapse_weight_perturbation',
-        label: 'Weight Perturb',
-        value: genome.mutation_rate_synapse_weight_perturbation,
-      },
-      {
-        key: 'mutation_rate_add_neuron_split_edge',
-        label: 'Split Edge Add',
-        value: genome.mutation_rate_add_neuron_split_edge,
-      },
+      { key: 'mutation_rate_age_of_maturity', label: 'Age Mat', value: genome.mutation_rate_age_of_maturity },
+      { key: 'mutation_rate_vision_distance', label: 'Vision', value: genome.mutation_rate_vision_distance },
+      { key: 'mutation_rate_neuron_location', label: 'Neuron Loc', value: genome.mutation_rate_neuron_location },
+      { key: 'mutation_rate_inter_bias', label: 'Bias', value: genome.mutation_rate_inter_bias },
+      { key: 'mutation_rate_inter_update_rate', label: 'Update', value: genome.mutation_rate_inter_update_rate },
+      { key: 'mutation_rate_eligibility_retention', label: 'Elig Ret', value: genome.mutation_rate_eligibility_retention },
+      { key: 'mutation_rate_synapse_prune_threshold', label: 'Prune', value: genome.mutation_rate_synapse_prune_threshold },
+      { key: 'mutation_rate_synapse_weight_perturbation', label: 'Wt Perturb', value: genome.mutation_rate_synapse_weight_perturbation },
+      { key: 'mutation_rate_add_neuron_split_edge', label: 'Split Edge', value: genome.mutation_rate_add_neuron_split_edge },
     ];
 
     return {
       coreStats: [
-        { label: 'Organism ID', value: String(focusedOrganism.id) },
-        { label: 'Species ID', value: String(focusedOrganism.species_id) },
-        { label: 'Generation', value: String(focusedOrganism.generation) },
-        { label: 'Position', value: `(${focusedOrganism.q}, ${focusedOrganism.r})` },
+        { label: 'ID', value: String(focusedOrganism.id) },
+        { label: 'Species', value: String(focusedOrganism.species_id) },
+        { label: 'Gen', value: String(focusedOrganism.generation) },
+        { label: 'Pos', value: `(${focusedOrganism.q},${focusedOrganism.r})` },
         { label: 'Facing', value: focusedOrganism.facing },
-        { label: 'Age (turns)', value: String(focusedOrganism.age_turns) },
+        { label: 'Age', value: String(focusedOrganism.age_turns) },
         { label: 'Energy', value: formatFloat(focusedOrganism.energy, 2) },
-        { label: 'Last Action Taken', value: focusedOrganism.last_action_taken },
+        { label: 'Action', value: focusedOrganism.last_action_taken },
         { label: 'Dopamine', value: formatFloat(focusedOrganism.dopamine, 3) },
-        { label: 'Consumptions', value: String(focusedOrganism.consumptions_count) },
-        { label: 'Reproductions', value: String(focusedOrganism.reproductions_count) },
+        { label: 'Meals', value: String(focusedOrganism.consumptions_count) },
+        { label: 'Repr', value: String(focusedOrganism.reproductions_count) },
       ] satisfies StatItem[],
       brainStats: [
-        { label: 'Sensory Neurons', value: String(focusedOrganism.brain.sensory.length) },
-        { label: 'Inter Neurons', value: String(focusedOrganism.brain.inter.length) },
-        { label: 'Action Neurons', value: String(focusedOrganism.brain.action.length) },
+        { label: 'Sensory', value: String(focusedOrganism.brain.sensory.length) },
+        { label: 'Inter', value: String(focusedOrganism.brain.inter.length) },
+        { label: 'Action', value: String(focusedOrganism.brain.action.length) },
         { label: 'Synapses', value: String(focusedOrganism.brain.synapse_count) },
-        { label: 'Active Neurons', value: String(activeNeuronCount) },
+        { label: 'Active', value: String(activeNeuronCount) },
       ] satisfies StatItem[],
       genomeStats: [
-        { label: 'Genome Neurons', value: String(genome.num_neurons) },
-        { label: 'Genome Synapses', value: String(genome.num_synapses) },
-        { label: 'Vision Distance', value: String(genome.vision_distance) },
-        { label: 'Age Maturity', value: String(genome.age_of_maturity) },
-        { label: 'Inter Bias Genes', value: String(genome.inter_biases.length) },
-        {
-          label: 'Inter Time Constant Genes',
-          value: String(genome.inter_log_time_constants.length),
-        },
+        { label: 'Neurons', value: String(genome.num_neurons) },
+        { label: 'Synapses', value: String(genome.num_synapses) },
+        { label: 'Vision', value: String(genome.vision_distance) },
+        { label: 'Maturity', value: String(genome.age_of_maturity) },
+        { label: 'Biases', value: String(genome.inter_biases.length) },
+        { label: 'Time Cst', value: String(genome.inter_log_time_constants.length) },
       ] satisfies StatItem[],
       mutationRates,
     };
   }, [activeActionNeuronId, focusedOrganism]);
 
   return (
-    <aside className="h-full overflow-auto rounded-2xl border border-accent/20 bg-gradient-to-b from-white/95 to-slate-50/90 p-4 shadow-panel">
+    <aside className="h-full overflow-auto rounded-xl bg-panel p-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold tracking-tight text-ink">Organism Inspector</h2>
+        <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-ink/40">Inspector</h2>
         <button
           onClick={onDefocus}
-          className="rounded-md p-1 text-ink/40 transition hover:bg-slate-200 hover:text-ink/80"
+          className="rounded p-0.5 text-ink/20 transition hover:text-ink/50"
           aria-label="Close inspector"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
             <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
           </svg>
         </button>
       </div>
 
       {!summary ? (
-        <section className="mt-3 rounded-xl border border-dashed border-accent/30 bg-white/80 px-4 py-6 text-sm text-ink/70">
-          Select an organism in the world to inspect its stats, genome, mutation rates, and neural activity.
-        </section>
+        <p className="mt-4 text-center text-xs text-ink/25">
+          Select an organism to inspect
+        </p>
       ) : (
-        <div className="mt-3 space-y-3">
-          {statSection('Core', summary.coreStats)}
+        <div className="mt-2 space-y-2">
+          <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-ink/35">Core</h3>
+          {statGrid(summary.coreStats)}
+
           <details
             open={expandedSections.brain}
             onToggle={(event) => setSectionOpen('brain', event.currentTarget.open)}
-            className="rounded-xl border border-accent/20 bg-white/85 p-3"
           >
-            <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.14em] text-ink/75">
+            <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-[0.14em] text-ink/35 transition hover:text-ink/55">
               Brain
             </summary>
-            <div className="mt-2">{statList(summary.brainStats)}</div>
+            <div className="mt-1">{statGrid(summary.brainStats)}</div>
           </details>
 
           <details
             open={expandedSections.genome}
             onToggle={(event) => setSectionOpen('genome', event.currentTarget.open)}
-            className="rounded-xl border border-accent/20 bg-white/85 p-3"
           >
-            <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.14em] text-ink/75">
+            <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-[0.14em] text-ink/35 transition hover:text-ink/55">
               Genome
             </summary>
-            <div className="mt-2">{statList(summary.genomeStats)}</div>
+            <div className="mt-1">{statGrid(summary.genomeStats)}</div>
           </details>
 
           <details
             open={expandedSections.mutationRates}
             onToggle={(event) => setSectionOpen('mutationRates', event.currentTarget.open)}
-            className="rounded-xl border border-accent/20 bg-white/85 p-3"
           >
-            <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.14em] text-ink/75">
+            <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-[0.14em] text-ink/35 transition hover:text-ink/55">
               Mutation Rates
             </summary>
-            <ul className="mt-2 space-y-2">
+            <div className="mt-1 space-y-1">
               {summary.mutationRates.map((entry) => {
                 const clamped = Math.max(0, Math.min(1, entry.value));
                 return (
-                  <li key={entry.key} className="rounded-lg bg-slate-100/80 p-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-medium text-ink/80">{entry.label}</span>
-                      <span className="font-mono text-ink/90">{formatPercent(entry.value)}</span>
-                    </div>
-                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-300/80">
+                  <div key={entry.key} className="flex items-center gap-2 text-[10px]">
+                    <span className="w-16 shrink-0 text-ink/35">{entry.label}</span>
+                    <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted/40">
                       <div
-                        className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-blue-600"
+                        className="h-full rounded-full bg-accent/40"
                         style={{ width: `${clamped * 100}%` }}
                       />
                     </div>
-                  </li>
+                    <span className="w-10 shrink-0 text-right font-mono text-ink/40">
+                      {formatPercent(entry.value)}
+                    </span>
+                  </div>
                 );
               })}
-            </ul>
+            </div>
           </details>
         </div>
       )}
 
-      <section className="mt-3 rounded-xl border border-accent/20 bg-white/85 p-3">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-ink/80">Brain</h3>
-        <div className="mt-2 h-[440px]">
+      <div className="mt-3">
+        <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-ink/35">
+          Brain
+        </h3>
+        <div className="mt-1 h-[500px]">
           <BrainCanvas
             focusedBrain={focusedBrain}
             activeActionNeuronId={activeActionNeuronId}
             focusOrganismId={focusedOrganism?.id ?? null}
           />
         </div>
-      </section>
+      </div>
     </aside>
   );
 }

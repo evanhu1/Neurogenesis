@@ -10,90 +10,64 @@ function formatEnergy(value: number): string {
   return value >= 100 ? Math.round(value).toString() : value.toFixed(1);
 }
 
-function formatTimestamp(unixMs: number): string {
-  return new Date(unixMs).toLocaleString([], {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
 export function ChampionPoolPanel({
   entries,
   onDeleteEntry,
   onClearAll,
 }: ChampionPoolPanelProps) {
   return (
-    <section className="mt-3 rounded-2xl border border-accent/15 bg-slate-100/75 p-3">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-ink/80">
-            Champion Pool
-          </h3>
-          <p className="mt-1 text-[11px] font-mono text-ink/60">{entries.length} stored genomes</p>
-        </div>
-        {entries.length > 0 ? (
+    <section className="mt-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-ink/40">
+          Champions
+          <span className="ml-1.5 font-mono text-ink/25">{entries.length}</span>
+        </h3>
+        {entries.length > 0 && (
           <button
             type="button"
             onClick={onClearAll}
-            className="rounded-lg border border-rose-300 px-2.5 py-1 font-mono text-[11px] font-medium text-rose-700 transition hover:bg-rose-50"
+            className="font-mono text-[10px] text-rose-400/60 transition hover:text-rose-400"
           >
-            Clear All
+            Clear
           </button>
-        ) : null}
+        )}
       </div>
 
       {entries.length === 0 ? (
-        <div className="mt-3 rounded-xl border border-dashed border-accent/15 px-3 py-4 text-center font-mono text-[11px] text-ink/55">
-          Pool is empty.
-        </div>
+        <p className="mt-2 text-center font-mono text-[10px] text-ink/20">
+          No champions saved
+        </p>
       ) : (
-        <div className="mt-3 max-h-72 space-y-2 overflow-auto pr-1 scrollbar-none">
+        <div className="mt-1 max-h-44 space-y-px overflow-auto scrollbar-none">
           {entries.map((entry, index) => (
-            <article
-              key={`${entry.source_turn}-${entry.generation}-${entry.reproductions_count}-${index}`}
-              className="rounded-xl border border-accent/10 bg-white/80 px-3 py-2"
+            <div
+              key={`${entry.source_turn}-${entry.generation}-${index}`}
+              className="group flex items-center gap-2 rounded px-1.5 py-1 transition hover:bg-surface"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="font-mono text-xs font-semibold text-ink">
-                    #{index + 1} g{entry.generation} e{formatEnergy(entry.energy)}
-                  </div>
-                  <div className="mt-0.5 font-mono text-[11px] text-ink/55">
-                    turn {entry.source_turn} · {formatTimestamp(entry.source_created_at_unix_ms)}
-                  </div>
-                </div>
-                <div className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 font-mono text-[10px] text-ink/70">
-                  {entry.genome.num_neurons}n {entry.genome.num_synapses}s
-                </div>
-              </div>
-
-              <div className="mt-2 grid grid-cols-3 gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-ink/58">
-                <div>
-                  <div className="text-[9px] text-ink/45">Meals</div>
-                  <div className="mt-0.5 text-[11px] text-ink">{entry.consumptions_count}</div>
-                </div>
-                <div>
-                  <div className="text-[9px] text-ink/45">Offspring</div>
-                  <div className="mt-0.5 text-[11px] text-ink">{entry.reproductions_count}</div>
-                </div>
-                <div>
-                  <div className="text-[9px] text-ink/45">Vision</div>
-                  <div className="mt-0.5 text-[11px] text-ink">{entry.genome.vision_distance}</div>
-                </div>
-              </div>
-
-              <div className="mt-2 flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => onDeleteEntry(index)}
-                  className="rounded-md border border-rose-300 px-2 py-1 font-mono text-[10px] font-medium text-rose-700 transition hover:bg-rose-50"
+              <span className="font-mono text-[10px] text-ink/25">{index + 1}</span>
+              <span className="font-mono text-[11px] text-ink/70">g{entry.generation}</span>
+              <span className="font-mono text-[11px] text-accent/60">
+                {formatEnergy(entry.energy)}e
+              </span>
+              <span className="font-mono text-[10px] text-ink/25">
+                {entry.genome.num_neurons}n/{entry.genome.num_synapses}s
+              </span>
+              <button
+                type="button"
+                onClick={() => onDeleteEntry(index)}
+                className="ml-auto text-ink/15 opacity-0 transition hover:text-rose-400 group-hover:opacity-100"
+                aria-label="Delete champion"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                  className="h-3 w-3"
                 >
-                  Delete
-                </button>
-              </div>
-            </article>
+                  <path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z" />
+                </svg>
+              </button>
+            </div>
           ))}
         </div>
       )}

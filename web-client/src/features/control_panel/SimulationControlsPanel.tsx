@@ -43,11 +43,7 @@ export function SimulationControlsPanel({
     const requested = Math.max(1, stepProgress.requested_count);
     const completed = Math.min(requested, Math.max(0, stepProgress.completed_count));
     const percent = Math.round((completed / requested) * 100);
-    return {
-      requested,
-      completed,
-      percent,
-    };
+    return { requested, completed, percent };
   }, [stepProgress]);
 
   useEffect(() => {
@@ -79,42 +75,37 @@ export function SimulationControlsPanel({
 
   return (
     <>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <ControlButton label="New Session" onClick={() => onNewSession(seedInput)} />
-        <ControlButton label="Save Champions" onClick={onSaveChampions} disabled={!snapshot} />
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        <ControlButton label="New" onClick={() => onNewSession(seedInput)} />
+        <ControlButton label="Save" onClick={onSaveChampions} disabled={!snapshot} />
         <ControlButton
-          label={isFastMode ? 'Stop Fast' : 'Fast Run'}
+          label={isFastMode ? 'Stop Fast' : 'Fast'}
           onClick={onToggleFastRun}
           disabled={isStepPending}
         />
-        <div className="flex w-full items-center gap-2 rounded-lg bg-white/70 px-2 py-1">
-          <ControlButton
-            label={isRunning && streamMode === 'full' ? 'Stop' : 'Start'}
-            onClick={onToggleRun}
-            disabled={isStepPending}
-          />
-          <span className="text-xs" role="img" aria-label="turtle">
-            🐢
-          </span>
-          <input
-            aria-label="Simulation speed"
-            type="range"
-            min={0}
-            max={speedLevelCount - 1}
-            step={1}
-            value={speedLevelIndex}
-            onChange={handleSpeedLevelInput}
-            disabled={isFastMode}
-            className="h-1.5 min-w-0 flex-1 cursor-pointer accent-accent disabled:cursor-not-allowed disabled:opacity-50"
-          />
-          <span className="text-xs" role="img" aria-label="rabbit">
-            🐇
-          </span>
-        </div>
       </div>
 
-      <div className="mt-2 flex items-center gap-2 rounded-lg bg-white/70 px-2 py-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-ink/75">Seed</span>
+      <div className="mt-1.5 flex items-center gap-2">
+        <ControlButton
+          label={isRunning && streamMode === 'full' ? 'Stop' : 'Start'}
+          onClick={onToggleRun}
+          disabled={isStepPending}
+        />
+        <input
+          aria-label="Simulation speed"
+          type="range"
+          min={0}
+          max={speedLevelCount - 1}
+          step={1}
+          value={speedLevelIndex}
+          onChange={handleSpeedLevelInput}
+          disabled={isFastMode}
+          className="h-1 min-w-0 flex-1 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+        />
+      </div>
+
+      <div className="mt-1.5 flex items-center gap-2">
+        <span className="text-[10px] font-medium uppercase tracking-wide text-ink/35">Seed</span>
         <input
           aria-label="Session seed"
           type="text"
@@ -122,53 +113,48 @@ export function SimulationControlsPanel({
           pattern="[0-9]*"
           value={seedInput}
           onChange={(evt) => setSeedInput(evt.target.value)}
-          className="w-48 rounded-md border border-accent/30 bg-white px-2 py-1 font-mono text-sm text-ink outline-none ring-accent/20 focus:ring-2"
+          className="min-w-0 flex-1 rounded border border-muted/60 bg-surface px-2 py-0.5 font-mono text-[11px] text-ink/80 outline-none focus:border-accent/40"
         />
       </div>
 
-      <div className="mt-2 flex gap-2">
-        <ControlButton label="Step 1" onClick={() => onStep(1)} disabled={isStepPending} />
-        <ControlButton label="Step 10" onClick={() => onStep(10)} disabled={isStepPending} />
-        <ControlButton label="Step 100" onClick={() => onStep(100)} disabled={isStepPending} />
+      <div className="mt-1.5 flex items-center gap-1.5">
+        <ControlButton label="×1" onClick={() => onStep(1)} disabled={isStepPending} />
+        <ControlButton label="×10" onClick={() => onStep(10)} disabled={isStepPending} />
+        <ControlButton label="×100" onClick={() => onStep(100)} disabled={isStepPending} />
+        <div className="ml-auto flex items-center gap-1.5">
+          <input
+            aria-label="Skip step count"
+            type="number"
+            min={1}
+            step={1}
+            value={skipCountInput}
+            disabled={isStepPending}
+            onChange={handleSkipCountInput}
+            onKeyDown={(evt) => {
+              if (evt.key === 'Enter') runSkip();
+            }}
+            className="w-20 rounded border border-muted/60 bg-surface px-2 py-0.5 font-mono text-[11px] text-ink/80 outline-none focus:border-accent/40 disabled:cursor-not-allowed disabled:opacity-40"
+          />
+          <ControlButton label="Skip" onClick={runSkip} disabled={isStepPending} />
+        </div>
       </div>
 
-      <div className="mt-2 flex items-center gap-2 rounded-lg bg-white/70 px-2 py-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-ink/75">Skip X</span>
-        <input
-          aria-label="Skip step count"
-          type="number"
-          min={1}
-          step={1}
-          value={skipCountInput}
-          disabled={isStepPending}
-          onChange={handleSkipCountInput}
-          onKeyDown={(evt) => {
-            if (evt.key === 'Enter') {
-              runSkip();
-            }
-          }}
-          className="w-28 rounded-md border border-accent/30 bg-white px-2 py-1 font-mono text-sm text-ink outline-none ring-accent/20 focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:grayscale"
-        />
-        <ControlButton label="Skip" onClick={runSkip} disabled={isStepPending} />
-      </div>
-
-      {skipProgress ? (
-        <div className="mt-2 rounded-lg bg-white/70 px-2 py-2">
-          <div className="mb-1 flex items-center justify-between font-mono text-[11px] text-ink/75">
-            <span>Skipping {skipProgress.requested.toLocaleString()} ticks</span>
+      {skipProgress && (
+        <div className="mt-1.5">
+          <div className="flex items-center justify-between font-mono text-[10px] text-ink/35">
             <span>
-              {skipProgress.completed.toLocaleString()} / {skipProgress.requested.toLocaleString()}{' '}
-              ({skipProgress.percent}%)
+              {skipProgress.completed.toLocaleString()} / {skipProgress.requested.toLocaleString()}
             </span>
+            <span>{skipProgress.percent}%</span>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-accent/20">
+          <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-muted/40">
             <div
-              className="h-full rounded-full bg-accent transition-[width] duration-200 ease-out"
+              className="h-full rounded-full bg-accent/50 transition-[width] duration-200"
               style={{ width: `${skipProgress.percent}%` }}
             />
           </div>
         </div>
-      ) : null}
+      )}
     </>
   );
 }

@@ -5,22 +5,21 @@ export default {
   theme: {
     extend: {
       colors: {
-        ink: '#1b2638',
-        panel: '#ffffff',
-        accent: '#1167b1',
-        gridA: '#d7dde8',
-        gridB: '#e3e8f0',
+        ink: '#e2e8f0',
+        panel: '#0f172a',
+        surface: '#1e293b',
+        accent: '#38bdf8',
+        muted: '#334155',
       },
       fontFamily: {
-        sans: ['Space Grotesk', 'Avenir Next', 'Segoe UI', 'sans-serif'],
-        mono: ['IBM Plex Mono', 'SF Mono', 'monospace'],
+        sans: ['Outfit', 'system-ui', 'sans-serif'],
+        mono: ['JetBrains Mono', 'SF Mono', 'monospace'],
       },
       boxShadow: {
-        panel: '0 14px 30px rgba(15, 33, 63, 0.12)',
+        panel: '0 2px 16px rgba(0, 0, 0, 0.35)',
       },
       backgroundImage: {
-        page:
-          'radial-gradient(circle at 14% -12%, #dce8fb 0, #f1f5fb 35%, #dfe8f7 100%)',
+        page: 'linear-gradient(145deg, #020617 0%, #0a1128 50%, #020617 100%)',
       },
     },
   },

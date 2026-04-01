@@ -240,8 +240,8 @@ export function renderBrain(
   ctx.clearRect(0, 0, width, height);
 
   if (!focusedBrain) {
-    ctx.fillStyle = '#1b2638';
-    ctx.font = '15px Space Grotesk';
+    ctx.fillStyle = '#64748b';
+    ctx.font = '15px Outfit';
     ctx.fillText('No focused organism', 16, 30);
     return;
   }
@@ -271,14 +271,14 @@ export function renderBrain(
     const midX = (pre.x + post.x) / 2 + nx * 7;
     const midY = (pre.y + post.y) / 2 + ny * 7;
 
-    ctx.font = '10px Space Grotesk';
+    ctx.font = '10px Outfit';
     const textWidth = ctx.measureText(wLabel).width;
-    ctx.fillStyle = 'rgba(248, 250, 252, 0.88)';
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
     ctx.fillRect(midX - textWidth / 2 - 2, midY - 7, textWidth + 4, 14);
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = weight >= 0 ? '#0f4f86' : '#8a1634';
+    ctx.fillStyle = weight >= 0 ? '#38bdf8' : '#f87171';
     ctx.fillText(wLabel, midX, midY);
     ctx.textAlign = 'start';
     ctx.textBaseline = 'alphabetic';
@@ -377,14 +377,14 @@ export function renderBrain(
     const labelY = node.y - 2;
     const wLabel = weight.toFixed(2);
 
-    ctx.font = '10px Space Grotesk';
+    ctx.font = '10px Outfit';
     const textWidth = ctx.measureText(wLabel).width;
-    ctx.fillStyle = 'rgba(248, 250, 252, 0.88)';
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
     ctx.fillRect(labelX - textWidth / 2 - 2, labelY - 7, textWidth + 4, 14);
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = weight >= 0 ? '#0f4f86' : '#8a1634';
+    ctx.fillStyle = weight >= 0 ? '#38bdf8' : '#f87171';
     ctx.fillText(wLabel, labelX, labelY);
     ctx.textAlign = 'start';
     ctx.textBaseline = 'alphabetic';
@@ -399,7 +399,7 @@ export function renderBrain(
       const postId = unwrapId(synapse.post_neuron_id);
       const post = positions.get(postId);
       if (!post) continue;
-      const strokeColor = synapse.weight >= 0 ? 'rgba(17,103,177,0.6)' : 'rgba(177,28,59,0.7)';
+      const strokeColor = synapse.weight >= 0 ? 'rgba(56,189,248,0.5)' : 'rgba(248,113,113,0.55)';
       const strokeWidth = Math.max(0.5, (Math.abs(synapse.weight) / 8) * 2);
       if (pre.id === postId) {
         drawSelfSynapse(pre, strokeColor, strokeWidth);
@@ -418,7 +418,7 @@ export function renderBrain(
       const postId = unwrapId(synapse.post_neuron_id);
       const post = positions.get(postId);
       if (!post) continue;
-      const strokeColor = synapse.weight >= 0 ? 'rgba(17,103,177,0.55)' : 'rgba(177,28,59,0.65)';
+      const strokeColor = synapse.weight >= 0 ? 'rgba(56,189,248,0.45)' : 'rgba(248,113,113,0.5)';
       const strokeWidth = Math.max(0.5, (Math.abs(synapse.weight) / 8) * 2);
       if (pre.id === postId) {
         drawSelfSynapse(pre, strokeColor, strokeWidth);
@@ -449,13 +449,13 @@ export function renderBrain(
     }
 
     if (showMetrics) {
-      ctx.fillStyle = '#10233f';
-      ctx.font = '11px Space Grotesk';
+      ctx.fillStyle = '#e2e8f0';
+      ctx.font = '11px Outfit';
       const hasLabel = typeof node.label === 'string' && node.label.length > 0;
       if (hasLabel) {
         ctx.fillText(node.label as string, node.x + 12, node.y + 4);
       }
-      ctx.fillStyle = '#43556f';
+      ctx.fillStyle = '#94a3b8';
       const metricsY = hasLabel ? node.y + 16 : node.y + 4;
       const valueLabel = node.type === 'action' ? 'logit' : 'h';
       ctx.fillText(`${valueLabel}=${node.value.toFixed(2)}`, node.x + 12, metricsY);

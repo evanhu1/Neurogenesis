@@ -120,8 +120,8 @@ export function BrainCanvas({
       ref={canvasRef}
       id="brain-canvas"
       width={420}
-      height={460}
-      className="mt-2 w-full  h-full rounded-xl border border-accent/20 bg-white cursor-grab active:cursor-grabbing"
+      height={500}
+      className="w-full h-full rounded bg-surface cursor-grab active:cursor-grabbing"
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}

@@ -7,21 +7,21 @@ import { WorldCanvas } from './features/world/components/WorldCanvas';
 
 function FastModeWorldPanel() {
   return (
-    <div className="flex h-full w-full items-center justify-center rounded-2xl border border-accent/15 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.14),_transparent_42%),linear-gradient(180deg,_rgba(15,23,42,0.94),_rgba(15,23,42,0.82))] px-6 text-center text-white shadow-panel">
+    <div className="flex h-full w-full items-center justify-center rounded-xl bg-gradient-to-b from-surface to-panel px-6 text-center shadow-panel">
       <div className="max-w-md">
-        <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl border border-white/15 bg-white/10 shadow-2xl">
-          <svg aria-hidden="true" viewBox="0 0 24 24" className="h-10 w-10 fill-current">
+        <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-xl bg-accent/10 shadow-2xl">
+          <svg aria-hidden="true" viewBox="0 0 24 24" className="h-10 w-10 fill-accent/60">
             <path d="M4 5.5v13l8-6.5-8-6.5Z" />
             <path d="M12 5.5v13l8-6.5-8-6.5Z" />
           </svg>
         </div>
-        <div className="mt-5 text-xs font-semibold uppercase tracking-[0.34em] text-white/65">
+        <div className="mt-5 text-xs font-semibold uppercase tracking-[0.34em] text-ink/35">
           Metrics-Only Fast Run
         </div>
-        <h2 className="mt-3 text-2xl font-semibold tracking-tight">
+        <h2 className="mt-3 text-2xl font-semibold tracking-tight text-ink">
           World rendering paused
         </h2>
-        <p className="mt-3 text-sm leading-6 text-white/72">
+        <p className="mt-3 text-sm leading-6 text-ink/50">
           The canvas and viewport hooks are fully unmounted in fast mode. Only the tick counter and
           species population stream stay live.
         </p>
@@ -44,8 +44,8 @@ export default function App() {
   );
 
   return (
-    <div className="h-screen bg-page px-4 py-4 text-ink sm:px-6 lg:px-8">
-      <div className="mx-auto grid h-full max-w-[1720px] gap-4 xl:grid-cols-[320px_minmax(480px,1fr)_450px]">
+    <div className="h-screen bg-page px-2.5 py-2.5 text-ink">
+      <div className="mx-auto grid h-full max-w-[1720px] gap-2.5 xl:grid-cols-[310px_minmax(480px,1fr)_410px]">
         <ControlPanel
           overview={{
             metricsText,
@@ -82,7 +82,7 @@ export default function App() {
           errorText={simulation.errorText}
         />
 
-        <main className="flex h-full items-center justify-center overflow-hidden rounded-2xl border border-accent/15 bg-panel/70 p-3 shadow-panel">
+        <main className="flex h-full items-center justify-center overflow-hidden rounded-xl bg-panel p-2">
           {simulation.isFastMode ? (
             <FastModeWorldPanel />
           ) : (
