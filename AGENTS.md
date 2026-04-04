@@ -71,8 +71,9 @@
 ## Testing
 
 - Primary runner: `cargo test --workspace`.
-- Add deterministic tests for simulation behavior changes (fixed seeds, snapshot
-  assertions).
+- Add deterministic tests for simulation behavior changes when the change is
+  nontrivial, high-risk, or explicitly requests regression coverage (fixed
+  seeds, snapshot assertions).
 - For evolution-loop benchmarking and regression checks, run `sim-evaluation`
   (prefer release mode) and compare outputs across seeds/configs.
 

@@ -46,7 +46,7 @@ pub(super) fn encode_sensory_inputs(
         organism.genome.starting_energy.max(MIN_ENERGY_SENSOR_SCALE),
     );
     let damage_signal = (organism.damage_taken_last_turn
-        / organism.genome.starting_energy.max(MIN_ENERGY_SENSOR_SCALE))
+        / organism.max_health.max(MIN_ENERGY_SENSOR_SCALE))
     .clamp(0.0, 1.0);
 
     for sensory in &mut organism.brain.sensory {
