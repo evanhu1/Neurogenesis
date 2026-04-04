@@ -13,11 +13,6 @@ basic sensory-motor reactions (see food ahead, move forward), to complex
 intelligent behavior (internal states, memory, navigation, predation), by
 evolving creatures in a 2D world.
 
-The design of the brain borrows structural (e.g. excitatory / inhibitory
-synapses) and algorithmic (e.g. Hebbian plasticity) priors from biological
-brains, while taking advantage of silicon hardware (e.g. floating point
-precision).
-
 ## Inspiration:
 
 The brain is the only existence proof of general intelligence and it was created
