@@ -8,17 +8,19 @@
 
 </div>
 
-The goal of this project is to achieve open-ended evolution of cognition, from
-basic sensory-motor reactions (see food ahead, move forward), to complex
-intelligent behavior (internal states, memory, navigation, predation), by
-evolving creatures in a 2D world.
+This is a project to reproduce the emergence of cognitive complexity through
+open-ended evolution of embodied agent populations in a 2D environment.
+
+Agents are controlled by evolvable neural architectures with capacity for
+lifetime adaptation and interact with a dynamic world containing rich ecological
+dynamics.
 
 ## Inspiration:
 
 The brain is the only existence proof of general intelligence and it was created
-through evolution. Granted it took ~600 million years from the appearance of the
-first neuron in sponges in the ancient oceans, but nature had to solve for many
-things we don't: physical embodiment, energy constraints, long generation
+through evolution. Granted, it took ~600 million years from the appearance of
+the first neuron in sponges in the ancient oceans, but nature had to solve for
+many things we don't: physical embodiment, energy constraints, long generation
 timescales. Even before neurons, nature had to spend 2 billion years assembling
 the molecular apparatus of reproduction itself. Evolution _in silico_ rewrites
 the constraints. Can a well designed evolutionary search over brain-like systems
