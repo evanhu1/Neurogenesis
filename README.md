@@ -13,14 +13,21 @@ basic sensory-motor reactions (see food ahead, move forward), to complex
 intelligent behavior (internal states, memory, navigation, predation), by
 evolving creatures in a 2D world.
 
-The main challenge is creating an evolutionary curriculum that scales
-environment complexity with cognitive evolution while avoiding convergence to
-degenerate niches along the way.
+The design of the brain borrows structural (e.g. excitatory / inhibitory
+synapses) and algorithmic (e.g. Hebbian plasticity) priors from biological
+brains, while taking advantage of silicon hardware (e.g. floating point
+precision).
 
-In designing the brain we take a neuromorphic approach that implements many
-structural (e.g. excitatory / inhibitory synapses) and algorithmic (e.g. Hebbian
-plasticity) priors from biological brains, while taking advantage of silicon
-hardware (e.g. floating point precision).
+## Inspiration:
+
+The brain is the only existence proof of general intelligence and it was created
+through evolution. Granted it took ~600 million years from the appearance of the
+first neuron in sponges in the ancient oceans, but nature had to solve for many
+things we don't: physical embodiment, energy constraints, long generation
+timescales. Even before neurons, nature had to spend 2 billion years assembling
+the molecular apparatus of reproduction itself. Evolution _in silico_ rewrites
+the constraints. Can a well designed evolutionary search over brain-like systems
+be a path to AGI?
 
 | ![Simulation Screenshot](docs/screenshot.png) | ![Evaluation Screenshot](docs/evaluation.png) |
 | :-------------------------------------------: | :-------------------------------------------: |
