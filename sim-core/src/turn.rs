@@ -33,7 +33,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 #[cfg(feature = "profiling")]
 use std::time::Instant;
 
-const FOOD_ENERGY_METABOLISM_DIVISOR: f32 = 10000.0;
 const RNG_TURN_MIX: u64 = 0x9E37_79B9_7F4A_7C15;
 const RNG_ORGANISM_MIX: u64 = 0xBF58_476D_1CE4_E5B9;
 const REPRODUCE_LOCK_DURATION_TURNS: u8 = 2;
@@ -266,7 +265,10 @@ impl Simulation {
 }
 
 fn organism_passive_metabolic_energy_cost(config: &WorldConfig, organism: &OrganismState) -> f32 {
-    organism_passive_metabolic_energy_cost_from_food_energy(config.food_energy, organism)
+    organism_passive_metabolic_energy_cost_from_complexity(
+        config.passive_metabolism_cost_per_unit,
+        organism,
+    )
 }
 
 fn organism_health_regeneration(organism: &OrganismState) -> f32 {
@@ -280,16 +282,15 @@ fn food_consumption_energy_fraction(kind: FoodKind) -> f32 {
     }
 }
 
-fn organism_passive_metabolic_energy_cost_from_food_energy(
-    food_energy: f32,
+fn organism_passive_metabolic_energy_cost_from_complexity(
+    passive_metabolism_cost_per_unit: f32,
     organism: &OrganismState,
 ) -> f32 {
     let inter_neuron_count = organism.genome.num_neurons as f32;
     let sensory_neuron_count = organism.brain.sensory.len() as f32;
     let synapse_count = organism.brain.synapse_count as f32;
     let vision_distance_cost_units = organism.genome.vision_distance as f32 / 3.0;
-    let metabolic_cost_per_unit = food_energy / FOOD_ENERGY_METABOLISM_DIVISOR;
-    metabolic_cost_per_unit
+    passive_metabolism_cost_per_unit
         * (inter_neuron_count + sensory_neuron_count + synapse_count + vision_distance_cost_units)
 }
 

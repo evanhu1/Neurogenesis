@@ -8,14 +8,14 @@ Generated from `sim-config/src/config.rs`.
 | --- | --- | --- |
 | `world_width` | `required` | Toroidal world width used for both axial dimensions. |
 | `num_organisms` | `required` | Target initial population before terrain limits are applied. |
-| `periodic_injection_interval_turns` | `100` | Cadence for seed-genome injections when omitted from TOML. |
+| `periodic_injection_interval_turns` | `100` | Cadence for seed-genome injections. |
 | `periodic_injection_count` | `100` | How many injection attempts run at each periodic-injection turn. |
-| `max_organism_age` | `derived: world_width * 5` | Inserted during TOML normalization when omitted. |
 
 ## World Config: Lifecycle And Actions
 
 | Key | Default / Derivation | Notes |
 | --- | --- | --- |
+| `passive_metabolism_cost_per_unit` | `0.005` | Per-complexity-unit passive energy drain applied each tick. |
 | `food_energy` | `required` | Energy stored in each plant food item. |
 | `move_action_energy_cost` | `required` | Flat energy cost applied to non-idle actions. |
 | `reproduction_investment_energy` | `500` | Immediate parent energy investment when reproduction starts. |
@@ -55,7 +55,9 @@ Generated from `sim-config/src/config.rs`.
 | `spatial_prior_sigma` | `required` | Spatial connectivity prior width. |
 | `vision_distance` | `required` | Maximum look distance for look-ray sensors. |
 | `starting_energy` | `1` | Default starting energy when omitted in seed-genome TOML. |
+| `max_health` | `1` | Default maximum health when omitted in seed-genome TOML. |
 | `age_of_maturity` | `required` | Age threshold for adulthood. |
+| `max_organism_age` | `4294967295` | Default lifespan cap when omitted in seed-genome TOML. |
 
 ## Seed Genome Config: Plasticity
 
@@ -73,7 +75,9 @@ Generated from `sim-config/src/config.rs`.
 | Key | Default / Derivation | Notes |
 | --- | --- | --- |
 | `mutation_rate_age_of_maturity` | `required` | Mutation rate for maturity age. |
+| `mutation_rate_max_organism_age` | `required` | Mutation rate for organism lifespan. |
 | `mutation_rate_vision_distance` | `required` | Mutation rate for vision distance. |
+| `mutation_rate_max_health` | `required` | Mutation rate for maximum health. |
 | `mutation_rate_inter_bias` | `required` | Mutation rate for inter biases. |
 | `mutation_rate_inter_update_rate` | `required` | Mutation rate for inter-neuron time constants. |
 | `mutation_rate_eligibility_retention` | `required` | Mutation rate for eligibility retention. |

@@ -9,7 +9,9 @@ const MUTATION_RATE_LOGIT_EPSILON: f32 = 1.0e-6;
 
 pub(super) struct EffectiveMutationRates {
     pub(super) age_of_maturity: f32,
+    pub(super) max_organism_age: f32,
     pub(super) vision_distance: f32,
+    pub(super) max_health: f32,
     pub(super) inter_bias: f32,
     pub(super) inter_update_rate: f32,
     pub(super) eligibility_retention: f32,
@@ -28,7 +30,9 @@ pub(super) fn mutate_mutation_rate_genes<R: Rng + ?Sized>(
 ) {
     let mut rates = [
         genome.mutation_rate_age_of_maturity,
+        genome.mutation_rate_max_organism_age,
         genome.mutation_rate_vision_distance,
+        genome.mutation_rate_max_health,
         genome.mutation_rate_inter_bias,
         genome.mutation_rate_inter_update_rate,
         genome.mutation_rate_eligibility_retention,
@@ -51,17 +55,19 @@ pub(super) fn mutate_mutation_rate_genes<R: Rng + ?Sized>(
     }
 
     genome.mutation_rate_age_of_maturity = rates[0];
-    genome.mutation_rate_vision_distance = rates[1];
-    genome.mutation_rate_inter_bias = rates[2];
-    genome.mutation_rate_inter_update_rate = rates[3];
-    genome.mutation_rate_eligibility_retention = rates[4];
-    genome.mutation_rate_synapse_prune_threshold = rates[5];
-    genome.mutation_rate_neuron_location = rates[6];
-    genome.mutation_rate_synapse_weight_perturbation = rates[7];
-    genome.mutation_rate_add_synapse = rates[8];
-    genome.mutation_rate_remove_synapse = rates[9];
-    genome.mutation_rate_remove_neuron = rates[10];
-    genome.mutation_rate_add_neuron_split_edge = rates[11];
+    genome.mutation_rate_max_organism_age = rates[1];
+    genome.mutation_rate_vision_distance = rates[2];
+    genome.mutation_rate_max_health = rates[3];
+    genome.mutation_rate_inter_bias = rates[4];
+    genome.mutation_rate_inter_update_rate = rates[5];
+    genome.mutation_rate_eligibility_retention = rates[6];
+    genome.mutation_rate_synapse_prune_threshold = rates[7];
+    genome.mutation_rate_neuron_location = rates[8];
+    genome.mutation_rate_synapse_weight_perturbation = rates[9];
+    genome.mutation_rate_add_synapse = rates[10];
+    genome.mutation_rate_remove_synapse = rates[11];
+    genome.mutation_rate_remove_neuron = rates[12];
+    genome.mutation_rate_add_neuron_split_edge = rates[13];
 }
 
 pub(super) fn effective_mutation_rates(
@@ -73,8 +79,16 @@ pub(super) fn effective_mutation_rates(
             genome.mutation_rate_age_of_maturity,
             global_mutation_rate_modifier,
         ),
+        max_organism_age: effective_mutation_rate(
+            genome.mutation_rate_max_organism_age,
+            global_mutation_rate_modifier,
+        ),
         vision_distance: effective_mutation_rate(
             genome.mutation_rate_vision_distance,
+            global_mutation_rate_modifier,
+        ),
+        max_health: effective_mutation_rate(
+            genome.mutation_rate_max_health,
             global_mutation_rate_modifier,
         ),
         inter_bias: effective_mutation_rate(

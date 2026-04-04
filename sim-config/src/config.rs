@@ -4,6 +4,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 const DEFAULT_WORLD_CONFIG_REL_PATH: &str = "config.toml";
+const DEFAULT_SEED_GENOME_CONFIG_REL_PATH: &str = "seed_genome.toml";
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
 pub struct PopulationDefaults {
@@ -13,6 +14,7 @@ pub struct PopulationDefaults {
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
 pub struct LifecycleDefaults {
+    pub passive_metabolism_cost_per_unit: f32,
     pub reproduction_investment_energy: f32,
     pub action_temperature: f32,
     pub intent_parallel_threads: u32,
@@ -51,14 +53,11 @@ pub struct WorldConfigDefaults {
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
 pub struct SeedGenomeConfigDefaults {
     pub starting_energy: f32,
+    pub max_health: f32,
+    pub max_organism_age: u32,
     pub plasticity_start_age: u32,
     pub juvenile_eta_scale: f32,
     pub max_weight_delta_per_tick: f32,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, PartialEq)]
-pub struct DerivedWorldPolicy {
-    pub max_organism_age_per_world_width: u32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
@@ -83,6 +82,7 @@ pub fn world_config_defaults() -> WorldConfigDefaults {
             periodic_injection_count: 100,
         },
         lifecycle: LifecycleDefaults {
+            passive_metabolism_cost_per_unit: 0.005,
             reproduction_investment_energy: 500.0,
             action_temperature: 0.5,
             intent_parallel_threads: 8,
@@ -108,15 +108,11 @@ pub fn world_config_defaults() -> WorldConfigDefaults {
 pub fn seed_genome_config_defaults() -> SeedGenomeConfigDefaults {
     SeedGenomeConfigDefaults {
         starting_energy: 1.0,
+        max_health: 1.0,
+        max_organism_age: u32::MAX,
         plasticity_start_age: 0,
         juvenile_eta_scale: 0.5,
         max_weight_delta_per_tick: 0.05,
-    }
-}
-
-pub fn derived_world_policy() -> DerivedWorldPolicy {
-    DerivedWorldPolicy {
-        max_organism_age_per_world_width: 5,
     }
 }
 
@@ -140,7 +136,6 @@ pub fn food_ecology_policy() -> FoodEcologyPolicy {
 pub fn world_config_reference_markdown() -> String {
     let world = world_config_defaults();
     let genome = seed_genome_config_defaults();
-    let derived = derived_world_policy();
     let terrain_policy = terrain_generation_policy();
     let food_policy = food_ecology_policy();
 
@@ -169,20 +164,12 @@ pub fn world_config_reference_markdown() -> String {
                     .population
                     .periodic_injection_interval_turns
                     .to_string(),
-                "Cadence for seed-genome injections when omitted from TOML.",
+                "Cadence for seed-genome injections.",
             ),
             (
                 "periodic_injection_count",
                 world.population.periodic_injection_count.to_string(),
                 "How many injection attempts run at each periodic-injection turn.",
-            ),
-            (
-                "max_organism_age",
-                format!(
-                    "derived: world_width * {}",
-                    derived.max_organism_age_per_world_width
-                ),
-                "Inserted during TOML normalization when omitted.",
             ),
         ],
     );
@@ -191,6 +178,11 @@ pub fn world_config_reference_markdown() -> String {
         "World Config",
         "Lifecycle And Actions",
         &vec![
+            (
+                "passive_metabolism_cost_per_unit",
+                world.lifecycle.passive_metabolism_cost_per_unit.to_string(),
+                "Per-complexity-unit passive energy drain applied each tick.",
+            ),
             (
                 "food_energy",
                 "required".to_owned(),
@@ -315,9 +307,19 @@ pub fn world_config_reference_markdown() -> String {
                 "Default starting energy when omitted in seed-genome TOML.",
             ),
             (
+                "max_health",
+                genome.max_health.to_string(),
+                "Default maximum health when omitted in seed-genome TOML.",
+            ),
+            (
                 "age_of_maturity",
                 "required".to_owned(),
                 "Age threshold for adulthood.",
+            ),
+            (
+                "max_organism_age",
+                genome.max_organism_age.to_string(),
+                "Default lifespan cap when omitted in seed-genome TOML.",
             ),
         ],
     );
@@ -369,9 +371,19 @@ pub fn world_config_reference_markdown() -> String {
                 "Mutation rate for maturity age.",
             ),
             (
+                "mutation_rate_max_organism_age",
+                "required".to_owned(),
+                "Mutation rate for organism lifespan.",
+            ),
+            (
                 "mutation_rate_vision_distance",
                 "required".to_owned(),
                 "Mutation rate for vision distance.",
+            ),
+            (
+                "mutation_rate_max_health",
+                "required".to_owned(),
+                "Mutation rate for maximum health.",
             ),
             (
                 "mutation_rate_inter_bias",
@@ -487,6 +499,10 @@ pub struct SeedGenomeConfig {
     #[serde(default = "default_starting_energy")]
     pub starting_energy: f32,
     pub age_of_maturity: u32,
+    #[serde(default = "default_max_health")]
+    pub max_health: f32,
+    #[serde(default = "default_max_organism_age")]
+    pub max_organism_age: u32,
     #[serde(default = "default_plasticity_start_age")]
     pub plasticity_start_age: u32,
     pub hebb_eta_gain: f32,
@@ -497,7 +513,9 @@ pub struct SeedGenomeConfig {
     pub max_weight_delta_per_tick: f32,
     pub synapse_prune_threshold: f32,
     pub mutation_rate_age_of_maturity: f32,
+    pub mutation_rate_max_organism_age: f32,
     pub mutation_rate_vision_distance: f32,
+    pub mutation_rate_max_health: f32,
     pub mutation_rate_inter_bias: f32,
     pub mutation_rate_inter_update_rate: f32,
     pub mutation_rate_eligibility_retention: f32,
@@ -515,7 +533,7 @@ pub struct SeedGenomeConfig {
     pub mutation_rate_add_neuron_split_edge: f32,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorldConfig {
     pub world_width: u32,
     pub num_organisms: u32,
@@ -524,6 +542,8 @@ pub struct WorldConfig {
     #[serde(default = "default_periodic_injection_count")]
     pub periodic_injection_count: u32,
     pub food_energy: f32,
+    #[serde(default = "default_passive_metabolism_cost_per_unit")]
+    pub passive_metabolism_cost_per_unit: f32,
     pub move_action_energy_cost: f32,
     #[serde(default = "default_reproduction_investment_energy")]
     pub reproduction_investment_energy: f32,
@@ -541,7 +561,6 @@ pub struct WorldConfig {
     pub terrain_threshold: f32,
     #[serde(default = "default_spike_density")]
     pub spike_density: f32,
-    pub max_organism_age: u32,
     #[serde(default = "default_global_mutation_rate_modifier")]
     pub global_mutation_rate_modifier: f32,
     #[serde(default = "default_meta_mutation_enabled")]
@@ -554,14 +573,151 @@ pub struct WorldConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct WorldConfigDeserialize {
+struct SeedGenomeConfigToml {
+    topology: SeedGenomeTopologyToml,
+    lifecycle: SeedGenomeLifecycleToml,
+    plasticity: SeedGenomePlasticityToml,
+    mutation_rates: SeedGenomeMutationRatesToml,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SeedGenomeTopologyToml {
+    num_neurons: u32,
+    num_synapses: u32,
+    spatial_prior_sigma: f32,
+    vision_distance: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SeedGenomeLifecycleToml {
+    #[serde(default = "default_starting_energy")]
+    starting_energy: f32,
+    #[serde(default = "default_max_health")]
+    max_health: f32,
+    age_of_maturity: u32,
+    #[serde(default = "default_max_organism_age")]
+    max_organism_age: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SeedGenomePlasticityToml {
+    #[serde(default = "default_plasticity_start_age")]
+    plasticity_start_age: u32,
+    hebb_eta_gain: f32,
+    #[serde(default = "default_juvenile_eta_scale")]
+    juvenile_eta_scale: f32,
+    eligibility_retention: f32,
+    #[serde(default = "default_max_weight_delta_per_tick")]
+    max_weight_delta_per_tick: f32,
+    synapse_prune_threshold: f32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SeedGenomeMutationRatesToml {
+    mutation_rate_age_of_maturity: f32,
+    mutation_rate_max_organism_age: f32,
+    mutation_rate_vision_distance: f32,
+    mutation_rate_max_health: f32,
+    mutation_rate_inter_bias: f32,
+    mutation_rate_inter_update_rate: f32,
+    mutation_rate_eligibility_retention: f32,
+    mutation_rate_synapse_prune_threshold: f32,
+    mutation_rate_neuron_location: f32,
+    #[serde(default)]
+    mutation_rate_synapse_weight_perturbation: f32,
+    #[serde(default)]
+    mutation_rate_add_synapse: f32,
+    #[serde(default)]
+    mutation_rate_remove_synapse: f32,
+    #[serde(default)]
+    mutation_rate_remove_neuron: f32,
+    #[serde(default)]
+    mutation_rate_add_neuron_split_edge: f32,
+}
+
+impl From<SeedGenomeConfigToml> for SeedGenomeConfig {
+    fn from(raw: SeedGenomeConfigToml) -> Self {
+        Self {
+            num_neurons: raw.topology.num_neurons,
+            num_synapses: raw.topology.num_synapses,
+            spatial_prior_sigma: raw.topology.spatial_prior_sigma,
+            vision_distance: raw.topology.vision_distance,
+            starting_energy: raw.lifecycle.starting_energy,
+            max_health: raw.lifecycle.max_health,
+            age_of_maturity: raw.lifecycle.age_of_maturity,
+            max_organism_age: raw.lifecycle.max_organism_age,
+            plasticity_start_age: raw.plasticity.plasticity_start_age,
+            hebb_eta_gain: raw.plasticity.hebb_eta_gain,
+            juvenile_eta_scale: raw.plasticity.juvenile_eta_scale,
+            eligibility_retention: raw.plasticity.eligibility_retention,
+            max_weight_delta_per_tick: raw.plasticity.max_weight_delta_per_tick,
+            synapse_prune_threshold: raw.plasticity.synapse_prune_threshold,
+            mutation_rate_age_of_maturity: raw
+                .mutation_rates
+                .mutation_rate_age_of_maturity,
+            mutation_rate_max_organism_age: raw
+                .mutation_rates
+                .mutation_rate_max_organism_age,
+            mutation_rate_vision_distance: raw
+                .mutation_rates
+                .mutation_rate_vision_distance,
+            mutation_rate_max_health: raw.mutation_rates.mutation_rate_max_health,
+            mutation_rate_inter_bias: raw.mutation_rates.mutation_rate_inter_bias,
+            mutation_rate_inter_update_rate: raw
+                .mutation_rates
+                .mutation_rate_inter_update_rate,
+            mutation_rate_eligibility_retention: raw
+                .mutation_rates
+                .mutation_rate_eligibility_retention,
+            mutation_rate_synapse_prune_threshold: raw
+                .mutation_rates
+                .mutation_rate_synapse_prune_threshold,
+            mutation_rate_neuron_location: raw
+                .mutation_rates
+                .mutation_rate_neuron_location,
+            mutation_rate_synapse_weight_perturbation: raw
+                .mutation_rates
+                .mutation_rate_synapse_weight_perturbation,
+            mutation_rate_add_synapse: raw.mutation_rates.mutation_rate_add_synapse,
+            mutation_rate_remove_synapse: raw
+                .mutation_rates
+                .mutation_rate_remove_synapse,
+            mutation_rate_remove_neuron: raw.mutation_rates.mutation_rate_remove_neuron,
+            mutation_rate_add_neuron_split_edge: raw
+                .mutation_rates
+                .mutation_rate_add_neuron_split_edge,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct WorldConfigToml {
+    world: WorldGeometryToml,
+    population: WorldPopulationToml,
+    lifecycle: WorldLifecycleToml,
+    food: WorldFoodToml,
+    terrain: WorldTerrainToml,
+    evolution: WorldEvolutionToml,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct WorldGeometryToml {
     world_width: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct WorldPopulationToml {
     num_organisms: u32,
     #[serde(default = "default_periodic_injection_interval_turns")]
     periodic_injection_interval_turns: u32,
     #[serde(default = "default_periodic_injection_count")]
     periodic_injection_count: u32,
-    food_energy: f32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct WorldLifecycleToml {
+    #[serde(default = "default_passive_metabolism_cost_per_unit")]
+    passive_metabolism_cost_per_unit: f32,
     move_action_energy_cost: f32,
     #[serde(default = "default_reproduction_investment_energy")]
     reproduction_investment_energy: f32,
@@ -569,17 +725,29 @@ struct WorldConfigDeserialize {
     action_temperature: f32,
     #[serde(default = "default_intent_parallel_threads")]
     intent_parallel_threads: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct WorldFoodToml {
+    food_energy: f32,
     #[serde(default = "default_food_regrowth_interval")]
     food_regrowth_interval: u32,
     #[serde(default = "default_food_regrowth_jitter")]
     food_regrowth_jitter: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct WorldTerrainToml {
     #[serde(default = "default_terrain_noise_scale")]
     terrain_noise_scale: f32,
     #[serde(default = "default_terrain_threshold")]
     terrain_threshold: f32,
     #[serde(default = "default_spike_density")]
     spike_density: f32,
-    max_organism_age: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct WorldEvolutionToml {
     #[serde(default = "default_global_mutation_rate_modifier")]
     global_mutation_rate_modifier: f32,
     #[serde(default = "default_meta_mutation_enabled")]
@@ -588,37 +756,32 @@ struct WorldConfigDeserialize {
     runtime_plasticity_enabled: bool,
     #[serde(default = "default_force_random_actions")]
     force_random_actions: bool,
-    seed_genome_config: SeedGenomeConfig,
 }
 
-impl<'de> Deserialize<'de> for WorldConfig {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let raw = WorldConfigDeserialize::deserialize(deserializer)?;
-        Ok(Self {
-            world_width: raw.world_width,
-            num_organisms: raw.num_organisms,
-            periodic_injection_interval_turns: raw.periodic_injection_interval_turns,
-            periodic_injection_count: raw.periodic_injection_count,
-            food_energy: raw.food_energy,
-            move_action_energy_cost: raw.move_action_energy_cost,
-            reproduction_investment_energy: raw.reproduction_investment_energy,
-            action_temperature: raw.action_temperature,
-            intent_parallel_threads: raw.intent_parallel_threads,
-            food_regrowth_interval: raw.food_regrowth_interval,
-            food_regrowth_jitter: raw.food_regrowth_jitter,
-            terrain_noise_scale: raw.terrain_noise_scale,
-            terrain_threshold: raw.terrain_threshold,
-            spike_density: raw.spike_density,
-            max_organism_age: raw.max_organism_age,
-            global_mutation_rate_modifier: raw.global_mutation_rate_modifier,
-            meta_mutation_enabled: raw.meta_mutation_enabled,
-            runtime_plasticity_enabled: raw.runtime_plasticity_enabled,
-            force_random_actions: raw.force_random_actions,
-            seed_genome_config: raw.seed_genome_config,
-        })
+impl WorldConfigToml {
+    fn into_runtime(self, seed_genome_config: SeedGenomeConfig) -> WorldConfig {
+        WorldConfig {
+            world_width: self.world.world_width,
+            num_organisms: self.population.num_organisms,
+            periodic_injection_interval_turns: self.population.periodic_injection_interval_turns,
+            periodic_injection_count: self.population.periodic_injection_count,
+            food_energy: self.food.food_energy,
+            passive_metabolism_cost_per_unit: self.lifecycle.passive_metabolism_cost_per_unit,
+            move_action_energy_cost: self.lifecycle.move_action_energy_cost,
+            reproduction_investment_energy: self.lifecycle.reproduction_investment_energy,
+            action_temperature: self.lifecycle.action_temperature,
+            intent_parallel_threads: self.lifecycle.intent_parallel_threads,
+            food_regrowth_interval: self.food.food_regrowth_interval,
+            food_regrowth_jitter: self.food.food_regrowth_jitter,
+            terrain_noise_scale: self.terrain.terrain_noise_scale,
+            terrain_threshold: self.terrain.terrain_threshold,
+            spike_density: self.terrain.spike_density,
+            global_mutation_rate_modifier: self.evolution.global_mutation_rate_modifier,
+            meta_mutation_enabled: self.evolution.meta_mutation_enabled,
+            runtime_plasticity_enabled: self.evolution.runtime_plasticity_enabled,
+            force_random_actions: self.evolution.force_random_actions,
+            seed_genome_config,
+        }
     }
 }
 
@@ -628,14 +791,20 @@ impl Default for WorldConfig {
     }
 }
 
-pub fn world_config_from_toml_str(raw: &str) -> Result<WorldConfig, toml::de::Error> {
-    let mut value: toml::Value = toml::from_str(raw)?;
-    normalize_world_config_toml(&mut value);
-    value.try_into()
+pub fn world_config_from_toml_parts(
+    world_raw: &str,
+    seed_genome_raw: &str,
+) -> Result<WorldConfig, toml::de::Error> {
+    let world_config: WorldConfigToml = toml::from_str(world_raw)?;
+    let seed_genome_config: SeedGenomeConfigToml = toml::from_str(seed_genome_raw)?;
+    Ok(world_config.into_runtime(seed_genome_config.into()))
 }
 
 pub fn default_world_config() -> WorldConfig {
-    world_config_from_toml_str(include_str!("../config.toml"))
+    world_config_from_toml_parts(
+        include_str!("../config.toml"),
+        include_str!("../seed_genome.toml"),
+    )
         .expect("default world config TOML must deserialize")
 }
 
@@ -650,7 +819,14 @@ pub fn load_default_world_config() -> Result<WorldConfig> {
 pub fn load_world_config_from_path(path: &Path) -> Result<WorldConfig> {
     let raw = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read world config from {}", path.display()))?;
-    world_config_from_toml_str(&raw)
+    let seed_genome_path = path.with_file_name(DEFAULT_SEED_GENOME_CONFIG_REL_PATH);
+    let seed_genome_raw = std::fs::read_to_string(&seed_genome_path).with_context(|| {
+        format!(
+            "failed to read seed genome config from {}",
+            seed_genome_path.display()
+        )
+    })?;
+    world_config_from_toml_parts(&raw, &seed_genome_raw)
         .context("world config TOML failed schema deserialization")
         .with_context(|| format!("failed to parse world config from {}", path.display()))
 }
@@ -664,6 +840,11 @@ pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
     }
     if config.food_energy <= 0.0 {
         return Err("food_energy must be greater than zero".to_owned());
+    }
+    if !config.passive_metabolism_cost_per_unit.is_finite()
+        || config.passive_metabolism_cost_per_unit < 0.0
+    {
+        return Err("passive_metabolism_cost_per_unit must be finite and >= 0".to_owned());
     }
     if config.move_action_energy_cost < 0.0 {
         return Err("move_action_energy_cost must be >= 0".to_owned());
@@ -712,47 +893,6 @@ pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
     Ok(())
 }
 
-fn normalize_world_config_toml(value: &mut toml::Value) {
-    let Some(table) = value.as_table_mut() else {
-        return;
-    };
-
-    let world_width = table
-        .get("world_width")
-        .and_then(toml::Value::as_integer)
-        .and_then(|v| u32::try_from(v).ok());
-    let legacy_starting_energy = table
-        .get("starting_energy")
-        .and_then(|value| match value {
-            toml::Value::Float(v) => Some(*v),
-            toml::Value::Integer(v) => Some(*v as f64),
-            _ => None,
-        })
-        .or_else(|| world_width.map(|w| w as f64));
-
-    if let Some(seed_genome_table) = table
-        .entry("seed_genome_config")
-        .or_insert_with(|| toml::Value::Table(Default::default()))
-        .as_table_mut()
-    {
-        if let Some(legacy_starting_energy) = legacy_starting_energy {
-            seed_genome_table
-                .entry("starting_energy")
-                .or_insert_with(|| toml::Value::Float(legacy_starting_energy));
-        }
-    }
-
-    if let Some(world_width) = world_width {
-        let derived_max_age = derived_max_organism_age(world_width);
-        table
-            .entry("max_organism_age")
-            .or_insert_with(|| toml::Value::Integer(i64::from(derived_max_age)));
-        table
-            .entry("periodic_injection_interval_turns")
-            .or_insert_with(|| toml::Value::Integer(i64::from(derived_max_age)));
-    }
-}
-
 fn default_starting_energy() -> f32 {
     seed_genome_config_defaults().starting_energy
 }
@@ -771,16 +911,20 @@ fn default_max_weight_delta_per_tick() -> f32 {
     seed_genome_config_defaults().max_weight_delta_per_tick
 }
 
+fn default_max_health() -> f32 {
+    seed_genome_config_defaults().max_health
+}
+
+fn default_max_organism_age() -> u32 {
+    seed_genome_config_defaults().max_organism_age
+}
+
 fn default_food_regrowth_interval() -> u32 {
     world_config_defaults().food_regrowth.interval
 }
 
 fn default_food_regrowth_jitter() -> u32 {
     world_config_defaults().food_regrowth.jitter
-}
-
-fn derived_max_organism_age(world_width: u32) -> u32 {
-    world_width.saturating_mul(derived_world_policy().max_organism_age_per_world_width)
 }
 
 fn default_periodic_injection_interval_turns() -> u32 {
@@ -791,6 +935,10 @@ fn default_periodic_injection_interval_turns() -> u32 {
 
 fn default_periodic_injection_count() -> u32 {
     world_config_defaults().population.periodic_injection_count
+}
+
+fn default_passive_metabolism_cost_per_unit() -> f32 {
+    world_config_defaults().lifecycle.passive_metabolism_cost_per_unit
 }
 
 fn default_terrain_noise_scale() -> f32 {

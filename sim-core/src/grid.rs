@@ -133,7 +133,7 @@ impl Simulation {
         }
 
         if organism.max_health <= 0.0 {
-            organism.max_health = organism.genome.starting_energy.max(1.0);
+            organism.max_health = organism.genome.max_health.max(1.0);
         }
         if organism.health <= 0.0 {
             organism.health = organism.max_health;

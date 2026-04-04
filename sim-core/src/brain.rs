@@ -26,8 +26,7 @@ pub(crate) use crate::topology::{
 };
 #[cfg_attr(not(test), allow(unused_imports))]
 pub use evaluation::derive_active_action_neuron_id;
-#[cfg_attr(not(test), allow(unused_imports))]
-pub(crate) use evaluation::{evaluate_brain, select_action_from_logits};
+pub(crate) use evaluation::evaluate_brain;
 #[cfg_attr(not(test), allow(unused_imports))]
 pub(crate) use expression::{express_genome, make_action_neuron, make_sensory_neuron};
 #[cfg_attr(not(test), allow(unused_imports))]

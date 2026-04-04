@@ -45,10 +45,10 @@ output flood your context. All logs and evaluation outputs must live under
   reward signals, synapse pruning.
 - `sim-core/src/genome.rs` — mutation operators, genome structure, mutation
   rates logic.
-- `sim-config/config.toml` — world parameters, seed genome config, mutation
-  rates.
-- `sim-evaluation/config.toml` — evaluation config (keep in sync with sim-config
-  when needed).
+- `sim-config/config.toml` + `sim-config/seed_genome.toml` — world parameters,
+  seed genome config, and mutation rates.
+- `sim-evaluation/config.toml` + `sim-evaluation/seed_genome.toml` —
+  evaluation config (keep in sync with sim-config when needed).
 
 **What you CANNOT modify:**
 

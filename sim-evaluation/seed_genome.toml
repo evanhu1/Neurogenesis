@@ -1,0 +1,35 @@
+[topology]
+num_neurons = 3
+num_synapses = 20
+spatial_prior_sigma = 3.0
+vision_distance = 10
+
+[lifecycle]
+starting_energy = 500.0
+max_health = 500.0
+age_of_maturity = 50
+max_organism_age = 1250
+
+[plasticity]
+plasticity_start_age = 0
+hebb_eta_gain = 0.01
+juvenile_eta_scale = 0.5
+eligibility_retention = 0.95
+max_weight_delta_per_tick = 0.05
+synapse_prune_threshold = 0.05
+
+[mutation_rates]
+mutation_rate_age_of_maturity = 0.1
+mutation_rate_max_organism_age = 0.1
+mutation_rate_vision_distance = 0.1
+mutation_rate_max_health = 0.1
+mutation_rate_inter_bias = 0.1
+mutation_rate_inter_update_rate = 0.1
+mutation_rate_eligibility_retention = 0.1
+mutation_rate_synapse_prune_threshold = 0.05
+mutation_rate_neuron_location = 0.1
+mutation_rate_synapse_weight_perturbation = 0.5
+mutation_rate_add_synapse = 0.1
+mutation_rate_remove_synapse = 0.1
+mutation_rate_remove_neuron = 0.05
+mutation_rate_add_neuron_split_edge = 0.1

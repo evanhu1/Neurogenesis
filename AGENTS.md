@@ -3,8 +3,9 @@
 ## Project Structure
 
 - `sim-types/`: shared domain types used across all Rust crates.
-- `sim-config/`: world + seed-genome config crate (`config.toml`, typed
-  loader/validation, owned defaults/policies, generated config reference).
+- `sim-config/`: world + seed-genome config crate (`config.toml`,
+  `seed_genome.toml`, typed loader/validation, owned defaults/policies,
+  generated config reference).
 - `sim-core/`: deterministic simulation engine:
   - `lib.rs`: `Simulation` struct, config validation.
   - `turn.rs` + `turn/`: tick orchestration, lifecycle, snapshot, intents,
@@ -23,12 +24,15 @@
 - `sim-server/`: Axum HTTP + WebSocket server (`src/main.rs`), with server-only
   API types in `src/protocol.rs`.
 - `web-client/`: React + TailwindCSS + Vite canvas UI (`src/`).
-- `sim-config/config.toml`: baseline simulation configuration.
+- `sim-config/config.toml`: baseline world simulation configuration.
+- `sim-config/seed_genome.toml`: baseline seed-genome configuration.
 - `sim-config/CONFIG_REFERENCE.md`: generated config reference derived from
   `sim-config/src/config.rs`.
-- `sim-evaluation/config.toml`: stable evaluation benchmark configuration.
-  Keep this in sync with `sim-config/config.toml` when config-schema or baseline
-  tuning changes affect evaluation assumptions.
+- `sim-evaluation/config.toml`: stable evaluation world configuration.
+- `sim-evaluation/seed_genome.toml`: stable evaluation seed-genome
+  configuration. Keep both evaluation files in sync with the `sim-config`
+  baseline when config-schema or baseline tuning changes affect evaluation
+  assumptions.
 
 ## Build & Test
 

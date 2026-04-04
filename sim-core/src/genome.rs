@@ -32,6 +32,10 @@ const MIN_MUTATED_VISION_DISTANCE: u32 = 1;
 const MAX_MUTATED_VISION_DISTANCE: u32 = 32;
 const MIN_MUTATED_AGE_OF_MATURITY: u32 = 0;
 const MAX_MUTATED_AGE_OF_MATURITY: u32 = 10_000;
+const MIN_MUTATED_MAX_ORGANISM_AGE: u32 = 1;
+const MAX_MUTATED_MAX_ORGANISM_AGE: u32 = 100_000;
+const MIN_MUTATED_MAX_HEALTH: f32 = 1.0;
+const MAX_MUTATED_MAX_HEALTH: f32 = 1_000_000_000.0;
 pub(crate) const SYNAPSE_STRENGTH_MAX: f32 = 1.5;
 pub(crate) const SYNAPSE_STRENGTH_MIN: f32 = 0.001;
 const BIAS_MAX: f32 = 1.0;
@@ -44,6 +48,7 @@ const BIAS_PERTURBATION_STDDEV: f32 = 0.15;
 const INTER_LOG_TIME_CONSTANT_PERTURBATION_STDDEV: f32 = 0.05;
 const ELIGIBILITY_RETENTION_PERTURBATION_STDDEV: f32 = 0.05;
 const SYNAPSE_PRUNE_THRESHOLD_PERTURBATION_STDDEV: f32 = 0.02;
+const MAX_HEALTH_PERTURBATION_STDDEV: f32 = 25.0;
 const INTER_BIAS_PERTURB_NEURON_RATE: f32 = 0.8;
 const INTER_UPDATE_RATE_PERTURB_NEURON_RATE: f32 = 0.8;
 const SYNAPSE_WEIGHT_PERTURBATION_STDDEV: f32 = 0.15;
@@ -82,11 +87,28 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
             rng,
         );
     }
+    if rng.random::<f32>() < rates.max_organism_age {
+        genome.max_organism_age = step_u32(
+            genome.max_organism_age,
+            MIN_MUTATED_MAX_ORGANISM_AGE,
+            MAX_MUTATED_MAX_ORGANISM_AGE,
+            rng,
+        );
+    }
     if rng.random::<f32>() < rates.vision_distance {
         genome.vision_distance = step_u32(
             genome.vision_distance,
             MIN_MUTATED_VISION_DISTANCE,
             MAX_MUTATED_VISION_DISTANCE,
+            rng,
+        );
+    }
+    if rng.random::<f32>() < rates.max_health {
+        genome.max_health = perturb_clamped(
+            genome.max_health,
+            MAX_HEALTH_PERTURBATION_STDDEV,
+            MIN_MUTATED_MAX_HEALTH,
+            MAX_MUTATED_MAX_HEALTH,
             rng,
         );
     }

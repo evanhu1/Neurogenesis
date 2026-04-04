@@ -124,16 +124,6 @@ pub fn derive_active_action_neuron_id(organism: &OrganismState) -> Option<Neuron
         .map(|action_neuron| action_neuron.neuron_id)
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn select_action_from_logits(
-    action_logits: [f32; ACTION_COUNT],
-    idle_bias: f32,
-    action_temperature: f32,
-    action_sample: f32,
-) -> ActionType {
-    sample_action_from_logits(action_logits, idle_bias, action_temperature, action_sample).action
-}
-
 fn sample_action_from_logits(
     action_logits: [f32; ACTION_COUNT],
     idle_bias: f32,

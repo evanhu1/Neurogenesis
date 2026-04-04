@@ -1,0 +1,35 @@
+[topology]
+num_neurons = 3 # Number of inter neurons in the initial seed genome.
+num_synapses = 20 # Number of synaptic connections in the initial seed genome.
+spatial_prior_sigma = 3.0 # Spatial prior width used when biasing new synapses toward nearby neurons.
+vision_distance = 10 # Maximum ray-sensing distance for `LookRay` sensory neurons.
+
+[lifecycle]
+starting_energy = 500.0 # Starting energy assigned to newly spawned organisms using this genome.
+max_health = 500.0 # Maximum health assigned to newly spawned organisms using this genome.
+age_of_maturity = 50 # Age in turns at which organisms count as mature.
+max_organism_age = 1250 # Lifespan cap in turns for organisms using this genome.
+
+[plasticity]
+plasticity_start_age = 0 # Age in turns when runtime plasticity begins affecting the organism.
+hebb_eta_gain = 0.01 # Base Hebbian learning-rate gain used for mature organisms.
+juvenile_eta_scale = 0.5 # Multiplier applied to `hebb_eta_gain` before maturity.
+eligibility_retention = 0.95 # Exponential retention factor for eligibility traces across ticks.
+max_weight_delta_per_tick = 0.05 # Per-tick clamp on how much a synapse weight can change from plasticity.
+synapse_prune_threshold = 0.05 # Minimum absolute weight and eligibility scale required to keep a mature synapse during pruning.
+
+[mutation_rates]
+mutation_rate_age_of_maturity = 0.1 # Probability of mutating `age_of_maturity` during offspring generation.
+mutation_rate_max_organism_age = 0.1 # Probability of mutating `max_organism_age` during offspring generation.
+mutation_rate_vision_distance = 0.1 # Probability of mutating `vision_distance` during offspring generation.
+mutation_rate_max_health = 0.1 # Probability of mutating `max_health` during offspring generation.
+mutation_rate_inter_bias = 0.1 # Probability of perturbing an inter-neuron bias.
+mutation_rate_inter_update_rate = 0.1 # Probability of mutating an inter-neuron update-rate / time-constant gene.
+mutation_rate_eligibility_retention = 0.1 # Probability of mutating `eligibility_retention`.
+mutation_rate_synapse_prune_threshold = 0.05 # Probability of mutating `synapse_prune_threshold`.
+mutation_rate_neuron_location = 0.1 # Probability of perturbing a neuron location in latent space.
+mutation_rate_synapse_weight_perturbation = 0.5 # Probability of perturbing or replacing an existing synapse weight.
+mutation_rate_add_synapse = 0.1 # Probability of adding a new synapse.
+mutation_rate_remove_synapse = 0.1 # Probability of removing an existing synapse.
+mutation_rate_remove_neuron = 0.05 # Probability of removing an inter neuron.
+mutation_rate_add_neuron_split_edge = 0.1 # Probability of splitting an edge to insert a new inter neuron.

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-pub use sim_config::{world_config_from_toml_str, SeedGenomeConfig, WorldConfig};
+pub use sim_config::{SeedGenomeConfig, WorldConfig};
 use strum::VariantArray;
 
 macro_rules! id_newtype {
@@ -204,8 +204,12 @@ pub struct OrganismGenome {
     pub vision_distance: u32,
     #[serde(default = "default_starting_energy")]
     pub starting_energy: f32,
+    #[serde(default = "default_max_health")]
+    pub max_health: f32,
     #[serde(default = "default_age_of_maturity")]
     pub age_of_maturity: u32,
+    #[serde(default = "default_max_organism_age")]
+    pub max_organism_age: u32,
     #[serde(default = "default_plasticity_start_age")]
     pub plasticity_start_age: u32,
     #[serde(default)]
@@ -221,7 +225,11 @@ pub struct OrganismGenome {
     #[serde(default)]
     pub mutation_rate_age_of_maturity: f32,
     #[serde(default)]
+    pub mutation_rate_max_organism_age: f32,
+    #[serde(default)]
     pub mutation_rate_vision_distance: f32,
+    #[serde(default)]
+    pub mutation_rate_max_health: f32,
     #[serde(default)]
     pub mutation_rate_inter_bias: f32,
     #[serde(default)]
@@ -269,11 +277,19 @@ fn default_age_of_maturity() -> u32 {
     0
 }
 
+fn default_max_organism_age() -> u32 {
+    u32::MAX
+}
+
 fn default_plasticity_start_age() -> u32 {
     0
 }
 
 fn default_starting_energy() -> f32 {
+    1.0
+}
+
+fn default_max_health() -> f32 {
     1.0
 }
 

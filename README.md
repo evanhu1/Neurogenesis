@@ -82,7 +82,8 @@ Each run writes artifacts under `artifacts/evaluation/...` including
 - `sim-server/` — Axum HTTP + WebSocket server. Server-only API types live in
   `src/protocol.rs`.
 - `web-client/` — React + TailwindCSS + Vite canvas UI.
-- `sim-config/config.toml` — baseline simulation configuration.
+- `sim-config/config.toml` — baseline world simulation configuration.
+- `sim-config/seed_genome.toml` — baseline seed-genome configuration.
 - `sim-config/CONFIG_REFERENCE.md` — generated config reference derived from the
   config source of truth.
 

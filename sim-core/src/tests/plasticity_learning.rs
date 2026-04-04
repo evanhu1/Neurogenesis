@@ -6,8 +6,7 @@ use crate::plasticity::{apply_runtime_weight_updates, compute_pending_coactivati
 
 const NO_REPRODUCTION_INVESTMENT: f32 = 1.0e12;
 fn repo_default_world_config() -> WorldConfig {
-    sim_types::world_config_from_toml_str(include_str!("../../../sim-config/config.toml"))
-        .expect("repo default config should parse")
+    sim_config::default_world_config()
 }
 
 fn seed_learning_food_if_missing(sim: &mut Simulation, food_q: i32, food_r: i32) {
@@ -88,7 +87,7 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
         cfg.food_regrowth_interval = 1;
         cfg.food_regrowth_jitter = 0;
         cfg.action_temperature = 0.08;
-        cfg.max_organism_age = max_age;
+        cfg.seed_genome_config.max_organism_age = max_age as u32;
         cfg.seed_genome_config.starting_energy = 10_000.0;
         cfg.reproduction_investment_energy = NO_REPRODUCTION_INVESTMENT;
         cfg
@@ -214,7 +213,7 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
 fn repo_default_plasticity_params_still_produce_learning_signal() {
     let default_cfg = repo_default_world_config();
     let default_seed = &default_cfg.seed_genome_config;
-    let max_age = default_cfg.max_organism_age;
+    let max_age = default_cfg.seed_genome_config.max_organism_age;
     let initial_weight = 0.3_f32;
     let initial_energy = 5_000.0_f32;
     let seed = 43_u64;
@@ -232,7 +231,9 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
     genome.eligibility_retention = default_seed.eligibility_retention;
     genome.synapse_prune_threshold = default_seed.synapse_prune_threshold;
     genome.age_of_maturity = default_seed.age_of_maturity;
+    genome.max_organism_age = default_seed.max_organism_age;
     genome.starting_energy = default_seed.starting_energy;
+    genome.max_health = default_seed.max_health;
     genome.vision_distance = default_seed.vision_distance;
     genome.edges = vec![SynapseEdge {
         pre_neuron_id: NeuronId(food_ahead_sensory_id),
@@ -251,7 +252,7 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
         cfg.periodic_injection_interval_turns = 0;
         cfg.periodic_injection_count = 0;
         cfg.terrain_threshold = 1.0;
-        cfg.max_organism_age = max_age;
+        cfg.seed_genome_config.max_organism_age = max_age;
         cfg.seed_genome_config.starting_energy = 10_000.0;
         cfg.reproduction_investment_energy = NO_REPRODUCTION_INVESTMENT;
         cfg
@@ -356,7 +357,7 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
 fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
     let default_cfg = repo_default_world_config();
     let default_seed = &default_cfg.seed_genome_config;
-    let max_age = default_cfg.max_organism_age;
+    let max_age = default_cfg.seed_genome_config.max_organism_age;
     let initial_energy = 5_000.0_f32;
     let seed = 44_u64;
 
@@ -374,7 +375,9 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
     genome.eligibility_retention = default_seed.eligibility_retention;
     genome.synapse_prune_threshold = default_seed.synapse_prune_threshold;
     genome.age_of_maturity = default_seed.age_of_maturity;
+    genome.max_organism_age = default_seed.max_organism_age;
     genome.starting_energy = default_seed.starting_energy;
+    genome.max_health = default_seed.max_health;
     genome.vision_distance = default_seed.vision_distance;
     genome.edges = vec![
         SynapseEdge {
@@ -402,7 +405,7 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
         cfg.periodic_injection_interval_turns = 0;
         cfg.periodic_injection_count = 0;
         cfg.terrain_threshold = 1.0;
-        cfg.max_organism_age = max_age;
+        cfg.seed_genome_config.max_organism_age = max_age;
         cfg.seed_genome_config.starting_energy = 10_000.0;
         cfg.reproduction_investment_energy = NO_REPRODUCTION_INVESTMENT;
         cfg

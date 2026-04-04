@@ -129,7 +129,7 @@ impl Simulation {
     ) -> OrganismState {
         let id = self.alloc_organism_id();
         let starting_energy = genome.starting_energy;
-        let vitality = starting_energy.max(1.0);
+        let max_health = genome.max_health.max(1.0);
         OrganismState {
             id,
             species_id: params.species_id,
@@ -139,8 +139,8 @@ impl Simulation {
             age_turns: 0,
             facing: params.facing,
             energy: starting_energy,
-            health: vitality,
-            max_health: vitality,
+            health: max_health,
+            max_health,
             energy_prev: starting_energy,
             dopamine: 0.0,
             damage_taken_last_turn: 0.0,

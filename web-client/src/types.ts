@@ -40,7 +40,9 @@ type GenomeCoreParams = {
   spatial_prior_sigma: number;
   vision_distance: number;
   starting_energy: number;
+  max_health: number;
   age_of_maturity: number;
+  max_organism_age: number;
   plasticity_start_age: number;
   hebb_eta_gain: number;
   juvenile_eta_scale: number;
@@ -51,7 +53,9 @@ type GenomeCoreParams = {
 
 type GenomeMutationRateParams = {
   mutation_rate_age_of_maturity: number;
+  mutation_rate_max_organism_age: number;
   mutation_rate_vision_distance: number;
+  mutation_rate_max_health: number;
   mutation_rate_inter_bias: number;
   mutation_rate_inter_update_rate: number;
   mutation_rate_eligibility_retention: number;
@@ -74,17 +78,15 @@ export type WorldConfig = {
   periodic_injection_interval_turns: number;
   periodic_injection_count: number;
   food_energy: number;
+  passive_metabolism_cost_per_unit: number;
   move_action_energy_cost: number;
   reproduction_investment_energy: number;
   action_temperature: number;
-  neuron_metabolism_cost: number;
   food_regrowth_interval: number;
   food_regrowth_jitter: number;
   terrain_noise_scale: number;
   terrain_threshold: number;
   spike_density: number;
-  max_organism_age: number;
-  speciation_threshold: number;
   global_mutation_rate_modifier: number;
   meta_mutation_enabled: boolean;
   runtime_plasticity_enabled: boolean;
