@@ -33,6 +33,7 @@ pub(crate) struct SeedEvaluationSummary {
     pub(crate) baseline: bool,
     pub(crate) total_time_seconds: f64,
     pub(crate) aggregate_score: AggregateScore,
+    pub(crate) experiment_readouts: ReproductionAnalytics,
     pub(crate) state_hash: String,
     pub(crate) timeseries: Vec<IntervalMetrics>,
 }
@@ -46,6 +47,7 @@ pub(crate) struct EvaluationSummary {
     pub(crate) worker_threads: usize,
     pub(crate) total_time_seconds: f64,
     pub(crate) aggregate_score: AggregateScore,
+    pub(crate) experiment_readouts: ReproductionAnalytics,
     pub(crate) seed_summaries: Vec<SeedRunSummary>,
     pub(crate) timeseries: Vec<IntervalMetrics>,
 }
@@ -56,7 +58,21 @@ pub(crate) struct SeedRunSummary {
     pub(crate) out_dir: PathBuf,
     pub(crate) total_time_seconds: f64,
     pub(crate) aggregate_score: AggregateScore,
+    pub(crate) experiment_readouts: ReproductionAnalytics,
     pub(crate) state_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub(crate) struct ReproductionAnalytics {
+    pub(crate) births: u64,
+    pub(crate) successful_births: u64,
+    pub(crate) blocked_births: u64,
+    pub(crate) parent_died_during_reproduction: u64,
+    pub(crate) survived_to_30: u64,
+    pub(crate) survived_to_maturity: u64,
+    pub(crate) mean_parent_energy_after_successful_birth: Option<f64>,
+    pub(crate) mean_age_at_first_successful_reproduction: Option<f64>,
+    pub(crate) mean_successful_birth_interval: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]

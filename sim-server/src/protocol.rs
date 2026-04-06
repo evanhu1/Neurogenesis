@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use sim_types::{
     FacingDirection, FoodState, MetricsSnapshot, NeuronId, OccupancyCell, OrganismFacing,
-    OrganismGenome, OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId,
-    TerrainCell, TickDelta, WorldConfig, WorldSnapshot,
+    OrganismGenome, OrganismId, OrganismMove, OrganismState, RemovedEntityPosition,
+    ReproductionEvent, SpeciesId, TerrainCell, TickDelta, WorldConfig, WorldSnapshot,
 };
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -79,8 +79,12 @@ pub enum ClientCommand {
         stream_mode: StreamMode,
     },
     Pause,
-    Step { count: u32 },
-    SetFocus { organism_id: OrganismId },
+    Step {
+        count: u32,
+    },
+    SetFocus {
+        organism_id: OrganismId,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -178,6 +182,7 @@ pub struct TickDeltaView {
     pub facing_updates: Vec<OrganismFacing>,
     pub removed_positions: Vec<RemovedEntityPosition>,
     pub spawned: Vec<WorldOrganismState>,
+    pub reproduction_events: Vec<ReproductionEvent>,
     pub food_spawned: Vec<FoodState>,
     pub metrics: MetricsSnapshot,
 }
@@ -190,6 +195,7 @@ impl From<TickDelta> for TickDeltaView {
             facing_updates: delta.facing_updates,
             removed_positions: delta.removed_positions,
             spawned: delta.spawned.iter().map(WorldOrganismState::from).collect(),
+            reproduction_events: delta.reproduction_events,
             food_spawned: delta.food_spawned,
             metrics: delta.metrics,
         }

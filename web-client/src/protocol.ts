@@ -285,6 +285,16 @@ export function normalizeTickDelta(delta: ApiTickDelta): TickDelta {
     })),
     removed_positions: delta.removed_positions.map(normalizeRemovedEntityPosition),
     spawned: delta.spawned.map(normalizeWorldOrganismState),
+    reproduction_events: delta.reproduction_events.map((event) => ({
+      parent_id: unwrapId(event.parent_id),
+      parent_species_id: unwrapId(event.parent_species_id),
+      parent_age_turns: event.parent_age_turns,
+      parent_generation: event.parent_generation,
+      investment_energy: event.investment_energy,
+      parent_energy_after_event: event.parent_energy_after_event,
+      child_id: event.child_id == null ? null : unwrapId(event.child_id),
+      failure_cause: event.failure_cause,
+    })),
     food_spawned: delta.food_spawned.map(normalizeFoodState),
     metrics: {
       ...delta.metrics,

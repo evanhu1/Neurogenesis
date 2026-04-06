@@ -446,6 +446,30 @@ export type EntityId =
   | { entity_type: 'Organism'; id: OrganismId }
   | { entity_type: 'Food'; id: FoodId };
 
+export type ReproductionFailureCause = 'BlockedBirth' | 'ParentDied';
+
+export type ApiReproductionEvent = {
+  parent_id: ApiOrganismId;
+  parent_species_id: ApiSpeciesId;
+  parent_age_turns: number;
+  parent_generation: number;
+  investment_energy: number;
+  parent_energy_after_event: number;
+  child_id: ApiOrganismId | null;
+  failure_cause: ReproductionFailureCause | null;
+};
+
+export type ReproductionEvent = {
+  parent_id: OrganismId;
+  parent_species_id: SpeciesId;
+  parent_age_turns: number;
+  parent_generation: number;
+  investment_energy: number;
+  parent_energy_after_event: number;
+  child_id: OrganismId | null;
+  failure_cause: ReproductionFailureCause | null;
+};
+
 export type ApiRemovedEntityPosition = {
   entity_id: ApiEntityId;
   q: number;
@@ -470,6 +494,7 @@ export type ApiTickDelta = {
   facing_updates: ApiOrganismFacing[];
   removed_positions: ApiRemovedEntityPosition[];
   spawned: ApiWorldOrganismState[];
+  reproduction_events: ApiReproductionEvent[];
   food_spawned: ApiFoodState[];
   metrics: ApiMetricsSnapshot;
 };
@@ -480,6 +505,7 @@ export type TickDelta = {
   facing_updates: OrganismFacing[];
   removed_positions: RemovedEntityPosition[];
   spawned: WorldOrganismState[];
+  reproduction_events: ReproductionEvent[];
   food_spawned: FoodState[];
   metrics: MetricsSnapshot;
 };

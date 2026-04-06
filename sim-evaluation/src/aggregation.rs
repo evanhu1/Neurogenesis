@@ -3,7 +3,7 @@ use crate::{
     output::{
         mean_f64, mean_histogram, mean_option, mean_option_u64, mean_round_u32, mean_round_u64,
     },
-    types::{AggregateScore, SeedEvaluationSummary},
+    types::{AggregateScore, ReproductionAnalytics, SeedEvaluationSummary},
 };
 use sim_types::OrganismState;
 use std::collections::hash_map::DefaultHasher;
@@ -396,6 +396,62 @@ pub(crate) fn average_aggregate_scores(seed_summaries: &[SeedEvaluationSummary])
             seed_summaries
                 .iter()
                 .map(|summary| summary.aggregate_score.adaptation_pillar),
+        ),
+    }
+}
+
+pub(crate) fn average_reproduction_analytics(
+    seed_summaries: &[SeedEvaluationSummary],
+) -> ReproductionAnalytics {
+    ReproductionAnalytics {
+        births: mean_round_u64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.experiment_readouts.births),
+        ),
+        successful_births: mean_round_u64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.experiment_readouts.successful_births),
+        ),
+        blocked_births: mean_round_u64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.experiment_readouts.blocked_births),
+        ),
+        parent_died_during_reproduction: mean_round_u64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.experiment_readouts.parent_died_during_reproduction),
+        ),
+        survived_to_30: mean_round_u64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.experiment_readouts.survived_to_30),
+        ),
+        survived_to_maturity: mean_round_u64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.experiment_readouts.survived_to_maturity),
+        ),
+        mean_parent_energy_after_successful_birth: mean_option(seed_summaries.iter().map(
+            |summary| {
+                summary
+                    .experiment_readouts
+                    .mean_parent_energy_after_successful_birth
+            },
+        )),
+        mean_age_at_first_successful_reproduction: mean_option(seed_summaries.iter().map(
+            |summary| {
+                summary
+                    .experiment_readouts
+                    .mean_age_at_first_successful_reproduction
+            },
+        )),
+        mean_successful_birth_interval: mean_option(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.experiment_readouts.mean_successful_birth_interval),
         ),
     }
 }

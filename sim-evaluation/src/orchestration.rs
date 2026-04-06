@@ -1,6 +1,7 @@
 use crate::{
     aggregation::{
-        average_aggregate_scores, average_timeseries, compute_aggregate_score, state_hash,
+        average_aggregate_scores, average_reproduction_analytics, average_timeseries,
+        compute_aggregate_score, state_hash,
     },
     ledger::{Ledger, N_ACTIONS},
     metrics::{compute_interval_metrics, jensen_shannon_divergence},
@@ -90,6 +91,7 @@ pub(crate) fn run_evaluation_across_seeds(
     write_timeseries_csv(&options.out_dir, &averaged_timeseries)?;
 
     let aggregate_score = average_aggregate_scores(&seed_summaries);
+    let experiment_readouts = average_reproduction_analytics(&seed_summaries);
     let total_time_seconds = run_started.elapsed().as_secs_f64();
     let generated_at_utc = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
 
@@ -100,6 +102,7 @@ pub(crate) fn run_evaluation_across_seeds(
             out_dir: PathBuf::from(format!("seed_{}", summary.seed)),
             total_time_seconds: summary.total_time_seconds,
             aggregate_score: summary.aggregate_score.clone(),
+            experiment_readouts: summary.experiment_readouts.clone(),
             state_hash: summary.state_hash.clone(),
         })
         .collect::<Vec<_>>();
@@ -112,6 +115,7 @@ pub(crate) fn run_evaluation_across_seeds(
         worker_threads,
         total_time_seconds,
         aggregate_score: aggregate_score.clone(),
+        experiment_readouts,
         seed_summaries: seed_run_summaries.clone(),
         timeseries: averaged_timeseries.clone(),
     };
@@ -238,11 +242,15 @@ pub(crate) fn run_single_seed_evaluation(
         for record in records {
             ledger.update(record);
         }
+        for event in delta.reproduction_events.iter().copied() {
+            ledger.handle_reproduction_event(tick, event);
+        }
 
         interval_births = interval_births.saturating_add(delta.spawned.len() as u64);
         for spawned in &delta.spawned {
             ledger.birth(spawned.id, tick);
         }
+        ledger.update_survival_thresholds(sim.organisms());
 
         for removed in &delta.removed_positions {
             match removed.entity_id {
@@ -303,6 +311,7 @@ pub(crate) fn run_single_seed_evaluation(
     let total_time_seconds = run_started.elapsed().as_secs_f64();
     let generated_at_utc = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
     let aggregate_score = compute_aggregate_score(&timeseries, options.reward_reversal_tick);
+    let experiment_readouts = ledger.reproduction_analytics();
 
     let summary = SeedEvaluationSummary {
         title: options.title.clone(),
@@ -311,6 +320,7 @@ pub(crate) fn run_single_seed_evaluation(
         baseline: options.baseline,
         total_time_seconds,
         aggregate_score: aggregate_score.clone(),
+        experiment_readouts,
         state_hash: state_hash(sim.organisms()),
         timeseries,
     };
