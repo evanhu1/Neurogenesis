@@ -19,7 +19,7 @@ impl Reporter {
         let mut csv = BufWriter::new(File::create(csv_path)?);
         writeln!(
             csv,
-            "tick,pop,births,deaths,food,max_generation,life_mean,predation_rate,foraging_rate,attack_attempt_rate,attack_success_rate,ate_pct,cons_mean,brain_size,brain_size_stddev,brain_size_p10,brain_size_p50,brain_size_p90,lineage_diversity,p_fwd_food,mi_sa,mi_sa_juvenile,mi_sa_adult,h_action,idle_fraction,reproduction_efficiency,damage_avoidance,reward_reversal_shift,util"
+            "tick,pop,births,deaths,food,max_generation,life_mean,predation_rate,foraging_rate,attack_attempt_rate,attack_success_rate,ate_pct,cons_mean,brain_size,brain_size_stddev,brain_size_p10,brain_size_p50,brain_size_p90,lineage_diversity,p_fwd_food,mi_sa,mi_sa_juvenile,mi_sa_adult,h_action,idle_fraction,reproduction_efficiency,mean_gestation_ticks,mean_offspring_transfer_energy,damage_avoidance,reward_reversal_shift,util"
         )?;
         Ok(Self { csv })
     }
@@ -27,7 +27,7 @@ impl Reporter {
     pub fn emit(&mut self, metrics: &IntervalMetrics) -> Result<()> {
         writeln!(
             self.csv,
-            "{tick},{pop},{births},{deaths},{food},{max_generation},{life_mean},{predation_rate},{foraging_rate},{attack_attempt_rate},{attack_success_rate},{ate_pct},{cons_mean},{brain_size},{brain_size_stddev},{brain_size_p10},{brain_size_p50},{brain_size_p90},{lineage_diversity},{p_fwd_food},{mi_sa},{mi_sa_juvenile},{mi_sa_adult},{h_action},{idle_fraction},{reproduction_efficiency},{damage_avoidance},{reward_reversal_shift},{util}",
+            "{tick},{pop},{births},{deaths},{food},{max_generation},{life_mean},{predation_rate},{foraging_rate},{attack_attempt_rate},{attack_success_rate},{ate_pct},{cons_mean},{brain_size},{brain_size_stddev},{brain_size_p10},{brain_size_p50},{brain_size_p90},{lineage_diversity},{p_fwd_food},{mi_sa},{mi_sa_juvenile},{mi_sa_adult},{h_action},{idle_fraction},{reproduction_efficiency},{mean_gestation_ticks},{mean_offspring_transfer_energy},{damage_avoidance},{reward_reversal_shift},{util}",
             tick = metrics.tick,
             pop = metrics.pop,
             births = metrics.births,
@@ -54,6 +54,8 @@ impl Reporter {
             h_action = csv_opt(metrics.h_action),
             idle_fraction = csv_opt(metrics.idle_fraction),
             reproduction_efficiency = csv_opt(metrics.reproduction_efficiency),
+            mean_gestation_ticks = csv_opt(metrics.mean_gestation_ticks),
+            mean_offspring_transfer_energy = csv_opt(metrics.mean_offspring_transfer_energy),
             damage_avoidance = csv_opt(metrics.damage_avoidance),
             reward_reversal_shift = csv_opt(metrics.reward_reversal_shift),
             util = csv_opt(metrics.util),
@@ -344,6 +346,8 @@ pub fn write_html_report(
         "h_action",
         "idle_fraction",
         "reproduction_efficiency",
+        "mean_gestation_ticks",
+        "mean_offspring_transfer_energy",
         "damage_avoidance",
         "reward_reversal_shift",
         "util",
@@ -377,6 +381,8 @@ pub fn write_html_report(
             fmt_opt(row.h_action, 4),
             fmt_opt(row.idle_fraction, 4),
             fmt_opt(row.reproduction_efficiency, 4),
+            fmt_opt(row.mean_gestation_ticks, 4),
+            fmt_opt(row.mean_offspring_transfer_energy, 2),
             fmt_opt(row.damage_avoidance, 4),
             fmt_opt(row.reward_reversal_shift, 4),
             fmt_opt(row.util, 4),
@@ -502,6 +508,18 @@ pub fn write_html_report(
             metric_series(rows, |r| r.reproduction_efficiency),
             Some(0.0),
             "#0ea5e9",
+        ),
+        (
+            "Mean Gestation Ticks",
+            metric_series(rows, |r| r.mean_gestation_ticks),
+            Some(0.0),
+            "#7c2d12",
+        ),
+        (
+            "Mean Offspring Transfer Energy",
+            metric_series(rows, |r| r.mean_offspring_transfer_energy),
+            None,
+            "#1f2937",
         ),
         (
             "Lineage Diversity",

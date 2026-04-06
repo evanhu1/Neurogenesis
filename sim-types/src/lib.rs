@@ -18,6 +18,9 @@ id_newtype!(FoodId, u64);
 
 pub const INTER_NEURON_ID_BASE: u32 = 1000;
 pub const ACTION_NEURON_ID_BASE: u32 = 2000;
+pub const MAX_GESTATION_TICKS: u8 = 4;
+pub const BASE_OFFSPRING_TRANSFER_ENERGY: f32 = 100.0;
+pub const GESTATION_TRANSFER_ENERGY_STEP: f32 = 100.0;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum FoodKind {
@@ -214,6 +217,11 @@ pub fn inter_neuron_index(id: NeuronId, num_neurons: u32) -> Option<u32> {
     (idx < num_neurons).then_some(idx)
 }
 
+pub fn offspring_transfer_energy(gestation_ticks: u8) -> f32 {
+    BASE_OFFSPRING_TRANSFER_ENERGY
+        + GESTATION_TRANSFER_ENERGY_STEP * f32::from(gestation_ticks.min(MAX_GESTATION_TICKS))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OrganismGenome {
     pub num_neurons: u32,
@@ -226,6 +234,8 @@ pub struct OrganismGenome {
     pub max_health: f32,
     #[serde(default = "default_age_of_maturity")]
     pub age_of_maturity: u32,
+    #[serde(default = "default_gestation_ticks")]
+    pub gestation_ticks: u8,
     #[serde(default = "default_max_organism_age")]
     pub max_organism_age: u32,
     #[serde(default = "default_plasticity_start_age")]
@@ -242,6 +252,8 @@ pub struct OrganismGenome {
     pub synapse_prune_threshold: f32,
     #[serde(default)]
     pub mutation_rate_age_of_maturity: f32,
+    #[serde(default)]
+    pub mutation_rate_gestation_ticks: f32,
     #[serde(default)]
     pub mutation_rate_max_organism_age: f32,
     #[serde(default)]
@@ -292,6 +304,10 @@ fn default_eligibility_retention() -> f32 {
 }
 
 fn default_age_of_maturity() -> u32 {
+    0
+}
+
+fn default_gestation_ticks() -> u8 {
     0
 }
 

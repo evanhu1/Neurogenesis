@@ -8,6 +8,7 @@ vision_distance = 10 # Maximum ray-sensing distance for `LookRay` sensory neuron
 starting_energy = 500.0 # Starting energy assigned to newly spawned organisms using this genome.
 max_health = 500.0 # Maximum health assigned to newly spawned organisms using this genome.
 age_of_maturity = 50 # Age in turns at which organisms count as mature.
+gestation_ticks = 2 # Gestation duration in ticks used to determine offspring transfer energy.
 max_organism_age = 1250 # Lifespan cap in turns for organisms using this genome.
 
 [plasticity]
@@ -20,6 +21,7 @@ synapse_prune_threshold = 0.05 # Minimum absolute weight and eligibility scale r
 
 [mutation_rates]
 mutation_rate_age_of_maturity = 0.1 # Probability of mutating `age_of_maturity` during offspring generation.
+mutation_rate_gestation_ticks = 0.1 # Probability of mutating `gestation_ticks` during offspring generation.
 mutation_rate_max_organism_age = 0.1 # Probability of mutating `max_organism_age` during offspring generation.
 mutation_rate_vision_distance = 0.1 # Probability of mutating `vision_distance` during offspring generation.
 mutation_rate_max_health = 0.1 # Probability of mutating `max_health` during offspring generation.

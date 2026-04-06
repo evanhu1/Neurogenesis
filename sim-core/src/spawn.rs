@@ -21,6 +21,7 @@ pub(crate) struct ReproductionSpawn {
     pub(crate) parent_generation: u64,
     pub(crate) parent_species_id: SpeciesId,
     pub(crate) parent_facing: FacingDirection,
+    pub(crate) offspring_starting_energy: f32,
     pub(crate) q: i32,
     pub(crate) r: i32,
 }
@@ -49,6 +50,7 @@ struct OrganismSpawnParams {
     r: i32,
     generation: u64,
     facing: FacingDirection,
+    starting_energy_override: Option<f32>,
 }
 
 impl SpawnRequest {

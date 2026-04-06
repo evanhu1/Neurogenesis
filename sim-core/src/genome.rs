@@ -32,6 +32,8 @@ const MIN_MUTATED_VISION_DISTANCE: u32 = 1;
 const MAX_MUTATED_VISION_DISTANCE: u32 = 32;
 const MIN_MUTATED_AGE_OF_MATURITY: u32 = 0;
 const MAX_MUTATED_AGE_OF_MATURITY: u32 = 10_000;
+const MIN_MUTATED_GESTATION_TICKS: u8 = 0;
+const MAX_MUTATED_GESTATION_TICKS: u8 = 4;
 const MIN_MUTATED_MAX_ORGANISM_AGE: u32 = 1;
 const MAX_MUTATED_MAX_ORGANISM_AGE: u32 = 100_000;
 const MIN_MUTATED_MAX_HEALTH: f32 = 1.0;
@@ -84,6 +86,14 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
             genome.age_of_maturity,
             MIN_MUTATED_AGE_OF_MATURITY,
             MAX_MUTATED_AGE_OF_MATURITY,
+            rng,
+        );
+    }
+    if rng.random::<f32>() < rates.gestation_ticks {
+        genome.gestation_ticks = step_u8(
+            genome.gestation_ticks,
+            MIN_MUTATED_GESTATION_TICKS,
+            MAX_MUTATED_GESTATION_TICKS,
             rng,
         );
     }
@@ -192,6 +202,23 @@ fn mutate_many_or_one<T, R: Rng + ?Sized>(
 }
 
 fn step_u32<R: Rng + ?Sized>(value: u32, min: u32, max: u32, rng: &mut R) -> u32 {
+    if min >= max {
+        return min;
+    }
+    if value <= min {
+        return min.saturating_add(1).min(max);
+    }
+    if value >= max {
+        return max.saturating_sub(1).max(min);
+    }
+    if rng.random::<bool>() {
+        value.saturating_add(1).min(max)
+    } else {
+        value.saturating_sub(1).max(min)
+    }
+}
+
+fn step_u8<R: Rng + ?Sized>(value: u8, min: u8, max: u8, rng: &mut R) -> u8 {
     if min >= max {
         return min;
     }

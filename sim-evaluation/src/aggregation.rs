@@ -50,6 +50,9 @@ pub(crate) fn compute_aggregate_score(
     let mean_idle_fraction = mean_option(window.iter().map(|row| row.idle_fraction));
     let mean_reproduction_efficiency =
         mean_option(window.iter().map(|row| row.reproduction_efficiency));
+    let mean_gestation_ticks = mean_option(window.iter().map(|row| row.mean_gestation_ticks));
+    let mean_offspring_transfer_energy =
+        mean_option(window.iter().map(|row| row.mean_offspring_transfer_energy));
     let mean_lineage_diversity = mean_option(window.iter().map(|row| row.lineage_diversity));
     let mean_damage_avoidance = mean_option(window.iter().map(|row| row.damage_avoidance));
     let mean_reward_reversal_shift =
@@ -161,6 +164,8 @@ pub(crate) fn compute_aggregate_score(
         mean_attack_success_rate,
         mean_idle_fraction,
         mean_reproduction_efficiency,
+        mean_gestation_ticks,
+        mean_offspring_transfer_energy,
         mean_lineage_diversity,
         mean_damage_avoidance,
         mean_reward_reversal_shift,
@@ -266,6 +271,16 @@ pub(crate) fn average_aggregate_scores(seed_summaries: &[SeedEvaluationSummary])
             seed_summaries
                 .iter()
                 .map(|summary| summary.aggregate_score.mean_reproduction_efficiency),
+        ),
+        mean_gestation_ticks: mean_option(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.mean_gestation_ticks),
+        ),
+        mean_offspring_transfer_energy: mean_option(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.mean_offspring_transfer_energy),
         ),
         mean_lineage_diversity: mean_option(
             seed_summaries
@@ -595,6 +610,16 @@ pub(crate) fn average_timeseries(seed_summaries: &[SeedEvaluationSummary]) -> Ve
                 seed_summaries
                     .iter()
                     .map(|summary| summary.timeseries[row_idx].reproduction_efficiency),
+            ),
+            mean_gestation_ticks: mean_option(
+                seed_summaries
+                    .iter()
+                    .map(|summary| summary.timeseries[row_idx].mean_gestation_ticks),
+            ),
+            mean_offspring_transfer_energy: mean_option(
+                seed_summaries
+                    .iter()
+                    .map(|summary| summary.timeseries[row_idx].mean_offspring_transfer_energy),
             ),
             damage_avoidance: mean_option(
                 seed_summaries

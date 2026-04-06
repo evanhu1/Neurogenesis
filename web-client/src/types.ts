@@ -42,6 +42,7 @@ type GenomeCoreParams = {
   starting_energy: number;
   max_health: number;
   age_of_maturity: number;
+  gestation_ticks: number;
   max_organism_age: number;
   plasticity_start_age: number;
   hebb_eta_gain: number;
@@ -53,6 +54,7 @@ type GenomeCoreParams = {
 
 type GenomeMutationRateParams = {
   mutation_rate_age_of_maturity: number;
+  mutation_rate_gestation_ticks: number;
   mutation_rate_max_organism_age: number;
   mutation_rate_vision_distance: number;
   mutation_rate_max_health: number;

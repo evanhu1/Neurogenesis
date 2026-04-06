@@ -35,7 +35,6 @@ use std::time::Instant;
 
 const RNG_TURN_MIX: u64 = 0x9E37_79B9_7F4A_7C15;
 const RNG_ORGANISM_MIX: u64 = 0xBF58_476D_1CE4_E5B9;
-const REPRODUCE_LOCK_DURATION_TURNS: u8 = 2;
 const PLANT_CONSUMPTION_ENERGY_FRACTION: f32 = 0.20;
 const CORPSE_CONSUMPTION_ENERGY_FRACTION: f32 = 0.80;
 const ATTACK_DAMAGE_FRACTION: f32 = 0.50;
@@ -172,7 +171,6 @@ impl Simulation {
                 &intents,
                 &self.occupancy,
                 snapshot.world_width,
-                self.config.reproduction_investment_energy,
             );
         });
 
