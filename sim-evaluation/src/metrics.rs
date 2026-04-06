@@ -1,6 +1,6 @@
 use crate::ledger::{CompletedLifetime, IntervalActionStats, N_ACTIONS, SENSORY_BIN_COUNT};
 use serde::Serialize;
-use sim_types::OrganismState;
+use sim_types::{offspring_transfer_energy, OrganismState};
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize)]
@@ -31,6 +31,8 @@ pub struct IntervalMetrics {
     pub h_action: Option<f64>,
     pub idle_fraction: Option<f64>,
     pub reproduction_efficiency: Option<f64>,
+    pub mean_gestation_ticks: Option<f64>,
+    pub mean_offspring_transfer_energy: Option<f64>,
     pub damage_avoidance: Option<f64>,
     pub reward_reversal_shift: Option<f64>,
     pub util: Option<f64>,
@@ -81,6 +83,8 @@ pub fn compute_interval_metrics(
     } else {
         Some(action_histogram[0])
     };
+    let mean_gestation_ticks = mean_gestation_ticks(living);
+    let mean_offspring_transfer_energy = mean_offspring_transfer_energy(living);
 
     let (life_mean, ate_pct, cons_mean, p_fwd_food, mi_sa, h_action, util) = if deceased.is_empty()
     {
@@ -136,6 +140,8 @@ pub fn compute_interval_metrics(
         h_action,
         idle_fraction,
         reproduction_efficiency,
+        mean_gestation_ticks,
+        mean_offspring_transfer_energy,
         damage_avoidance,
         reward_reversal_shift: None,
         util,
@@ -227,6 +233,32 @@ fn lineage_diversity(living: &[OrganismState]) -> Option<f64> {
         shannon -= p * p.log2();
     }
     Some(shannon)
+}
+
+fn mean_gestation_ticks(living: &[OrganismState]) -> Option<f64> {
+    if living.is_empty() {
+        return None;
+    }
+    Some(
+        living
+            .iter()
+            .map(|organism| f64::from(organism.genome.gestation_ticks))
+            .sum::<f64>()
+            / living.len() as f64,
+    )
+}
+
+fn mean_offspring_transfer_energy(living: &[OrganismState]) -> Option<f64> {
+    if living.is_empty() {
+        return None;
+    }
+    Some(
+        living
+            .iter()
+            .map(|organism| f64::from(offspring_transfer_energy(organism.genome.gestation_ticks)))
+            .sum::<f64>()
+            / living.len() as f64,
+    )
 }
 
 fn pooled_p_fwd_food(deceased: &[CompletedLifetime]) -> Option<f64> {

@@ -1,5 +1,5 @@
 use super::*;
-use sim_types::{ReproductionEvent, ReproductionFailureCause};
+use sim_types::{offspring_transfer_energy, ReproductionEvent, ReproductionFailureCause};
 
 #[derive(Clone, Copy)]
 struct PendingBirthEvent {
@@ -68,7 +68,6 @@ impl ReproductionPhaseState {
         intents: &[OrganismIntent],
         occupancy: &[Option<Occupant>],
         world_width: i32,
-        reproduction_investment_energy: f32,
     ) {
         for intent in intents {
             let org_idx = intent.idx;
@@ -79,8 +78,9 @@ impl ReproductionPhaseState {
                 continue;
             }
 
+            let transfer_energy = offspring_transfer_energy(organism.genome.gestation_ticks);
             let parent_energy = organism.energy;
-            if parent_energy < reproduction_investment_energy {
+            if parent_energy < transfer_energy {
                 continue;
             }
             let maturity_age = u64::from(organism.genome.age_of_maturity);
@@ -95,17 +95,17 @@ impl ReproductionPhaseState {
                 continue;
             }
 
-            organism.energy -= reproduction_investment_energy;
+            organism.energy -= transfer_energy;
             organism.reproductions_count = organism.reproductions_count.saturating_add(1);
             reward_ledgers[org_idx].record(RewardEvent::ReproductionInvested {
-                energy: reproduction_investment_energy,
+                energy: transfer_energy,
             });
             pending_actions[org_idx] = PendingActionState {
                 kind: PendingActionKind::Reproduce,
-                turns_remaining: REPRODUCE_LOCK_DURATION_TURNS,
-                reproduction_energy_bits: reproduction_investment_energy.to_bits(),
+                turns_remaining: organism.genome.gestation_ticks,
+                reproduction_energy_bits: transfer_energy.to_bits(),
             };
-            self.skip_pending_action_decrement[org_idx] = true;
+            self.skip_pending_action_decrement[org_idx] = organism.genome.gestation_ticks > 0;
         }
     }
 
@@ -142,6 +142,7 @@ impl ReproductionPhaseState {
                         parent_generation: parent.generation,
                         parent_species_id: parent.species_id,
                         parent_facing: parent.facing,
+                        offspring_starting_energy: pending_action.reproduction_energy(),
                         q,
                         r,
                     }),

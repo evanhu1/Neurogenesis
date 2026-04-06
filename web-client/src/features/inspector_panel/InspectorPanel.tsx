@@ -69,6 +69,7 @@ export function InspectorPanel({
 
     const mutationRates: MutationRateItem[] = [
       { key: 'mutation_rate_age_of_maturity', label: 'Age Mat', value: genome.mutation_rate_age_of_maturity },
+      { key: 'mutation_rate_gestation_ticks', label: 'Gest', value: genome.mutation_rate_gestation_ticks },
       { key: 'mutation_rate_vision_distance', label: 'Vision', value: genome.mutation_rate_vision_distance },
       { key: 'mutation_rate_neuron_location', label: 'Neuron Loc', value: genome.mutation_rate_neuron_location },
       { key: 'mutation_rate_inter_bias', label: 'Bias', value: genome.mutation_rate_inter_bias },
@@ -87,6 +88,7 @@ export function InspectorPanel({
         { label: 'Pos', value: `(${focusedOrganism.q},${focusedOrganism.r})` },
         { label: 'Facing', value: focusedOrganism.facing },
         { label: 'Age', value: String(focusedOrganism.age_turns) },
+        { label: 'Gest', value: String(genome.gestation_ticks) },
         { label: 'Energy', value: formatFloat(focusedOrganism.energy, 2) },
         { label: 'Action', value: focusedOrganism.last_action_taken },
         { label: 'Dopamine', value: formatFloat(focusedOrganism.dopamine, 3) },

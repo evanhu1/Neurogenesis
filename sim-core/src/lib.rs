@@ -141,6 +141,7 @@ impl RewardLedger {
     pub(crate) fn reward_signal(self) -> f32 {
         self.food_consumed_energy + self.predation_energy + self.offspring_spawn_reward
             - self.move_cost_energy
+            - self.reproduction_investment_energy
             - self.damage_taken_energy
     }
 }

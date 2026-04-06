@@ -55,6 +55,7 @@ pub struct SeedGenomeConfigDefaults {
     pub starting_energy: f32,
     pub max_health: f32,
     pub max_organism_age: u32,
+    pub gestation_ticks: u8,
     pub plasticity_start_age: u32,
     pub juvenile_eta_scale: f32,
     pub max_weight_delta_per_tick: f32,
@@ -110,6 +111,7 @@ pub fn seed_genome_config_defaults() -> SeedGenomeConfigDefaults {
         starting_energy: 1.0,
         max_health: 1.0,
         max_organism_age: u32::MAX,
+        gestation_ticks: 2,
         plasticity_start_age: 0,
         juvenile_eta_scale: 0.5,
         max_weight_delta_per_tick: 0.05,
@@ -317,6 +319,11 @@ pub fn world_config_reference_markdown() -> String {
                 "Age threshold for adulthood.",
             ),
             (
+                "gestation_ticks",
+                genome.gestation_ticks.to_string(),
+                "Inherited gestation duration in ticks for offspring transfer scheduling.",
+            ),
+            (
                 "max_organism_age",
                 genome.max_organism_age.to_string(),
                 "Default lifespan cap when omitted in seed-genome TOML.",
@@ -369,6 +376,11 @@ pub fn world_config_reference_markdown() -> String {
                 "mutation_rate_age_of_maturity",
                 "required".to_owned(),
                 "Mutation rate for maturity age.",
+            ),
+            (
+                "mutation_rate_gestation_ticks",
+                "required".to_owned(),
+                "Mutation rate for gestation duration.",
             ),
             (
                 "mutation_rate_max_organism_age",
@@ -499,6 +511,8 @@ pub struct SeedGenomeConfig {
     #[serde(default = "default_starting_energy")]
     pub starting_energy: f32,
     pub age_of_maturity: u32,
+    #[serde(default = "default_gestation_ticks")]
+    pub gestation_ticks: u8,
     #[serde(default = "default_max_health")]
     pub max_health: f32,
     #[serde(default = "default_max_organism_age")]
@@ -513,6 +527,7 @@ pub struct SeedGenomeConfig {
     pub max_weight_delta_per_tick: f32,
     pub synapse_prune_threshold: f32,
     pub mutation_rate_age_of_maturity: f32,
+    pub mutation_rate_gestation_ticks: f32,
     pub mutation_rate_max_organism_age: f32,
     pub mutation_rate_vision_distance: f32,
     pub mutation_rate_max_health: f32,
@@ -595,6 +610,8 @@ struct SeedGenomeLifecycleToml {
     #[serde(default = "default_max_health")]
     max_health: f32,
     age_of_maturity: u32,
+    #[serde(default = "default_gestation_ticks")]
+    gestation_ticks: u8,
     #[serde(default = "default_max_organism_age")]
     max_organism_age: u32,
 }
@@ -615,6 +632,7 @@ struct SeedGenomePlasticityToml {
 #[derive(Debug, Clone, Deserialize)]
 struct SeedGenomeMutationRatesToml {
     mutation_rate_age_of_maturity: f32,
+    mutation_rate_gestation_ticks: f32,
     mutation_rate_max_organism_age: f32,
     mutation_rate_vision_distance: f32,
     mutation_rate_max_health: f32,
@@ -643,8 +661,9 @@ impl From<SeedGenomeConfigToml> for SeedGenomeConfig {
             spatial_prior_sigma: raw.topology.spatial_prior_sigma,
             vision_distance: raw.topology.vision_distance,
             starting_energy: raw.lifecycle.starting_energy,
-            max_health: raw.lifecycle.max_health,
             age_of_maturity: raw.lifecycle.age_of_maturity,
+            gestation_ticks: raw.lifecycle.gestation_ticks,
+            max_health: raw.lifecycle.max_health,
             max_organism_age: raw.lifecycle.max_organism_age,
             plasticity_start_age: raw.plasticity.plasticity_start_age,
             hebb_eta_gain: raw.plasticity.hebb_eta_gain,
@@ -652,36 +671,25 @@ impl From<SeedGenomeConfigToml> for SeedGenomeConfig {
             eligibility_retention: raw.plasticity.eligibility_retention,
             max_weight_delta_per_tick: raw.plasticity.max_weight_delta_per_tick,
             synapse_prune_threshold: raw.plasticity.synapse_prune_threshold,
-            mutation_rate_age_of_maturity: raw
-                .mutation_rates
-                .mutation_rate_age_of_maturity,
-            mutation_rate_max_organism_age: raw
-                .mutation_rates
-                .mutation_rate_max_organism_age,
-            mutation_rate_vision_distance: raw
-                .mutation_rates
-                .mutation_rate_vision_distance,
+            mutation_rate_age_of_maturity: raw.mutation_rates.mutation_rate_age_of_maturity,
+            mutation_rate_gestation_ticks: raw.mutation_rates.mutation_rate_gestation_ticks,
+            mutation_rate_max_organism_age: raw.mutation_rates.mutation_rate_max_organism_age,
+            mutation_rate_vision_distance: raw.mutation_rates.mutation_rate_vision_distance,
             mutation_rate_max_health: raw.mutation_rates.mutation_rate_max_health,
             mutation_rate_inter_bias: raw.mutation_rates.mutation_rate_inter_bias,
-            mutation_rate_inter_update_rate: raw
-                .mutation_rates
-                .mutation_rate_inter_update_rate,
+            mutation_rate_inter_update_rate: raw.mutation_rates.mutation_rate_inter_update_rate,
             mutation_rate_eligibility_retention: raw
                 .mutation_rates
                 .mutation_rate_eligibility_retention,
             mutation_rate_synapse_prune_threshold: raw
                 .mutation_rates
                 .mutation_rate_synapse_prune_threshold,
-            mutation_rate_neuron_location: raw
-                .mutation_rates
-                .mutation_rate_neuron_location,
+            mutation_rate_neuron_location: raw.mutation_rates.mutation_rate_neuron_location,
             mutation_rate_synapse_weight_perturbation: raw
                 .mutation_rates
                 .mutation_rate_synapse_weight_perturbation,
             mutation_rate_add_synapse: raw.mutation_rates.mutation_rate_add_synapse,
-            mutation_rate_remove_synapse: raw
-                .mutation_rates
-                .mutation_rate_remove_synapse,
+            mutation_rate_remove_synapse: raw.mutation_rates.mutation_rate_remove_synapse,
             mutation_rate_remove_neuron: raw.mutation_rates.mutation_rate_remove_neuron,
             mutation_rate_add_neuron_split_edge: raw
                 .mutation_rates
@@ -805,7 +813,7 @@ pub fn default_world_config() -> WorldConfig {
         include_str!("../config.toml"),
         include_str!("../seed_genome.toml"),
     )
-        .expect("default world config TOML must deserialize")
+    .expect("default world config TOML must deserialize")
 }
 
 pub fn default_world_config_path() -> PathBuf {
@@ -880,6 +888,9 @@ pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
     {
         return Err("seed_genome_config.juvenile_eta_scale must be finite and >= 0".to_owned());
     }
+    if config.seed_genome_config.gestation_ticks > 4 {
+        return Err("seed_genome_config.gestation_ticks must be in [0, 4]".to_owned());
+    }
     if !config
         .seed_genome_config
         .max_weight_delta_per_tick
@@ -895,6 +906,10 @@ pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
 
 fn default_starting_energy() -> f32 {
     seed_genome_config_defaults().starting_energy
+}
+
+fn default_gestation_ticks() -> u8 {
+    seed_genome_config_defaults().gestation_ticks
 }
 
 fn default_reproduction_investment_energy() -> f32 {
@@ -938,7 +953,9 @@ fn default_periodic_injection_count() -> u32 {
 }
 
 fn default_passive_metabolism_cost_per_unit() -> f32 {
-    world_config_defaults().lifecycle.passive_metabolism_cost_per_unit
+    world_config_defaults()
+        .lifecycle
+        .passive_metabolism_cost_per_unit
 }
 
 fn default_terrain_noise_scale() -> f32 {

@@ -57,6 +57,7 @@ Generated from `sim-config/src/config.rs`.
 | `starting_energy` | `1` | Default starting energy when omitted in seed-genome TOML. |
 | `max_health` | `1` | Default maximum health when omitted in seed-genome TOML. |
 | `age_of_maturity` | `required` | Age threshold for adulthood. |
+| `gestation_ticks` | `2` | Inherited gestation duration in ticks for offspring transfer scheduling. |
 | `max_organism_age` | `4294967295` | Default lifespan cap when omitted in seed-genome TOML. |
 
 ## Seed Genome Config: Plasticity
@@ -75,6 +76,7 @@ Generated from `sim-config/src/config.rs`.
 | Key | Default / Derivation | Notes |
 | --- | --- | --- |
 | `mutation_rate_age_of_maturity` | `required` | Mutation rate for maturity age. |
+| `mutation_rate_gestation_ticks` | `required` | Mutation rate for gestation duration. |
 | `mutation_rate_max_organism_age` | `required` | Mutation rate for organism lifespan. |
 | `mutation_rate_vision_distance` | `required` | Mutation rate for vision distance. |
 | `mutation_rate_max_health` | `required` | Mutation rate for maximum health. |

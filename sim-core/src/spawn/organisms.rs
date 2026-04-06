@@ -21,6 +21,7 @@ impl Simulation {
                             r: reproduction.r,
                             generation: reproduction.parent_generation.saturating_add(1),
                             facing: opposite_direction(reproduction.parent_facing),
+                            starting_energy_override: Some(reproduction.offspring_starting_energy),
                         },
                     )
                 }
@@ -37,6 +38,7 @@ impl Simulation {
                             r: injection.r,
                             generation: 0,
                             facing,
+                            starting_energy_override: None,
                         },
                     )
                 }
@@ -115,6 +117,7 @@ impl Simulation {
                     r,
                     generation: 0,
                     facing,
+                    starting_energy_override: None,
                 },
             );
             let added = self.add_organism(organism);
@@ -128,7 +131,9 @@ impl Simulation {
         params: OrganismSpawnParams,
     ) -> OrganismState {
         let id = self.alloc_organism_id();
-        let starting_energy = genome.starting_energy;
+        let starting_energy = params
+            .starting_energy_override
+            .unwrap_or(genome.starting_energy);
         let max_health = genome.max_health.max(1.0);
         OrganismState {
             id,

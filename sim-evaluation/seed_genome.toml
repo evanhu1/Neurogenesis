@@ -8,6 +8,7 @@ vision_distance = 10
 starting_energy = 500.0
 max_health = 500.0
 age_of_maturity = 50
+gestation_ticks = 2
 max_organism_age = 1250
 
 [plasticity]
@@ -20,6 +21,7 @@ synapse_prune_threshold = 0.05
 
 [mutation_rates]
 mutation_rate_age_of_maturity = 0.1
+mutation_rate_gestation_ticks = 0.1
 mutation_rate_max_organism_age = 0.1
 mutation_rate_vision_distance = 0.1
 mutation_rate_max_health = 0.1

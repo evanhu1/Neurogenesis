@@ -96,6 +96,8 @@ pub(crate) struct AggregateScore {
     pub(crate) mean_attack_success_rate: Option<f64>,
     pub(crate) mean_idle_fraction: Option<f64>,
     pub(crate) mean_reproduction_efficiency: Option<f64>,
+    pub(crate) mean_gestation_ticks: Option<f64>,
+    pub(crate) mean_offspring_transfer_energy: Option<f64>,
     pub(crate) mean_lineage_diversity: Option<f64>,
     pub(crate) mean_damage_avoidance: Option<f64>,
     pub(crate) mean_reward_reversal_shift: Option<f64>,
