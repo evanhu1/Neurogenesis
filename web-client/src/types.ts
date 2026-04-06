@@ -39,7 +39,6 @@ type GenomeCoreParams = {
   num_synapses: number;
   spatial_prior_sigma: number;
   vision_distance: number;
-  starting_energy: number;
   max_health: number;
   age_of_maturity: number;
   gestation_ticks: number;

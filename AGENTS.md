@@ -164,7 +164,7 @@ Runtime plasticity:
 ### Genome
 
 `OrganismGenome` has `num_neurons`, `num_synapses`, `spatial_prior_sigma`,
-`vision_distance`, `starting_energy`, `age_of_maturity`,
+`vision_distance`, `max_health`, `age_of_maturity`, `gestation_ticks`,
 `plasticity_start_age`, `hebb_eta_gain`, `juvenile_eta_scale`,
 `eligibility_retention`, `max_weight_delta_per_tick`,
 `synapse_prune_threshold`, `inter_biases`, `inter_log_time_constants`,

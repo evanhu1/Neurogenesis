@@ -1,4 +1,5 @@
 use super::*;
+use rand::Rng;
 
 struct CommitPhaseContext<'a> {
     sim: &'a mut Simulation,
@@ -198,42 +199,21 @@ impl<'a> CommitPhaseContext<'a> {
         }
 
         let prey_energy = self.sim.organisms[prey_idx].energy.max(0.0);
-        let prey_max_health = self.sim.organisms[prey_idx].max_health.max(1.0);
-        let attack_damage = (prey_max_health * ATTACK_DAMAGE_FRACTION)
-            .max(1.0)
-            .min(self.sim.organisms[prey_idx].health.max(0.0));
+        let predator_size = sim_types::get_size(&self.sim.organisms[predator_idx]).max(1.0);
+        let prey_size = sim_types::get_size(&self.sim.organisms[prey_idx]).max(1.0);
+        let predation_success = (predator_size / prey_size).clamp(0.0, 1.0);
         let (prey_q, prey_r) = (
             self.sim.organisms[prey_idx].q,
             self.sim.organisms[prey_idx].r,
         );
-        if attack_damage <= 0.0 {
+        if self.sim.rng.random::<f32>() >= predation_success {
             return;
         }
-
-        if predator_idx < prey_idx {
-            let (left, right) = self.sim.organisms.split_at_mut(prey_idx);
-            let prey = &mut right[0];
-            let _predator = &mut left[predator_idx];
-            prey.health = (prey.health - attack_damage).max(0.0);
-            prey.damage_taken_last_turn += attack_damage;
-        } else {
-            let (left, right) = self.sim.organisms.split_at_mut(predator_idx);
-            let prey = &mut left[prey_idx];
-            let _predator = &mut right[0];
-            prey.health = (prey.health - attack_damage).max(0.0);
-            prey.damage_taken_last_turn += attack_damage;
-        }
-        self.sim.reward_ledgers[prey_idx].record(RewardEvent::DamageTaken {
-            energy: attack_damage,
+        self.sim.reward_ledgers[predator_idx].record(RewardEvent::PredationSucceeded {
+            energy: prey_energy,
         });
-
-        if self.sim.organisms[prey_idx].health <= 0.0 {
-            self.sim.reward_ledgers[predator_idx].record(RewardEvent::PredationSucceeded {
-                energy: prey_energy,
-            });
-            self.result.predations += 1;
-            self.mark_organism_dead(prey_idx, prey_id, target_idx, (prey_q, prey_r), prey_energy);
-        }
+        self.result.predations += 1;
+        self.mark_organism_dead(prey_idx, prey_id, target_idx, (prey_q, prey_r), prey_energy);
     }
 
     fn mark_organism_dead(

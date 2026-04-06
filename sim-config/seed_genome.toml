@@ -5,11 +5,10 @@ spatial_prior_sigma = 3.0 # Spatial prior width used when biasing new synapses t
 vision_distance = 10 # Maximum ray-sensing distance for `LookRay` sensory neurons.
 
 [lifecycle]
-starting_energy = 500.0 # Starting energy assigned to newly spawned organisms using this genome.
 max_health = 500.0 # Maximum health assigned to newly spawned organisms using this genome.
 age_of_maturity = 50 # Age in turns at which organisms count as mature.
 gestation_ticks = 2 # Gestation duration in ticks used to determine offspring transfer energy.
-max_organism_age = 1250 # Lifespan cap in turns for organisms using this genome.
+max_organism_age = 1000 # Lifespan cap in turns for organisms using this genome.
 
 [plasticity]
 plasticity_start_age = 0 # Age in turns when runtime plasticity begins affecting the organism.

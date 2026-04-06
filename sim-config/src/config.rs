@@ -52,7 +52,6 @@ pub struct WorldConfigDefaults {
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
 pub struct SeedGenomeConfigDefaults {
-    pub starting_energy: f32,
     pub max_health: f32,
     pub max_organism_age: u32,
     pub gestation_ticks: u8,
@@ -108,7 +107,6 @@ pub fn world_config_defaults() -> WorldConfigDefaults {
 
 pub fn seed_genome_config_defaults() -> SeedGenomeConfigDefaults {
     SeedGenomeConfigDefaults {
-        starting_energy: 1.0,
         max_health: 1.0,
         max_organism_age: u32::MAX,
         gestation_ticks: 2,
@@ -302,11 +300,6 @@ pub fn world_config_reference_markdown() -> String {
                 "vision_distance",
                 "required".to_owned(),
                 "Maximum look distance for look-ray sensors.",
-            ),
-            (
-                "starting_energy",
-                genome.starting_energy.to_string(),
-                "Default starting energy when omitted in seed-genome TOML.",
             ),
             (
                 "max_health",
@@ -508,8 +501,6 @@ pub struct SeedGenomeConfig {
     pub num_synapses: u32,
     pub spatial_prior_sigma: f32,
     pub vision_distance: u32,
-    #[serde(default = "default_starting_energy")]
-    pub starting_energy: f32,
     pub age_of_maturity: u32,
     #[serde(default = "default_gestation_ticks")]
     pub gestation_ticks: u8,
@@ -605,8 +596,6 @@ struct SeedGenomeTopologyToml {
 
 #[derive(Debug, Clone, Deserialize)]
 struct SeedGenomeLifecycleToml {
-    #[serde(default = "default_starting_energy")]
-    starting_energy: f32,
     #[serde(default = "default_max_health")]
     max_health: f32,
     age_of_maturity: u32,
@@ -660,7 +649,6 @@ impl From<SeedGenomeConfigToml> for SeedGenomeConfig {
             num_synapses: raw.topology.num_synapses,
             spatial_prior_sigma: raw.topology.spatial_prior_sigma,
             vision_distance: raw.topology.vision_distance,
-            starting_energy: raw.lifecycle.starting_energy,
             age_of_maturity: raw.lifecycle.age_of_maturity,
             gestation_ticks: raw.lifecycle.gestation_ticks,
             max_health: raw.lifecycle.max_health,
@@ -902,10 +890,6 @@ pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
         );
     }
     Ok(())
-}
-
-fn default_starting_energy() -> f32 {
-    seed_genome_config_defaults().starting_energy
 }
 
 fn default_gestation_ticks() -> u8 {

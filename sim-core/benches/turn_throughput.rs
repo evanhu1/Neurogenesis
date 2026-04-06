@@ -28,7 +28,6 @@ fn stable_perf_config() -> WorldConfig {
             num_synapses: 80,
             spatial_prior_sigma: 3.5,
             vision_distance: 10,
-            starting_energy: 1_000_000_000.0,
             max_health: 1_000_000_000.0,
             age_of_maturity: 0,
             gestation_ticks: 2,

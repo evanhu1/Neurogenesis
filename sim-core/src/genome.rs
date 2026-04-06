@@ -36,6 +36,7 @@ const MIN_MUTATED_GESTATION_TICKS: u8 = 0;
 const MAX_MUTATED_GESTATION_TICKS: u8 = 4;
 const MIN_MUTATED_MAX_ORGANISM_AGE: u32 = 1;
 const MAX_MUTATED_MAX_ORGANISM_AGE: u32 = 100_000;
+const MAX_ORGANISM_AGE_MUTATION_STEP: u32 = 100;
 const MIN_MUTATED_MAX_HEALTH: f32 = 1.0;
 const MAX_MUTATED_MAX_HEALTH: f32 = 1_000_000_000.0;
 pub(crate) const SYNAPSE_STRENGTH_MAX: f32 = 1.5;
@@ -98,10 +99,11 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
         );
     }
     if rng.random::<f32>() < rates.max_organism_age {
-        genome.max_organism_age = step_u32(
+        genome.max_organism_age = step_u32_by(
             genome.max_organism_age,
             MIN_MUTATED_MAX_ORGANISM_AGE,
             MAX_MUTATED_MAX_ORGANISM_AGE,
+            MAX_ORGANISM_AGE_MUTATION_STEP,
             rng,
         );
     }
@@ -202,19 +204,24 @@ fn mutate_many_or_one<T, R: Rng + ?Sized>(
 }
 
 fn step_u32<R: Rng + ?Sized>(value: u32, min: u32, max: u32, rng: &mut R) -> u32 {
+    step_u32_by(value, min, max, 1, rng)
+}
+
+fn step_u32_by<R: Rng + ?Sized>(value: u32, min: u32, max: u32, step: u32, rng: &mut R) -> u32 {
     if min >= max {
         return min;
     }
+    let step = step.max(1);
     if value <= min {
-        return min.saturating_add(1).min(max);
+        return min.saturating_add(step).min(max);
     }
     if value >= max {
-        return max.saturating_sub(1).max(min);
+        return max.saturating_sub(step).max(min);
     }
     if rng.random::<bool>() {
-        value.saturating_add(1).min(max)
+        value.saturating_add(step).min(max)
     } else {
-        value.saturating_sub(1).max(min)
+        value.saturating_sub(step).max(min)
     }
 }
 

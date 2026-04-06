@@ -111,7 +111,7 @@ function createSnapshot(worldWidth: number, organismCount: number, foodCount: nu
         num_synapses: 16,
         spatial_prior_sigma: 1,
         vision_distance: 4,
-        starting_energy: 50,
+        max_health: 50,
         age_of_maturity: 5,
         gestation_ticks: 2,
         hebb_eta_gain: 0.1,

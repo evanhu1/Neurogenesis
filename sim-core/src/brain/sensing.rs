@@ -43,12 +43,7 @@ pub(super) fn encode_sensory_inputs(
     let contact_ahead_signal = occupancy[contact_ahead_idx].map_or(0.0, |_| 1.0);
     let energy_signal = energy_sensor_value(
         organism.energy,
-        organism
-            .genome
-            .starting_energy
-            .max(sim_types::offspring_transfer_energy(
-                organism.genome.gestation_ticks,
-            ))
+        sim_types::offspring_transfer_energy(organism.genome.gestation_ticks)
             .max(MIN_ENERGY_SENSOR_SCALE),
     );
     let damage_signal = (organism.damage_taken_last_turn

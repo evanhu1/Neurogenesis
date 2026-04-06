@@ -54,7 +54,6 @@ Generated from `sim-config/src/config.rs`.
 | `num_synapses` | `required` | Requested synapse count before sanitization. |
 | `spatial_prior_sigma` | `required` | Spatial connectivity prior width. |
 | `vision_distance` | `required` | Maximum look distance for look-ray sensors. |
-| `starting_energy` | `1` | Default starting energy when omitted in seed-genome TOML. |
 | `max_health` | `1` | Default maximum health when omitted in seed-genome TOML. |
 | `age_of_maturity` | `required` | Age threshold for adulthood. |
 | `gestation_ticks` | `2` | Inherited gestation duration in ticks for offspring transfer scheduling. |

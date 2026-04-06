@@ -240,42 +240,40 @@ fn eat_only_interacts_with_food() {
 }
 
 #[test]
-fn attack_only_interacts_with_organisms_and_applies_damage() {
+fn attack_only_interacts_with_organisms_and_kills_on_success() {
     let cfg = test_config(5, 2);
     let mut sim = Simulation::new(cfg, 205).expect("simulation should initialize");
+    let mut predator = make_single_action_organism(
+        0,
+        1,
+        1,
+        FacingDirection::East,
+        ActionType::Attack,
+        0.9,
+        50.0,
+    );
+    predator.genome.gestation_ticks = 4;
+    let mut prey = make_single_action_organism(
+        1,
+        2,
+        1,
+        FacingDirection::East,
+        ActionType::Idle,
+        0.1,
+        50.0,
+    );
+    prey.genome.gestation_ticks = 0;
     configure_sim(
         &mut sim,
-        vec![
-            make_single_action_organism(
-                0,
-                1,
-                1,
-                FacingDirection::East,
-                ActionType::Attack,
-                0.9,
-                50.0,
-            ),
-            make_single_action_organism(
-                1,
-                2,
-                1,
-                FacingDirection::East,
-                ActionType::Idle,
-                0.1,
-                50.0,
-            ),
-        ],
+        vec![predator, prey],
     );
 
-    let _ = tick_once(&mut sim);
-    let prey = sim
+    let delta = tick_once(&mut sim);
+    assert_eq!(delta.metrics.predations_last_turn, 1);
+    assert!(sim
         .organisms
         .iter()
-        .find(|organism| organism.id == OrganismId(1))
-        .expect("prey should survive a single attack");
-    assert_eq!(prey.damage_taken_last_turn, 25.0);
-    assert_eq!(prey.health, 25.0);
-    assert!(prey.energy > 0.0);
+        .all(|organism| organism.id != OrganismId(1)));
 }
 
 #[test]
@@ -286,20 +284,20 @@ fn lethal_attack_spawns_corpse_food_without_feeding_attacker() {
         make_single_action_organism(1, 2, 1, FacingDirection::East, ActionType::Idle, 0.1, 50.0);
     prey.health = 5.0;
     prey.max_health = 50.0;
+    prey.genome.gestation_ticks = 0;
+    let mut predator = make_single_action_organism(
+        0,
+        1,
+        1,
+        FacingDirection::East,
+        ActionType::Attack,
+        0.9,
+        50.0,
+    );
+    predator.genome.gestation_ticks = 4;
     configure_sim(
         &mut sim,
-        vec![
-            make_single_action_organism(
-                0,
-                1,
-                1,
-                FacingDirection::East,
-                ActionType::Attack,
-                0.9,
-                50.0,
-            ),
-            prey,
-        ],
+        vec![predator, prey],
     );
 
     let delta = tick_once(&mut sim);

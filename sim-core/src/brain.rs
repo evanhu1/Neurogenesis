@@ -29,8 +29,6 @@ pub use evaluation::derive_active_action_neuron_id;
 pub(crate) use evaluation::evaluate_brain;
 #[cfg_attr(not(test), allow(unused_imports))]
 pub(crate) use expression::{express_genome, make_action_neuron, make_sensory_neuron};
-#[cfg_attr(not(test), allow(unused_imports))]
-pub(crate) use sensing::scan_rays;
 
 const DEFAULT_BIAS: f32 = 0.0;
 const MIN_ENERGY_SENSOR_SCALE: f32 = 1.0;

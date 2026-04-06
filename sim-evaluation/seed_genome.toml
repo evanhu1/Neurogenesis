@@ -5,7 +5,6 @@ spatial_prior_sigma = 3.0
 vision_distance = 10
 
 [lifecycle]
-starting_energy = 500.0
 max_health = 500.0
 age_of_maturity = 50
 gestation_ticks = 2

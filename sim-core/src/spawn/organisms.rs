@@ -28,6 +28,7 @@ impl Simulation {
                 SpawnRequestKind::PeriodicInjection(injection) => {
                     let genome =
                         generate_seed_genome(&self.config.seed_genome_config, &mut self.rng);
+                    let starting_energy = sim_types::offspring_transfer_energy(genome.gestation_ticks);
                     let species_id = founder_species_id(OrganismId(self.next_organism_id));
                     let facing = self.random_facing();
                     self.build_organism(
@@ -38,7 +39,7 @@ impl Simulation {
                             r: injection.r,
                             generation: 0,
                             facing,
-                            starting_energy_override: None,
+                            starting_energy_override: Some(starting_energy),
                         },
                     )
                 }
@@ -107,6 +108,7 @@ impl Simulation {
                 let idx = self.rng.random_range(0..champion_pool.len());
                 champion_pool[idx].clone()
             };
+            let starting_energy = sim_types::offspring_transfer_energy(genome.gestation_ticks);
             let species_id = founder_species_id(OrganismId(self.next_organism_id));
             let facing = self.random_facing();
             let organism = self.build_organism(
@@ -117,7 +119,7 @@ impl Simulation {
                     r,
                     generation: 0,
                     facing,
-                    starting_energy_override: None,
+                    starting_energy_override: Some(starting_energy),
                 },
             );
             let added = self.add_organism(organism);
@@ -133,7 +135,7 @@ impl Simulation {
         let id = self.alloc_organism_id();
         let starting_energy = params
             .starting_energy_override
-            .unwrap_or(genome.starting_energy);
+            .unwrap_or_else(|| sim_types::offspring_transfer_energy(genome.gestation_ticks));
         let max_health = genome.max_health.max(1.0);
         OrganismState {
             id,

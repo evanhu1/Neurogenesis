@@ -228,8 +228,6 @@ pub struct OrganismGenome {
     pub num_synapses: u32,
     pub spatial_prior_sigma: f32,
     pub vision_distance: u32,
-    #[serde(default = "default_starting_energy")]
-    pub starting_energy: f32,
     #[serde(default = "default_max_health")]
     pub max_health: f32,
     #[serde(default = "default_age_of_maturity")]
@@ -319,10 +317,6 @@ fn default_plasticity_start_age() -> u32 {
     0
 }
 
-fn default_starting_energy() -> f32 {
-    1.0
-}
-
 fn default_max_health() -> f32 {
     1.0
 }
@@ -408,6 +402,10 @@ pub struct OrganismState {
     pub last_action_taken: ActionType,
     pub brain: BrainState,
     pub genome: OrganismGenome,
+}
+
+pub fn get_size(organism: &OrganismState) -> f32 {
+    offspring_transfer_energy(organism.genome.gestation_ticks)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

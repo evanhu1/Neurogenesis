@@ -94,7 +94,6 @@ struct PersistedOrganismGenome {
     num_synapses: u32,
     spatial_prior_sigma: f32,
     vision_distance: u32,
-    starting_energy: f32,
     max_health: f32,
     age_of_maturity: u32,
     gestation_ticks: u8,
@@ -344,7 +343,6 @@ fn encode_persisted_genome(genome: &OrganismGenome) -> Result<PersistedOrganismG
         num_synapses: genome.num_synapses,
         spatial_prior_sigma: genome.spatial_prior_sigma,
         vision_distance: genome.vision_distance,
-        starting_energy: genome.starting_energy,
         max_health: genome.max_health,
         age_of_maturity: genome.age_of_maturity,
         gestation_ticks: genome.gestation_ticks,
@@ -447,7 +445,6 @@ fn decode_persisted_genome(genome: PersistedOrganismGenome) -> OrganismGenome {
         num_synapses: edges.len() as u32,
         spatial_prior_sigma: genome.spatial_prior_sigma,
         vision_distance: genome.vision_distance,
-        starting_energy: genome.starting_energy,
         max_health: genome.max_health,
         age_of_maturity: genome.age_of_maturity,
         gestation_ticks: genome.gestation_ticks,
@@ -1235,7 +1232,6 @@ mod tests {
             num_synapses: 0,
             spatial_prior_sigma: 3.5,
             vision_distance: 2,
-            starting_energy: energy.max(1.0),
             max_health: energy.max(1.0),
             age_of_maturity: 0,
             gestation_ticks: 2,
@@ -1276,7 +1272,6 @@ mod tests {
         };
         genome.num_neurons = generation as u32 + 1;
         genome.vision_distance = generation as u32 + 2;
-        genome.starting_energy = energy.max(1.0);
         genome.inter_biases = vec![generation as f32];
         genome.inter_log_time_constants = vec![generation as f32 * 0.1];
         genome.inter_locations = vec![sim_types::BrainLocation {
