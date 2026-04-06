@@ -133,6 +133,24 @@ pub enum EntityId {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ReproductionFailureCause {
+    BlockedBirth,
+    ParentDied,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct ReproductionEvent {
+    pub parent_id: OrganismId,
+    pub parent_species_id: SpeciesId,
+    pub parent_age_turns: u64,
+    pub parent_generation: u64,
+    pub investment_energy: f32,
+    pub parent_energy_after_event: f32,
+    pub child_id: Option<OrganismId>,
+    pub failure_cause: Option<ReproductionFailureCause>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "receptor_type")]
 pub enum SensoryReceptor {
     LookRay {
@@ -460,6 +478,7 @@ pub struct TickDelta {
     pub facing_updates: Vec<OrganismFacing>,
     pub removed_positions: Vec<RemovedEntityPosition>,
     pub spawned: Vec<OrganismState>,
+    pub reproduction_events: Vec<ReproductionEvent>,
     pub food_spawned: Vec<FoodState>,
     pub metrics: MetricsSnapshot,
 }

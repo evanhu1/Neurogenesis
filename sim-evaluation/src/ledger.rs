@@ -1,10 +1,12 @@
-use sim_types::{ActionRecord, ActionType, OrganismId};
+use crate::types::ReproductionAnalytics;
+use sim_types::{ActionRecord, ActionType, OrganismId, OrganismState, ReproductionEvent};
 use std::collections::HashMap;
 
 pub const N_ACTIONS: usize = 7;
 pub const SENSORY_BIN_COUNT: usize = 5;
 const INTER_EMA_ALPHA: f32 = 0.05;
 const UTILIZATION_THRESHOLD: f32 = 0.03;
+const SURVIVAL_AGE_30: u64 = 30;
 
 #[derive(Debug, Clone)]
 pub struct CompletedLifetime {
@@ -36,6 +38,10 @@ impl IntervalActionStats {
 #[derive(Debug)]
 struct OrganismEntry {
     birth_tick: u64,
+    tracked_reproduction_birth: bool,
+    survived_to_30_recorded: bool,
+    survived_to_maturity_recorded: bool,
+    last_successful_birth_tick: Option<u64>,
     last_consumptions: u64,
     action_counts: [u32; N_ACTIONS],
     joint: [[u32; N_ACTIONS]; SENSORY_BIN_COUNT],
@@ -46,9 +52,13 @@ struct OrganismEntry {
 }
 
 impl OrganismEntry {
-    fn new(birth_tick: u64) -> Self {
+    fn new(birth_tick: u64, tracked_reproduction_birth: bool) -> Self {
         Self {
             birth_tick,
+            tracked_reproduction_birth,
+            survived_to_30_recorded: false,
+            survived_to_maturity_recorded: false,
+            last_successful_birth_tick: None,
             last_consumptions: 0,
             action_counts: [0; N_ACTIONS],
             joint: [[0; N_ACTIONS]; SENSORY_BIN_COUNT],
@@ -65,6 +75,19 @@ pub struct Ledger {
     sidecar: HashMap<OrganismId, OrganismEntry>,
     recently_deceased: Vec<CompletedLifetime>,
     interval_action_stats: IntervalActionStats,
+    births: u64,
+    successful_births: u64,
+    blocked_births: u64,
+    parent_died_during_reproduction: u64,
+    survived_to_30: u64,
+    survived_to_maturity: u64,
+    pending_tracked_births: HashMap<OrganismId, ()>,
+    parent_energy_after_successful_birth_sum: f64,
+    parent_energy_after_successful_birth_count: u64,
+    age_at_first_successful_reproduction_sum: f64,
+    age_at_first_successful_reproduction_count: u64,
+    successful_birth_interval_sum: f64,
+    successful_birth_interval_count: u64,
     pub neonatal_deaths: u64,
     min_lifetime: u64,
 }
@@ -75,13 +98,31 @@ impl Ledger {
             sidecar: HashMap::new(),
             recently_deceased: Vec::new(),
             interval_action_stats: IntervalActionStats::default(),
+            births: 0,
+            successful_births: 0,
+            blocked_births: 0,
+            parent_died_during_reproduction: 0,
+            survived_to_30: 0,
+            survived_to_maturity: 0,
+            pending_tracked_births: HashMap::new(),
+            parent_energy_after_successful_birth_sum: 0.0,
+            parent_energy_after_successful_birth_count: 0,
+            age_at_first_successful_reproduction_sum: 0.0,
+            age_at_first_successful_reproduction_count: 0,
+            successful_birth_interval_sum: 0.0,
+            successful_birth_interval_count: 0,
             neonatal_deaths: 0,
             min_lifetime,
         }
     }
 
     pub fn birth(&mut self, id: OrganismId, tick: u64) {
-        self.sidecar.insert(id, OrganismEntry::new(tick));
+        let tracked_reproduction_birth = self.pending_tracked_births.remove(&id).is_some();
+        if tracked_reproduction_birth {
+            self.births = self.births.saturating_add(1);
+        }
+        self.sidecar
+            .insert(id, OrganismEntry::new(tick, tracked_reproduction_birth));
     }
 
     pub fn update(&mut self, record: ActionRecord) {
@@ -185,6 +226,87 @@ impl Ledger {
         &self.recently_deceased
     }
 
+    pub fn handle_reproduction_event(&mut self, tick: u64, event: ReproductionEvent) {
+        match event.failure_cause {
+            None => {
+                self.successful_births = self.successful_births.saturating_add(1);
+                self.parent_energy_after_successful_birth_sum +=
+                    f64::from(event.parent_energy_after_event);
+                self.parent_energy_after_successful_birth_count = self
+                    .parent_energy_after_successful_birth_count
+                    .saturating_add(1);
+                if let Some(entry) = self.sidecar.get_mut(&event.parent_id) {
+                    if entry.last_successful_birth_tick.is_none() {
+                        self.age_at_first_successful_reproduction_sum +=
+                            event.parent_age_turns as f64;
+                        self.age_at_first_successful_reproduction_count = self
+                            .age_at_first_successful_reproduction_count
+                            .saturating_add(1);
+                    } else if let Some(last_tick) = entry.last_successful_birth_tick {
+                        self.successful_birth_interval_sum += tick.saturating_sub(last_tick) as f64;
+                        self.successful_birth_interval_count =
+                            self.successful_birth_interval_count.saturating_add(1);
+                    }
+                    entry.last_successful_birth_tick = Some(tick);
+                }
+                if let Some(child_id) = event.child_id {
+                    self.pending_tracked_births.insert(child_id, ());
+                }
+            }
+            Some(sim_types::ReproductionFailureCause::BlockedBirth) => {
+                self.blocked_births = self.blocked_births.saturating_add(1);
+            }
+            Some(sim_types::ReproductionFailureCause::ParentDied) => {
+                self.parent_died_during_reproduction =
+                    self.parent_died_during_reproduction.saturating_add(1);
+            }
+        }
+    }
+
+    pub fn update_survival_thresholds(&mut self, organisms: &[OrganismState]) {
+        for organism in organisms {
+            let Some(entry) = self.sidecar.get_mut(&organism.id) else {
+                continue;
+            };
+            if !entry.tracked_reproduction_birth {
+                continue;
+            }
+            if !entry.survived_to_30_recorded && organism.age_turns >= SURVIVAL_AGE_30 {
+                self.survived_to_30 = self.survived_to_30.saturating_add(1);
+                entry.survived_to_30_recorded = true;
+            }
+            if !entry.survived_to_maturity_recorded
+                && organism.age_turns >= u64::from(organism.genome.age_of_maturity)
+            {
+                self.survived_to_maturity = self.survived_to_maturity.saturating_add(1);
+                entry.survived_to_maturity_recorded = true;
+            }
+        }
+    }
+
+    pub fn reproduction_analytics(&self) -> ReproductionAnalytics {
+        ReproductionAnalytics {
+            births: self.births,
+            successful_births: self.successful_births,
+            blocked_births: self.blocked_births,
+            parent_died_during_reproduction: self.parent_died_during_reproduction,
+            survived_to_30: self.survived_to_30,
+            survived_to_maturity: self.survived_to_maturity,
+            mean_parent_energy_after_successful_birth: mean_or_none(
+                self.parent_energy_after_successful_birth_sum,
+                self.parent_energy_after_successful_birth_count,
+            ),
+            mean_age_at_first_successful_reproduction: mean_or_none(
+                self.age_at_first_successful_reproduction_sum,
+                self.age_at_first_successful_reproduction_count,
+            ),
+            mean_successful_birth_interval: mean_or_none(
+                self.successful_birth_interval_sum,
+                self.successful_birth_interval_count,
+            ),
+        }
+    }
+
     pub fn interval_action_stats(&self) -> &IntervalActionStats {
         &self.interval_action_stats
     }
@@ -193,6 +315,14 @@ impl Ledger {
         self.recently_deceased.clear();
         self.interval_action_stats = IntervalActionStats::default();
         self.neonatal_deaths = 0;
+    }
+}
+
+fn mean_or_none(sum: f64, count: u64) -> Option<f64> {
+    if count == 0 {
+        None
+    } else {
+        Some(sum / count as f64)
     }
 }
 

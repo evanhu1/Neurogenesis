@@ -150,7 +150,7 @@ impl Simulation {
         #[cfg(feature = "profiling")]
         let tick_started = Instant::now();
 
-        let (starvations, starved_removed_positions) =
+        let (starvations, starved_removed_positions, lifecycle_reproduction_events) =
             profile_turn_phase!(TurnPhase::Lifecycle, { self.lifecycle_phase() });
 
         let snapshot = profile_turn_phase!(TurnPhase::Snapshot, { self.build_turn_snapshot() });
@@ -163,6 +163,7 @@ impl Simulation {
         let synapse_ops = intents.iter().map(|intent| intent.synapse_ops).sum::<u64>();
 
         let mut reproduction_state = ReproductionPhaseState::new(snapshot.organism_count);
+        reproduction_state.extend_reproduction_events(lifecycle_reproduction_events);
         profile_turn_phase!(TurnPhase::Reproduction, {
             reproduction_state.apply_triggers(
                 &mut self.organisms,
@@ -196,12 +197,15 @@ impl Simulation {
 
         let spawned = profile_turn_phase!(TurnPhase::Spawn, {
             let spawn_requests = reproduction_state.spawn_requests_mut();
+            let reproduction_spawn_count = spawn_requests.len();
             self.enqueue_periodic_injections(spawn_requests);
             let spawned = self.resolve_spawn_requests(spawn_requests);
+            let reproduction_events = reproduction_state
+                .finalize_reproduction_events(&spawned[..reproduction_spawn_count]);
             self.apply_post_commit_runtime_weight_updates();
-            spawned
+            (spawned, reproduction_events)
         });
-        let reproductions = spawned.len() as u64;
+        let reproductions = spawned.0.len() as u64;
 
         profile_turn_phase!(TurnPhase::ConsistencyCheck, {
             self.debug_assert_consistent_state();
@@ -232,7 +236,8 @@ impl Simulation {
             moves: commit.moves,
             facing_updates: commit.facing_updates,
             removed_positions,
-            spawned,
+            spawned: spawned.0,
+            reproduction_events: spawned.1,
             food_spawned: commit.food_spawned,
             metrics: self.metrics.clone(),
         }
