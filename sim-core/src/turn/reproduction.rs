@@ -97,6 +97,7 @@ impl ReproductionPhaseState {
 
             organism.energy -= transfer_energy;
             organism.reproductions_count = organism.reproductions_count.saturating_add(1);
+            organism.is_gestating = true;
             reward_ledgers[org_idx].record(RewardEvent::ReproductionInvested {
                 energy: transfer_energy,
             });
@@ -168,6 +169,7 @@ impl ReproductionPhaseState {
                 });
             }
 
+            sim.organisms[idx].is_gestating = false;
             *pending_action = PendingActionState::default();
         }
     }

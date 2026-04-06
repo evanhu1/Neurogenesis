@@ -396,7 +396,14 @@ pub struct OrganismState {
     pub dopamine: f32,
     #[serde(default)]
     pub damage_taken_last_turn: f32,
+    #[serde(default)]
+    pub is_gestating: bool,
+    #[serde(default)]
     pub consumptions_count: u64,
+    #[serde(default)]
+    pub plant_consumptions_count: u64,
+    #[serde(default)]
+    pub prey_consumptions_count: u64,
     pub reproductions_count: u64,
     #[serde(default)]
     pub last_action_taken: ActionType,

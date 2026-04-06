@@ -138,7 +138,10 @@ function normalizeWorldOrganismState(organism: ApiWorldOrganismState): WorldOrga
     health: organism.health,
     max_health: organism.max_health,
     damage_taken_last_turn: organism.damage_taken_last_turn,
+    is_gestating: organism.is_gestating,
     consumptions_count: organism.consumptions_count,
+    plant_consumptions_count: organism.plant_consumptions_count,
+    prey_consumptions_count: organism.prey_consumptions_count,
     reproductions_count: organism.reproductions_count,
   };
 }
@@ -158,7 +161,10 @@ function normalizeOrganismState(organism: ApiOrganismState): OrganismState {
     energy_prev: organism.energy_prev,
     dopamine: organism.dopamine,
     damage_taken_last_turn: organism.damage_taken_last_turn,
+    is_gestating: organism.is_gestating,
     consumptions_count: organism.consumptions_count,
+    plant_consumptions_count: organism.plant_consumptions_count,
+    prey_consumptions_count: organism.prey_consumptions_count,
     reproductions_count: organism.reproductions_count,
     last_action_taken: organism.last_action_taken,
     brain: normalizeBrainState(organism.brain),

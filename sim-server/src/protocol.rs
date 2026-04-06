@@ -120,7 +120,10 @@ pub struct WorldOrganismState {
     pub health: f32,
     pub max_health: f32,
     pub damage_taken_last_turn: f32,
+    pub is_gestating: bool,
     pub consumptions_count: u64,
+    pub plant_consumptions_count: u64,
+    pub prey_consumptions_count: u64,
     pub reproductions_count: u64,
 }
 
@@ -138,7 +141,10 @@ impl From<&OrganismState> for WorldOrganismState {
             health: organism.health,
             max_health: organism.max_health,
             damage_taken_last_turn: organism.damage_taken_last_turn,
+            is_gestating: organism.is_gestating,
             consumptions_count: organism.consumptions_count,
+            plant_consumptions_count: organism.plant_consumptions_count,
+            prey_consumptions_count: organism.prey_consumptions_count,
             reproductions_count: organism.reproductions_count,
         }
     }

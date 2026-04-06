@@ -46,6 +46,9 @@ const ORGANISM_STROKE_SCALE = 0.012;
 const ORGANISM_MIN_STROKE_PX = 0.18;
 const FOCUSED_ORGANISM_STROKE_COLOR = '#0b1730';
 const ORGANISM_STROKE_COLOR = 'rgba(15, 23, 42, 0.6)';
+const GESTATING_GLOW_COLOR = 'rgba(255, 244, 180, 0.95)';
+const GESTATING_GLOW_BLUR_SCALE = 0.9;
+const GESTATING_GLOW_MIN_BLUR_PX = 4;
 
 type HexLayout = {
   size: number;
@@ -614,6 +617,20 @@ function renderOrganismLayer(
     const backY = anchorY - uy * radius * ORGANISM_TAIL_LENGTH_SCALE;
     const perpX = -uy * radius * ORGANISM_SIDE_SPAN_SCALE;
     const perpY = ux * radius * ORGANISM_SIDE_SPAN_SCALE;
+
+    if (org.is_gestating) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(tipX, tipY);
+      ctx.lineTo(backX + perpX, backY + perpY);
+      ctx.lineTo(backX - perpX, backY - perpY);
+      ctx.closePath();
+      ctx.shadowColor = GESTATING_GLOW_COLOR;
+      ctx.shadowBlur = Math.max(GESTATING_GLOW_MIN_BLUR_PX, geometry.layout.size * GESTATING_GLOW_BLUR_SCALE);
+      ctx.fillStyle = 'rgba(255, 244, 180, 0.5)';
+      ctx.fill();
+      ctx.restore();
+    }
 
     ctx.beginPath();
     ctx.moveTo(tipX, tipY);

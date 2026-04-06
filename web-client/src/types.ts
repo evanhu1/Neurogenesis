@@ -237,7 +237,10 @@ export type ApiOrganismState = {
   energy_prev: number;
   dopamine: number;
   damage_taken_last_turn: number;
+  is_gestating: boolean;
   consumptions_count: number;
+  plant_consumptions_count: number;
+  prey_consumptions_count: number;
   reproductions_count: number;
   last_action_taken: ActionType;
   brain: ApiBrainState;
@@ -258,7 +261,10 @@ export type OrganismState = {
   energy_prev: number;
   dopamine: number;
   damage_taken_last_turn: number;
+  is_gestating: boolean;
   consumptions_count: number;
+  plant_consumptions_count: number;
+  prey_consumptions_count: number;
   reproductions_count: number;
   last_action_taken: ActionType;
   brain: BrainState;
@@ -277,7 +283,10 @@ export type ApiWorldOrganismState = {
   health: number;
   max_health: number;
   damage_taken_last_turn: number;
+  is_gestating: boolean;
   consumptions_count: number;
+  plant_consumptions_count: number;
+  prey_consumptions_count: number;
   reproductions_count: number;
 };
 
@@ -293,7 +302,10 @@ export type WorldOrganismState = {
   health: number;
   max_health: number;
   damage_taken_last_turn: number;
+  is_gestating: boolean;
   consumptions_count: number;
+  plant_consumptions_count: number;
+  prey_consumptions_count: number;
   reproductions_count: number;
 };
 

@@ -174,6 +174,16 @@ impl<'a> CommitPhaseContext<'a> {
         let predator = &mut self.sim.organisms[predator_idx];
         predator.energy += gained_energy;
         predator.consumptions_count = predator.consumptions_count.saturating_add(1);
+        match food.kind {
+            FoodKind::Plant => {
+                predator.plant_consumptions_count =
+                    predator.plant_consumptions_count.saturating_add(1);
+            }
+            FoodKind::Corpse => {
+                predator.prey_consumptions_count =
+                    predator.prey_consumptions_count.saturating_add(1);
+            }
+        }
         self.sim.reward_ledgers[predator_idx].record(RewardEvent::FoodConsumed {
             energy: gained_energy,
         });
