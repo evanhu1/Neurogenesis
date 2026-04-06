@@ -18,7 +18,6 @@ Generated from `sim-config/src/config.rs`.
 | `passive_metabolism_cost_per_unit` | `0.005` | Per-complexity-unit passive energy drain applied each tick. |
 | `food_energy` | `required` | Energy stored in each plant food item. |
 | `move_action_energy_cost` | `required` | Flat energy cost applied to non-idle actions. |
-| `reproduction_investment_energy` | `500` | Immediate parent energy investment when reproduction starts. |
 | `action_temperature` | `0.5` | Softmax temperature for action sampling. |
 | `intent_parallel_threads` | `8` | Worker-count default for intent evaluation. |
 

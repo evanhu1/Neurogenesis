@@ -236,26 +236,14 @@ fn fmt_option(value: Option<f64>, decimals: usize) -> String {
 }
 
 fn print_experiment_readouts(label: &str, readouts: &ReproductionAnalytics) {
-    println!(
-        "{label}_tracked_births: {}",
-        readouts.births
-    );
-    println!(
-        "{label}_successful_births: {}",
-        readouts.successful_births
-    );
-    println!(
-        "{label}_blocked_births: {}",
-        readouts.blocked_births
-    );
+    println!("{label}_tracked_births: {}", readouts.births);
+    println!("{label}_successful_births: {}", readouts.successful_births);
+    println!("{label}_blocked_births: {}", readouts.blocked_births);
     println!(
         "{label}_parent_died_during_reproduction: {}",
         readouts.parent_died_during_reproduction
     );
-    println!(
-        "{label}_survived_to_30: {}",
-        readouts.survived_to_30
-    );
+    println!("{label}_survived_to_30: {}", readouts.survived_to_30);
     println!(
         "{label}_survived_to_maturity: {}",
         readouts.survived_to_maturity

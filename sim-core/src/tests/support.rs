@@ -79,7 +79,6 @@ pub(super) fn stable_test_config() -> WorldConfig {
         food_energy: 50.0,
         passive_metabolism_cost_per_unit: 0.005,
         move_action_energy_cost: 1.0,
-        reproduction_investment_energy: 500.0,
         action_temperature: 0.5,
         intent_parallel_threads: 8,
         food_regrowth_interval: 10,

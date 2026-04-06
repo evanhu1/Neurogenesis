@@ -4,7 +4,6 @@ use crate::brain::{action_index, express_genome, BrainScratch, ACTION_ID_BASE};
 use crate::grid::world_capacity;
 use crate::plasticity::{apply_runtime_weight_updates, compute_pending_coactivations};
 
-const NO_REPRODUCTION_INVESTMENT: f32 = 1.0e12;
 fn repo_default_world_config() -> WorldConfig {
     sim_config::default_world_config()
 }
@@ -88,7 +87,6 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
         cfg.action_temperature = 0.08;
         cfg.seed_genome_config.max_organism_age = max_age as u32;
         cfg.seed_genome_config.max_health = 10_000.0;
-        cfg.reproduction_investment_energy = NO_REPRODUCTION_INVESTMENT;
         cfg
     };
 
@@ -255,7 +253,6 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
         cfg.terrain_threshold = 1.0;
         cfg.seed_genome_config.max_organism_age = max_age;
         cfg.seed_genome_config.max_health = 10_000.0;
-        cfg.reproduction_investment_energy = NO_REPRODUCTION_INVESTMENT;
         cfg
     };
 
@@ -410,7 +407,6 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
         cfg.terrain_threshold = 1.0;
         cfg.seed_genome_config.max_organism_age = max_age;
         cfg.seed_genome_config.max_health = 10_000.0;
-        cfg.reproduction_investment_energy = NO_REPRODUCTION_INVESTMENT;
         cfg
     };
 

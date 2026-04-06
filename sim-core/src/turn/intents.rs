@@ -1,5 +1,10 @@
 use super::*;
 
+#[cfg(feature = "instrumentation")]
+const INTER_EMA_ALPHA: f32 = 0.05;
+#[cfg(feature = "instrumentation")]
+const UTILIZATION_THRESHOLD: f32 = 0.03;
+
 #[derive(Clone, Copy)]
 struct IntentBuildContext<'a> {
     world_width: i32,
@@ -270,7 +275,7 @@ fn translate_action_to_intent(
 
 #[cfg(feature = "instrumentation")]
 fn instrument_action_record(
-    organism: &OrganismState,
+    organism: &mut OrganismState,
     organism_id: OrganismId,
     selected_action: ActionType,
     food_flags: (bool, bool, bool, bool),
@@ -278,7 +283,6 @@ fn instrument_action_record(
     let (food_ahead, food_left, food_right, food_behind) = food_flags;
     ActionRecord {
         organism_id,
-        species_id: organism.species_id,
         selected_action,
         food_ahead,
         food_left,
@@ -286,15 +290,40 @@ fn instrument_action_record(
         food_behind,
         damage_taken_last_turn: organism.damage_taken_last_turn,
         age_turns: organism.age_turns,
-        age_of_maturity: organism.genome.age_of_maturity,
-        inter_activations: organism
-            .brain
-            .inter
-            .iter()
-            .map(|inter| inter.neuron.activation)
-            .collect(),
+        utilization: update_instrumentation_utilization(organism),
         consumptions_count: organism.consumptions_count,
     }
+}
+
+#[cfg(feature = "instrumentation")]
+fn update_instrumentation_utilization(organism: &mut OrganismState) -> f32 {
+    let activations = organism
+        .brain
+        .inter
+        .iter()
+        .map(|inter| inter.neuron.activation.abs());
+    let ema = &mut organism.instrumentation.inter_ema;
+    let mut inter_count = 0_usize;
+
+    if ema.len() != organism.brain.inter.len() {
+        ema.clear();
+        ema.extend(activations);
+        inter_count = ema.len();
+    } else {
+        for (ema_value, activation) in ema.iter_mut().zip(activations) {
+            *ema_value = (1.0 - INTER_EMA_ALPHA) * *ema_value + INTER_EMA_ALPHA * activation;
+            inter_count += 1;
+        }
+    }
+
+    if inter_count == 0 {
+        return 0.0;
+    }
+    let utilized = ema
+        .iter()
+        .filter(|value| **value > UTILIZATION_THRESHOLD)
+        .count();
+    utilized as f32 / inter_count as f32
 }
 
 fn intent_from_selected_action(

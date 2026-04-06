@@ -211,7 +211,7 @@ pub(crate) fn run_single_seed_evaluation(
     let mut ledger = Ledger::new(options.min_lifetime);
 
     for organism in sim.organisms() {
-        ledger.birth(organism.id, 0);
+        ledger.birth(organism.id, 0, organism.genome.age_of_maturity);
     }
 
     let mut current_food_count = sim.snapshot().foods.len() as u64;
@@ -248,7 +248,7 @@ pub(crate) fn run_single_seed_evaluation(
 
         interval_births = interval_births.saturating_add(delta.spawned.len() as u64);
         for spawned in &delta.spawned {
-            ledger.birth(spawned.id, tick);
+            ledger.birth(spawned.id, tick, spawned.genome.age_of_maturity);
         }
         ledger.update_survival_thresholds(sim.organisms());
 

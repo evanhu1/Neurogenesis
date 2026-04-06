@@ -4,19 +4,48 @@ use std::collections::HashMap;
 
 pub const N_ACTIONS: usize = 7;
 pub const SENSORY_BIN_COUNT: usize = 5;
-const INTER_EMA_ALPHA: f32 = 0.05;
-const UTILIZATION_THRESHOLD: f32 = 0.03;
 const SURVIVAL_AGE_30: u64 = 30;
 
-#[derive(Debug, Clone)]
-pub struct CompletedLifetime {
-    pub lifetime: u64,
-    pub consumptions: u64,
-    pub action_counts: [u32; N_ACTIONS],
-    pub joint: [[u32; N_ACTIONS]; SENSORY_BIN_COUNT],
-    pub food_ahead_ticks: u32,
-    pub fwd_when_food_ahead: u32,
-    pub utilization: f32,
+#[derive(Debug, Clone, Default)]
+pub struct IntervalLifetimeSummary {
+    pub count: u64,
+    pub lifetime_sum: u64,
+    pub ate_count: u64,
+    pub consumptions_sum: u64,
+    pub action_counts: [u64; N_ACTIONS],
+    pub joint: [[u64; N_ACTIONS]; SENSORY_BIN_COUNT],
+    pub food_ahead_ticks_sum: u64,
+    pub fwd_when_food_ahead_sum: u64,
+    pub utilization_sum: f64,
+}
+
+impl IntervalLifetimeSummary {
+    fn record(&mut self, entry: &OrganismEntry, lifetime: u64) {
+        self.count = self.count.saturating_add(1);
+        self.lifetime_sum = self.lifetime_sum.saturating_add(lifetime);
+        self.ate_count = self
+            .ate_count
+            .saturating_add(u64::from(entry.last_consumptions > 0));
+        self.consumptions_sum = self
+            .consumptions_sum
+            .saturating_add(entry.last_consumptions);
+        self.food_ahead_ticks_sum = self
+            .food_ahead_ticks_sum
+            .saturating_add(u64::from(entry.food_ahead_ticks));
+        self.fwd_when_food_ahead_sum = self
+            .fwd_when_food_ahead_sum
+            .saturating_add(u64::from(entry.fwd_when_food_ahead));
+        self.utilization_sum += f64::from(entry.utilization.clamp(0.0, 1.0));
+        for (idx, count) in entry.action_counts.iter().enumerate() {
+            self.action_counts[idx] = self.action_counts[idx].saturating_add(u64::from(*count));
+        }
+        for (sensory_idx, row) in entry.joint.iter().enumerate() {
+            for (action_idx, count) in row.iter().enumerate() {
+                self.joint[sensory_idx][action_idx] =
+                    self.joint[sensory_idx][action_idx].saturating_add(u64::from(*count));
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -38,6 +67,7 @@ impl IntervalActionStats {
 #[derive(Debug)]
 struct OrganismEntry {
     birth_tick: u64,
+    age_of_maturity: u32,
     tracked_reproduction_birth: bool,
     survived_to_30_recorded: bool,
     survived_to_maturity_recorded: bool,
@@ -47,14 +77,14 @@ struct OrganismEntry {
     joint: [[u32; N_ACTIONS]; SENSORY_BIN_COUNT],
     food_ahead_ticks: u32,
     fwd_when_food_ahead: u32,
-    inter_ema: Vec<f32>,
-    ema_initialized: bool,
+    utilization: f32,
 }
 
 impl OrganismEntry {
-    fn new(birth_tick: u64, tracked_reproduction_birth: bool) -> Self {
+    fn new(birth_tick: u64, age_of_maturity: u32, tracked_reproduction_birth: bool) -> Self {
         Self {
             birth_tick,
+            age_of_maturity,
             tracked_reproduction_birth,
             survived_to_30_recorded: false,
             survived_to_maturity_recorded: false,
@@ -64,8 +94,7 @@ impl OrganismEntry {
             joint: [[0; N_ACTIONS]; SENSORY_BIN_COUNT],
             food_ahead_ticks: 0,
             fwd_when_food_ahead: 0,
-            inter_ema: Vec::new(),
-            ema_initialized: false,
+            utilization: 0.0,
         }
     }
 }
@@ -73,7 +102,7 @@ impl OrganismEntry {
 #[derive(Debug)]
 pub struct Ledger {
     sidecar: HashMap<OrganismId, OrganismEntry>,
-    recently_deceased: Vec<CompletedLifetime>,
+    recently_deceased: IntervalLifetimeSummary,
     interval_action_stats: IntervalActionStats,
     births: u64,
     successful_births: u64,
@@ -96,7 +125,7 @@ impl Ledger {
     pub fn new(min_lifetime: u64) -> Self {
         Self {
             sidecar: HashMap::new(),
-            recently_deceased: Vec::new(),
+            recently_deceased: IntervalLifetimeSummary::default(),
             interval_action_stats: IntervalActionStats::default(),
             births: 0,
             successful_births: 0,
@@ -116,13 +145,15 @@ impl Ledger {
         }
     }
 
-    pub fn birth(&mut self, id: OrganismId, tick: u64) {
+    pub fn birth(&mut self, id: OrganismId, tick: u64, age_of_maturity: u32) {
         let tracked_reproduction_birth = self.pending_tracked_births.remove(&id).is_some();
         if tracked_reproduction_birth {
             self.births = self.births.saturating_add(1);
         }
-        self.sidecar
-            .insert(id, OrganismEntry::new(tick, tracked_reproduction_birth));
+        self.sidecar.insert(
+            id,
+            OrganismEntry::new(tick, age_of_maturity, tracked_reproduction_birth),
+        );
     }
 
     pub fn update(&mut self, record: ActionRecord) {
@@ -132,14 +163,6 @@ impl Ledger {
             self.interval_action_stats.action_counts[action_idx].saturating_add(1);
         self.interval_action_stats.joint[sensory_bin][action_idx] =
             self.interval_action_stats.joint[sensory_bin][action_idx].saturating_add(1);
-        if record.age_turns < u64::from(record.age_of_maturity) {
-            self.interval_action_stats.juvenile_joint[sensory_bin][action_idx] =
-                self.interval_action_stats.juvenile_joint[sensory_bin][action_idx]
-                    .saturating_add(1);
-        } else {
-            self.interval_action_stats.adult_joint[sensory_bin][action_idx] =
-                self.interval_action_stats.adult_joint[sensory_bin][action_idx].saturating_add(1);
-        }
         if record.selected_action == ActionType::Reproduce {
             self.interval_action_stats.reproduction_attempts = self
                 .interval_action_stats
@@ -153,39 +176,25 @@ impl Ledger {
             return;
         };
 
+        if record.age_turns < u64::from(entry.age_of_maturity) {
+            self.interval_action_stats.juvenile_joint[sensory_bin][action_idx] =
+                self.interval_action_stats.juvenile_joint[sensory_bin][action_idx]
+                    .saturating_add(1);
+        } else {
+            self.interval_action_stats.adult_joint[sensory_bin][action_idx] =
+                self.interval_action_stats.adult_joint[sensory_bin][action_idx].saturating_add(1);
+        }
         entry.last_consumptions = record.consumptions_count;
         entry.action_counts[action_idx] = entry.action_counts[action_idx].saturating_add(1);
         entry.joint[sensory_bin][action_idx] =
             entry.joint[sensory_bin][action_idx].saturating_add(1);
+        entry.utilization = record.utilization.clamp(0.0, 1.0);
 
         if record.food_ahead {
             entry.food_ahead_ticks = entry.food_ahead_ticks.saturating_add(1);
             if record.selected_action == ActionType::Forward {
                 entry.fwd_when_food_ahead = entry.fwd_when_food_ahead.saturating_add(1);
             }
-        }
-
-        if !entry.ema_initialized {
-            entry.inter_ema = record
-                .inter_activations
-                .iter()
-                .map(|value| value.abs())
-                .collect();
-            entry.ema_initialized = true;
-            return;
-        }
-
-        if entry.inter_ema.len() != record.inter_activations.len() {
-            entry.inter_ema = record
-                .inter_activations
-                .iter()
-                .map(|value| value.abs())
-                .collect();
-            return;
-        }
-
-        for (ema, activation) in entry.inter_ema.iter_mut().zip(&record.inter_activations) {
-            *ema = (1.0 - INTER_EMA_ALPHA) * *ema + INTER_EMA_ALPHA * activation.abs();
         }
     }
 
@@ -200,29 +209,10 @@ impl Ledger {
             return;
         }
 
-        let utilization = if entry.inter_ema.is_empty() {
-            0.0
-        } else {
-            let utilized = entry
-                .inter_ema
-                .iter()
-                .filter(|value| **value > UTILIZATION_THRESHOLD)
-                .count() as f32;
-            utilized / entry.inter_ema.len() as f32
-        };
-
-        self.recently_deceased.push(CompletedLifetime {
-            lifetime,
-            consumptions: entry.last_consumptions,
-            action_counts: entry.action_counts,
-            joint: entry.joint,
-            food_ahead_ticks: entry.food_ahead_ticks,
-            fwd_when_food_ahead: entry.fwd_when_food_ahead,
-            utilization,
-        });
+        self.recently_deceased.record(&entry, lifetime);
     }
 
-    pub fn recently_deceased(&self) -> &[CompletedLifetime] {
+    pub fn recently_deceased(&self) -> &IntervalLifetimeSummary {
         &self.recently_deceased
     }
 
@@ -276,7 +266,7 @@ impl Ledger {
                 entry.survived_to_30_recorded = true;
             }
             if !entry.survived_to_maturity_recorded
-                && organism.age_turns >= u64::from(organism.genome.age_of_maturity)
+                && organism.age_turns >= u64::from(entry.age_of_maturity)
             {
                 self.survived_to_maturity = self.survived_to_maturity.saturating_add(1);
                 entry.survived_to_maturity_recorded = true;
@@ -312,7 +302,7 @@ impl Ledger {
     }
 
     pub fn clear_interval(&mut self) {
-        self.recently_deceased.clear();
+        self.recently_deceased = IntervalLifetimeSummary::default();
         self.interval_action_stats = IntervalActionStats::default();
         self.neonatal_deaths = 0;
     }

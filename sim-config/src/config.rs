@@ -15,7 +15,6 @@ pub struct PopulationDefaults {
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
 pub struct LifecycleDefaults {
     pub passive_metabolism_cost_per_unit: f32,
-    pub reproduction_investment_energy: f32,
     pub action_temperature: f32,
     pub intent_parallel_threads: u32,
 }
@@ -83,7 +82,6 @@ pub fn world_config_defaults() -> WorldConfigDefaults {
         },
         lifecycle: LifecycleDefaults {
             passive_metabolism_cost_per_unit: 0.005,
-            reproduction_investment_energy: 500.0,
             action_temperature: 0.5,
             intent_parallel_threads: 8,
         },
@@ -192,11 +190,6 @@ pub fn world_config_reference_markdown() -> String {
                 "move_action_energy_cost",
                 "required".to_owned(),
                 "Flat energy cost applied to non-idle actions.",
-            ),
-            (
-                "reproduction_investment_energy",
-                world.lifecycle.reproduction_investment_energy.to_string(),
-                "Immediate parent energy investment when reproduction starts.",
             ),
             (
                 "action_temperature",
@@ -551,8 +544,6 @@ pub struct WorldConfig {
     #[serde(default = "default_passive_metabolism_cost_per_unit")]
     pub passive_metabolism_cost_per_unit: f32,
     pub move_action_energy_cost: f32,
-    #[serde(default = "default_reproduction_investment_energy")]
-    pub reproduction_investment_energy: f32,
     #[serde(default = "default_action_temperature")]
     pub action_temperature: f32,
     #[serde(default = "default_intent_parallel_threads")]
@@ -715,8 +706,6 @@ struct WorldLifecycleToml {
     #[serde(default = "default_passive_metabolism_cost_per_unit")]
     passive_metabolism_cost_per_unit: f32,
     move_action_energy_cost: f32,
-    #[serde(default = "default_reproduction_investment_energy")]
-    reproduction_investment_energy: f32,
     #[serde(default = "default_action_temperature")]
     action_temperature: f32,
     #[serde(default = "default_intent_parallel_threads")]
@@ -764,7 +753,6 @@ impl WorldConfigToml {
             food_energy: self.food.food_energy,
             passive_metabolism_cost_per_unit: self.lifecycle.passive_metabolism_cost_per_unit,
             move_action_energy_cost: self.lifecycle.move_action_energy_cost,
-            reproduction_investment_energy: self.lifecycle.reproduction_investment_energy,
             action_temperature: self.lifecycle.action_temperature,
             intent_parallel_threads: self.lifecycle.intent_parallel_threads,
             food_regrowth_interval: self.food.food_regrowth_interval,
@@ -845,9 +833,6 @@ pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
     if config.move_action_energy_cost < 0.0 {
         return Err("move_action_energy_cost must be >= 0".to_owned());
     }
-    if config.reproduction_investment_energy < 0.0 {
-        return Err("reproduction_investment_energy must be >= 0".to_owned());
-    }
     if !config.action_temperature.is_finite() || config.action_temperature <= 0.0 {
         return Err("action_temperature must be finite and greater than zero".to_owned());
     }
@@ -894,12 +879,6 @@ pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
 
 fn default_gestation_ticks() -> u8 {
     seed_genome_config_defaults().gestation_ticks
-}
-
-fn default_reproduction_investment_energy() -> f32 {
-    world_config_defaults()
-        .lifecycle
-        .reproduction_investment_energy
 }
 
 fn default_juvenile_eta_scale() -> f32 {

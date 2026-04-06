@@ -1,7 +1,7 @@
-use crate::ledger::{CompletedLifetime, IntervalActionStats, N_ACTIONS, SENSORY_BIN_COUNT};
+use crate::ledger::{IntervalActionStats, IntervalLifetimeSummary, N_ACTIONS, SENSORY_BIN_COUNT};
 use serde::Serialize;
 use sim_types::{offspring_transfer_energy, OrganismState};
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct IntervalMetrics {
@@ -48,7 +48,7 @@ pub fn compute_interval_metrics(
     interval_consumptions: u64,
     interval_predations: u64,
     interval_population_exposure: u64,
-    deceased: &[CompletedLifetime],
+    deceased: &IntervalLifetimeSummary,
     living: &[OrganismState],
     action_stats: &IntervalActionStats,
     food_energy: f32,
@@ -86,30 +86,18 @@ pub fn compute_interval_metrics(
     let mean_gestation_ticks = mean_gestation_ticks(living);
     let mean_offspring_transfer_energy = mean_offspring_transfer_energy(living);
 
-    let (life_mean, ate_pct, cons_mean, p_fwd_food, mi_sa, h_action, util) = if deceased.is_empty()
+    let (life_mean, ate_pct, cons_mean, p_fwd_food, mi_sa, h_action, util) = if deceased.count == 0
     {
         (None, None, None, None, None, None, None)
     } else {
-        let life_sum: u64 = deceased.iter().map(|entry| entry.lifetime).sum();
-        let ate_count = deceased
-            .iter()
-            .filter(|entry| entry.consumptions > 0)
-            .count() as f64;
-        let cons_sum: u64 = deceased.iter().map(|entry| entry.consumptions).sum();
-        let util_mean = deceased
-            .iter()
-            .map(|entry| entry.utilization as f64)
-            .sum::<f64>()
-            / deceased.len() as f64;
-
         (
-            Some(life_sum as f64 / deceased.len() as f64),
-            Some(100.0 * ate_count / deceased.len() as f64),
-            Some(cons_sum as f64 / deceased.len() as f64),
+            Some(deceased.lifetime_sum as f64 / deceased.count as f64),
+            Some(100.0 * deceased.ate_count as f64 / deceased.count as f64),
+            Some(deceased.consumptions_sum as f64 / deceased.count as f64),
             pooled_p_fwd_food(deceased),
             pooled_mi_sa(deceased),
             pooled_action_entropy(deceased),
-            Some(util_mean),
+            Some(deceased.utilization_sum / deceased.count as f64),
         )
     };
 
@@ -222,7 +210,7 @@ fn lineage_diversity(living: &[OrganismState]) -> Option<f64> {
         return None;
     }
 
-    let mut counts = BTreeMap::new();
+    let mut counts = HashMap::new();
     for organism in living {
         *counts.entry(organism.species_id).or_insert(0_u64) += 1;
     }
@@ -261,29 +249,15 @@ fn mean_offspring_transfer_energy(living: &[OrganismState]) -> Option<f64> {
     )
 }
 
-fn pooled_p_fwd_food(deceased: &[CompletedLifetime]) -> Option<f64> {
-    let numerator: u64 = deceased
-        .iter()
-        .map(|entry| u64::from(entry.fwd_when_food_ahead))
-        .sum();
-    let denominator: u64 = deceased
-        .iter()
-        .map(|entry| u64::from(entry.food_ahead_ticks))
-        .sum();
-    if denominator == 0 {
+fn pooled_p_fwd_food(deceased: &IntervalLifetimeSummary) -> Option<f64> {
+    if deceased.food_ahead_ticks_sum == 0 {
         return None;
     }
-    Some(numerator as f64 / denominator as f64)
+    Some(deceased.fwd_when_food_ahead_sum as f64 / deceased.food_ahead_ticks_sum as f64)
 }
 
-fn pooled_action_entropy(deceased: &[CompletedLifetime]) -> Option<f64> {
-    let mut pooled = [0_u64; N_ACTIONS];
-    for entry in deceased {
-        for (idx, count) in entry.action_counts.iter().enumerate() {
-            pooled[idx] = pooled[idx].saturating_add(u64::from(*count));
-        }
-    }
-    action_entropy_from_counts(&pooled)
+fn pooled_action_entropy(deceased: &IntervalLifetimeSummary) -> Option<f64> {
+    action_entropy_from_counts(&deceased.action_counts)
 }
 
 fn action_entropy_from_counts(counts: &[u64; N_ACTIONS]) -> Option<f64> {
@@ -303,17 +277,8 @@ fn action_entropy_from_counts(counts: &[u64; N_ACTIONS]) -> Option<f64> {
     Some(entropy)
 }
 
-fn pooled_mi_sa(deceased: &[CompletedLifetime]) -> Option<f64> {
-    let mut pooled_joint = [[0_u64; N_ACTIONS]; SENSORY_BIN_COUNT];
-    for entry in deceased {
-        for (sensory_idx, row) in entry.joint.iter().enumerate() {
-            for (action_idx, count) in row.iter().enumerate() {
-                pooled_joint[sensory_idx][action_idx] =
-                    pooled_joint[sensory_idx][action_idx].saturating_add(u64::from(*count));
-            }
-        }
-    }
-    pooled_mi_sa_from_u64(&pooled_joint)
+fn pooled_mi_sa(deceased: &IntervalLifetimeSummary) -> Option<f64> {
+    pooled_mi_sa_from_u64(&deceased.joint)
 }
 
 fn pooled_mi_sa_from_u64(pooled_joint: &[[u64; N_ACTIONS]; SENSORY_BIN_COUNT]) -> Option<f64> {

@@ -6,7 +6,6 @@ fn state_invariants_hold_across_multi_turn_mixed_ecology_and_spawn_flow() {
     let mut cfg = test_config(8, 5);
     cfg.food_regrowth_interval = 2;
     cfg.food_regrowth_jitter = 0;
-    cfg.reproduction_investment_energy = 100.0;
 
     let mut sim = Simulation::new(cfg, 20).expect("simulation should initialize");
     let wall_idx = sim.cell_index(3, 1);

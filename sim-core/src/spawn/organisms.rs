@@ -28,7 +28,8 @@ impl Simulation {
                 SpawnRequestKind::PeriodicInjection(injection) => {
                     let genome =
                         generate_seed_genome(&self.config.seed_genome_config, &mut self.rng);
-                    let starting_energy = sim_types::offspring_transfer_energy(genome.gestation_ticks);
+                    let starting_energy =
+                        sim_types::offspring_transfer_energy(genome.gestation_ticks);
                     let species_id = founder_species_id(OrganismId(self.next_organism_id));
                     let facing = self.random_facing();
                     self.build_organism(
@@ -157,6 +158,8 @@ impl Simulation {
             prey_consumptions_count: 0,
             reproductions_count: 0,
             last_action_taken: ActionType::Idle,
+            #[cfg(feature = "instrumentation")]
+            instrumentation: Default::default(),
             brain: express_genome(&genome),
             genome,
         }

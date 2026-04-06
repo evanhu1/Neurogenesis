@@ -121,7 +121,7 @@ Terrain-wall cells are infertile.
    per-edge pending coactivations (`pre * post`).
 4. **Reproduction trigger** — `Reproduce` starts a 2-turn lock if mature and
    energy is sufficient; parent energy is debited immediately by
-   `reproduction_investment_energy`.
+   gestation-derived offspring transfer energy.
 5. **Move resolution** — simultaneous movement into empty targets only; highest
    confidence wins, ties broken by lower ID. Occupied cells and walls block.
 6. **Commit** — apply facing + moves + action costs; resolve forward-cell

@@ -253,20 +253,10 @@ fn attack_only_interacts_with_organisms_and_kills_on_success() {
         50.0,
     );
     predator.genome.gestation_ticks = 4;
-    let mut prey = make_single_action_organism(
-        1,
-        2,
-        1,
-        FacingDirection::East,
-        ActionType::Idle,
-        0.1,
-        50.0,
-    );
+    let mut prey =
+        make_single_action_organism(1, 2, 1, FacingDirection::East, ActionType::Idle, 0.1, 50.0);
     prey.genome.gestation_ticks = 0;
-    configure_sim(
-        &mut sim,
-        vec![predator, prey],
-    );
+    configure_sim(&mut sim, vec![predator, prey]);
 
     let delta = tick_once(&mut sim);
     assert_eq!(delta.metrics.predations_last_turn, 1);
@@ -295,10 +285,7 @@ fn lethal_attack_spawns_corpse_food_without_feeding_attacker() {
         50.0,
     );
     predator.genome.gestation_ticks = 4;
-    configure_sim(
-        &mut sim,
-        vec![predator, prey],
-    );
+    configure_sim(&mut sim, vec![predator, prey]);
 
     let delta = tick_once(&mut sim);
     assert_eq!(delta.metrics.predations_last_turn, 1);

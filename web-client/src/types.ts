@@ -81,7 +81,6 @@ export type WorldConfig = {
   food_energy: number;
   passive_metabolism_cost_per_unit: number;
   move_action_energy_cost: number;
-  reproduction_investment_energy: number;
   action_temperature: number;
   food_regrowth_interval: number;
   food_regrowth_jitter: number;

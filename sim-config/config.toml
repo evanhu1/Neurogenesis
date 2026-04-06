@@ -9,7 +9,6 @@ periodic_injection_count = 200 # Fresh seed-genome spawn attempts to make on eac
 [lifecycle]
 passive_metabolism_cost_per_unit = 0.005 # Passive energy drain per brain/vision complexity unit each tick.
 move_action_energy_cost = 1.0 # Flat energy cost charged for any non-idle action.
-reproduction_investment_energy = 500.0 # Energy the parent immediately commits when starting reproduction.
 action_temperature = 0.08 # Softmax temperature for action sampling; lower values make choices more deterministic.
 intent_parallel_threads = 8 # Worker threads used during the intent-evaluation phase.
 

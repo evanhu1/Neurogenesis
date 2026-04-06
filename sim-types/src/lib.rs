@@ -75,7 +75,6 @@ impl Default for ActionType {
 #[derive(Debug, Clone)]
 pub struct ActionRecord {
     pub organism_id: OrganismId,
-    pub species_id: SpeciesId,
     pub selected_action: ActionType,
     pub food_ahead: bool,
     pub food_left: bool,
@@ -83,9 +82,15 @@ pub struct ActionRecord {
     pub food_behind: bool,
     pub damage_taken_last_turn: f32,
     pub age_turns: u64,
-    pub age_of_maturity: u32,
-    pub inter_activations: Vec<f32>,
+    pub utilization: f32,
     pub consumptions_count: u64,
+}
+
+#[cfg(feature = "instrumentation")]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct OrganismInstrumentationState {
+    #[serde(default, skip)]
+    pub inter_ema: Vec<f32>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, VariantArray)]
@@ -407,6 +412,9 @@ pub struct OrganismState {
     pub reproductions_count: u64,
     #[serde(default)]
     pub last_action_taken: ActionType,
+    #[cfg(feature = "instrumentation")]
+    #[serde(default, skip)]
+    pub instrumentation: OrganismInstrumentationState,
     pub brain: BrainState,
     pub genome: OrganismGenome,
 }
