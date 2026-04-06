@@ -80,7 +80,7 @@ pub(crate) fn compute_pending_coactivations(
 
 fn should_prune_synapses(age_turns: u64, age_of_maturity: u32) -> bool {
     let maturity_ticks = u64::from(age_of_maturity);
-    age_turns >= maturity_ticks && age_turns % SYNAPSE_PRUNE_INTERVAL_TICKS == 0
+    age_turns >= maturity_ticks && age_turns.is_multiple_of(SYNAPSE_PRUNE_INTERVAL_TICKS)
 }
 
 #[allow(dead_code)]

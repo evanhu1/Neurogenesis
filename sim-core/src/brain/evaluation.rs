@@ -9,14 +9,19 @@ struct SampledAction {
     confidence: f32,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct BrainEvalContext<'a> {
+    pub(crate) world_width: i32,
+    pub(crate) occupancy: &'a [Option<Occupant>],
+    pub(crate) spike_map: &'a [bool],
+    pub(crate) vision_distance: u32,
+    pub(crate) action_temperature: f32,
+    pub(crate) action_sample: f32,
+}
+
 pub(crate) fn evaluate_brain(
     organism: &mut sim_types::OrganismState,
-    world_width: i32,
-    occupancy: &[Option<Occupant>],
-    spike_map: &[bool],
-    vision_distance: u32,
-    action_temperature: f32,
-    action_sample: f32,
+    context: BrainEvalContext<'_>,
     scratch: &mut BrainScratch,
 ) -> BrainEvaluation {
     let mut result = BrainEvaluation::default();
@@ -24,8 +29,13 @@ pub(crate) fn evaluate_brain(
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     #[cfg_attr(not(feature = "instrumentation"), allow(unused_variables))]
-    let ray_scans =
-        encode_sensory_inputs(organism, world_width, occupancy, spike_map, vision_distance);
+    let ray_scans = encode_sensory_inputs(
+        organism,
+        context.world_width,
+        context.occupancy,
+        context.spike_map,
+        context.vision_distance,
+    );
     #[cfg(feature = "instrumentation")]
     {
         result.food_ahead = look_ray_signal(&ray_scans, 0, EntityType::Food) > 0.0;
@@ -100,8 +110,8 @@ pub(crate) fn evaluate_brain(
     let sampled_action = sample_action_from_logits(
         result.action_logits,
         EXPLICIT_IDLE_LOGIT_BIAS,
-        action_temperature,
-        action_sample,
+        context.action_temperature,
+        context.action_sample,
     );
     scratch.selected_action_index = match sampled_action.action {
         ActionType::Idle => None,

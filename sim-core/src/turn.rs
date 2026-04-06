@@ -7,7 +7,7 @@ mod snapshot;
 
 #[cfg(feature = "instrumentation")]
 use crate::brain::scan_rays;
-use crate::brain::{action_index, evaluate_brain, BrainScratch, ACTION_COUNT};
+use crate::brain::{action_index, evaluate_brain, BrainEvalContext, BrainScratch, ACTION_COUNT};
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right, wrap_position};
 use crate::plasticity::{
     apply_runtime_weight_updates_with_multiplier, compute_pending_coactivations,

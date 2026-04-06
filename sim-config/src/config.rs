@@ -145,7 +145,7 @@ pub fn world_config_reference_markdown() -> String {
         &mut out,
         "World Config",
         "Population",
-        &vec![
+        &[
             (
                 "world_width",
                 "required".to_owned(),
@@ -175,7 +175,7 @@ pub fn world_config_reference_markdown() -> String {
         &mut out,
         "World Config",
         "Lifecycle And Actions",
-        &vec![
+        &[
             (
                 "passive_metabolism_cost_per_unit",
                 world.lifecycle.passive_metabolism_cost_per_unit.to_string(),
@@ -207,7 +207,7 @@ pub fn world_config_reference_markdown() -> String {
         &mut out,
         "World Config",
         "Food Ecology",
-        &vec![
+        &[
             (
                 "food_regrowth_interval",
                 world.food_regrowth.interval.to_string(),
@@ -224,7 +224,7 @@ pub fn world_config_reference_markdown() -> String {
         &mut out,
         "World Config",
         "Terrain",
-        &vec![
+        &[
             (
                 "terrain_noise_scale",
                 world.terrain.terrain_noise_scale.to_string(),
@@ -246,7 +246,7 @@ pub fn world_config_reference_markdown() -> String {
         &mut out,
         "World Config",
         "Evolution Features",
-        &vec![
+        &[
             (
                 "global_mutation_rate_modifier",
                 world.evolution.global_mutation_rate_modifier.to_string(),
@@ -273,7 +273,7 @@ pub fn world_config_reference_markdown() -> String {
         &mut out,
         "Seed Genome Config",
         "Core",
-        &vec![
+        &[
             (
                 "num_neurons",
                 "required".to_owned(),
@@ -320,7 +320,7 @@ pub fn world_config_reference_markdown() -> String {
         &mut out,
         "Seed Genome Config",
         "Plasticity",
-        &vec![
+        &[
             (
                 "plasticity_start_age",
                 genome.plasticity_start_age.to_string(),
@@ -357,7 +357,7 @@ pub fn world_config_reference_markdown() -> String {
         &mut out,
         "Seed Genome Config",
         "Mutation Rates",
-        &vec![
+        &[
             (
                 "mutation_rate_age_of_maturity",
                 "required".to_owned(),
@@ -439,7 +439,7 @@ pub fn world_config_reference_markdown() -> String {
         &mut out,
         "Hidden Policies",
         "Terrain Generation",
-        &vec![
+        &[
             (
                 "terrain_seed_mix",
                 format!("0x{:X}", terrain_policy.terrain_seed_mix),
@@ -461,7 +461,7 @@ pub fn world_config_reference_markdown() -> String {
         &mut out,
         "Hidden Policies",
         "Food Ecology",
-        &vec![
+        &[
             (
                 "fertility_seed_mix",
                 format!("0x{:X}", food_policy.fertility_seed_mix),

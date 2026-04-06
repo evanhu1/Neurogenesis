@@ -34,7 +34,7 @@ pub(crate) struct PeriodicInjectionSpawn {
 
 #[derive(Clone)]
 pub(crate) enum SpawnRequestKind {
-    Reproduction(ReproductionSpawn),
+    Reproduction(Box<ReproductionSpawn>),
     PeriodicInjection(PeriodicInjectionSpawn),
 }
 

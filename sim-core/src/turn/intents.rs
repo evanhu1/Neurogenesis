@@ -27,6 +27,17 @@ struct SelectedActionState {
     food_flags: (bool, bool, bool, bool),
 }
 
+#[derive(Clone, Copy)]
+struct ActionIntentOutcome {
+    facing_after_actions: FacingDirection,
+    wants_move: bool,
+    wants_eat: bool,
+    wants_attack: bool,
+    wants_reproduce: bool,
+    move_target: Option<(i32, i32)>,
+    interaction_target: Option<(i32, i32)>,
+}
+
 impl Simulation {
     pub(super) fn build_intents(&mut self, snapshot: &TurnSnapshot) -> Vec<OrganismIntent> {
         let context = IntentBuildContext {
@@ -199,12 +210,14 @@ fn select_action_for_organism(
 
     let evaluation = evaluate_brain(
         organism,
-        context.world_width,
-        context.occupancy,
-        context.spike_map,
-        vision_distance,
-        context.action_temperature,
-        action_sample,
+        BrainEvalContext {
+            world_width: context.world_width,
+            occupancy: context.occupancy,
+            spike_map: context.spike_map,
+            vision_distance,
+            action_temperature: context.action_temperature,
+            action_sample,
+        },
         scratch,
     );
     if context.runtime_plasticity_enabled {
@@ -241,16 +254,8 @@ fn translate_action_to_intent(
     synapse_ops: u64,
     world_width: i32,
 ) -> OrganismIntent {
-    let (
-        facing_after_actions,
-        wants_move,
-        wants_eat,
-        wants_attack,
-        wants_reproduce,
-        move_target,
-        interaction_target,
-    ) = intent_from_selected_action(selected_action, snapshot_state, world_width);
-    let move_confidence = if wants_move {
+    let outcome = intent_from_selected_action(selected_action, snapshot_state, world_width);
+    let move_confidence = if outcome.wants_move {
         selected_action_logit
     } else {
         0.0
@@ -260,13 +265,13 @@ fn translate_action_to_intent(
         idx,
         id: organism_id,
         from: (snapshot_state.q, snapshot_state.r),
-        facing_after_actions,
-        wants_move,
-        wants_eat,
-        wants_attack,
-        wants_reproduce,
-        move_target,
-        interaction_target,
+        facing_after_actions: outcome.facing_after_actions,
+        wants_move: outcome.wants_move,
+        wants_eat: outcome.wants_eat,
+        wants_attack: outcome.wants_attack,
+        wants_reproduce: outcome.wants_reproduce,
+        move_target: outcome.move_target,
+        interaction_target: outcome.interaction_target,
         move_confidence,
         action_cost_count: u8::from(selected_action != ActionType::Idle),
         synapse_ops,
@@ -330,65 +335,73 @@ fn intent_from_selected_action(
     selected_action: ActionType,
     snapshot_state: SnapshotOrganismState,
     world_width: i32,
-) -> (
-    FacingDirection,
-    bool,
-    bool,
-    bool,
-    bool,
-    Option<(i32, i32)>,
-    Option<(i32, i32)>,
-) {
+) -> ActionIntentOutcome {
     let from = (snapshot_state.q, snapshot_state.r);
     let current_facing = snapshot_state.facing;
 
     match selected_action {
-        ActionType::Idle => (current_facing, false, false, false, false, None, None),
-        ActionType::TurnLeft => (
-            rotate_left(current_facing),
-            false,
-            false,
-            false,
-            false,
-            None,
-            None,
-        ),
-        ActionType::TurnRight => (
-            rotate_right(current_facing),
-            false,
-            false,
-            false,
-            false,
-            None,
-            None,
-        ),
-        ActionType::Forward => (
-            current_facing,
-            true,
-            false,
-            false,
-            false,
-            Some(hex_neighbor(from, current_facing, world_width)),
-            None,
-        ),
-        ActionType::Eat => (
-            current_facing,
-            false,
-            true,
-            false,
-            false,
-            None,
-            Some(hex_neighbor(from, current_facing, world_width)),
-        ),
-        ActionType::Attack => (
-            current_facing,
-            false,
-            false,
-            true,
-            false,
-            None,
-            Some(hex_neighbor(from, current_facing, world_width)),
-        ),
-        ActionType::Reproduce => (current_facing, false, false, false, true, None, None),
+        ActionType::Idle => ActionIntentOutcome {
+            facing_after_actions: current_facing,
+            wants_move: false,
+            wants_eat: false,
+            wants_attack: false,
+            wants_reproduce: false,
+            move_target: None,
+            interaction_target: None,
+        },
+        ActionType::TurnLeft => ActionIntentOutcome {
+            facing_after_actions: rotate_left(current_facing),
+            wants_move: false,
+            wants_eat: false,
+            wants_attack: false,
+            wants_reproduce: false,
+            move_target: None,
+            interaction_target: None,
+        },
+        ActionType::TurnRight => ActionIntentOutcome {
+            facing_after_actions: rotate_right(current_facing),
+            wants_move: false,
+            wants_eat: false,
+            wants_attack: false,
+            wants_reproduce: false,
+            move_target: None,
+            interaction_target: None,
+        },
+        ActionType::Forward => ActionIntentOutcome {
+            facing_after_actions: current_facing,
+            wants_move: true,
+            wants_eat: false,
+            wants_attack: false,
+            wants_reproduce: false,
+            move_target: Some(hex_neighbor(from, current_facing, world_width)),
+            interaction_target: None,
+        },
+        ActionType::Eat => ActionIntentOutcome {
+            facing_after_actions: current_facing,
+            wants_move: false,
+            wants_eat: true,
+            wants_attack: false,
+            wants_reproduce: false,
+            move_target: None,
+            interaction_target: Some(hex_neighbor(from, current_facing, world_width)),
+        },
+        ActionType::Attack => ActionIntentOutcome {
+            facing_after_actions: current_facing,
+            wants_move: false,
+            wants_eat: false,
+            wants_attack: true,
+            wants_reproduce: false,
+            move_target: None,
+            interaction_target: Some(hex_neighbor(from, current_facing, world_width)),
+        },
+        ActionType::Reproduce => ActionIntentOutcome {
+            facing_after_actions: current_facing,
+            wants_move: false,
+            wants_eat: false,
+            wants_attack: false,
+            wants_reproduce: true,
+            move_target: None,
+            interaction_target: None,
+        },
     }
 }

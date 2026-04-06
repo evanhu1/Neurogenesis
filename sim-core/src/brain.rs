@@ -26,9 +26,10 @@ pub(crate) use crate::topology::{
 };
 #[cfg_attr(not(test), allow(unused_imports))]
 pub use evaluation::derive_active_action_neuron_id;
-pub(crate) use evaluation::evaluate_brain;
+pub(crate) use evaluation::{BrainEvalContext, evaluate_brain};
 #[cfg_attr(not(test), allow(unused_imports))]
 pub(crate) use expression::{express_genome, make_action_neuron, make_sensory_neuron};
+#[cfg_attr(not(feature = "instrumentation"), allow(unused_imports))]
 pub(crate) use sensing::scan_rays;
 
 const DEFAULT_BIAS: f32 = 0.0;

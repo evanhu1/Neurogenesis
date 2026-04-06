@@ -138,7 +138,7 @@ impl ReproductionPhaseState {
                     reward: sim.config.food_energy * PLANT_CONSUMPTION_ENERGY_FRACTION,
                 });
                 self.spawn_requests.push(SpawnRequest {
-                    kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
+                    kind: SpawnRequestKind::Reproduction(Box::new(ReproductionSpawn {
                         parent_genome: parent.genome.clone(),
                         parent_generation: parent.generation,
                         parent_species_id: parent.species_id,
@@ -146,7 +146,7 @@ impl ReproductionPhaseState {
                         offspring_starting_energy: pending_action.reproduction_energy(),
                         q,
                         r,
-                    }),
+                    })),
                 });
                 self.successful_births.push(PendingBirthEvent {
                     parent_id: parent.id,

@@ -22,20 +22,16 @@ pub const MAX_GESTATION_TICKS: u8 = 4;
 pub const BASE_OFFSPRING_TRANSFER_ENERGY: f32 = 100.0;
 pub const GESTATION_TRANSFER_ENERGY_STEP: f32 = 100.0;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum FoodKind {
+    #[default]
     Plant,
     Corpse,
 }
 
-impl Default for FoodKind {
-    fn default() -> Self {
-        Self::Plant
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, VariantArray)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, VariantArray, Default)]
 pub enum ActionType {
+    #[default]
     Idle,
     TurnLeft,
     TurnRight,
@@ -62,12 +58,6 @@ impl ActionType {
     pub fn from_neuron_id(id: NeuronId) -> Option<Self> {
         let idx = id.0.checked_sub(ACTION_NEURON_ID_BASE)? as usize;
         Self::ALL.get(idx).copied()
-    }
-}
-
-impl Default for ActionType {
-    fn default() -> Self {
-        Self::Idle
     }
 }
 

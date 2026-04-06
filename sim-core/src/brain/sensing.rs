@@ -21,6 +21,15 @@ impl ScanResult {
 
 type RayScans = [ScanResult; LOOK_RAY_COUNT];
 
+#[derive(Clone, Copy)]
+struct RaycastContext<'a> {
+    organism_id: OrganismId,
+    world_width: i32,
+    occupancy: &'a [Option<Occupant>],
+    spike_map: &'a [bool],
+    vision_distance: u32,
+}
+
 pub(super) fn encode_sensory_inputs(
     organism: &mut OrganismState,
     world_width: i32,
@@ -85,17 +94,15 @@ pub(crate) fn scan_rays(
     spike_map: &[bool],
     vision_distance: u32,
 ) -> RayScans {
+    let context = RaycastContext {
+        organism_id,
+        world_width,
+        occupancy,
+        spike_map,
+        vision_distance,
+    };
     std::array::from_fn(|idx| {
-        scan_ray(
-            position,
-            facing,
-            SensoryReceptor::LOOK_RAY_OFFSETS[idx],
-            organism_id,
-            world_width,
-            occupancy,
-            spike_map,
-            vision_distance,
-        )
+        scan_ray(position, facing, SensoryReceptor::LOOK_RAY_OFFSETS[idx], context)
     })
 }
 
@@ -133,25 +140,21 @@ fn scan_ray(
     position: (i32, i32),
     facing: sim_types::FacingDirection,
     ray_offset: i8,
-    organism_id: OrganismId,
-    world_width: i32,
-    occupancy: &[Option<Occupant>],
-    spike_map: &[bool],
-    vision_distance: u32,
+    context: RaycastContext<'_>,
 ) -> ScanResult {
     let ray_facing = rotate_facing_by_offset(facing, ray_offset);
-    let max_dist = vision_distance.max(1);
+    let max_dist = context.vision_distance.max(1);
     let mut current = position;
     for d in 1..=max_dist {
-        current = hex_neighbor(current, ray_facing, world_width);
-        let idx = current.1 as usize * world_width as usize + current.0 as usize;
+        current = hex_neighbor(current, ray_facing, context.world_width);
+        let idx = current.1 as usize * context.world_width as usize + current.0 as usize;
         let signal = (max_dist - d + 1) as f32 / max_dist as f32;
         let mut hit = ScanResult::default();
-        if spike_map[idx] {
+        if context.spike_map[idx] {
             hit.spike_signal = signal;
         }
-        match occupancy[idx] {
-            Some(Occupant::Organism(id)) if id == organism_id => {}
+        match context.occupancy[idx] {
+            Some(Occupant::Organism(id)) if id == context.organism_id => {}
             Some(Occupant::Food(_)) => {
                 hit.food_signal = signal;
                 return hit;

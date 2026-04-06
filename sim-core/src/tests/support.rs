@@ -161,7 +161,7 @@ fn forced_brain_with_action(preferred_action: ActionType, confidence: f32) -> Br
     let inter_id = NeuronId(1000);
     let inter_bias = confidence;
     let inter_synapses: Vec<SynapseEdge> = ActionType::ALL
-        .into_iter()
+        .iter()
         .copied()
         .enumerate()
         .map(|(idx, action_type)| SynapseEdge {
@@ -193,7 +193,7 @@ fn forced_brain_with_action(preferred_action: ActionType, confidence: f32) -> Br
         synapses: inter_synapses,
     }];
     let mut action: Vec<_> = ActionType::ALL
-        .into_iter()
+        .iter()
         .copied()
         .enumerate()
         .map(|(idx, action_type)| {
@@ -309,7 +309,7 @@ pub(super) fn reproduction_request_from_parent(
         sim.config.world_width as i32,
     );
     SpawnRequest {
-        kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
+        kind: SpawnRequestKind::Reproduction(Box::new(ReproductionSpawn {
             parent_genome: parent.genome.clone(),
             parent_generation: parent.generation,
             parent_species_id: parent.species_id,
@@ -319,7 +319,7 @@ pub(super) fn reproduction_request_from_parent(
             ),
             q,
             r,
-        }),
+        })),
     }
 }
 
@@ -335,7 +335,7 @@ pub(super) fn reproduction_request_at(
         .find(|organism| organism.id == parent_id)
         .expect("parent should exist for reproduction request");
     SpawnRequest {
-        kind: SpawnRequestKind::Reproduction(ReproductionSpawn {
+        kind: SpawnRequestKind::Reproduction(Box::new(ReproductionSpawn {
             parent_genome: parent.genome.clone(),
             parent_generation: parent.generation,
             parent_species_id: parent.species_id,
@@ -345,7 +345,7 @@ pub(super) fn reproduction_request_at(
             ),
             q,
             r,
-        }),
+        })),
     }
 }
 

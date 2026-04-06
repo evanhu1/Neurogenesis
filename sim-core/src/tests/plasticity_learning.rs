@@ -85,7 +85,7 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
         cfg.food_regrowth_interval = 1;
         cfg.food_regrowth_jitter = 0;
         cfg.action_temperature = 0.08;
-        cfg.seed_genome_config.max_organism_age = max_age as u32;
+        cfg.seed_genome_config.max_organism_age = max_age;
         cfg.seed_genome_config.max_health = 10_000.0;
         cfg
     };
@@ -155,8 +155,8 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
     let mut sim_static = setup(false);
 
     // Run for the organism's full lifetime.
-    advance_learning_harness(&mut sim_plastic, max_age as u32, food_q, food_r);
-    advance_learning_harness(&mut sim_static, max_age as u32, food_q, food_r);
+    advance_learning_harness(&mut sim_plastic, max_age, food_q, food_r);
+    advance_learning_harness(&mut sim_static, max_age, food_q, food_r);
 
     // Both organisms must survive the full run (they die at the START of the
     // tick after age_turns reaches max_organism_age, so after advance_n(max_age)

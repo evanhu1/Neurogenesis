@@ -62,7 +62,7 @@ impl Simulation {
         }
 
         let next_turn = self.turn.saturating_add(1);
-        if next_turn % interval != 0 {
+        if !next_turn.is_multiple_of(interval) {
             return;
         }
 

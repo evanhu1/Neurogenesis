@@ -8,6 +8,7 @@ use rand_distr::{Distribution, StandardNormal};
 use sim_types::{BrainLocation, NeuronId, OrganismGenome, SeedGenomeConfig, SynapseEdge};
 use std::cmp::Ordering;
 use std::collections::HashSet;
+use std::f32::consts::LN_10;
 
 mod mutation_rates;
 mod sanitization;
@@ -60,8 +61,8 @@ const SYNAPSE_WEIGHT_REPLACEMENT_RATE: f32 = 0.1;
 const LOCATION_PERTURBATION_STDDEV: f32 = 0.75;
 pub(crate) const INTER_TIME_CONSTANT_MIN: f32 = 0.1;
 pub(crate) const INTER_TIME_CONSTANT_MAX: f32 = 10.0;
-pub(crate) const INTER_LOG_TIME_CONSTANT_MIN: f32 = -2.302_585_1;
-pub(crate) const INTER_LOG_TIME_CONSTANT_MAX: f32 = 2.302_585_1;
+pub(crate) const INTER_LOG_TIME_CONSTANT_MIN: f32 = -LN_10;
+pub(crate) const INTER_LOG_TIME_CONSTANT_MAX: f32 = LN_10;
 pub(crate) const DEFAULT_INTER_LOG_TIME_CONSTANT: f32 = -1.203_972_8;
 pub(crate) const BRAIN_SPACE_MIN: f32 = 0.0;
 pub(crate) const BRAIN_SPACE_MAX: f32 = 10.0;
