@@ -156,7 +156,7 @@ impl Ledger {
         );
     }
 
-    pub fn update(&mut self, record: ActionRecord) {
+    pub fn update(&mut self, record: &ActionRecord) {
         let action_idx = action_index(record.selected_action);
         let sensory_bin = sensory_bin(&record);
         self.interval_action_stats.action_counts[action_idx] =

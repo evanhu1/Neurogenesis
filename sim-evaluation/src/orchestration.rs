@@ -233,15 +233,15 @@ pub(crate) fn run_single_seed_evaluation(
         interval_population_exposure =
             interval_population_exposure.saturating_add(sim.organisms().len() as u64);
         let delta = sim.tick();
-        let records = sim.drain_action_records();
         interval_consumptions =
             interval_consumptions.saturating_add(delta.metrics.consumptions_last_turn);
         interval_predations =
             interval_predations.saturating_add(delta.metrics.predations_last_turn);
 
-        for record in records {
+        for record in sim.action_records() {
             ledger.update(record);
         }
+        sim.clear_action_records();
         for event in delta.reproduction_events.iter().copied() {
             ledger.handle_reproduction_event(tick, event);
         }

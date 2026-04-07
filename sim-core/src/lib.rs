@@ -309,8 +309,13 @@ impl Simulation {
     }
 
     #[cfg(feature = "instrumentation")]
-    pub fn drain_action_records(&mut self) -> Vec<ActionRecord> {
-        std::mem::take(&mut self.action_records)
+    pub fn action_records(&self) -> &[ActionRecord] {
+        &self.action_records
+    }
+
+    #[cfg(feature = "instrumentation")]
+    pub fn clear_action_records(&mut self) {
+        self.action_records.clear();
     }
 
     pub fn validate_state(&self) -> Result<(), SimError> {

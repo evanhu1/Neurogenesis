@@ -3,16 +3,21 @@ use sim_core::profiling::{self, PhaseCounterSnapshot, ProfilingSnapshot};
 #[cfg(feature = "profiling")]
 use sim_core::Simulation;
 #[cfg(feature = "profiling")]
+use sim_config::load_world_config_from_path;
+#[cfg(feature = "profiling")]
 use sim_types::{SeedGenomeConfig, WorldConfig};
+#[cfg(feature = "profiling")]
+use std::path::PathBuf;
 #[cfg(feature = "profiling")]
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "profiling")]
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Args {
     turns: u32,
     warmup_turns: u32,
     seed: u64,
+    config: Option<PathBuf>,
 }
 
 #[cfg(feature = "profiling")]
@@ -35,7 +40,13 @@ fn main() {
 #[cfg(feature = "profiling")]
 fn run() -> Result<(), String> {
     let args = parse_args()?;
-    let mut sim = Simulation::new(stable_perf_config(), args.seed)
+    let config = if let Some(path) = args.config.as_ref() {
+        load_world_config_from_path(path)
+            .map_err(|err| format!("failed to load config from {}: {err}", path.display()))?
+    } else {
+        stable_perf_config()
+    };
+    let mut sim = Simulation::new(config.clone(), args.seed)
         .map_err(|err| format!("failed to initialize simulation: {err}"))?;
 
     if args.warmup_turns > 0 {
@@ -48,7 +59,7 @@ fn run() -> Result<(), String> {
     let elapsed = started.elapsed();
     let snapshot = profiling::snapshot();
 
-    print_report(args, &snapshot, elapsed);
+    print_report(args, &config, &snapshot, elapsed);
     Ok(())
 }
 
@@ -58,6 +69,7 @@ fn parse_args() -> Result<Args, String> {
         turns: 1_000,
         warmup_turns: 200,
         seed: 42,
+        config: None,
     };
 
     let mut iter = std::env::args().skip(1);
@@ -66,6 +78,7 @@ fn parse_args() -> Result<Args, String> {
             "--turns" => args.turns = parse_value(&mut iter, "--turns")?,
             "--warmup-turns" => args.warmup_turns = parse_value(&mut iter, "--warmup-turns")?,
             "--seed" => args.seed = parse_value(&mut iter, "--seed")?,
+            "--config" => args.config = Some(parse_value(&mut iter, "--config")?),
             "--help" | "-h" => {
                 print_help();
                 std::process::exit(0);
@@ -109,17 +122,38 @@ fn print_help() {
     println!("  --turns <u32>                Number of measured turns (default: 1000)");
     println!("  --warmup-turns <u32>         Warmup turns before reset (default: 200)");
     println!("  --seed <u64>                 Simulation seed (default: 42)");
+    println!("  --config <path>              Load world+seed config from TOML path");
 }
 
 #[cfg(feature = "profiling")]
-fn print_report(args: Args, snapshot: &ProfilingSnapshot, wall_elapsed: Duration) {
+fn print_report(
+    args: Args,
+    config: &WorldConfig,
+    snapshot: &ProfilingSnapshot,
+    wall_elapsed: Duration,
+) {
     let tick_ns = snapshot.tick_total.total_ns.max(1);
     let wall_ns = duration_to_ns(wall_elapsed);
 
     println!("== sim-core turn profile ==");
+    if let Some(path) = args.config.as_ref() {
+        println!("config_path: {}", path.display());
+    } else {
+        println!("config_path: <stable_perf_config>");
+    }
     println!("turns: {}", args.turns);
     println!("warmup_turns: {}", args.warmup_turns);
     println!("seed: {}", args.seed);
+    println!(
+        "config_summary: world_width={} num_organisms={} vision_distance={} neurons={} synapses={} runtime_plasticity_enabled={} intent_parallel_threads={}",
+        config.world_width,
+        config.num_organisms,
+        config.seed_genome_config.vision_distance,
+        config.seed_genome_config.num_neurons,
+        config.seed_genome_config.num_synapses,
+        config.runtime_plasticity_enabled,
+        config.intent_parallel_threads,
+    );
     println!("wall_time_ms: {:.3}", ns_to_ms(wall_ns));
     println!(
         "avg_wall_us_per_turn: {:.3}",

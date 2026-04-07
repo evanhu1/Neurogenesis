@@ -174,27 +174,35 @@ fn compute_pending_edge_coactivations(
     inter_activations: &[f32],
     scratch: &BrainScratch,
 ) {
-    let (inter_edges, action_edges) = split_inter_and_action_edges_mut(edges);
-
-    for edge in inter_edges {
-        let Some(idx) = inter_index(edge.post_neuron_id, inter_activations.len()) else {
-            continue;
-        };
-        let Some(post_activation) = inter_activations.get(idx).copied() else {
-            continue;
-        };
-        edge.pending_coactivation = inter_pre_signal * post_activation;
+    if inter_pre_signal == 0.0 && action_pre_signal == 0.0 {
+        return;
     }
 
-    for edge in action_edges {
-        let Some(idx) = action_array_index(edge.post_neuron_id) else {
-            continue;
-        };
-        edge.pending_coactivation = if Some(idx) == scratch.selected_action_index {
-            action_pre_signal * scratch.selected_action_confidence
-        } else {
-            0.0
-        };
+    let (inter_edges, action_edges) = split_inter_and_action_edges_mut(edges);
+
+    if inter_pre_signal != 0.0 {
+        for edge in inter_edges {
+            let Some(idx) = inter_index(edge.post_neuron_id, inter_activations.len()) else {
+                continue;
+            };
+            let Some(post_activation) = inter_activations.get(idx).copied() else {
+                continue;
+            };
+            edge.pending_coactivation = inter_pre_signal * post_activation;
+        }
+    }
+
+    if action_pre_signal != 0.0 {
+        for edge in action_edges {
+            let Some(idx) = action_array_index(edge.post_neuron_id) else {
+                continue;
+            };
+            edge.pending_coactivation = if Some(idx) == scratch.selected_action_index {
+                action_pre_signal * scratch.selected_action_confidence
+            } else {
+                0.0
+            };
+        }
     }
 }
 

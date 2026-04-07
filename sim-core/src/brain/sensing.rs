@@ -1,4 +1,5 @@
 use super::*;
+use crate::grid::hex_neighbor;
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct ScanResult {
@@ -59,16 +60,37 @@ pub(super) fn encode_sensory_inputs(
         / organism.max_health.max(MIN_ENERGY_SENSOR_SCALE))
     .clamp(0.0, 1.0);
 
-    for sensory in &mut organism.brain.sensory {
-        sensory.neuron.activation = match &sensory.receptor {
-            SensoryReceptor::LookRay {
-                ray_offset,
-                look_target,
-            } => look_ray_signal(&ray_scans, *ray_offset, *look_target),
-            SensoryReceptor::ContactAhead => contact_ahead_signal,
-            SensoryReceptor::Damage => damage_signal,
-            SensoryReceptor::Energy => energy_signal,
-        };
+    let sensory = &mut organism.brain.sensory;
+    if sensory.len() == SENSORY_COUNT as usize {
+        let look_target_count = SensoryReceptor::LOOK_TARGETS.len();
+        for (ray_idx, scan) in ray_scans.iter().copied().enumerate() {
+            let base = ray_idx * look_target_count;
+            sensory[base].neuron.activation = scan.food_signal;
+            sensory[base + 1].neuron.activation = scan.organism_signal;
+            sensory[base + 2].neuron.activation = scan.wall_signal;
+            sensory[base + 3].neuron.activation = scan.spike_signal;
+        }
+        sensory[SensoryReceptor::LOOK_NEURON_COUNT as usize]
+            .neuron
+            .activation = contact_ahead_signal;
+        sensory[SensoryReceptor::LOOK_NEURON_COUNT as usize + 1]
+            .neuron
+            .activation = damage_signal;
+        sensory[SensoryReceptor::LOOK_NEURON_COUNT as usize + 2]
+            .neuron
+            .activation = energy_signal;
+    } else {
+        for sensory_neuron in sensory {
+            sensory_neuron.neuron.activation = match &sensory_neuron.receptor {
+                SensoryReceptor::LookRay {
+                    ray_offset,
+                    look_target,
+                } => look_ray_signal(&ray_scans, *ray_offset, *look_target),
+                SensoryReceptor::ContactAhead => contact_ahead_signal,
+                SensoryReceptor::Damage => damage_signal,
+                SensoryReceptor::Energy => energy_signal,
+            };
+        }
     }
 
     ray_scans
@@ -101,9 +123,10 @@ pub(crate) fn scan_rays(
         spike_map,
         vision_distance,
     };
-    std::array::from_fn(|idx| {
-        scan_ray(position, facing, SensoryReceptor::LOOK_RAY_OFFSETS[idx], context)
-    })
+    let left = scan_ray(position, rotate_left(facing), context);
+    let forward = scan_ray(position, facing, context);
+    let right = scan_ray(position, rotate_right(facing), context);
+    [left, forward, right]
 }
 
 fn energy_sensor_value(energy: f32, scale: f32) -> f32 {
@@ -119,36 +142,18 @@ fn ray_offset_index(ray_offset: i8) -> Option<usize> {
         .position(|offset| *offset == ray_offset)
 }
 
-fn rotate_facing_by_offset(
-    mut facing: sim_types::FacingDirection,
-    ray_offset: i8,
-) -> sim_types::FacingDirection {
-    if ray_offset >= 0 {
-        for _ in 0..u8::try_from(ray_offset).unwrap_or(0) {
-            facing = rotate_right(facing);
-        }
-        return facing;
-    }
-
-    for _ in 0..ray_offset.unsigned_abs() {
-        facing = rotate_left(facing);
-    }
-    facing
-}
-
 fn scan_ray(
     position: (i32, i32),
-    facing: sim_types::FacingDirection,
-    ray_offset: i8,
+    ray_facing: sim_types::FacingDirection,
     context: RaycastContext<'_>,
 ) -> ScanResult {
-    let ray_facing = rotate_facing_by_offset(facing, ray_offset);
     let max_dist = context.vision_distance.max(1);
     let mut current = position;
+    let inv_max_dist = 1.0 / max_dist as f32;
     for d in 1..=max_dist {
         current = hex_neighbor(current, ray_facing, context.world_width);
         let idx = current.1 as usize * context.world_width as usize + current.0 as usize;
-        let signal = (max_dist - d + 1) as f32 / max_dist as f32;
+        let signal = (max_dist - d + 1) as f32 * inv_max_dist;
         let mut hit = ScanResult::default();
         if context.spike_map[idx] {
             hit.spike_signal = signal;

@@ -6,7 +6,7 @@ use crate::genome::{
     inter_alpha_from_log_time_constant, BRAIN_SPACE_MAX, BRAIN_SPACE_MIN,
     DEFAULT_INTER_LOG_TIME_CONSTANT,
 };
-use crate::grid::{hex_neighbor, rotate_left, rotate_right};
+use crate::grid::{rotate_left, rotate_right};
 #[cfg(feature = "profiling")]
 use crate::profiling::{self, BrainStage};
 use crate::topology::{

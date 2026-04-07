@@ -75,23 +75,25 @@ impl Simulation {
         profiling::record_brain_eval_total(brain_eval_started.elapsed());
 
         #[cfg(feature = "instrumentation")]
-        let mut action_records = Vec::with_capacity(built_intents.len());
+        {
+            self.action_records.clear();
+            self.action_records.reserve(
+                built_intents
+                    .len()
+                    .saturating_sub(self.action_records.capacity()),
+            );
+        }
 
         let intents = built_intents
             .into_iter()
             .map(|built| {
                 #[cfg(feature = "instrumentation")]
                 if let Some(action_record) = built.action_record {
-                    action_records.push(action_record);
+                    self.action_records.push(action_record);
                 }
                 built.intent
             })
             .collect();
-
-        #[cfg(feature = "instrumentation")]
-        {
-            self.action_records = action_records;
-        }
 
         intents
     }
