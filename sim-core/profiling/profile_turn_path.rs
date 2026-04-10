@@ -317,6 +317,7 @@ fn stable_perf_config() -> WorldConfig {
         food_regrowth_interval: 10,
         food_regrowth_jitter: 2,
         food_fertility_threshold: 0.6,
+        food_fertility_jitter_strength: 1.0,
         terrain_noise_scale: 0.02,
         terrain_threshold: 1.0,
         spike_density: 0.0,

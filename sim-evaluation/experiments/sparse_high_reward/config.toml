@@ -16,7 +16,8 @@ intent_parallel_threads = 8
 food_energy = 400
 food_regrowth_interval = 200
 food_regrowth_jitter = 50
-food_fertility_threshold = 0.85
+food_fertility_threshold = 0.6
+food_fertility_jitter_strength = 4.0
 
 [terrain]
 terrain_noise_scale = 0.01

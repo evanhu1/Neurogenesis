@@ -9,6 +9,7 @@ impl Simulation {
             self.config.world_width,
             self.seed,
             self.config.food_fertility_threshold,
+            self.config.food_fertility_jitter_strength,
         );
         for (idx, blocked) in self.terrain_map.iter().copied().enumerate() {
             if blocked {
@@ -166,7 +167,12 @@ impl Simulation {
     }
 }
 
-fn build_fertility_map(world_width: u32, seed: u64, fertility_threshold: f32) -> Vec<bool> {
+fn build_fertility_map(
+    world_width: u32,
+    seed: u64,
+    fertility_threshold: f32,
+    fertility_jitter_strength: f32,
+) -> Vec<bool> {
     let policy = food_ecology_policy();
     let width = world_width as usize;
     let fertility_seed = seed ^ policy.fertility_seed_mix;
@@ -178,7 +184,7 @@ fn build_fertility_map(world_width: u32, seed: u64, fertility_threshold: f32) ->
             let y = r as f64 * policy.fertility_noise_scale;
             let value = fractal_perlin_2d(x, y, fertility_seed);
             let normalized = ((value + 1.0) * 0.5).clamp(0.0, 1.0);
-            let jitter = cell_jitter(q as i64, r as i64, jitter_seed);
+            let jitter = cell_jitter(q as i64, r as i64, jitter_seed, fertility_jitter_strength);
             let jittered = (normalized * jitter).clamp(0.0, 1.0);
             fertility.push(jittered >= f64::from(fertility_threshold));
         }
@@ -186,8 +192,10 @@ fn build_fertility_map(world_width: u32, seed: u64, fertility_threshold: f32) ->
     fertility
 }
 
-fn cell_jitter(x: i64, y: i64, seed: u64) -> f64 {
+fn cell_jitter(x: i64, y: i64, seed: u64, strength: f32) -> f64 {
     const MAX_U53: f64 = ((1_u64 << 53) - 1) as f64;
     let sample = (hash_2d(x, y, seed) >> 11) as f64 / MAX_U53;
-    0.5 + sample
+    let base_jitter = 0.5 + sample;
+    let extra_hole_punch = sample.powf(f64::from((strength - 1.0).max(0.0)));
+    base_jitter * extra_hole_punch
 }

@@ -76,6 +76,7 @@ pub struct FoodEcologyPolicy {
     pub fertility_jitter_seed_mix: u64,
     pub fertility_noise_scale: f64,
     pub fertility_threshold: f64,
+    pub fertility_jitter_strength: f64,
 }
 
 pub fn world_config_defaults() -> WorldConfigDefaults {
@@ -134,6 +135,7 @@ pub fn food_ecology_policy() -> FoodEcologyPolicy {
         fertility_jitter_seed_mix: 0x510E_527F_9B05_688C,
         fertility_noise_scale: 0.012,
         fertility_threshold: 0.6,
+        fertility_jitter_strength: 1.0,
     }
 }
 
@@ -203,6 +205,8 @@ pub struct WorldConfig {
     pub food_regrowth_jitter: u32,
     #[serde(default = "default_food_fertility_threshold")]
     pub food_fertility_threshold: f32,
+    #[serde(default = "default_food_fertility_jitter_strength")]
+    pub food_fertility_jitter_strength: f32,
     #[serde(default = "default_terrain_noise_scale")]
     pub terrain_noise_scale: f32,
     #[serde(default = "default_terrain_threshold")]
@@ -373,6 +377,8 @@ struct WorldFoodToml {
     food_regrowth_jitter: u32,
     #[serde(default = "default_food_fertility_threshold")]
     food_fertility_threshold: f32,
+    #[serde(default = "default_food_fertility_jitter_strength")]
+    food_fertility_jitter_strength: f32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -416,6 +422,7 @@ impl WorldConfigToml {
             food_regrowth_interval: self.food.food_regrowth_interval,
             food_regrowth_jitter: self.food.food_regrowth_jitter,
             food_fertility_threshold: self.food.food_fertility_threshold,
+            food_fertility_jitter_strength: self.food.food_fertility_jitter_strength,
             terrain_noise_scale: self.terrain.terrain_noise_scale,
             terrain_threshold: self.terrain.terrain_threshold,
             spike_density: self.terrain.spike_density,
@@ -504,6 +511,11 @@ pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
     if !(0.0..=1.0).contains(&config.food_fertility_threshold) {
         return Err("food_fertility_threshold must be in [0.0, 1.0]".to_owned());
     }
+    if !config.food_fertility_jitter_strength.is_finite()
+        || config.food_fertility_jitter_strength < 1.0
+    {
+        return Err("food_fertility_jitter_strength must be finite and >= 1".to_owned());
+    }
     if config.terrain_noise_scale <= 0.0 {
         return Err("terrain_noise_scale must be greater than zero".to_owned());
     }
@@ -569,6 +581,10 @@ fn default_food_regrowth_jitter() -> u32 {
 
 fn default_food_fertility_threshold() -> f32 {
     food_ecology_policy().fertility_threshold as f32
+}
+
+fn default_food_fertility_jitter_strength() -> f32 {
+    food_ecology_policy().fertility_jitter_strength as f32
 }
 
 fn default_periodic_injection_interval_turns() -> u32 {

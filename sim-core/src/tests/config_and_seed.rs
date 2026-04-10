@@ -124,3 +124,26 @@ fn higher_food_fertility_threshold_reduces_initial_plant_supply() {
         "raising the fertility threshold should reduce initial plant supply: dense={dense_food} sparse={sparse_food}"
     );
 }
+
+#[test]
+fn stronger_food_fertility_jitter_reduces_initial_plant_supply() {
+    let mut baseline_cfg = stable_test_config();
+    baseline_cfg.world_width = 48;
+    baseline_cfg.num_organisms = 1;
+    baseline_cfg.food_fertility_threshold = 0.6;
+    baseline_cfg.food_fertility_jitter_strength = 1.0;
+
+    let mut patchy_cfg = baseline_cfg.clone();
+    patchy_cfg.food_fertility_jitter_strength = 2.0;
+
+    let baseline = Simulation::new(baseline_cfg, 2026).expect("simulation should initialize");
+    let patchy = Simulation::new(patchy_cfg, 2026).expect("simulation should initialize");
+
+    let baseline_food = baseline.snapshot().foods.len();
+    let patchy_food = patchy.snapshot().foods.len();
+
+    assert!(
+        patchy_food < baseline_food,
+        "raising fertility jitter strength should reduce initial plant supply: baseline={baseline_food} patchy={patchy_food}"
+    );
+}

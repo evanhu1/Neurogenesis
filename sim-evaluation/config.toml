@@ -17,6 +17,7 @@ food_energy = 100
 food_regrowth_interval = 200
 food_regrowth_jitter = 50
 food_fertility_threshold = 0.6
+food_fertility_jitter_strength = 1.0
 
 [terrain]
 terrain_noise_scale = 0.01
