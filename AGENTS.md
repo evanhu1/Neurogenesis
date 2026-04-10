@@ -5,7 +5,7 @@
 - `sim-types/`: shared domain types used across all Rust crates.
 - `sim-config/`: world + seed-genome config crate (`config.toml`,
   `seed_genome.toml`, typed loader/validation, owned defaults/policies,
-  generated config reference).
+  inline-commented TOML baselines).
 - `sim-core/`: deterministic simulation engine:
   - `lib.rs`: `Simulation` struct, config validation.
   - `turn.rs` + `turn/`: tick orchestration, lifecycle, snapshot, intents,
@@ -26,8 +26,6 @@
 - `web-client/`: React + TailwindCSS + Vite canvas UI (`src/`).
 - `sim-config/config.toml`: baseline world simulation configuration.
 - `sim-config/seed_genome.toml`: baseline seed-genome configuration.
-- `sim-config/CONFIG_REFERENCE.md`: generated config reference derived from
-  `sim-config/src/config.rs`.
 - `sim-evaluation/config.toml`: stable evaluation world configuration.
 - `sim-evaluation/seed_genome.toml`: stable evaluation seed-genome
   configuration. Keep both evaluation files in sync with the `sim-config`
@@ -38,11 +36,9 @@
 
 - `cargo check --workspace`: fast compile check.
 - `cargo test --workspace`: run all Rust tests.
-- `cargo run -p sim-config --bin generate_config_docs`: regenerate
-  `sim-config/CONFIG_REFERENCE.md`.
 - `make fmt`: format Rust code.
 - `make lint`: clippy with warnings as errors.
-- `cargo run -p sim-evaluation --release --`: run the default 10-seed
+- `cargo run -p sim-evaluation --release --`: run the default 8-seed
   evolution-loop evaluation harness and generate
   `report.html`/`timeseries.csv`/`summary.json`.
 - `cargo run -p sim-evaluation --release -- --seed <u64>[,<u64>...]`: override
@@ -103,9 +99,9 @@ from Perlin noise at world init (`terrain_noise_scale`, `terrain_threshold`) and
 block spawn, movement, and ray vision.
 
 Food fertility is binary (boolean per cell), generated from Perlin noise using
-the hidden food-ecology policy owned by `sim-config` and documented in
-`sim-config/CONFIG_REFERENCE.md`:
-`FOOD_FERTILITY_NOISE_SCALE = 0.012`, `FOOD_FERTILITY_THRESHOLD = 0.6`.
+the hidden food-ecology policy owned by `sim-config`. The current built-in
+policy uses `FOOD_FERTILITY_NOISE_SCALE = 0.012`, and the default TOML
+override is `food_fertility_threshold = 0.6`.
 Terrain-wall cells are infertile.
 
 ### Turn Pipeline (execution order)

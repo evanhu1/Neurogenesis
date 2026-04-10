@@ -1,0 +1,8 @@
+{
+  "name": "neurogenesis-tools",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "gather:llm-context": "node scripts/gather-llm-context.mjs"
+  }
+}

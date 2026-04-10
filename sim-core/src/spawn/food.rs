@@ -5,7 +5,11 @@ use sim_config::food_ecology_policy;
 impl Simulation {
     pub(crate) fn initialize_food_ecology(&mut self) {
         let capacity = world_capacity(self.config.world_width);
-        self.food_fertility = build_fertility_map(self.config.world_width, self.seed);
+        self.food_fertility = build_fertility_map(
+            self.config.world_width,
+            self.seed,
+            self.config.food_fertility_threshold,
+        );
         for (idx, blocked) in self.terrain_map.iter().copied().enumerate() {
             if blocked {
                 self.food_fertility[idx] = false;
@@ -162,7 +166,7 @@ impl Simulation {
     }
 }
 
-fn build_fertility_map(world_width: u32, seed: u64) -> Vec<bool> {
+fn build_fertility_map(world_width: u32, seed: u64, fertility_threshold: f32) -> Vec<bool> {
     let policy = food_ecology_policy();
     let width = world_width as usize;
     let fertility_seed = seed ^ policy.fertility_seed_mix;
@@ -176,7 +180,7 @@ fn build_fertility_map(world_width: u32, seed: u64) -> Vec<bool> {
             let normalized = ((value + 1.0) * 0.5).clamp(0.0, 1.0);
             let jitter = cell_jitter(q as i64, r as i64, jitter_seed);
             let jittered = (normalized * jitter).clamp(0.0, 1.0);
-            fertility.push(jittered >= policy.fertility_threshold);
+            fertility.push(jittered >= f64::from(fertility_threshold));
         }
     }
     fertility

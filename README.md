@@ -54,7 +54,7 @@ behavioral adaptation is emerging.
 - Faster smoke run:
   - `cargo run -p sim-evaluation --release -- --ticks 1000 --report-every 250`
 
-By default the harness runs a fixed 10-seed benchmark suite. You can override it
+By default the harness runs a fixed 8-seed benchmark suite. You can override it
 with `--seed` and a comma-separated list such as `--seed 42,123,7`.
 
 Each run writes artifacts under `artifacts/evaluation/...` including
@@ -64,7 +64,7 @@ Each run writes artifacts under `artifacts/evaluation/...` including
 
 - `sim-types/` — shared domain types used across all Rust crates.
 - `sim-config/` — world/seed-genome configuration crate, TOML loader,
-  validation, owned defaults/policies, and generated config reference.
+  validation, owned defaults/policies, and inline-commented TOML baselines.
 - `sim-core/` — deterministic simulation engine:
   - `lib.rs` — `Simulation` struct, config validation.
   - `turn.rs` + `turn/` — tick orchestration split into lifecycle, snapshot,
@@ -84,8 +84,6 @@ Each run writes artifacts under `artifacts/evaluation/...` including
 - `web-client/` — React + TailwindCSS + Vite canvas UI.
 - `sim-config/config.toml` — baseline world simulation configuration.
 - `sim-config/seed_genome.toml` — baseline seed-genome configuration.
-- `sim-config/CONFIG_REFERENCE.md` — generated config reference derived from the
-  config source of truth.
 
 ## High level design
 

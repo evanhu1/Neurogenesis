@@ -13,10 +13,10 @@ action_temperature = 0.08
 intent_parallel_threads = 8
 
 [food]
-food_energy = 100
+food_energy = 400
 food_regrowth_interval = 200
 food_regrowth_jitter = 50
-food_fertility_threshold = 0.6
+food_fertility_threshold = 0.85
 
 [terrain]
 terrain_noise_scale = 0.01

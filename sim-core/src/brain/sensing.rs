@@ -1,5 +1,5 @@
 use super::*;
-use crate::grid::hex_neighbor;
+use crate::grid::{hex_neighbor, rotate_by_steps};
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct ScanResult {
@@ -60,37 +60,16 @@ pub(super) fn encode_sensory_inputs(
         / organism.max_health.max(MIN_ENERGY_SENSOR_SCALE))
     .clamp(0.0, 1.0);
 
-    let sensory = &mut organism.brain.sensory;
-    if sensory.len() == SENSORY_COUNT as usize {
-        let look_target_count = SensoryReceptor::LOOK_TARGETS.len();
-        for (ray_idx, scan) in ray_scans.iter().copied().enumerate() {
-            let base = ray_idx * look_target_count;
-            sensory[base].neuron.activation = scan.food_signal;
-            sensory[base + 1].neuron.activation = scan.organism_signal;
-            sensory[base + 2].neuron.activation = scan.wall_signal;
-            sensory[base + 3].neuron.activation = scan.spike_signal;
-        }
-        sensory[SensoryReceptor::LOOK_NEURON_COUNT as usize]
-            .neuron
-            .activation = contact_ahead_signal;
-        sensory[SensoryReceptor::LOOK_NEURON_COUNT as usize + 1]
-            .neuron
-            .activation = damage_signal;
-        sensory[SensoryReceptor::LOOK_NEURON_COUNT as usize + 2]
-            .neuron
-            .activation = energy_signal;
-    } else {
-        for sensory_neuron in sensory {
-            sensory_neuron.neuron.activation = match &sensory_neuron.receptor {
-                SensoryReceptor::LookRay {
-                    ray_offset,
-                    look_target,
-                } => look_ray_signal(&ray_scans, *ray_offset, *look_target),
-                SensoryReceptor::ContactAhead => contact_ahead_signal,
-                SensoryReceptor::Damage => damage_signal,
-                SensoryReceptor::Energy => energy_signal,
-            };
-        }
+    for sensory_neuron in &mut organism.brain.sensory {
+        sensory_neuron.neuron.activation = match &sensory_neuron.receptor {
+            SensoryReceptor::LookRay {
+                ray_offset,
+                look_target,
+            } => look_ray_signal(&ray_scans, *ray_offset, *look_target),
+            SensoryReceptor::ContactAhead => contact_ahead_signal,
+            SensoryReceptor::Damage => damage_signal,
+            SensoryReceptor::Energy => energy_signal,
+        };
     }
 
     ray_scans
@@ -123,10 +102,13 @@ pub(crate) fn scan_rays(
         spike_map,
         vision_distance,
     };
-    let left = scan_ray(position, rotate_left(facing), context);
-    let forward = scan_ray(position, facing, context);
-    let right = scan_ray(position, rotate_right(facing), context);
-    [left, forward, right]
+    std::array::from_fn(|idx| {
+        scan_ray(
+            position,
+            rotate_by_steps(facing, SensoryReceptor::LOOK_RAY_OFFSETS[idx]),
+            context,
+        )
+    })
 }
 
 fn energy_sensor_value(energy: f32, scale: f32) -> f32 {

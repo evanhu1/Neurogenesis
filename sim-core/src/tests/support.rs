@@ -83,6 +83,7 @@ pub(super) fn stable_test_config() -> WorldConfig {
         intent_parallel_threads: 8,
         food_regrowth_interval: 10,
         food_regrowth_jitter: 2,
+        food_fertility_threshold: 0.6,
         terrain_noise_scale: 0.02,
         terrain_threshold: 1.0,
         spike_density: 0.0,
@@ -250,6 +251,8 @@ pub(super) fn make_single_action_organism(
         prey_consumptions_count: 0,
         reproductions_count: 0,
         last_action_taken: ActionType::Idle,
+        #[cfg(feature = "instrumentation")]
+        instrumentation: Default::default(),
         brain: forced_brain_with_action(preferred_action, confidence),
         genome: test_genome(),
     }
@@ -289,6 +292,8 @@ pub(super) fn make_organism(
         prey_consumptions_count: 0,
         reproductions_count: 0,
         last_action_taken: ActionType::Idle,
+        #[cfg(feature = "instrumentation")]
+        instrumentation: Default::default(),
         brain: forced_brain(wants_move, turn_left, turn_right, confidence),
         genome: test_genome(),
     }

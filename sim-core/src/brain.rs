@@ -6,7 +6,6 @@ use crate::genome::{
     inter_alpha_from_log_time_constant, BRAIN_SPACE_MAX, BRAIN_SPACE_MIN,
     DEFAULT_INTER_LOG_TIME_CONSTANT,
 };
-use crate::grid::{rotate_left, rotate_right};
 #[cfg(feature = "profiling")]
 use crate::profiling::{self, BrainStage};
 use crate::topology::{
@@ -26,7 +25,7 @@ pub(crate) use crate::topology::{
 };
 #[cfg_attr(not(test), allow(unused_imports))]
 pub use evaluation::derive_active_action_neuron_id;
-pub(crate) use evaluation::{BrainEvalContext, evaluate_brain};
+pub(crate) use evaluation::{evaluate_brain, BrainEvalContext};
 #[cfg_attr(not(test), allow(unused_imports))]
 pub(crate) use expression::{express_genome, make_action_neuron, make_sensory_neuron};
 #[cfg_attr(not(feature = "instrumentation"), allow(unused_imports))]
@@ -37,7 +36,7 @@ const MIN_ENERGY_SENSOR_SCALE: f32 = 1.0;
 const ENERGY_SENSOR_CURVE_EXPONENT: f32 = 2.0;
 const MIN_ACTION_TEMPERATURE: f32 = 1.0e-6;
 pub(crate) const EXPLICIT_IDLE_LOGIT_BIAS: f32 = -0.01;
-const LOOK_RAY_COUNT: usize = SensoryReceptor::LOOK_RAY_OFFSETS.len();
+pub(crate) const LOOK_RAY_COUNT: usize = SensoryReceptor::LOOK_RAY_OFFSETS.len();
 
 #[derive(Default)]
 pub(crate) struct BrainEvaluation {

@@ -12,8 +12,8 @@ max_organism_age = 1000 # Lifespan cap in turns for organisms using this genome.
 
 [plasticity]
 plasticity_start_age = 0 # Age in turns when runtime plasticity begins affecting the organism.
-hebb_eta_gain = 0.01 # Base Hebbian learning-rate gain used for mature organisms.
-juvenile_eta_scale = 0.5 # Multiplier applied to `hebb_eta_gain` before maturity.
+hebb_eta_gain = 0.02 # Base Hebbian learning-rate gain used for mature organisms.
+juvenile_eta_scale = 2.0 # Multiplier applied to `hebb_eta_gain` before maturity.
 eligibility_retention = 0.95 # Exponential retention factor for eligibility traces across ticks.
 max_weight_delta_per_tick = 0.05 # Per-tick clamp on how much a synapse weight can change from plasticity.
 synapse_prune_threshold = 0.05 # Minimum absolute weight and eligibility scale required to keep a mature synapse during pruning.

@@ -28,6 +28,20 @@ pub(crate) fn rotate_right(direction: FacingDirection) -> FacingDirection {
     }
 }
 
+pub(crate) fn rotate_by_steps(direction: FacingDirection, steps: i8) -> FacingDirection {
+    let mut direction = direction;
+    if steps >= 0 {
+        for _ in 0..steps as u8 {
+            direction = rotate_right(direction);
+        }
+    } else {
+        for _ in 0..steps.unsigned_abs() {
+            direction = rotate_left(direction);
+        }
+    }
+    direction
+}
+
 pub(crate) fn wrap_position(position: (i32, i32), world_width: i32) -> (i32, i32) {
     (
         position.0.rem_euclid(world_width),

@@ -1,9 +1,9 @@
 #[cfg(feature = "profiling")]
+use sim_config::load_world_config_from_path;
+#[cfg(feature = "profiling")]
 use sim_core::profiling::{self, PhaseCounterSnapshot, ProfilingSnapshot};
 #[cfg(feature = "profiling")]
 use sim_core::Simulation;
-#[cfg(feature = "profiling")]
-use sim_config::load_world_config_from_path;
 #[cfg(feature = "profiling")]
 use sim_types::{SeedGenomeConfig, WorldConfig};
 #[cfg(feature = "profiling")]
@@ -316,6 +316,7 @@ fn stable_perf_config() -> WorldConfig {
         intent_parallel_threads,
         food_regrowth_interval: 10,
         food_regrowth_jitter: 2,
+        food_fertility_threshold: 0.6,
         terrain_noise_scale: 0.02,
         terrain_threshold: 1.0,
         spike_density: 0.0,

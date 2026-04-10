@@ -162,7 +162,7 @@ pub enum SensoryReceptor {
 
 impl SensoryReceptor {
     /// Fixed relative ray offsets around facing direction.
-    pub const LOOK_RAY_OFFSETS: [i8; 3] = [-1, 0, 1];
+    pub const LOOK_RAY_OFFSETS: [i8; 5] = [-2, -1, 0, 1, 2];
     /// Entity classes available to look-ray sensors.
     pub const LOOK_TARGETS: [EntityType; 4] = [
         EntityType::Food,
@@ -407,6 +407,59 @@ pub struct OrganismState {
     pub instrumentation: OrganismInstrumentationState,
     pub brain: BrainState,
     pub genome: OrganismGenome,
+}
+
+impl OrganismState {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        id: OrganismId,
+        species_id: SpeciesId,
+        q: i32,
+        r: i32,
+        generation: u64,
+        age_turns: u64,
+        facing: FacingDirection,
+        energy: f32,
+        health: f32,
+        max_health: f32,
+        energy_prev: f32,
+        dopamine: f32,
+        damage_taken_last_turn: f32,
+        is_gestating: bool,
+        consumptions_count: u64,
+        plant_consumptions_count: u64,
+        prey_consumptions_count: u64,
+        reproductions_count: u64,
+        last_action_taken: ActionType,
+        brain: BrainState,
+        genome: OrganismGenome,
+    ) -> Self {
+        Self {
+            id,
+            species_id,
+            q,
+            r,
+            generation,
+            age_turns,
+            facing,
+            energy,
+            health,
+            max_health,
+            energy_prev,
+            dopamine,
+            damage_taken_last_turn,
+            is_gestating,
+            consumptions_count,
+            plant_consumptions_count,
+            prey_consumptions_count,
+            reproductions_count,
+            last_action_taken,
+            #[cfg(feature = "instrumentation")]
+            instrumentation: Default::default(),
+            brain,
+            genome,
+        }
+    }
 }
 
 pub fn get_size(organism: &OrganismState) -> f32 {

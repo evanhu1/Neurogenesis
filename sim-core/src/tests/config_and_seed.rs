@@ -102,3 +102,25 @@ fn reset_preserves_champion_pool_bootstrap_behavior() {
         .iter()
         .all(|organism| organism.genome == champion));
 }
+
+#[test]
+fn higher_food_fertility_threshold_reduces_initial_plant_supply() {
+    let mut dense_cfg = stable_test_config();
+    dense_cfg.world_width = 48;
+    dense_cfg.num_organisms = 1;
+    dense_cfg.food_fertility_threshold = 0.6;
+
+    let mut sparse_cfg = dense_cfg.clone();
+    sparse_cfg.food_fertility_threshold = 0.9;
+
+    let dense = Simulation::new(dense_cfg, 2026).expect("simulation should initialize");
+    let sparse = Simulation::new(sparse_cfg, 2026).expect("simulation should initialize");
+
+    let dense_food = dense.snapshot().foods.len();
+    let sparse_food = sparse.snapshot().foods.len();
+
+    assert!(
+        sparse_food < dense_food,
+        "raising the fertility threshold should reduce initial plant supply: dense={dense_food} sparse={sparse_food}"
+    );
+}

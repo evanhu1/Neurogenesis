@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 const DEFAULT_WORLD_CONFIG_REL_PATH: &str = "config.toml";
@@ -35,6 +34,10 @@ pub struct TerrainDefaults {
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
 pub struct EvolutionDefaults {
     pub global_mutation_rate_modifier: f32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq)]
+pub struct FlagsDefaults {
     pub meta_mutation_enabled: bool,
     pub runtime_plasticity_enabled: bool,
     pub force_random_actions: bool,
@@ -47,6 +50,7 @@ pub struct WorldConfigDefaults {
     pub food_regrowth: FoodRegrowthDefaults,
     pub terrain: TerrainDefaults,
     pub evolution: EvolutionDefaults,
+    pub flags: FlagsDefaults,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
@@ -96,6 +100,8 @@ pub fn world_config_defaults() -> WorldConfigDefaults {
         },
         evolution: EvolutionDefaults {
             global_mutation_rate_modifier: 1.0,
+        },
+        flags: FlagsDefaults {
             meta_mutation_enabled: true,
             runtime_plasticity_enabled: true,
             force_random_actions: false,
@@ -129,363 +135,6 @@ pub fn food_ecology_policy() -> FoodEcologyPolicy {
         fertility_noise_scale: 0.012,
         fertility_threshold: 0.6,
     }
-}
-
-pub fn world_config_reference_markdown() -> String {
-    let world = world_config_defaults();
-    let genome = seed_genome_config_defaults();
-    let terrain_policy = terrain_generation_policy();
-    let food_policy = food_ecology_policy();
-
-    let mut out = String::new();
-    out.push_str("# Config Reference\n\n");
-    out.push_str("Generated from `sim-config/src/config.rs`.\n\n");
-
-    push_doc_section(
-        &mut out,
-        "World Config",
-        "Population",
-        &[
-            (
-                "world_width",
-                "required".to_owned(),
-                "Toroidal world width used for both axial dimensions.",
-            ),
-            (
-                "num_organisms",
-                "required".to_owned(),
-                "Target initial population before terrain limits are applied.",
-            ),
-            (
-                "periodic_injection_interval_turns",
-                world
-                    .population
-                    .periodic_injection_interval_turns
-                    .to_string(),
-                "Cadence for seed-genome injections.",
-            ),
-            (
-                "periodic_injection_count",
-                world.population.periodic_injection_count.to_string(),
-                "How many injection attempts run at each periodic-injection turn.",
-            ),
-        ],
-    );
-    push_doc_section(
-        &mut out,
-        "World Config",
-        "Lifecycle And Actions",
-        &[
-            (
-                "passive_metabolism_cost_per_unit",
-                world.lifecycle.passive_metabolism_cost_per_unit.to_string(),
-                "Per-complexity-unit passive energy drain applied each tick.",
-            ),
-            (
-                "food_energy",
-                "required".to_owned(),
-                "Energy stored in each plant food item.",
-            ),
-            (
-                "move_action_energy_cost",
-                "required".to_owned(),
-                "Flat energy cost applied to non-idle actions.",
-            ),
-            (
-                "action_temperature",
-                world.lifecycle.action_temperature.to_string(),
-                "Softmax temperature for action sampling.",
-            ),
-            (
-                "intent_parallel_threads",
-                world.lifecycle.intent_parallel_threads.to_string(),
-                "Worker-count default for intent evaluation.",
-            ),
-        ],
-    );
-    push_doc_section(
-        &mut out,
-        "World Config",
-        "Food Ecology",
-        &[
-            (
-                "food_regrowth_interval",
-                world.food_regrowth.interval.to_string(),
-                "Base plant regrowth delay in turns.",
-            ),
-            (
-                "food_regrowth_jitter",
-                world.food_regrowth.jitter.to_string(),
-                "Uniform +/- jitter applied to regrowth delay.",
-            ),
-        ],
-    );
-    push_doc_section(
-        &mut out,
-        "World Config",
-        "Terrain",
-        &[
-            (
-                "terrain_noise_scale",
-                world.terrain.terrain_noise_scale.to_string(),
-                "Perlin input scale for terrain walls.",
-            ),
-            (
-                "terrain_threshold",
-                world.terrain.terrain_threshold.to_string(),
-                "Wall cutoff used by default terrain generation.",
-            ),
-            (
-                "spike_density",
-                world.terrain.spike_density.to_string(),
-                "Fraction of non-wall cells assigned spikes by deterministic per-cell scatter.",
-            ),
-        ],
-    );
-    push_doc_section(
-        &mut out,
-        "World Config",
-        "Evolution Features",
-        &[
-            (
-                "global_mutation_rate_modifier",
-                world.evolution.global_mutation_rate_modifier.to_string(),
-                "Global multiplier applied to mutation-rate genes.",
-            ),
-            (
-                "meta_mutation_enabled",
-                bool_label(world.evolution.meta_mutation_enabled).to_owned(),
-                "Enables mutation of the mutation-rate genes themselves.",
-            ),
-            (
-                "runtime_plasticity_enabled",
-                bool_label(world.evolution.runtime_plasticity_enabled).to_owned(),
-                "Master toggle for mature runtime plasticity updates.",
-            ),
-            (
-                "force_random_actions",
-                bool_label(world.evolution.force_random_actions).to_owned(),
-                "Validation/debug override for random policy execution.",
-            ),
-        ],
-    );
-    push_doc_section(
-        &mut out,
-        "Seed Genome Config",
-        "Core",
-        &[
-            (
-                "num_neurons",
-                "required".to_owned(),
-                "Inter-neuron count for seed genomes.",
-            ),
-            (
-                "num_synapses",
-                "required".to_owned(),
-                "Requested synapse count before sanitization.",
-            ),
-            (
-                "spatial_prior_sigma",
-                "required".to_owned(),
-                "Spatial connectivity prior width.",
-            ),
-            (
-                "vision_distance",
-                "required".to_owned(),
-                "Maximum look distance for look-ray sensors.",
-            ),
-            (
-                "max_health",
-                genome.max_health.to_string(),
-                "Default maximum health when omitted in seed-genome TOML.",
-            ),
-            (
-                "age_of_maturity",
-                "required".to_owned(),
-                "Age threshold for adulthood.",
-            ),
-            (
-                "gestation_ticks",
-                genome.gestation_ticks.to_string(),
-                "Inherited gestation duration in ticks for offspring transfer scheduling.",
-            ),
-            (
-                "max_organism_age",
-                genome.max_organism_age.to_string(),
-                "Default lifespan cap when omitted in seed-genome TOML.",
-            ),
-        ],
-    );
-    push_doc_section(
-        &mut out,
-        "Seed Genome Config",
-        "Plasticity",
-        &[
-            (
-                "plasticity_start_age",
-                genome.plasticity_start_age.to_string(),
-                "Default age when runtime plasticity may begin.",
-            ),
-            (
-                "hebb_eta_gain",
-                "required".to_owned(),
-                "Base Hebbian learning-rate gain.",
-            ),
-            (
-                "juvenile_eta_scale",
-                genome.juvenile_eta_scale.to_string(),
-                "Scaling factor for juvenile plasticity when enabled.",
-            ),
-            (
-                "eligibility_retention",
-                "required".to_owned(),
-                "Eligibility trace retention factor.",
-            ),
-            (
-                "max_weight_delta_per_tick",
-                genome.max_weight_delta_per_tick.to_string(),
-                "Clamp for per-tick synapse updates.",
-            ),
-            (
-                "synapse_prune_threshold",
-                "required".to_owned(),
-                "Pruning threshold for mature synapses.",
-            ),
-        ],
-    );
-    push_doc_section(
-        &mut out,
-        "Seed Genome Config",
-        "Mutation Rates",
-        &[
-            (
-                "mutation_rate_age_of_maturity",
-                "required".to_owned(),
-                "Mutation rate for maturity age.",
-            ),
-            (
-                "mutation_rate_gestation_ticks",
-                "required".to_owned(),
-                "Mutation rate for gestation duration.",
-            ),
-            (
-                "mutation_rate_max_organism_age",
-                "required".to_owned(),
-                "Mutation rate for organism lifespan.",
-            ),
-            (
-                "mutation_rate_vision_distance",
-                "required".to_owned(),
-                "Mutation rate for vision distance.",
-            ),
-            (
-                "mutation_rate_max_health",
-                "required".to_owned(),
-                "Mutation rate for maximum health.",
-            ),
-            (
-                "mutation_rate_inter_bias",
-                "required".to_owned(),
-                "Mutation rate for inter biases.",
-            ),
-            (
-                "mutation_rate_inter_update_rate",
-                "required".to_owned(),
-                "Mutation rate for inter-neuron time constants.",
-            ),
-            (
-                "mutation_rate_eligibility_retention",
-                "required".to_owned(),
-                "Mutation rate for eligibility retention.",
-            ),
-            (
-                "mutation_rate_synapse_prune_threshold",
-                "required".to_owned(),
-                "Mutation rate for prune thresholds.",
-            ),
-            (
-                "mutation_rate_neuron_location",
-                "required".to_owned(),
-                "Mutation rate for sensory/inter/action locations.",
-            ),
-            (
-                "mutation_rate_synapse_weight_perturbation",
-                "required".to_owned(),
-                "Mutation rate for synapse weight perturbation/replacement.",
-            ),
-            (
-                "mutation_rate_add_synapse",
-                "required".to_owned(),
-                "Mutation rate for adding synapses.",
-            ),
-            (
-                "mutation_rate_remove_synapse",
-                "required".to_owned(),
-                "Mutation rate for removing synapses.",
-            ),
-            (
-                "mutation_rate_remove_neuron",
-                "required".to_owned(),
-                "Mutation rate for removing inter neurons.",
-            ),
-            (
-                "mutation_rate_add_neuron_split_edge",
-                "required".to_owned(),
-                "Mutation rate for splitting an edge with a new neuron.",
-            ),
-        ],
-    );
-    push_doc_section(
-        &mut out,
-        "Hidden Policies",
-        "Terrain Generation",
-        &[
-            (
-                "terrain_seed_mix",
-                format!("0x{:X}", terrain_policy.terrain_seed_mix),
-                "Seed xor used to derive terrain noise from the run seed.",
-            ),
-            (
-                "default_threshold",
-                terrain_policy.default_threshold.to_string(),
-                "Canonical terrain-wall threshold used by `build_terrain_map`.",
-            ),
-            (
-                "spike_seed_mix",
-                format!("0x{:X}", terrain_policy.spike_seed_mix),
-                "Seed xor used to derive spike scatter hashes from the run seed.",
-            ),
-        ],
-    );
-    push_doc_section(
-        &mut out,
-        "Hidden Policies",
-        "Food Ecology",
-        &[
-            (
-                "fertility_seed_mix",
-                format!("0x{:X}", food_policy.fertility_seed_mix),
-                "Seed xor used to derive plant fertility noise.",
-            ),
-            (
-                "fertility_jitter_seed_mix",
-                format!("0x{:X}", food_policy.fertility_jitter_seed_mix),
-                "Secondary seed xor used for fertility jitter.",
-            ),
-            (
-                "fertility_noise_scale",
-                food_policy.fertility_noise_scale.to_string(),
-                "Perlin input scale for fertility sampling.",
-            ),
-            (
-                "fertility_threshold",
-                food_policy.fertility_threshold.to_string(),
-                "Binary fertility cutoff after jitter.",
-            ),
-        ],
-    );
-
-    out
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -552,6 +201,8 @@ pub struct WorldConfig {
     pub food_regrowth_interval: u32,
     #[serde(default = "default_food_regrowth_jitter")]
     pub food_regrowth_jitter: u32,
+    #[serde(default = "default_food_fertility_threshold")]
+    pub food_fertility_threshold: f32,
     #[serde(default = "default_terrain_noise_scale")]
     pub terrain_noise_scale: f32,
     #[serde(default = "default_terrain_threshold")]
@@ -685,6 +336,7 @@ struct WorldConfigToml {
     food: WorldFoodToml,
     terrain: WorldTerrainToml,
     evolution: WorldEvolutionToml,
+    flags: WorldFlagsToml,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -719,6 +371,8 @@ struct WorldFoodToml {
     food_regrowth_interval: u32,
     #[serde(default = "default_food_regrowth_jitter")]
     food_regrowth_jitter: u32,
+    #[serde(default = "default_food_fertility_threshold")]
+    food_fertility_threshold: f32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -735,6 +389,10 @@ struct WorldTerrainToml {
 struct WorldEvolutionToml {
     #[serde(default = "default_global_mutation_rate_modifier")]
     global_mutation_rate_modifier: f32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct WorldFlagsToml {
     #[serde(default = "default_meta_mutation_enabled")]
     meta_mutation_enabled: bool,
     #[serde(default = "default_runtime_plasticity_enabled")]
@@ -757,13 +415,14 @@ impl WorldConfigToml {
             intent_parallel_threads: self.lifecycle.intent_parallel_threads,
             food_regrowth_interval: self.food.food_regrowth_interval,
             food_regrowth_jitter: self.food.food_regrowth_jitter,
+            food_fertility_threshold: self.food.food_fertility_threshold,
             terrain_noise_scale: self.terrain.terrain_noise_scale,
             terrain_threshold: self.terrain.terrain_threshold,
             spike_density: self.terrain.spike_density,
             global_mutation_rate_modifier: self.evolution.global_mutation_rate_modifier,
-            meta_mutation_enabled: self.evolution.meta_mutation_enabled,
-            runtime_plasticity_enabled: self.evolution.runtime_plasticity_enabled,
-            force_random_actions: self.evolution.force_random_actions,
+            meta_mutation_enabled: self.flags.meta_mutation_enabled,
+            runtime_plasticity_enabled: self.flags.runtime_plasticity_enabled,
+            force_random_actions: self.flags.force_random_actions,
             seed_genome_config,
         }
     }
@@ -842,6 +501,9 @@ pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
     if config.food_regrowth_interval == 0 {
         return Err("food_regrowth_interval must be greater than zero".to_owned());
     }
+    if !(0.0..=1.0).contains(&config.food_fertility_threshold) {
+        return Err("food_fertility_threshold must be in [0.0, 1.0]".to_owned());
+    }
     if config.terrain_noise_scale <= 0.0 {
         return Err("terrain_noise_scale must be greater than zero".to_owned());
     }
@@ -905,6 +567,10 @@ fn default_food_regrowth_jitter() -> u32 {
     world_config_defaults().food_regrowth.jitter
 }
 
+fn default_food_fertility_threshold() -> f32 {
+    food_ecology_policy().fertility_threshold as f32
+}
+
 fn default_periodic_injection_interval_turns() -> u32 {
     world_config_defaults()
         .population
@@ -948,35 +614,17 @@ fn default_global_mutation_rate_modifier() -> f32 {
 }
 
 fn default_meta_mutation_enabled() -> bool {
-    world_config_defaults().evolution.meta_mutation_enabled
+    world_config_defaults().flags.meta_mutation_enabled
 }
 
 fn default_runtime_plasticity_enabled() -> bool {
-    world_config_defaults().evolution.runtime_plasticity_enabled
+    world_config_defaults().flags.runtime_plasticity_enabled
 }
 
 fn default_force_random_actions() -> bool {
-    world_config_defaults().evolution.force_random_actions
+    world_config_defaults().flags.force_random_actions
 }
 
 fn default_plasticity_start_age() -> u32 {
     seed_genome_config_defaults().plasticity_start_age
-}
-
-fn bool_label(value: bool) -> &'static str {
-    if value {
-        "true"
-    } else {
-        "false"
-    }
-}
-
-fn push_doc_section(out: &mut String, major: &str, minor: &str, rows: &[(&str, String, &str)]) {
-    let _ = write!(out, "## {major}: {minor}\n\n");
-    out.push_str("| Key | Default / Derivation | Notes |\n");
-    out.push_str("| --- | --- | --- |\n");
-    for (key, default, notes) in rows {
-        let _ = writeln!(out, "| `{key}` | `{default}` | {notes} |");
-    }
-    out.push('\n');
 }

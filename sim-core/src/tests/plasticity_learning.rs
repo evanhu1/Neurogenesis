@@ -4,6 +4,23 @@ use crate::brain::{action_index, express_genome, BrainScratch, ACTION_ID_BASE};
 use crate::grid::world_capacity;
 use crate::plasticity::{apply_runtime_weight_updates, compute_pending_coactivations};
 
+fn food_ahead_receptor() -> SensoryReceptor {
+    SensoryReceptor::LookRay {
+        ray_offset: 0,
+        look_target: EntityType::Food,
+    }
+}
+
+fn food_ahead_sensory_neuron_id() -> NeuronId {
+    food_ahead_receptor()
+        .neuron_id()
+        .expect("food-ahead receptor should map to a sensory neuron")
+}
+
+fn food_ahead_sensory_index() -> usize {
+    food_ahead_sensory_neuron_id().0 as usize
+}
+
 fn repo_default_world_config() -> WorldConfig {
     sim_config::default_world_config()
 }
@@ -52,8 +69,7 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
     let initial_energy: f32 = 5_000.0;
     let seed = 42_u64;
 
-    // Sensory neuron 0 = LookRay { offset: 0, target: Food } (food directly ahead).
-    let food_ahead_sensory_id = 0_u32;
+    let food_ahead_sensory_id = food_ahead_sensory_neuron_id();
     let consume_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Eat) as u32);
 
     // Genome: zero inter neurons, one sensory→action synapse.
@@ -69,7 +85,7 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
     genome.age_of_maturity = 0;
     genome.vision_distance = 5;
     genome.edges = vec![SynapseEdge {
-        pre_neuron_id: NeuronId(food_ahead_sensory_id),
+        pre_neuron_id: food_ahead_sensory_id,
         post_neuron_id: consume_action_id,
         weight: initial_weight,
         eligibility: 0.0,
@@ -123,6 +139,8 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
             prey_consumptions_count: 0,
             reproductions_count: 0,
             last_action_taken: ActionType::Idle,
+            #[cfg(feature = "instrumentation")]
+            instrumentation: Default::default(),
             brain,
             genome: genome.clone(),
         };
@@ -174,7 +192,7 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
 
     // Extract the food→consume synapse weight from each organism's brain.
     let synapse_weight = |sim: &Simulation| -> f32 {
-        sim.organisms()[0].brain.sensory[food_ahead_sensory_id as usize]
+        sim.organisms()[0].brain.sensory[food_ahead_sensory_index()]
             .synapses
             .iter()
             .find(|s| s.post_neuron_id == consume_action_id)
@@ -218,7 +236,7 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
     let initial_energy = 5_000.0_f32;
     let seed = 43_u64;
 
-    let food_ahead_sensory_id = 0_u32;
+    let food_ahead_sensory_id = food_ahead_sensory_neuron_id();
     let consume_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Eat) as u32);
 
     let mut genome = test_genome();
@@ -235,7 +253,7 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
     genome.max_health = default_seed.max_health;
     genome.vision_distance = default_seed.vision_distance;
     genome.edges = vec![SynapseEdge {
-        pre_neuron_id: NeuronId(food_ahead_sensory_id),
+        pre_neuron_id: food_ahead_sensory_id,
         post_neuron_id: consume_action_id,
         weight: initial_weight,
         eligibility: 0.0,
@@ -288,6 +306,8 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
             prey_consumptions_count: 0,
             reproductions_count: 0,
             last_action_taken: ActionType::Idle,
+            #[cfg(feature = "instrumentation")]
+            instrumentation: Default::default(),
             brain,
             genome: genome.clone(),
         };
@@ -321,7 +341,7 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
     advance_learning_harness(&mut sim_static, max_age as u32, food_q, food_r);
 
     let synapse_weight = |sim: &Simulation| -> f32 {
-        sim.organisms()[0].brain.sensory[food_ahead_sensory_id as usize]
+        sim.organisms()[0].brain.sensory[food_ahead_sensory_index()]
             .synapses
             .iter()
             .find(|s| s.post_neuron_id == consume_action_id)
@@ -362,7 +382,7 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
     let initial_energy = 5_000.0_f32;
     let seed = 44_u64;
 
-    let food_ahead_sensory_id = 0_u32;
+    let food_ahead_sensory_id = food_ahead_sensory_neuron_id();
     let forward_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Forward) as u32);
     let consume_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Eat) as u32);
 
@@ -381,14 +401,14 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
     genome.vision_distance = default_seed.vision_distance;
     genome.edges = vec![
         SynapseEdge {
-            pre_neuron_id: NeuronId(food_ahead_sensory_id),
+            pre_neuron_id: food_ahead_sensory_id,
             post_neuron_id: forward_action_id,
             weight: 0.25,
             eligibility: 0.0,
             pending_coactivation: 0.0,
         },
         SynapseEdge {
-            pre_neuron_id: NeuronId(food_ahead_sensory_id),
+            pre_neuron_id: food_ahead_sensory_id,
             post_neuron_id: consume_action_id,
             weight: 0.3,
             eligibility: 0.0,
@@ -442,6 +462,8 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
             prey_consumptions_count: 0,
             reproductions_count: 0,
             last_action_taken: ActionType::Idle,
+            #[cfg(feature = "instrumentation")]
+            instrumentation: Default::default(),
             brain,
             genome: genome.clone(),
         };
@@ -475,7 +497,7 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
     advance_learning_harness(&mut sim_static, max_age as u32, food_q, food_r);
 
     let edge_weight = |sim: &Simulation, post_neuron_id: NeuronId| -> f32 {
-        sim.organisms()[0].brain.sensory[food_ahead_sensory_id as usize]
+        sim.organisms()[0].brain.sensory[food_ahead_sensory_index()]
             .synapses
             .iter()
             .find(|s| s.post_neuron_id == post_neuron_id)
@@ -517,7 +539,7 @@ fn delayed_credit_assignment_organism(
     hebb_eta_gain: f32,
     eligibility_retention: f32,
 ) -> OrganismState {
-    let food_ahead_sensory_id = 0_u32;
+    let food_ahead_sensory_id = food_ahead_sensory_neuron_id();
     let consume_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Eat) as u32);
 
     let mut genome = test_genome();
@@ -531,7 +553,7 @@ fn delayed_credit_assignment_organism(
     genome.synapse_prune_threshold = 0.0;
     genome.age_of_maturity = 0;
     genome.edges = vec![SynapseEdge {
-        pre_neuron_id: NeuronId(food_ahead_sensory_id),
+        pre_neuron_id: food_ahead_sensory_id,
         post_neuron_id: consume_action_id,
         weight: initial_weight,
         eligibility: 0.0,
@@ -560,6 +582,8 @@ fn delayed_credit_assignment_organism(
         prey_consumptions_count: 0,
         reproductions_count: 0,
         last_action_taken: ActionType::Idle,
+        #[cfg(feature = "instrumentation")]
+        instrumentation: Default::default(),
         brain,
         genome,
     }
@@ -567,7 +591,7 @@ fn delayed_credit_assignment_organism(
 
 fn food_consume_edge(organism: &OrganismState) -> &SynapseEdge {
     let consume_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Eat) as u32);
-    organism.brain.sensory[0]
+    organism.brain.sensory[food_ahead_sensory_index()]
         .synapses
         .iter()
         .find(|edge| edge.post_neuron_id == consume_action_id)
@@ -580,7 +604,9 @@ fn set_pending_food_consume_coactivation(
     sensory_activation: f32,
     consume_post_signal: f32,
 ) {
-    organism.brain.sensory[0].neuron.activation = sensory_activation;
+    organism.brain.sensory[food_ahead_sensory_index()]
+        .neuron
+        .activation = sensory_activation;
     scratch.selected_action_index = Some(action_index(ActionType::Eat));
     scratch.selected_action_confidence = consume_post_signal;
     compute_pending_coactivations(organism, scratch);

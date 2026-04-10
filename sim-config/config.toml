@@ -16,6 +16,7 @@ intent_parallel_threads = 8 # Worker threads used during the intent-evaluation p
 food_energy = 50 # Energy stored in each plant food item before consumption multipliers are applied.
 food_regrowth_interval = 200 # Base turns before an eaten food tile becomes eligible to regrow.
 food_regrowth_jitter = 50 # Random plus/minus variation added to the base food regrowth delay.
+food_fertility_threshold = 0.6 # Binary fertility cutoff after deterministic jitter; higher values make fertile plant tiles rarer.
 
 [terrain]
 terrain_noise_scale = 0.01 # Perlin noise input scale for terrain-wall generation.
@@ -24,6 +25,9 @@ spike_density = 0.10 # Fraction of non-wall cells that become damaging spike til
 
 [evolution]
 global_mutation_rate_modifier = 1.0 # Global multiplier applied to genome mutation-rate genes during offspring mutation.
+
+# Flags for running experiments.
+[flags]
 meta_mutation_enabled = true # Whether mutation-rate genes themselves are allowed to mutate.
 runtime_plasticity_enabled = true # Whether runtime Hebbian plasticity updates are applied after each tick.
 force_random_actions = false # Debug toggle that ignores policy logits and forces random actions.
