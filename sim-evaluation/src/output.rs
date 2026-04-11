@@ -124,8 +124,9 @@ pub(crate) fn print_evaluation_summary(out_dir: &Path, summary: &EvaluationSumma
         summary.aggregate_score.foraging_rate_component
     );
     println!(
-        "aggregate_control_pillar: {:.3} [adult_mi={:.3} entropy={:.3} anti_idle={:.3} util={:.3}]",
+        "aggregate_control_pillar: {:.3} [effectiveness={:.3} adult_mi={:.3} entropy={:.3} anti_idle={:.3} util={:.3}]",
         summary.aggregate_score.control_pillar,
+        summary.aggregate_score.control_action_effectiveness_component,
         summary.aggregate_score.control_adult_mi_component,
         summary.aggregate_score.control_entropy_component,
         summary.aggregate_score.control_anti_idle_component,

@@ -77,6 +77,7 @@ impl Simulation {
         #[cfg(feature = "instrumentation")]
         {
             self.action_records.clear();
+            self.action_record_indices.clear();
             self.action_records.reserve(
                 built_intents
                     .len()
@@ -89,7 +90,7 @@ impl Simulation {
             .map(|built| {
                 #[cfg(feature = "instrumentation")]
                 if let Some(action_record) = built.action_record {
-                    self.action_records.push(action_record);
+                    self.record_action(action_record);
                 }
                 built.intent
             })
@@ -291,6 +292,7 @@ fn instrument_action_record(
     ActionRecord {
         organism_id,
         selected_action,
+        action_failed: contingent_action_can_fail(selected_action),
         food_ahead,
         food_left,
         food_right,
@@ -300,6 +302,14 @@ fn instrument_action_record(
         utilization: update_instrumentation_utilization(organism),
         consumptions_count: organism.consumptions_count,
     }
+}
+
+#[cfg(feature = "instrumentation")]
+fn contingent_action_can_fail(action: ActionType) -> bool {
+    matches!(
+        action,
+        ActionType::Forward | ActionType::Eat | ActionType::Attack | ActionType::Reproduce
+    )
 }
 
 #[cfg(feature = "instrumentation")]

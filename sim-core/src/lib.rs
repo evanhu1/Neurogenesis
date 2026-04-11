@@ -7,7 +7,7 @@ use sim_types::{
     FoodState, MetricsSnapshot, OccupancyCell, Occupant, OrganismGenome, OrganismId, OrganismState,
     TerrainCell, TerrainType, TickDelta, WorldConfig, WorldSnapshot,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use thiserror::Error;
 
 mod brain;
@@ -66,6 +66,9 @@ pub struct Simulation {
     #[cfg(feature = "instrumentation")]
     #[serde(skip)]
     action_records: Vec<ActionRecord>,
+    #[cfg(feature = "instrumentation")]
+    #[serde(skip)]
+    action_record_indices: HashMap<OrganismId, usize>,
     metrics: MetricsSnapshot,
 }
 
@@ -179,6 +182,8 @@ impl Simulation {
             food_regrowth_schedule: BTreeMap::new(),
             #[cfg(feature = "instrumentation")]
             action_records: Vec::new(),
+            #[cfg(feature = "instrumentation")]
+            action_record_indices: HashMap::new(),
             metrics: MetricsSnapshot::default(),
         };
 
@@ -271,6 +276,8 @@ impl Simulation {
         self.food_regrowth_schedule.clear();
         #[cfg(feature = "instrumentation")]
         self.action_records.clear();
+        #[cfg(feature = "instrumentation")]
+        self.action_record_indices.clear();
         self.metrics = MetricsSnapshot::default();
         self.initialize_terrain();
         self.spawn_initial_population();
@@ -316,6 +323,26 @@ impl Simulation {
     #[cfg(feature = "instrumentation")]
     pub fn clear_action_records(&mut self) {
         self.action_records.clear();
+        self.action_record_indices.clear();
+    }
+
+    #[cfg(feature = "instrumentation")]
+    pub(crate) fn record_action(&mut self, action_record: ActionRecord) {
+        let record_idx = self.action_records.len();
+        self.action_record_indices
+            .insert(action_record.organism_id, record_idx);
+        self.action_records.push(action_record);
+    }
+
+    #[cfg(feature = "instrumentation")]
+    pub(crate) fn mark_action_succeeded(&mut self, organism_id: OrganismId) {
+        let Some(record_idx) = self.action_record_indices.get(&organism_id).copied() else {
+            return;
+        };
+        let Some(record) = self.action_records.get_mut(record_idx) else {
+            return;
+        };
+        record.action_failed = false;
     }
 
     pub fn validate_state(&self) -> Result<(), SimError> {

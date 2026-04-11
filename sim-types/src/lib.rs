@@ -66,6 +66,7 @@ impl ActionType {
 pub struct ActionRecord {
     pub organism_id: OrganismId,
     pub selected_action: ActionType,
+    pub action_failed: bool,
     pub food_ahead: bool,
     pub food_left: bool,
     pub food_right: bool,

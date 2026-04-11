@@ -170,6 +170,10 @@ impl Simulation {
                 &intents,
                 &self.occupancy,
                 snapshot.world_width,
+                #[cfg(feature = "instrumentation")]
+                &mut self.action_records,
+                #[cfg(feature = "instrumentation")]
+                &self.action_record_indices,
             );
         });
 

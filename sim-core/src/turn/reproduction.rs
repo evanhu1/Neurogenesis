@@ -68,6 +68,8 @@ impl ReproductionPhaseState {
         intents: &[OrganismIntent],
         occupancy: &[Option<Occupant>],
         world_width: i32,
+        #[cfg(feature = "instrumentation")] action_records: &mut [sim_types::ActionRecord],
+        #[cfg(feature = "instrumentation")] action_record_indices: &HashMap<OrganismId, usize>,
     ) {
         for intent in intents {
             let org_idx = intent.idx;
@@ -107,6 +109,16 @@ impl ReproductionPhaseState {
                 reproduction_energy_bits: transfer_energy.to_bits(),
             };
             self.skip_pending_action_decrement[org_idx] = organism.genome.gestation_ticks > 0;
+            #[cfg(feature = "instrumentation")]
+            {
+                if let Some(record_idx) = action_record_indices.get(&organism.id).copied() {
+                    if let Some(record) = action_records.get_mut(record_idx) {
+                        // Starting gestation is the immediate successful effect of selecting
+                        // reproduce; later blocked births are tracked separately.
+                        record.action_failed = false;
+                    }
+                }
+            }
         }
     }
 

@@ -9,6 +9,12 @@ use sim_types::OrganismState;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+const MEAN_MI_SATURATION: f64 = 0.16;
+const ADULT_MI_SATURATION: f64 = 0.20;
+const JUVENILE_MI_SATURATION: f64 = 0.16;
+const FORAGING_RATE_SATURATION: f64 = 0.025;
+const UTILIZATION_SATURATION: f64 = 0.60;
+
 pub(crate) fn state_hash(organisms: &[OrganismState]) -> String {
     let population_count = organisms.len() as u64;
     let sum_ids = organisms
@@ -47,6 +53,9 @@ pub(crate) fn compute_aggregate_score(
     let mean_foraging_rate = mean_option(window.iter().map(|row| row.foraging_rate));
     let mean_attack_attempt_rate = mean_option(window.iter().map(|row| row.attack_attempt_rate));
     let mean_attack_success_rate = mean_option(window.iter().map(|row| row.attack_success_rate));
+    let mean_failed_action_count =
+        mean_option(window.iter().map(|row| Some(row.failed_action_count as f64)));
+    let mean_failed_action_rate = mean_option(window.iter().map(|row| row.failed_action_rate));
     let mean_idle_fraction = mean_option(window.iter().map(|row| row.idle_fraction));
     let mean_reproduction_efficiency =
         mean_option(window.iter().map(|row| row.reproduction_efficiency));
@@ -67,12 +76,17 @@ pub(crate) fn compute_aggregate_score(
     let p_fwd_food_component = mean_p_fwd_food
         .map(|value| clamp01((value - p_baseline) / (0.55 - p_baseline).max(f64::EPSILON)))
         .unwrap_or(0.0);
-    let mean_mi_component = mean_mi_sa.map(|value| clamp01(value / 0.10)).unwrap_or(0.0);
+    let mean_mi_component = mean_mi_sa
+        .map(|value| clamp01(value / MEAN_MI_SATURATION))
+        .unwrap_or(0.0);
     let adult_mi_component = mean_mi_sa_adult
-        .map(|value| clamp01(value / 0.10))
+        .map(|value| clamp01(value / ADULT_MI_SATURATION))
         .unwrap_or(mean_mi_component);
+    let action_effectiveness_component = mean_failed_action_rate
+        .map(|value| clamp01(1.0 - value))
+        .unwrap_or(0.0);
     let juvenile_mi_component = mean_mi_sa_juvenile
-        .map(|value| clamp01(value / 0.08))
+        .map(|value| clamp01(value / JUVENILE_MI_SATURATION))
         .unwrap_or(0.0);
     let entropy_component = mean_h_action
         .map(|value| entropy_component_score(value, h_baseline))
@@ -90,12 +104,14 @@ pub(crate) fn compute_aggregate_score(
         .map(|value| clamp01((value - 0.70) / 0.25))
         .unwrap_or(0.0);
     let foraging_rate_component = mean_foraging_rate
-        .map(|value| clamp01(value / 0.01))
+        .map(|value| clamp01(value / FORAGING_RATE_SATURATION))
         .unwrap_or(0.0);
     let anti_idle_component = mean_idle_fraction
         .map(|value| clamp01(1.0 - value / 0.60))
         .unwrap_or(0.0);
-    let util_component = mean_util.map(|value| clamp01(value / 0.35)).unwrap_or(0.0);
+    let util_component = mean_util
+        .map(|value| clamp01(value / UTILIZATION_SATURATION))
+        .unwrap_or(0.0);
     let attack_success_component = mean_attack_success_rate
         .map(|value| clamp01(value / 0.35))
         .unwrap_or(0.0);
@@ -119,10 +135,11 @@ pub(crate) fn compute_aggregate_score(
         (foraging_rate_component, 0.35),
     ]);
     let control_pillar = weighted_geometric_mean(&[
-        (adult_mi_component, 0.40),
-        (entropy_component, 0.20),
-        (anti_idle_component, 0.20),
-        (util_component, 0.20),
+        (action_effectiveness_component, 0.45),
+        (adult_mi_component, 0.25),
+        (entropy_component, 0.10),
+        (anti_idle_component, 0.10),
+        (util_component, 0.10),
     ]);
     let competition_pillar = weighted_geometric_mean(&[
         (predation_component, 0.50),
@@ -162,6 +179,8 @@ pub(crate) fn compute_aggregate_score(
         mean_foraging_rate,
         mean_attack_attempt_rate,
         mean_attack_success_rate,
+        mean_failed_action_count,
+        mean_failed_action_rate,
         mean_idle_fraction,
         mean_reproduction_efficiency,
         mean_gestation_ticks,
@@ -178,6 +197,7 @@ pub(crate) fn compute_aggregate_score(
         foraging_p_fwd_food_component: p_fwd_food_component,
         foraging_rate_component,
         control_adult_mi_component: adult_mi_component,
+        control_action_effectiveness_component: action_effectiveness_component,
         control_entropy_component: entropy_component,
         control_anti_idle_component: anti_idle_component,
         control_util_component: util_component,
@@ -262,6 +282,16 @@ pub(crate) fn average_aggregate_scores(seed_summaries: &[SeedEvaluationSummary])
                 .iter()
                 .map(|summary| summary.aggregate_score.mean_attack_success_rate),
         ),
+        mean_failed_action_count: mean_option(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.mean_failed_action_count),
+        ),
+        mean_failed_action_rate: mean_option(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.mean_failed_action_rate),
+        ),
         mean_idle_fraction: mean_option(
             seed_summaries
                 .iter()
@@ -341,6 +371,11 @@ pub(crate) fn average_aggregate_scores(seed_summaries: &[SeedEvaluationSummary])
             seed_summaries
                 .iter()
                 .map(|summary| summary.aggregate_score.control_adult_mi_component),
+        ),
+        control_action_effectiveness_component: mean_f64(
+            seed_summaries
+                .iter()
+                .map(|summary| summary.aggregate_score.control_action_effectiveness_component),
         ),
         control_entropy_component: mean_f64(
             seed_summaries
@@ -535,6 +570,16 @@ pub(crate) fn average_timeseries(seed_summaries: &[SeedEvaluationSummary]) -> Ve
                 seed_summaries
                     .iter()
                     .map(|summary| summary.timeseries[row_idx].attack_success_rate),
+            ),
+            failed_action_count: mean_round_u64(
+                seed_summaries
+                    .iter()
+                    .map(|summary| summary.timeseries[row_idx].failed_action_count),
+            ),
+            failed_action_rate: mean_option(
+                seed_summaries
+                    .iter()
+                    .map(|summary| summary.timeseries[row_idx].failed_action_rate),
             ),
             ate_pct: mean_option(
                 seed_summaries
@@ -799,6 +844,37 @@ mod tests {
         assert!(exploratory > random_like);
     }
 
+    #[test]
+    fn lower_failed_action_rate_improves_control_and_score() {
+        let low_failure = compute_aggregate_score(
+            &[
+                metrics_row(20, 0.05),
+                metrics_row(40, 0.05),
+                metrics_row(60, 0.05),
+                metrics_row(80, 0.05),
+                metrics_row(100, 0.05),
+            ],
+            None,
+        );
+        let high_failure = compute_aggregate_score(
+            &[
+                metrics_row(20, 0.65),
+                metrics_row(40, 0.65),
+                metrics_row(60, 0.65),
+                metrics_row(80, 0.65),
+                metrics_row(100, 0.65),
+            ],
+            None,
+        );
+
+        assert!(
+            low_failure.control_action_effectiveness_component
+                > high_failure.control_action_effectiveness_component
+        );
+        assert!(low_failure.control_pillar > high_failure.control_pillar);
+        assert!(low_failure.score > high_failure.score);
+    }
+
     fn repeated(action: ActionType, count: usize) -> Vec<ActionType> {
         let mut actions = Vec::with_capacity(count);
         for _ in 0..count {
@@ -845,5 +921,44 @@ mod tests {
             entropy -= p * p.log2();
         }
         entropy
+    }
+
+    fn metrics_row(tick: u64, failed_action_rate: f64) -> IntervalMetrics {
+        IntervalMetrics {
+            tick,
+            pop: 100,
+            births: 10,
+            deaths: 5,
+            food: 200,
+            max_generation: Some(8),
+            life_mean: Some(180.0),
+            predation_rate: Some(0.003),
+            foraging_rate: Some(0.02),
+            attack_attempt_rate: Some(0.015),
+            attack_success_rate: Some(0.4),
+            failed_action_count: (failed_action_rate * 100.0).round() as u64,
+            failed_action_rate: Some(failed_action_rate),
+            ate_pct: Some(60.0),
+            cons_mean: Some(3.0),
+            brain_size: Some(24.0),
+            brain_size_stddev: Some(2.0),
+            brain_size_p10: Some(20.0),
+            brain_size_p50: Some(24.0),
+            brain_size_p90: Some(28.0),
+            lineage_diversity: Some(1.0),
+            p_fwd_food: Some(0.45),
+            mi_sa: Some(0.08),
+            mi_sa_juvenile: Some(0.05),
+            mi_sa_adult: Some(0.08),
+            h_action: Some(0.9),
+            idle_fraction: Some(0.15),
+            reproduction_efficiency: Some(0.2),
+            mean_gestation_ticks: Some(1.0),
+            mean_offspring_transfer_energy: Some(200.0),
+            damage_avoidance: Some(0.9),
+            reward_reversal_shift: Some(0.15),
+            util: Some(0.3),
+            action_histogram: [0.05, 0.1, 0.1, 0.4, 0.2, 0.1, 0.05],
+        }
     }
 }

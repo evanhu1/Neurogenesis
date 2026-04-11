@@ -16,6 +16,8 @@ pub struct IntervalMetrics {
     pub foraging_rate: Option<f64>,
     pub attack_attempt_rate: Option<f64>,
     pub attack_success_rate: Option<f64>,
+    pub failed_action_count: u64,
+    pub failed_action_rate: Option<f64>,
     pub ate_pct: Option<f64>,
     pub cons_mean: Option<f64>,
     pub brain_size: Option<f64>,
@@ -66,6 +68,12 @@ pub fn compute_interval_metrics(
     } else {
         Some(interval_predations as f64 / attack_attempts as f64)
     };
+    let failed_action_count = action_stats.failed_action_count;
+    let failed_action_rate = if action_stats.failure_candidate_count == 0 {
+        None
+    } else {
+        Some(failed_action_count as f64 / action_stats.failure_candidate_count as f64)
+    };
     let reproduction_efficiency = if action_stats.reproduction_attempts == 0 {
         None
     } else {
@@ -113,6 +121,8 @@ pub fn compute_interval_metrics(
         foraging_rate,
         attack_attempt_rate,
         attack_success_rate,
+        failed_action_count,
+        failed_action_rate,
         ate_pct,
         cons_mean,
         brain_size: brain_stats.mean,

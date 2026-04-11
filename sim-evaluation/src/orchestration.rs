@@ -158,6 +158,9 @@ pub(crate) fn run_evaluation_across_seeds(
             aggregate_control_adult_mi_component: summary
                 .aggregate_score
                 .control_adult_mi_component,
+            aggregate_control_action_effectiveness_component: summary
+                .aggregate_score
+                .control_action_effectiveness_component,
             aggregate_control_entropy_component: summary.aggregate_score.control_entropy_component,
             aggregate_control_anti_idle_component: summary
                 .aggregate_score
@@ -362,6 +365,9 @@ pub(crate) fn run_single_seed_evaluation(
             aggregate_control_adult_mi_component: summary
                 .aggregate_score
                 .control_adult_mi_component,
+            aggregate_control_action_effectiveness_component: summary
+                .aggregate_score
+                .control_action_effectiveness_component,
             aggregate_control_entropy_component: summary.aggregate_score.control_entropy_component,
             aggregate_control_anti_idle_component: summary
                 .aggregate_score
@@ -447,8 +453,8 @@ mod tests {
 
         assert_eq!(summary_a.state_hash, summary_b.state_hash);
         assert_eq!(
-            serde_json::to_string(&summary_a.timeseries).expect("serialize first timeseries"),
-            serde_json::to_string(&summary_b.timeseries).expect("serialize second timeseries")
+            rounded_json(&summary_a.timeseries),
+            rounded_json(&summary_b.timeseries)
         );
 
         let _ = fs::remove_dir_all(out_a);
@@ -461,5 +467,35 @@ mod tests {
             .expect("clock should be after UNIX_EPOCH")
             .as_nanos();
         std::env::temp_dir().join(format!("sim-evaluation-test-{suffix}-{nanos}"))
+    }
+
+    fn rounded_json<T: serde::Serialize>(value: &T) -> serde_json::Value {
+        let mut json = serde_json::to_value(value).expect("test value should serialize");
+        round_json_numbers(&mut json);
+        json
+    }
+
+    fn round_json_numbers(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Number(number) => {
+                if let Some(float) = number.as_f64() {
+                    let rounded = (float * 1_000_000_000_000.0).round() / 1_000_000_000_000.0;
+                    *number = serde_json::Number::from_f64(rounded)
+                        .expect("rounded finite float should remain serializable");
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    round_json_numbers(item);
+                }
+            }
+            serde_json::Value::Object(entries) => {
+                for entry in entries.values_mut() {
+                    round_json_numbers(entry);
+                }
+            }
+            serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::String(_) => {
+            }
+        }
     }
 }

@@ -94,6 +94,8 @@ impl<'a> CommitPhaseContext<'a> {
             let organism = &mut self.sim.organisms[resolution.actor_idx];
             organism.q = resolution.to.0;
             organism.r = resolution.to.1;
+            #[cfg(feature = "instrumentation")]
+            self.sim.mark_action_succeeded(resolution.actor_id);
         }
     }
 
@@ -172,6 +174,7 @@ impl<'a> CommitPhaseContext<'a> {
 
         let gained_energy = food.energy.max(0.0) * food_consumption_energy_fraction(food.kind);
         let predator = &mut self.sim.organisms[predator_idx];
+        let predator_id = predator.id;
         predator.energy += gained_energy;
         predator.consumptions_count = predator.consumptions_count.saturating_add(1);
         match food.kind {
@@ -187,6 +190,8 @@ impl<'a> CommitPhaseContext<'a> {
         self.sim.reward_ledgers[predator_idx].record(RewardEvent::FoodConsumed {
             energy: gained_energy,
         });
+        #[cfg(feature = "instrumentation")]
+        self.sim.mark_action_succeeded(predator_id);
         self.result.consumptions += 1;
         self.result.removed_positions.push(RemovedEntityPosition {
             entity_id: EntityId::Food(food_id),
@@ -222,6 +227,9 @@ impl<'a> CommitPhaseContext<'a> {
         self.sim.reward_ledgers[predator_idx].record(RewardEvent::PredationSucceeded {
             energy: prey_energy,
         });
+        #[cfg(feature = "instrumentation")]
+        self.sim
+            .mark_action_succeeded(self.sim.organisms[predator_idx].id);
         self.result.predations += 1;
         self.mark_organism_dead(prey_idx, prey_id, target_idx, (prey_q, prey_r), prey_energy);
     }

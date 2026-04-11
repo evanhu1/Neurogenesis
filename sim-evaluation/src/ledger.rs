@@ -54,6 +54,8 @@ pub struct IntervalActionStats {
     pub joint: [[u64; N_ACTIONS]; SENSORY_BIN_COUNT],
     pub juvenile_joint: [[u64; N_ACTIONS]; SENSORY_BIN_COUNT],
     pub adult_joint: [[u64; N_ACTIONS]; SENSORY_BIN_COUNT],
+    pub failed_action_count: u64,
+    pub failure_candidate_count: u64,
     pub reproduction_attempts: u64,
     pub total_damage_taken: f64,
 }
@@ -163,6 +165,16 @@ impl Ledger {
             self.interval_action_stats.action_counts[action_idx].saturating_add(1);
         self.interval_action_stats.joint[sensory_bin][action_idx] =
             self.interval_action_stats.joint[sensory_bin][action_idx].saturating_add(1);
+        if action_can_fail(record.selected_action) {
+            self.interval_action_stats.failure_candidate_count = self
+                .interval_action_stats
+                .failure_candidate_count
+                .saturating_add(1);
+            self.interval_action_stats.failed_action_count = self
+                .interval_action_stats
+                .failed_action_count
+                .saturating_add(u64::from(record.action_failed));
+        }
         if record.selected_action == ActionType::Reproduce {
             self.interval_action_stats.reproduction_attempts = self
                 .interval_action_stats
@@ -339,5 +351,66 @@ fn action_index(action: ActionType) -> usize {
         ActionType::Eat => 4,
         ActionType::Attack => 5,
         ActionType::Reproduce => 6,
+    }
+}
+
+fn action_can_fail(action: ActionType) -> bool {
+    matches!(
+        action,
+        ActionType::Forward | ActionType::Eat | ActionType::Attack | ActionType::Reproduce
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn interval_failure_counts_only_contingent_actions() {
+        let mut ledger = Ledger::new(0);
+
+        ledger.update(&ActionRecord {
+            organism_id: OrganismId(1),
+            selected_action: ActionType::TurnLeft,
+            action_failed: true,
+            food_ahead: false,
+            food_left: false,
+            food_right: false,
+            food_behind: false,
+            damage_taken_last_turn: 0.0,
+            age_turns: 0,
+            utilization: 0.0,
+            consumptions_count: 0,
+        });
+        ledger.update(&ActionRecord {
+            organism_id: OrganismId(1),
+            selected_action: ActionType::Eat,
+            action_failed: true,
+            food_ahead: false,
+            food_left: false,
+            food_right: false,
+            food_behind: false,
+            damage_taken_last_turn: 0.0,
+            age_turns: 0,
+            utilization: 0.0,
+            consumptions_count: 0,
+        });
+        ledger.update(&ActionRecord {
+            organism_id: OrganismId(1),
+            selected_action: ActionType::Attack,
+            action_failed: false,
+            food_ahead: false,
+            food_left: false,
+            food_right: false,
+            food_behind: false,
+            damage_taken_last_turn: 0.0,
+            age_turns: 0,
+            utilization: 0.0,
+            consumptions_count: 0,
+        });
+
+        let stats = ledger.interval_action_stats();
+        assert_eq!(stats.failure_candidate_count, 2);
+        assert_eq!(stats.failed_action_count, 1);
     }
 }

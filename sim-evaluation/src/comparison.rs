@@ -332,6 +332,19 @@ fn comparison_metric_rows(
                 .collect(),
         ),
         paired_metric_row(
+            "failed_action_rate",
+            control
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_failed_action_rate)
+                .collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|seed| seed.aggregate_score.mean_failed_action_rate)
+                .collect(),
+        ),
+        paired_metric_row(
             "damage_avoidance",
             control
                 .seed_summaries
