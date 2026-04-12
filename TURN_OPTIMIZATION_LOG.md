@@ -75,3 +75,17 @@
   Attempt 4: `avg_wall_us_per_turn 500.090`
 - Notes:
   End-to-end wall time improved by about `0.8%`. The cached split boundary materially reduced routing overhead inside the brain eval hot path.
+
+## Attempt 5
+
+- Hypothesis:
+  The sensing path still pays generic receptor-dispatch overhead even though the sensory layout is fixed and only a single vision ray exists.
+- Planned change:
+  Specialize `encode_sensory_inputs` to write the fixed sensory slots directly and simplify single-ray handling.
+- Status:
+  Reverted.
+- 10000-turn checkpoint comparison:
+  Checkpoint `9f039af`: `avg_wall_us_per_turn 500.090`
+  Attempt 5 candidate: `avg_wall_us_per_turn 499.810`
+- Notes:
+  `scan_ahead` improved noticeably, but end-to-end wall time moved by only about `0.06%`. Not enough to justify extra specialized routing logic.
