@@ -896,7 +896,9 @@ fn append_interpretation_guidance(html: &mut String) {
     html.push_str("<h3>Failed action rate -- \"Do they choose actions that actually work?\"</h3>");
     html.push_str("<p>This measures how often contingent actions fail to produce their intended effect. The current definition counts failed <code>Forward</code>, <code>Eat</code>, <code>Attack</code>, and <code>Reproduce</code> selections, and it is the primary subscore inside Behavioral Control.</p>");
     html.push_str("<ul>");
-    html.push_str("<li><code>0.00-0.10</code>: strong. Brains usually avoid obviously useless actions.</li>");
+    html.push_str(
+        "<li><code>0.00-0.10</code>: strong. Brains usually avoid obviously useless actions.</li>",
+    );
     html.push_str("<li><code>0.20-0.40</code>: mixed. Organisms have some situational competence but still waste many actions.</li>");
     html.push_str("<li><code>0.50+</code>: weak behavioral control. A large share of costly actions are doing nothing useful.</li>");
     html.push_str("</ul>");

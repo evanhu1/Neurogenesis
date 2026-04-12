@@ -154,6 +154,7 @@ impl Simulation {
             r,
             energy,
             kind,
+            visual: sim_types::food_visual(kind),
         };
         self.occupancy[cell_idx] = Some(Occupant::Food(food.id));
         self.foods.push(food.clone());

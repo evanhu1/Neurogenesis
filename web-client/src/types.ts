@@ -10,6 +10,19 @@ export type SpeciesId = number;
 export type FoodId = number;
 export type NeuronId = number;
 
+export type RgbColor = {
+  r: number;
+  g: number;
+  b: number;
+};
+
+export type VisualProperties = {
+  r: number;
+  g: number;
+  b: number;
+  opacity: number;
+};
+
 export type ActionType =
   | 'Idle'
   | 'TurnLeft'
@@ -20,7 +33,8 @@ export type ActionType =
   | 'Reproduce';
 
 export type FoodKind = 'Plant' | 'Corpse';
-export type TerrainType = 'Spikes';
+export type TerrainType = 'Spikes' | 'Mountain';
+export type VisionChannel = 'Red' | 'Green' | 'Blue';
 
 export type NeuronType = 'Sensory' | 'Inter' | 'Action';
 
@@ -39,6 +53,7 @@ type GenomeCoreParams = {
   num_synapses: number;
   spatial_prior_sigma: number;
   vision_distance: number;
+  body_color: RgbColor;
   max_health: number;
   age_of_maturity: number;
   gestation_ticks: number;
@@ -144,29 +159,29 @@ export type NeuronState = {
   parent_ids: NeuronId[];
 };
 
-type LookRayReceptor = {
-  receptor_type: 'LookRay';
+type VisionRayReceptor = {
+  receptor_type: 'VisionRay';
   ray_offset: number;
-  look_target: EntityType;
-};
-
-type EnergyReceptor = {
-  receptor_type: 'Energy';
+  channel: VisionChannel;
 };
 
 type ContactAheadReceptor = {
   receptor_type: 'ContactAhead';
 };
 
-type DamageReceptor = {
-  receptor_type: 'Damage';
+type EnergyReceptor = {
+  receptor_type: 'Energy';
+};
+
+type HealthReceptor = {
+  receptor_type: 'Health';
 };
 
 export type SensoryReceptor =
-  | LookRayReceptor
+  | VisionRayReceptor
   | ContactAheadReceptor
-  | DamageReceptor
-  | EnergyReceptor;
+  | EnergyReceptor
+  | HealthReceptor;
 
 export type ApiSensoryNeuronState = {
   neuron: ApiNeuronState;
@@ -287,6 +302,7 @@ export type ApiWorldOrganismState = {
   plant_consumptions_count: number;
   prey_consumptions_count: number;
   reproductions_count: number;
+  visual: VisualProperties;
 };
 
 export type WorldOrganismState = {
@@ -306,6 +322,7 @@ export type WorldOrganismState = {
   plant_consumptions_count: number;
   prey_consumptions_count: number;
   reproductions_count: number;
+  visual: VisualProperties;
 };
 
 export type ApiFoodState = {
@@ -314,6 +331,7 @@ export type ApiFoodState = {
   r: number;
   energy: number;
   kind: FoodKind;
+  visual: VisualProperties;
 };
 
 export type FoodState = {
@@ -322,6 +340,7 @@ export type FoodState = {
   r: number;
   energy: number;
   kind: FoodKind;
+  visual: VisualProperties;
 };
 
 export type ApiMetricsSnapshot = {
@@ -369,12 +388,14 @@ export type ApiTerrainCell = {
   q: number;
   r: number;
   terrain_type: TerrainType;
+  visual: VisualProperties;
 };
 
 export type TerrainCell = {
   q: number;
   r: number;
   terrain_type: TerrainType;
+  visual: VisualProperties;
 };
 
 export type ApiWorldSnapshot = {

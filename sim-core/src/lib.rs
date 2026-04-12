@@ -7,7 +7,9 @@ use sim_types::{
     FoodState, MetricsSnapshot, OccupancyCell, Occupant, OrganismGenome, OrganismId, OrganismState,
     TerrainCell, TerrainType, TickDelta, WorldConfig, WorldSnapshot,
 };
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+#[cfg(feature = "instrumentation")]
+use std::collections::HashMap;
 use thiserror::Error;
 
 mod brain;
@@ -223,11 +225,20 @@ impl Simulation {
         for (idx, maybe_entity) in self.occupancy.iter().enumerate() {
             let q = (idx % width) as i32;
             let r = (idx / width) as i32;
+            if self.terrain_map[idx] {
+                terrain.push(TerrainCell {
+                    q,
+                    r,
+                    terrain_type: TerrainType::Mountain,
+                    visual: sim_types::terrain_visual(TerrainType::Mountain),
+                });
+            }
             if self.spike_map[idx] {
                 terrain.push(TerrainCell {
                     q,
                     r,
                     terrain_type: TerrainType::Spikes,
+                    visual: sim_types::terrain_visual(TerrainType::Spikes),
                 });
             }
             if let Some(occupant) = *maybe_entity {

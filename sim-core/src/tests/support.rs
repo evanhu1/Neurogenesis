@@ -36,6 +36,11 @@ pub(super) fn test_genome() -> OrganismGenome {
         num_synapses: 0,
         spatial_prior_sigma: 3.5,
         vision_distance: 2,
+        body_color: sim_types::RgbColor {
+            r: 0.4,
+            g: 0.7,
+            b: 0.9,
+        },
         max_health: 100.0,
         age_of_maturity: 0,
         gestation_ticks: 2,
@@ -154,9 +159,9 @@ fn forced_brain(
 fn forced_brain_with_action(preferred_action: ActionType, confidence: f32) -> BrainState {
     let sensory = vec![make_sensory_neuron(
         0,
-        SensoryReceptor::LookRay {
+        SensoryReceptor::VisionRay {
             ray_offset: 0,
-            look_target: EntityType::Food,
+            channel: sim_types::VisionChannel::Green,
         },
         BrainLocation { x: 0.0, y: 0.0 },
     )];

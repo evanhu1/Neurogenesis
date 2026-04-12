@@ -21,6 +21,8 @@ pub const ACTION_NEURON_ID_BASE: u32 = 2000;
 pub const MAX_GESTATION_TICKS: u8 = 4;
 pub const BASE_OFFSPRING_TRANSFER_ENERGY: f32 = 100.0;
 pub const GESTATION_TRANSFER_ENERGY_STEP: f32 = 100.0;
+pub const ORGANISM_VISUAL_OPACITY: f32 = 0.8;
+pub const FOOD_VISUAL_OPACITY: f32 = 0.8;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum FoodKind {
@@ -67,14 +69,24 @@ pub struct ActionRecord {
     pub organism_id: OrganismId,
     pub selected_action: ActionType,
     pub action_failed: bool,
-    pub food_ahead: bool,
-    pub food_left: bool,
-    pub food_right: bool,
-    pub food_behind: bool,
+    pub food_visible: [bool; SensoryReceptor::VISION_RAY_OFFSETS.len()],
     pub damage_taken_last_turn: f32,
     pub age_turns: u64,
     pub utilization: f32,
     pub consumptions_count: u64,
+}
+
+#[cfg(feature = "instrumentation")]
+impl ActionRecord {
+    pub fn food_visible_at_offset(&self, ray_offset: i8) -> bool {
+        let Some(ray_idx) = SensoryReceptor::VISION_RAY_OFFSETS
+            .iter()
+            .position(|candidate| *candidate == ray_offset)
+        else {
+            return false;
+        };
+        self.food_visible[ray_idx]
+    }
 }
 
 #[cfg(feature = "instrumentation")]
@@ -105,6 +117,42 @@ pub enum NeuronType {
     Action,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+pub struct RgbColor {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+}
+
+impl RgbColor {
+    pub fn clamped(self) -> Self {
+        Self {
+            r: self.r.clamp(0.0, 1.0),
+            g: self.g.clamp(0.0, 1.0),
+            b: self.b.clamp(0.0, 1.0),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+pub struct VisualProperties {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub opacity: f32,
+}
+
+impl VisualProperties {
+    pub fn clamped(self) -> Self {
+        Self {
+            r: self.r.clamp(0.0, 1.0),
+            g: self.g.clamp(0.0, 1.0),
+            b: self.b.clamp(0.0, 1.0),
+            opacity: self.opacity.clamp(0.0, 1.0),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct BrainLocation {
     pub x: f32,
@@ -122,6 +170,7 @@ pub enum EntityType {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TerrainType {
     Spikes,
+    Mountain,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -150,45 +199,53 @@ pub struct ReproductionEvent {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum VisionChannel {
+    Red,
+    Green,
+    Blue,
+}
+
+impl VisionChannel {
+    pub const ALL: [VisionChannel; 3] = [
+        VisionChannel::Red,
+        VisionChannel::Green,
+        VisionChannel::Blue,
+    ];
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "receptor_type")]
 pub enum SensoryReceptor {
-    LookRay {
+    VisionRay {
         ray_offset: i8,
-        look_target: EntityType,
+        channel: VisionChannel,
     },
     ContactAhead,
-    Damage,
     Energy,
+    Health,
 }
 
 impl SensoryReceptor {
     /// Fixed relative ray offsets around facing direction.
-    pub const LOOK_RAY_OFFSETS: [i8; 5] = [-2, -1, 0, 1, 2];
-    /// Entity classes available to look-ray sensors.
-    pub const LOOK_TARGETS: [EntityType; 4] = [
-        EntityType::Food,
-        EntityType::Organism,
-        EntityType::Wall,
-        EntityType::Spikes,
-    ];
-    /// Number of entity classes available to look-ray sensors.
-    pub const LOOK_TARGET_COUNT: u32 = Self::LOOK_TARGETS.len() as u32;
-    /// Number of look-based sensory neurons (ray count x object type count).
-    pub const LOOK_NEURON_COUNT: u32 =
-        (Self::LOOK_RAY_OFFSETS.len() as u32) * Self::LOOK_TARGET_COUNT;
+    pub const VISION_RAY_OFFSETS: [i8; 1] = [0];
+    pub const VISION_CHANNEL_COUNT: u32 = VisionChannel::ALL.len() as u32;
+    pub const SCALAR_NEURON_COUNT: u32 = 3;
+    pub const VISION_NEURON_COUNT: u32 =
+        (Self::VISION_RAY_OFFSETS.len() as u32) * Self::VISION_CHANNEL_COUNT;
+    pub const TOTAL_NEURON_COUNT: u32 = Self::VISION_NEURON_COUNT + Self::SCALAR_NEURON_COUNT;
 
     pub fn ordered() -> impl Iterator<Item = Self> {
-        Self::LOOK_RAY_OFFSETS
+        Self::VISION_RAY_OFFSETS
             .into_iter()
             .flat_map(|ray_offset| {
-                Self::LOOK_TARGETS
+                VisionChannel::ALL
                     .into_iter()
-                    .map(move |look_target| Self::LookRay {
+                    .map(move |channel| Self::VisionRay {
                         ray_offset,
-                        look_target,
+                        channel,
                     })
             })
-            .chain([Self::ContactAhead, Self::Damage, Self::Energy])
+            .chain([Self::ContactAhead, Self::Energy, Self::Health])
     }
 
     pub fn current_index(self) -> Option<usize> {
@@ -201,6 +258,37 @@ impl SensoryReceptor {
 
     pub fn from_neuron_id(id: NeuronId) -> Option<Self> {
         Self::ordered().nth(id.0 as usize)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SensoryReceptor, VisionChannel};
+
+    #[test]
+    fn sensory_receptors_include_forward_rgb_plus_scalar_sensors() {
+        let receptors = SensoryReceptor::ordered().collect::<Vec<_>>();
+        assert_eq!(receptors.len(), 6);
+        assert_eq!(
+            receptors,
+            vec![
+                SensoryReceptor::VisionRay {
+                    ray_offset: 0,
+                    channel: VisionChannel::Red,
+                },
+                SensoryReceptor::VisionRay {
+                    ray_offset: 0,
+                    channel: VisionChannel::Green,
+                },
+                SensoryReceptor::VisionRay {
+                    ray_offset: 0,
+                    channel: VisionChannel::Blue,
+                },
+                SensoryReceptor::ContactAhead,
+                SensoryReceptor::Energy,
+                SensoryReceptor::Health,
+            ]
+        );
     }
 }
 
@@ -224,6 +312,7 @@ pub struct OrganismGenome {
     pub num_synapses: u32,
     pub spatial_prior_sigma: f32,
     pub vision_distance: u32,
+    pub body_color: RgbColor,
     #[serde(default = "default_max_health")]
     pub max_health: f32,
     #[serde(default = "default_age_of_maturity")]
@@ -475,6 +564,7 @@ pub struct FoodState {
     pub energy: f32,
     #[serde(default)]
     pub kind: FoodKind,
+    pub visual: VisualProperties,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -517,11 +607,12 @@ pub struct OccupancyCell {
     pub occupant: Occupant,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct TerrainCell {
     pub q: i32,
     pub r: i32,
     pub terrain_type: TerrainType,
+    pub visual: VisualProperties,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -554,4 +645,48 @@ pub struct TickDelta {
     pub reproduction_events: Vec<ReproductionEvent>,
     pub food_spawned: Vec<FoodState>,
     pub metrics: MetricsSnapshot,
+}
+
+pub fn organism_visual(color: RgbColor) -> VisualProperties {
+    VisualProperties {
+        r: color.r,
+        g: color.g,
+        b: color.b,
+        opacity: ORGANISM_VISUAL_OPACITY,
+    }
+    .clamped()
+}
+
+pub fn food_visual(kind: FoodKind) -> VisualProperties {
+    match kind {
+        FoodKind::Plant => VisualProperties {
+            r: 0.0,
+            g: 1.0,
+            b: 0.0,
+            opacity: FOOD_VISUAL_OPACITY,
+        },
+        FoodKind::Corpse => VisualProperties {
+            r: 0.95,
+            g: 0.45,
+            b: 0.10,
+            opacity: FOOD_VISUAL_OPACITY,
+        },
+    }
+}
+
+pub fn terrain_visual(terrain_type: TerrainType) -> VisualProperties {
+    match terrain_type {
+        TerrainType::Spikes => VisualProperties {
+            r: 1.0,
+            g: 0.0,
+            b: 0.0,
+            opacity: 0.0,
+        },
+        TerrainType::Mountain => VisualProperties {
+            r: 0.0,
+            g: 0.0,
+            b: 0.0,
+            opacity: 1.0,
+        },
+    }
 }

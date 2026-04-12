@@ -81,6 +81,7 @@ fn state_invariants_hold_across_multi_turn_mixed_ecology_and_spawn_flow() {
         r: 4,
         energy: sim.config().food_energy,
         kind: sim_types::FoodKind::Plant,
+        visual: sim_types::food_visual(sim_types::FoodKind::Plant),
     });
     sim.occupancy[food_idx] = Some(Occupant::Food(FoodId(0)));
     sim.next_food_id = 1;

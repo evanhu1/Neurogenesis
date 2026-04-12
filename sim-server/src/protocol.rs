@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use sim_types::{
-    FacingDirection, FoodState, MetricsSnapshot, NeuronId, OccupancyCell, OrganismFacing,
-    OrganismGenome, OrganismId, OrganismMove, OrganismState, RemovedEntityPosition,
-    ReproductionEvent, SpeciesId, TerrainCell, TickDelta, WorldConfig, WorldSnapshot,
+    organism_visual, FacingDirection, FoodState, MetricsSnapshot, NeuronId, OccupancyCell,
+    OrganismFacing, OrganismGenome, OrganismId, OrganismMove, OrganismState, RemovedEntityPosition,
+    ReproductionEvent, SpeciesId, TerrainCell, TickDelta, VisualProperties, WorldConfig,
+    WorldSnapshot,
 };
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -125,6 +126,7 @@ pub struct WorldOrganismState {
     pub plant_consumptions_count: u64,
     pub prey_consumptions_count: u64,
     pub reproductions_count: u64,
+    pub visual: VisualProperties,
 }
 
 impl From<&OrganismState> for WorldOrganismState {
@@ -146,6 +148,7 @@ impl From<&OrganismState> for WorldOrganismState {
             plant_consumptions_count: organism.plant_consumptions_count,
             prey_consumptions_count: organism.prey_consumptions_count,
             reproductions_count: organism.reproductions_count,
+            visual: organism_visual(organism.genome.body_color),
         }
     }
 }

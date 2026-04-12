@@ -26,6 +26,7 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         num_synapses: config.num_synapses.min(max_synapses),
         spatial_prior_sigma: config.spatial_prior_sigma.max(0.01),
         vision_distance: config.vision_distance,
+        body_color: sample_body_color(rng),
         max_health: config.max_health,
         age_of_maturity: config.age_of_maturity,
         gestation_ticks: config.gestation_ticks,

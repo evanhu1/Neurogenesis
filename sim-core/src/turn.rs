@@ -21,11 +21,10 @@ use rayon::{ThreadPool, ThreadPoolBuilder};
 use reproduction::ReproductionPhaseState;
 #[cfg(feature = "instrumentation")]
 use sim_types::ActionRecord;
-#[cfg(feature = "instrumentation")]
-use sim_types::SensoryReceptor;
 use sim_types::{
     ActionType, EntityId, FacingDirection, FoodKind, FoodState, Occupant, OrganismFacing,
-    OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, TickDelta, WorldConfig,
+    OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, RgbColor, TickDelta,
+    VisualProperties, WorldConfig,
 };
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};

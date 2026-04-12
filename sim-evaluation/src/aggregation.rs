@@ -53,8 +53,11 @@ pub(crate) fn compute_aggregate_score(
     let mean_foraging_rate = mean_option(window.iter().map(|row| row.foraging_rate));
     let mean_attack_attempt_rate = mean_option(window.iter().map(|row| row.attack_attempt_rate));
     let mean_attack_success_rate = mean_option(window.iter().map(|row| row.attack_success_rate));
-    let mean_failed_action_count =
-        mean_option(window.iter().map(|row| Some(row.failed_action_count as f64)));
+    let mean_failed_action_count = mean_option(
+        window
+            .iter()
+            .map(|row| Some(row.failed_action_count as f64)),
+    );
     let mean_failed_action_rate = mean_option(window.iter().map(|row| row.failed_action_rate));
     let mean_idle_fraction = mean_option(window.iter().map(|row| row.idle_fraction));
     let mean_reproduction_efficiency =
@@ -372,11 +375,11 @@ pub(crate) fn average_aggregate_scores(seed_summaries: &[SeedEvaluationSummary])
                 .iter()
                 .map(|summary| summary.aggregate_score.control_adult_mi_component),
         ),
-        control_action_effectiveness_component: mean_f64(
-            seed_summaries
-                .iter()
-                .map(|summary| summary.aggregate_score.control_action_effectiveness_component),
-        ),
+        control_action_effectiveness_component: mean_f64(seed_summaries.iter().map(|summary| {
+            summary
+                .aggregate_score
+                .control_action_effectiveness_component
+        })),
         control_entropy_component: mean_f64(
             seed_summaries
                 .iter()

@@ -10,6 +10,8 @@ struct IntentBuildContext<'a> {
     world_width: i32,
     occupancy: &'a [Option<Occupant>],
     spike_map: &'a [bool],
+    organism_colors: &'a [RgbColor],
+    food_visuals: &'a [VisualProperties],
     pending_actions: &'a [PendingActionState],
     action_temperature: f32,
     runtime_plasticity_enabled: bool,
@@ -24,7 +26,7 @@ struct SelectedActionState {
     selected_action_logit: f32,
     synapse_ops: u64,
     #[cfg(feature = "instrumentation")]
-    food_flags: (bool, bool, bool, bool),
+    food_visible: [bool; crate::brain::VISION_RAY_COUNT],
 }
 
 #[derive(Clone, Copy)]
@@ -40,10 +42,14 @@ struct ActionIntentOutcome {
 
 impl Simulation {
     pub(super) fn build_intents(&mut self, snapshot: &TurnSnapshot) -> Vec<OrganismIntent> {
+        let organism_colors = build_organism_color_lookup(self.organisms());
+        let food_visuals = build_food_visual_lookup(&self.foods);
         let context = IntentBuildContext {
             world_width: self.config.world_width as i32,
             occupancy: &self.occupancy,
             spike_map: &self.spike_map,
+            organism_colors: &organism_colors,
+            food_visuals: &food_visuals,
             pending_actions: &self.pending_actions,
             action_temperature: self.config.action_temperature,
             runtime_plasticity_enabled: self.config.runtime_plasticity_enabled,
@@ -132,8 +138,7 @@ fn build_intent_for_organism(
         action_record: Some(instrument_action_record(
             organism,
             organism_id,
-            selected_action_state.selected_action,
-            selected_action_state.food_flags,
+            selected_action_state,
         )),
     }
 }
@@ -175,7 +180,7 @@ fn select_action_for_organism(
 
     if context.force_random_actions {
         #[cfg(feature = "instrumentation")]
-        let food_flags = {
+        let food_visible = {
             let ray_scans = scan_rays(
                 (organism.q, organism.r),
                 organism.facing,
@@ -183,23 +188,11 @@ fn select_action_for_organism(
                 context.world_width,
                 context.occupancy,
                 context.spike_map,
+                context.organism_colors,
+                context.food_visuals,
                 vision_distance,
             );
-            let food_at_offset = |offset: i8| -> bool {
-                let Some(ray_idx) = SensoryReceptor::LOOK_RAY_OFFSETS
-                    .iter()
-                    .position(|candidate| *candidate == offset)
-                else {
-                    return false;
-                };
-                ray_scans[ray_idx].food_signal > 0.0
-            };
-            (
-                food_at_offset(0),
-                food_at_offset(-1),
-                food_at_offset(1),
-                food_at_offset(3),
-            )
+            ray_scans.map(|scan| scan.food_visible)
         };
 
         return SelectedActionState {
@@ -207,7 +200,7 @@ fn select_action_for_organism(
             selected_action_logit: 0.0,
             synapse_ops: 0,
             #[cfg(feature = "instrumentation")]
-            food_flags,
+            food_visible,
         };
     }
 
@@ -217,6 +210,8 @@ fn select_action_for_organism(
             world_width: context.world_width,
             occupancy: context.occupancy,
             spike_map: context.spike_map,
+            organism_colors: context.organism_colors,
+            food_visuals: context.food_visuals,
             vision_distance,
             action_temperature: context.action_temperature,
             action_sample,
@@ -239,13 +234,30 @@ fn select_action_for_organism(
         selected_action_logit,
         synapse_ops: evaluation.synapse_ops,
         #[cfg(feature = "instrumentation")]
-        food_flags: (
-            evaluation.food_ahead,
-            evaluation.food_left,
-            evaluation.food_right,
-            evaluation.food_behind,
-        ),
+        food_visible: evaluation.food_visible,
     }
+}
+
+fn build_organism_color_lookup(organisms: &[OrganismState]) -> Vec<RgbColor> {
+    let max_id = organisms
+        .iter()
+        .map(|organism| organism.id.0 as usize)
+        .max();
+    let mut colors = vec![RgbColor::default(); max_id.map_or(0, |id| id.saturating_add(1))];
+    for organism in organisms {
+        colors[organism.id.0 as usize] = organism.genome.body_color;
+    }
+    colors
+}
+
+fn build_food_visual_lookup(foods: &[FoodState]) -> Vec<VisualProperties> {
+    let max_id = foods.iter().map(|food| food.id.0 as usize).max();
+    let mut visuals =
+        vec![VisualProperties::default(); max_id.map_or(0, |id| id.saturating_add(1))];
+    for food in foods {
+        visuals[food.id.0 as usize] = food.visual;
+    }
+    visuals
 }
 
 fn translate_action_to_intent(
@@ -285,18 +297,13 @@ fn translate_action_to_intent(
 fn instrument_action_record(
     organism: &mut OrganismState,
     organism_id: OrganismId,
-    selected_action: ActionType,
-    food_flags: (bool, bool, bool, bool),
+    selected_action_state: SelectedActionState,
 ) -> ActionRecord {
-    let (food_ahead, food_left, food_right, food_behind) = food_flags;
     ActionRecord {
         organism_id,
-        selected_action,
-        action_failed: contingent_action_can_fail(selected_action),
-        food_ahead,
-        food_left,
-        food_right,
-        food_behind,
+        selected_action: selected_action_state.selected_action,
+        action_failed: contingent_action_can_fail(selected_action_state.selected_action),
+        food_visible: selected_action_state.food_visible,
         damage_taken_last_turn: organism.damage_taken_last_turn,
         age_turns: organism.age_turns,
         utilization: update_instrumentation_utilization(organism),

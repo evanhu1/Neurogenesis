@@ -1,12 +1,9 @@
 import type { FacingDirection, WorldOrganismState, WorldSnapshot } from '../../types';
 import { unwrapId } from '../../protocol';
-import { colorForSpeciesId } from '../../speciesColor';
 
 const SQRT_3 = Math.sqrt(3);
-const PLANT_COLOR = '#16a34a';
-const CORPSE_COLOR = '#f97316';
-const WALL_COLOR = '#5f6572';
-const SPIKE_COLOR = '#fca5a5';
+const MOUNTAIN_COLOR = '#5f6572';
+const SPIKE_COLOR = 'rgba(160, 72, 72, 0.5)';
 const BASE_HEX_SIZE_AT_900PX = 8;
 const BASE_HEX_MIN_SIZE_PX = 6;
 const BASE_HEX_REFERENCE_CANVAS_PX = 900;
@@ -112,6 +109,20 @@ type HexSprite = {
   anchorX: number;
   anchorY: number;
 };
+
+function visualToCss(visual: { r: number; g: number; b: number }) {
+  const clampByte = (value: number) => Math.round(Math.max(0, Math.min(1, value)) * 255);
+  return `rgb(${clampByte(visual.r)}, ${clampByte(visual.g)}, ${clampByte(visual.b)})`;
+}
+
+function visualToCssWithAlpha(
+  visual: { r: number; g: number; b: number },
+  alpha: number,
+) {
+  const clampByte = (value: number) => Math.round(Math.max(0, Math.min(1, value)) * 255);
+  const safeAlpha = Math.max(0, Math.min(1, alpha));
+  return `rgba(${clampByte(visual.r)}, ${clampByte(visual.g)}, ${clampByte(visual.b)}, ${safeAlpha})`;
+}
 
 export type WorldRenderCache = {
   terrain: TerrainLayerCache;
@@ -402,9 +413,9 @@ function forEachVisibleCell(
 function buildWallMask(snapshot: WorldSnapshot) {
   const worldWidth = snapshot.config.world_width;
   const wallMask = new Uint8Array(worldWidth * worldWidth);
-  const occupancy = Array.isArray(snapshot.occupancy) ? snapshot.occupancy : [];
-  for (const cell of occupancy) {
-    if (cell.occupant.type !== 'Wall') continue;
+  const terrain = Array.isArray(snapshot.terrain) ? snapshot.terrain : [];
+  for (const cell of terrain) {
+    if (cell.terrain_type !== 'Mountain') continue;
     wallMask[cellIndex(worldWidth, cell.q, cell.r)] = 1;
   }
   return wallMask;
@@ -515,8 +526,22 @@ function renderTerrainLayer(
 ) {
   ctx.clearRect(0, 0, width, height);
   const geometry = getLayoutGeometry(cache, width, height, snapshot.config.world_width);
-  const earthHex = getHexSprite(cache, canvas, geometry.layout.size, EARTH_COLOR, GRID_STROKE_COLOR, GRID_STROKE_WIDTH);
-  const wallHex = getHexSprite(cache, canvas, geometry.layout.size, WALL_COLOR, WALL_STROKE_COLOR, GRID_STROKE_WIDTH);
+  const earthHex = getHexSprite(
+    cache,
+    canvas,
+    geometry.layout.size,
+    EARTH_COLOR,
+    GRID_STROKE_COLOR,
+    GRID_STROKE_WIDTH,
+  );
+  const wallHex = getHexSprite(
+    cache,
+    canvas,
+    geometry.layout.size,
+    MOUNTAIN_COLOR,
+    WALL_STROKE_COLOR,
+    GRID_STROKE_WIDTH,
+  );
   const spikeHex = getHexSprite(
     cache,
     canvas,
@@ -537,10 +562,9 @@ function renderTerrainLayer(
     drawHexSpriteAt(ctx, spikeHex, geometry.centerXs[index], geometry.centerYs[index]);
   }
 
-  const occupancy = Array.isArray(snapshot.occupancy) ? snapshot.occupancy : [];
-  for (const cell of occupancy) {
-    if (cell.occupant.type !== 'Wall') continue;
-    const index = cellIndex(geometry.worldWidth, cell.q, cell.r);
+  const wallMask = getWallMask(cache, snapshot);
+  for (let index = 0; index < geometry.centerXs.length; index += 1) {
+    if (wallMask[index] === 0) continue;
     drawHexSpriteAt(ctx, wallHex, geometry.centerXs[index], geometry.centerYs[index]);
   }
 }
@@ -555,34 +579,18 @@ function renderPlantLayer(
 ) {
   ctx.clearRect(0, 0, width, height);
   const geometry = getLayoutGeometry(cache, width, height, snapshot.config.world_width);
-  const plantHex = getHexSprite(
-    cache,
-    canvas,
-    geometry.layout.size,
-    PLANT_COLOR,
-    GRID_STROKE_COLOR,
-    GRID_STROKE_WIDTH,
-  );
-  const corpseHex = getHexSprite(
-    cache,
-    canvas,
-    geometry.layout.size,
-    CORPSE_COLOR,
-    GRID_STROKE_COLOR,
-    GRID_STROKE_WIDTH,
-  );
-  if (!plantHex || !corpseHex) return;
-
-  const foodMask = getFoodMask(cache, snapshot);
-  for (let index = 0; index < geometry.centerXs.length; index += 1) {
-    const foodKind = foodMask[index];
-    if (foodKind === 0) continue;
-    drawHexSpriteAt(
-      ctx,
-      foodKind === 2 ? corpseHex : plantHex,
-      geometry.centerXs[index],
-      geometry.centerYs[index],
+  for (const food of snapshot.foods) {
+    const sprite = getHexSprite(
+      cache,
+      canvas,
+      geometry.layout.size,
+      visualToCssWithAlpha(food.visual, 0.25),
+      GRID_STROKE_COLOR,
+      GRID_STROKE_WIDTH,
     );
+    if (!sprite) continue;
+    const index = cellIndex(geometry.worldWidth, food.q, food.r);
+    drawHexSpriteAt(ctx, sprite, geometry.centerXs[index], geometry.centerYs[index]);
   }
 }
 
@@ -600,7 +608,6 @@ function renderOrganismLayer(
 
   for (const org of snapshot.organisms) {
     const id = unwrapId(org.id);
-    const speciesId = unwrapId(org.species_id);
     const index = cellIndex(geometry.worldWidth, org.q, org.r);
     const centerX = geometry.centerXs[index];
     const centerY = geometry.centerYs[index];
@@ -637,7 +644,7 @@ function renderOrganismLayer(
     ctx.lineTo(backX + perpX, backY + perpY);
     ctx.lineTo(backX - perpX, backY - perpY);
     ctx.closePath();
-    ctx.fillStyle = colorForSpeciesId(String(speciesId));
+    ctx.fillStyle = visualToCss(org.visual);
     ctx.fill();
     ctx.lineWidth =
       id === focusedOrganismId
@@ -793,7 +800,7 @@ function renderVisibleTerrain(
     if (wallMask[index] === 0) return;
     traceHex(ctx, centerX, centerY, geometry.layout.size);
   });
-  ctx.fillStyle = WALL_COLOR;
+  ctx.fillStyle = MOUNTAIN_COLOR;
   ctx.fill();
   ctx.strokeStyle = WALL_STROKE_COLOR;
   ctx.lineWidth = GRID_STROKE_WIDTH;
@@ -810,27 +817,26 @@ function renderVisiblePlants(
 ) {
   const geometry = getLayoutGeometry(cache, width, height, snapshot.config.world_width);
   const range = computeVisibleHexRange(geometry.layout, width, height, viewport);
-  const foodMask = getFoodMask(cache, snapshot);
+  const minX = range.minX - geometry.layout.size;
+  const maxX = range.maxX + geometry.layout.size;
+  const minY = range.minY - geometry.layout.size;
+  const maxY = range.maxY + geometry.layout.size;
 
-  ctx.beginPath();
-  forEachVisibleCell(geometry, range, (index, centerX, centerY) => {
-    if (foodMask[index] !== 1) return;
+  for (const food of snapshot.foods) {
+    const index = cellIndex(geometry.worldWidth, food.q, food.r);
+    const centerX = geometry.centerXs[index];
+    const centerY = geometry.centerYs[index];
+    if (centerX < minX || centerX > maxX || centerY < minY || centerY > maxY) {
+      continue;
+    }
+    ctx.beginPath();
     traceHex(ctx, centerX, centerY, geometry.layout.size);
-  });
-  ctx.fillStyle = PLANT_COLOR;
-  ctx.fill();
-
-  ctx.beginPath();
-  forEachVisibleCell(geometry, range, (index, centerX, centerY) => {
-    if (foodMask[index] !== 2) return;
-    traceHex(ctx, centerX, centerY, geometry.layout.size);
-  });
-  ctx.fillStyle = CORPSE_COLOR;
-  ctx.fill();
-
-  ctx.strokeStyle = GRID_STROKE_COLOR;
-  ctx.lineWidth = GRID_STROKE_WIDTH;
-  ctx.stroke();
+    ctx.fillStyle = visualToCssWithAlpha(food.visual, 0.25);
+    ctx.fill();
+    ctx.strokeStyle = GRID_STROKE_COLOR;
+    ctx.lineWidth = GRID_STROKE_WIDTH;
+    ctx.stroke();
+  }
 }
 
 function renderVisibleOrganisms(
@@ -851,7 +857,6 @@ function renderVisibleOrganisms(
 
   for (const org of snapshot.organisms) {
     const id = unwrapId(org.id);
-    const speciesId = unwrapId(org.species_id);
     const index = cellIndex(geometry.worldWidth, org.q, org.r);
     const centerX = geometry.centerXs[index];
     const centerY = geometry.centerYs[index];
@@ -875,7 +880,7 @@ function renderVisibleOrganisms(
     ctx.lineTo(backX + perpX, backY + perpY);
     ctx.lineTo(backX - perpX, backY - perpY);
     ctx.closePath();
-    ctx.fillStyle = colorForSpeciesId(String(speciesId));
+    ctx.fillStyle = visualToCss(org.visual);
     ctx.fill();
     ctx.lineWidth =
       id === focusedOrganismId

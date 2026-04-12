@@ -130,9 +130,11 @@ impl Simulation {
 
     fn build_organism(
         &mut self,
-        genome: OrganismGenome,
+        mut genome: OrganismGenome,
         params: OrganismSpawnParams,
     ) -> OrganismState {
+        genome.vision_distance = genome.vision_distance.clamp(1, 10);
+        genome.body_color = genome.body_color.clamped();
         let id = self.alloc_organism_id();
         let starting_energy = params
             .starting_energy_override

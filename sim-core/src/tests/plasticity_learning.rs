@@ -5,9 +5,9 @@ use crate::grid::world_capacity;
 use crate::plasticity::{apply_runtime_weight_updates, compute_pending_coactivations};
 
 fn food_ahead_receptor() -> SensoryReceptor {
-    SensoryReceptor::LookRay {
+    SensoryReceptor::VisionRay {
         ray_offset: 0,
-        look_target: EntityType::Food,
+        channel: sim_types::VisionChannel::Green,
     }
 }
 
@@ -38,6 +38,7 @@ fn seed_learning_food_if_missing(sim: &mut Simulation, food_q: i32, food_r: i32)
                 r: food_r,
                 energy: sim.config.food_energy,
                 kind: sim_types::FoodKind::Plant,
+                visual: sim_types::food_visual(sim_types::FoodKind::Plant),
             });
             sim.occupancy[food_idx] = Some(Occupant::Food(food_id));
         }
@@ -156,6 +157,7 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
             r: food_r,
             energy: sim.config.food_energy,
             kind: sim_types::FoodKind::Plant,
+            visual: sim_types::food_visual(sim_types::FoodKind::Plant),
         });
         sim.occupancy[food_idx] = Some(Occupant::Food(sim_types::FoodId(0)));
         sim.next_food_id = 1;
@@ -322,6 +324,7 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
             r: food_r,
             energy: sim.config.food_energy,
             kind: sim_types::FoodKind::Plant,
+            visual: sim_types::food_visual(sim_types::FoodKind::Plant),
         });
         sim.occupancy[food_idx] = Some(Occupant::Food(sim_types::FoodId(0)));
         sim.next_food_id = 1;
@@ -478,6 +481,7 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
             r: food_r,
             energy: sim.config.food_energy,
             kind: sim_types::FoodKind::Plant,
+            visual: sim_types::food_visual(sim_types::FoodKind::Plant),
         });
         sim.occupancy[food_idx] = Some(Occupant::Food(sim_types::FoodId(0)));
         sim.next_food_id = 1;

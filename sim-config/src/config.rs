@@ -538,6 +538,9 @@ pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
     if config.seed_genome_config.gestation_ticks > 4 {
         return Err("seed_genome_config.gestation_ticks must be in [0, 4]".to_owned());
     }
+    if !(1..=10).contains(&config.seed_genome_config.vision_distance) {
+        return Err("seed_genome_config.vision_distance must be in [1, 10]".to_owned());
+    }
     if !config
         .seed_genome_config
         .max_weight_delta_per_tick

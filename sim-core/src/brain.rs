@@ -13,9 +13,9 @@ use crate::topology::{
     refresh_parent_ids_and_synapse_count, split_inter_and_action_edges,
 };
 use sim_types::{
-    ActionNeuronState, ActionType, BrainLocation, BrainState, EntityType, InterNeuronState,
-    NeuronId, NeuronState, NeuronType, Occupant, OrganismGenome, OrganismId, OrganismState,
-    SensoryNeuronState, SensoryReceptor, SynapseEdge,
+    ActionNeuronState, ActionType, BrainLocation, BrainState, InterNeuronState, NeuronId,
+    NeuronState, NeuronType, Occupant, OrganismGenome, OrganismId, OrganismState, RgbColor,
+    SensoryNeuronState, SensoryReceptor, SynapseEdge, VisionChannel, VisualProperties,
 };
 #[cfg(feature = "profiling")]
 use std::time::Instant;
@@ -32,11 +32,9 @@ pub(crate) use expression::{express_genome, make_action_neuron, make_sensory_neu
 pub(crate) use sensing::scan_rays;
 
 const DEFAULT_BIAS: f32 = 0.0;
-const MIN_ENERGY_SENSOR_SCALE: f32 = 1.0;
-const ENERGY_SENSOR_CURVE_EXPONENT: f32 = 2.0;
 const MIN_ACTION_TEMPERATURE: f32 = 1.0e-6;
 pub(crate) const EXPLICIT_IDLE_LOGIT_BIAS: f32 = -0.01;
-pub(crate) const LOOK_RAY_COUNT: usize = SensoryReceptor::LOOK_RAY_OFFSETS.len();
+pub(crate) const VISION_RAY_COUNT: usize = SensoryReceptor::VISION_RAY_OFFSETS.len();
 
 #[derive(Default)]
 pub(crate) struct BrainEvaluation {
@@ -44,13 +42,7 @@ pub(crate) struct BrainEvaluation {
     pub(crate) action_logits: [f32; ACTION_COUNT],
     pub(crate) synapse_ops: u64,
     #[cfg(feature = "instrumentation")]
-    pub(crate) food_ahead: bool,
-    #[cfg(feature = "instrumentation")]
-    pub(crate) food_left: bool,
-    #[cfg(feature = "instrumentation")]
-    pub(crate) food_right: bool,
-    #[cfg(feature = "instrumentation")]
-    pub(crate) food_behind: bool,
+    pub(crate) food_visible: [bool; VISION_RAY_COUNT],
 }
 
 pub(crate) struct BrainScratch {

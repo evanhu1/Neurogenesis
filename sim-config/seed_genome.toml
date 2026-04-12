@@ -2,7 +2,7 @@
 num_neurons = 3 # Number of inter neurons in the initial seed genome.
 num_synapses = 20 # Number of synaptic connections in the initial seed genome.
 spatial_prior_sigma = 3.0 # Spatial prior width used when biasing new synapses toward nearby neurons.
-vision_distance = 10 # Maximum ray-sensing distance for `LookRay` sensory neurons.
+vision_distance = 5 # Maximum ray-sensing distance for RGB `VisionRay` sensory neurons. Clamped to 10.
 
 [lifecycle]
 max_health = 500.0 # Maximum health assigned to newly spawned organisms using this genome.

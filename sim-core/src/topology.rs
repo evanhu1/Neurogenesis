@@ -1,10 +1,7 @@
 use crate::genome::{SYNAPSE_STRENGTH_MAX, SYNAPSE_STRENGTH_MIN};
 use sim_types::{ActionType, BrainState, NeuronId, SensoryReceptor, SynapseEdge};
 
-pub(crate) const CONTACT_SENSORY_ID: u32 = SensoryReceptor::LOOK_NEURON_COUNT;
-pub(crate) const DAMAGE_SENSORY_ID: u32 = CONTACT_SENSORY_ID + 1;
-pub(crate) const ENERGY_SENSORY_ID: u32 = DAMAGE_SENSORY_ID + 1;
-pub(crate) const SENSORY_COUNT: u32 = ENERGY_SENSORY_ID + 1;
+pub(crate) const SENSORY_COUNT: u32 = SensoryReceptor::TOTAL_NEURON_COUNT;
 pub(crate) const ACTION_COUNT: usize = ActionType::ALL.len();
 pub(crate) const ACTION_COUNT_U32: u32 = ACTION_COUNT as u32;
 pub(crate) const INTER_ID_BASE: u32 = 1000;

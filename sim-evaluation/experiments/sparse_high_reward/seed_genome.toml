@@ -2,7 +2,7 @@
 num_neurons = 3
 num_synapses = 20
 spatial_prior_sigma = 3.0
-vision_distance = 10
+vision_distance = 5
 
 [lifecycle]
 max_health = 500.0

@@ -112,6 +112,7 @@ fn food_ecology_cycles_consumption_and_regrowth_on_fertile_tile() {
         r: target.1,
         energy: sim.config.food_energy,
         kind: sim_types::FoodKind::Plant,
+        visual: sim_types::food_visual(sim_types::FoodKind::Plant),
     });
     sim.occupancy[target_idx] = Some(Occupant::Food(FoodId(0)));
     sim.next_food_id = 1;

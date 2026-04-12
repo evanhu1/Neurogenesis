@@ -17,7 +17,7 @@ use sim_server::{
 };
 use sim_types::{
     inter_neuron_id, inter_neuron_index, ActionType, BrainLocation, NeuronId, OrganismGenome,
-    OrganismState, SensoryReceptor, SpeciesId, SynapseEdge, WorldSnapshot,
+    OrganismState, RgbColor, SensoryReceptor, SpeciesId, SynapseEdge, WorldSnapshot,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -52,7 +52,7 @@ struct RuntimeState {
     runner: Option<JoinHandle<()>>,
 }
 
-const CHAMPION_POOL_SCHEMA_VERSION: u32 = 2;
+const CHAMPION_POOL_SCHEMA_VERSION: u32 = 3;
 const CHAMPION_POOL_MAX_GENOMES: usize = 32;
 const CHAMPION_POOL_MAX_CANDIDATES_PER_WORLD: usize = 32;
 const DEFAULT_PERSISTED_BRAIN_LOCATION: BrainLocation = BrainLocation { x: 5.0, y: 5.0 };
@@ -94,6 +94,7 @@ struct PersistedOrganismGenome {
     num_synapses: u32,
     spatial_prior_sigma: f32,
     vision_distance: u32,
+    body_color: RgbColor,
     max_health: f32,
     age_of_maturity: u32,
     gestation_ticks: u8,
@@ -343,6 +344,7 @@ fn encode_persisted_genome(genome: &OrganismGenome) -> Result<PersistedOrganismG
         num_synapses: genome.num_synapses,
         spatial_prior_sigma: genome.spatial_prior_sigma,
         vision_distance: genome.vision_distance,
+        body_color: genome.body_color,
         max_health: genome.max_health,
         age_of_maturity: genome.age_of_maturity,
         gestation_ticks: genome.gestation_ticks,
@@ -445,6 +447,7 @@ fn decode_persisted_genome(genome: PersistedOrganismGenome) -> OrganismGenome {
         num_synapses: edges.len() as u32,
         spatial_prior_sigma: genome.spatial_prior_sigma,
         vision_distance: genome.vision_distance,
+        body_color: genome.body_color,
         max_health: genome.max_health,
         age_of_maturity: genome.age_of_maturity,
         gestation_ticks: genome.gestation_ticks,
@@ -1219,7 +1222,7 @@ async fn get_session(state: &AppState, id: Uuid) -> Result<Arc<Session>, AppErro
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sim_types::{ActionType, BrainState, EntityType, FacingDirection, OrganismId, SpeciesId};
+    use sim_types::{ActionType, BrainState, FacingDirection, OrganismId, SpeciesId};
 
     fn make_record(
         generation: u64,
@@ -1232,6 +1235,11 @@ mod tests {
             num_synapses: 0,
             spatial_prior_sigma: 3.5,
             vision_distance: 2,
+            body_color: RgbColor {
+                r: 0.3,
+                g: 0.6,
+                b: 0.9,
+            },
             max_health: energy.max(1.0),
             age_of_maturity: 0,
             gestation_ticks: 2,
@@ -1376,11 +1384,14 @@ mod tests {
 
     #[test]
     fn champion_persistence_round_trip_preserves_brain_layout_and_edges() {
-        let food_receptor = SensoryReceptor::LookRay {
+        let food_receptor = SensoryReceptor::VisionRay {
             ray_offset: 0,
-            look_target: EntityType::Food,
+            channel: sim_types::VisionChannel::Green,
         };
-        let damage_receptor = SensoryReceptor::Damage;
+        let blue_receptor = SensoryReceptor::VisionRay {
+            ray_offset: 0,
+            channel: sim_types::VisionChannel::Blue,
+        };
         let forward_action = ActionType::Forward;
         let attack_action = ActionType::Attack;
 
@@ -1396,7 +1407,7 @@ mod tests {
             vec![BrainLocation { x: 0.0, y: 0.0 }; SensoryReceptor::ordered().count()];
         record.genome.sensory_locations[food_receptor.current_index().unwrap()] =
             BrainLocation { x: 7.0, y: 8.0 };
-        record.genome.sensory_locations[damage_receptor.current_index().unwrap()] =
+        record.genome.sensory_locations[blue_receptor.current_index().unwrap()] =
             BrainLocation { x: 9.0, y: 1.5 };
         record.genome.action_locations[action_type_index(forward_action).unwrap()] =
             BrainLocation { x: 6.0, y: 6.5 };
@@ -1411,7 +1422,7 @@ mod tests {
                 pending_coactivation: 0.0,
             },
             SynapseEdge {
-                pre_neuron_id: damage_receptor.neuron_id().unwrap(),
+                pre_neuron_id: blue_receptor.neuron_id().unwrap(),
                 post_neuron_id: attack_action.neuron_id().unwrap(),
                 weight: -0.5,
                 eligibility: 0.0,
@@ -1435,9 +1446,9 @@ mod tests {
 
     #[test]
     fn champion_persistence_json_uses_symbolic_neuron_refs() {
-        let food_receptor = SensoryReceptor::LookRay {
+        let food_receptor = SensoryReceptor::VisionRay {
             ray_offset: 0,
-            look_target: EntityType::Food,
+            channel: sim_types::VisionChannel::Green,
         };
         let mut record = make_record(2, 1, 1, 10.0);
         record.genome.edges = vec![SynapseEdge {
@@ -1458,7 +1469,7 @@ mod tests {
         );
         assert_eq!(
             json["genome"]["edges"][0]["pre_neuron"]["receptor"]["receptor_type"],
-            "LookRay"
+            "VisionRay"
         );
         assert_eq!(
             json["genome"]["edges"][0]["post_neuron"]["neuron_type"],

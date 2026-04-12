@@ -122,6 +122,7 @@ function normalizeFoodState(food: ApiFoodState): FoodState {
     r: food.r,
     energy: food.energy,
     kind: food.kind,
+    visual: food.visual,
   };
 }
 
@@ -143,6 +144,7 @@ function normalizeWorldOrganismState(organism: ApiWorldOrganismState): WorldOrga
     plant_consumptions_count: organism.plant_consumptions_count,
     prey_consumptions_count: organism.prey_consumptions_count,
     reproductions_count: organism.reproductions_count,
+    visual: organism.visual,
   };
 }
 
@@ -201,6 +203,7 @@ function normalizeTerrainCell(cell: ApiTerrainCell): TerrainCell {
     q: cell.q,
     r: cell.r,
     terrain_type: cell.terrain_type,
+    visual: cell.visual,
   };
 }
 

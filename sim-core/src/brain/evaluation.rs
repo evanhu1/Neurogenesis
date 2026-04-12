@@ -1,7 +1,5 @@
 use super::*;
 use crate::brain::sensing::encode_sensory_inputs;
-#[cfg(feature = "instrumentation")]
-use crate::brain::sensing::look_ray_signal;
 
 #[derive(Clone, Copy)]
 struct SampledAction {
@@ -14,6 +12,8 @@ pub(crate) struct BrainEvalContext<'a> {
     pub(crate) world_width: i32,
     pub(crate) occupancy: &'a [Option<Occupant>],
     pub(crate) spike_map: &'a [bool],
+    pub(crate) organism_colors: &'a [RgbColor],
+    pub(crate) food_visuals: &'a [VisualProperties],
     pub(crate) vision_distance: u32,
     pub(crate) action_temperature: f32,
     pub(crate) action_sample: f32,
@@ -34,14 +34,13 @@ pub(crate) fn evaluate_brain(
         context.world_width,
         context.occupancy,
         context.spike_map,
+        context.organism_colors,
+        context.food_visuals,
         context.vision_distance,
     );
     #[cfg(feature = "instrumentation")]
     {
-        result.food_ahead = look_ray_signal(&ray_scans, 0, EntityType::Food) > 0.0;
-        result.food_left = look_ray_signal(&ray_scans, -1, EntityType::Food) > 0.0;
-        result.food_right = look_ray_signal(&ray_scans, 1, EntityType::Food) > 0.0;
-        result.food_behind = look_ray_signal(&ray_scans, 3, EntityType::Food) > 0.0;
+        result.food_visible = ray_scans.map(|scan| scan.food_visible);
     }
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::ScanAhead, stage_started.elapsed());

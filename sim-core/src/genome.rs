@@ -30,7 +30,7 @@ pub(crate) use topology::{
 };
 
 const MIN_MUTATED_VISION_DISTANCE: u32 = 1;
-const MAX_MUTATED_VISION_DISTANCE: u32 = 32;
+const MAX_MUTATED_VISION_DISTANCE: u32 = 10;
 const MIN_MUTATED_AGE_OF_MATURITY: u32 = 0;
 const MAX_MUTATED_AGE_OF_MATURITY: u32 = 10_000;
 const MIN_MUTATED_GESTATION_TICKS: u8 = 0;
@@ -59,6 +59,7 @@ const SYNAPSE_WEIGHT_PERTURBATION_STDDEV: f32 = 0.15;
 const SYNAPSE_WEIGHT_PERTURB_EDGE_RATE: f32 = 0.8;
 const SYNAPSE_WEIGHT_REPLACEMENT_RATE: f32 = 0.1;
 const LOCATION_PERTURBATION_STDDEV: f32 = 0.75;
+const BODY_COLOR_PERTURBATION_STDDEV: f32 = 0.12;
 pub(crate) const INTER_TIME_CONSTANT_MIN: f32 = 0.1;
 pub(crate) const INTER_TIME_CONSTANT_MAX: f32 = 10.0;
 pub(crate) const INTER_LOG_TIME_CONSTANT_MIN: f32 = -LN_10;
@@ -116,6 +117,7 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
             rng,
         );
     }
+    genome.body_color = mutate_body_color(genome.body_color, rng);
     if rng.random::<f32>() < rates.max_health {
         genome.max_health = perturb_clamped(
             genome.max_health,
@@ -258,6 +260,27 @@ fn sample_uniform_location<R: Rng + ?Sized>(rng: &mut R) -> BrainLocation {
         x: rng.random_range(BRAIN_SPACE_MIN..=BRAIN_SPACE_MAX),
         y: rng.random_range(BRAIN_SPACE_MIN..=BRAIN_SPACE_MAX),
     }
+}
+
+fn sample_body_color<R: Rng + ?Sized>(rng: &mut R) -> sim_types::RgbColor {
+    sim_types::RgbColor {
+        r: rng.random::<f32>(),
+        g: rng.random::<f32>(),
+        b: rng.random::<f32>(),
+    }
+    .clamped()
+}
+
+fn mutate_body_color<R: Rng + ?Sized>(
+    color: sim_types::RgbColor,
+    rng: &mut R,
+) -> sim_types::RgbColor {
+    sim_types::RgbColor {
+        r: color.r + BODY_COLOR_PERTURBATION_STDDEV * standard_normal(rng),
+        g: color.g + BODY_COLOR_PERTURBATION_STDDEV * standard_normal(rng),
+        b: color.b + BODY_COLOR_PERTURBATION_STDDEV * standard_normal(rng),
+    }
+    .clamped()
 }
 
 fn sample_initial_bias<R: Rng + ?Sized>(rng: &mut R) -> f32 {

@@ -79,7 +79,7 @@ fn reset_preserves_champion_pool_bootstrap_behavior() {
 
     let mut champion = test_genome();
     champion.num_neurons = 4;
-    champion.vision_distance = 11;
+    champion.vision_distance = 10;
     champion.inter_biases = vec![0.0, 0.1, 0.2, 0.3];
     champion.inter_log_time_constants = vec![0.0, 0.1, 0.2, 0.3];
     champion.inter_locations = vec![

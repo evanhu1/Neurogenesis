@@ -1,9 +1,11 @@
 use crate::types::ReproductionAnalytics;
-use sim_types::{ActionRecord, ActionType, OrganismId, OrganismState, ReproductionEvent};
+use sim_types::{
+    ActionRecord, ActionType, OrganismId, OrganismState, ReproductionEvent, SensoryReceptor,
+};
 use std::collections::HashMap;
 
 pub const N_ACTIONS: usize = 7;
-pub const SENSORY_BIN_COUNT: usize = 5;
+pub const SENSORY_BIN_COUNT: usize = 1 + SensoryReceptor::VISION_RAY_OFFSETS.len();
 const SURVIVAL_AGE_30: u64 = 30;
 
 #[derive(Debug, Clone, Default)]
@@ -202,7 +204,7 @@ impl Ledger {
             entry.joint[sensory_bin][action_idx].saturating_add(1);
         entry.utilization = record.utilization.clamp(0.0, 1.0);
 
-        if record.food_ahead {
+        if record.food_visible_at_offset(0) {
             entry.food_ahead_ticks = entry.food_ahead_ticks.saturating_add(1);
             if record.selected_action == ActionType::Forward {
                 entry.fwd_when_food_ahead = entry.fwd_when_food_ahead.saturating_add(1);
@@ -329,17 +331,12 @@ fn mean_or_none(sum: f64, count: u64) -> Option<f64> {
 }
 
 fn sensory_bin(record: &ActionRecord) -> usize {
-    if record.food_ahead {
-        1
-    } else if record.food_left {
-        2
-    } else if record.food_right {
-        3
-    } else if record.food_behind {
-        4
-    } else {
-        0
+    for (idx, visible) in record.food_visible.iter().copied().enumerate() {
+        if visible {
+            return idx + 1;
+        }
     }
+    0
 }
 
 fn action_index(action: ActionType) -> usize {
@@ -373,10 +370,7 @@ mod tests {
             organism_id: OrganismId(1),
             selected_action: ActionType::TurnLeft,
             action_failed: true,
-            food_ahead: false,
-            food_left: false,
-            food_right: false,
-            food_behind: false,
+            food_visible: [false; SensoryReceptor::VISION_RAY_OFFSETS.len()],
             damage_taken_last_turn: 0.0,
             age_turns: 0,
             utilization: 0.0,
@@ -386,10 +380,7 @@ mod tests {
             organism_id: OrganismId(1),
             selected_action: ActionType::Eat,
             action_failed: true,
-            food_ahead: false,
-            food_left: false,
-            food_right: false,
-            food_behind: false,
+            food_visible: [false; SensoryReceptor::VISION_RAY_OFFSETS.len()],
             damage_taken_last_turn: 0.0,
             age_turns: 0,
             utilization: 0.0,
@@ -399,10 +390,7 @@ mod tests {
             organism_id: OrganismId(1),
             selected_action: ActionType::Attack,
             action_failed: false,
-            food_ahead: false,
-            food_left: false,
-            food_right: false,
-            food_behind: false,
+            food_visible: [false; SensoryReceptor::VISION_RAY_OFFSETS.len()],
             damage_taken_last_turn: 0.0,
             age_turns: 0,
             utilization: 0.0,
