@@ -1,7 +1,7 @@
 use super::*;
 use crate::grid::{hex_neighbor, rotate_by_steps};
 
-#[derive(Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(crate) struct ColorSignal {
     pub(crate) red: f32,
     pub(crate) green: f32,
@@ -168,19 +168,16 @@ fn scan_ray(
     let max_dist = context.vision_distance.max(1);
     let mut current = position;
     let inv_max_dist = 1.0 / max_dist as f32;
-    let mut color = ColorSignal::default();
-    let mut food_visible = false;
-    let mut remaining_visibility = 1.0_f32;
 
     for distance in 1..=max_dist {
         current = hex_neighbor(current, ray_facing, context.world_width);
         let idx = current.1 as usize * context.world_width as usize + current.0 as usize;
         let distance_signal = (max_dist - distance + 1) as f32 * inv_max_dist;
+        let mut hit = ScanResult::default();
 
         if context.spike_map[idx] {
-            accumulate_visual(
-                &mut color,
-                &mut remaining_visibility,
+            add_visual_signal(
+                &mut hit.color,
                 sim_types::terrain_visual(sim_types::TerrainType::Spikes),
                 distance_signal,
             );
@@ -189,59 +186,50 @@ fn scan_ray(
         match context.occupancy[idx] {
             Some(Occupant::Organism(id)) if id == context.organism_id => {}
             Some(Occupant::Food(id)) => {
-                food_visible |= remaining_visibility > 0.0;
-                accumulate_visual(
-                    &mut color,
-                    &mut remaining_visibility,
+                hit.food_visible = true;
+                add_visual_signal(
+                    &mut hit.color,
                     food_visual_for_id(context.food_visuals, id),
                     distance_signal,
                 );
+                hit.color = hit.color.clamped();
+                return hit;
             }
             Some(Occupant::Organism(id)) => {
-                accumulate_visual(
-                    &mut color,
-                    &mut remaining_visibility,
+                add_visual_signal(
+                    &mut hit.color,
                     organism_visual_for_id(context.organism_colors, id),
                     distance_signal,
                 );
+                hit.color = hit.color.clamped();
+                return hit;
             }
             Some(Occupant::Wall) => {
-                accumulate_visual(
-                    &mut color,
-                    &mut remaining_visibility,
+                add_visual_signal(
+                    &mut hit.color,
                     sim_types::terrain_visual(sim_types::TerrainType::Mountain),
                     distance_signal,
                 );
+                hit.color = hit.color.clamped();
+                return hit;
             }
-            None => {}
-        }
-
-        if remaining_visibility <= f32::EPSILON {
-            break;
+            None => {
+                if context.spike_map[idx] {
+                    hit.color = hit.color.clamped();
+                    return hit;
+                }
+            }
         }
     }
 
-    ScanResult {
-        color: color.clamped(),
-        food_visible,
-    }
+    ScanResult::default()
 }
 
-fn accumulate_visual(
-    color: &mut ColorSignal,
-    remaining_visibility: &mut f32,
-    visual: VisualProperties,
-    distance_signal: f32,
-) {
-    if *remaining_visibility <= 0.0 {
-        return;
-    }
-
-    let contribution = distance_signal * *remaining_visibility;
+fn add_visual_signal(color: &mut ColorSignal, visual: VisualProperties, distance_signal: f32) {
+    let contribution = distance_signal;
     color.red += visual.r * contribution;
     color.green += visual.g * contribution;
     color.blue += visual.b * contribution;
-    *remaining_visibility *= 1.0 - visual.opacity.clamp(0.0, 1.0);
 }
 
 fn organism_visual_for_id(colors: &[RgbColor], id: OrganismId) -> VisualProperties {
@@ -255,10 +243,15 @@ fn food_visual_for_id(visuals: &[VisualProperties], id: sim_types::FoodId) -> Vi
 
 #[cfg(test)]
 mod tests {
-    use super::{contact_ahead_signal, energy_signal, health_signal};
+    use super::{
+        contact_ahead_signal, energy_signal, health_signal, scan_ray, ColorSignal, RaycastContext,
+    };
     use rand::SeedableRng;
     use rand_chacha::ChaCha8Rng;
-    use sim_types::{BrainState, FacingDirection, OrganismId, OrganismState, SpeciesId};
+    use sim_types::{
+        food_visual, BrainState, FacingDirection, FoodId, Occupant, OrganismId, OrganismState,
+        RgbColor, SpeciesId,
+    };
 
     fn test_organism() -> OrganismState {
         let config = sim_config::default_world_config();
@@ -352,5 +345,87 @@ mod tests {
         organism.energy = -5.0;
         assert_eq!(health_signal(&organism), 1.0);
         assert_eq!(energy_signal(&organism), 0.0);
+    }
+
+    #[test]
+    fn scan_ray_stops_at_first_visible_hit() {
+        let world_width = 5;
+        let mut occupancy = vec![None; (world_width * world_width) as usize];
+        let spike_map = vec![false; occupancy.len()];
+        occupancy[1 * world_width as usize + 2] = Some(Occupant::Food(FoodId(0)));
+        occupancy[1 * world_width as usize + 3] = Some(Occupant::Organism(OrganismId(7)));
+        let organism_colors = vec![
+            RgbColor::default(),
+            RgbColor::default(),
+            RgbColor::default(),
+            RgbColor::default(),
+            RgbColor::default(),
+            RgbColor::default(),
+            RgbColor::default(),
+            RgbColor {
+                r: 1.0,
+                g: 0.0,
+                b: 0.0,
+            },
+        ];
+        let food_visuals = vec![food_visual(sim_types::FoodKind::Plant)];
+
+        let scan = scan_ray(
+            (1, 1),
+            FacingDirection::East,
+            RaycastContext {
+                organism_id: OrganismId(1),
+                world_width,
+                occupancy: &occupancy,
+                spike_map: &spike_map,
+                organism_colors: &organism_colors,
+                food_visuals: &food_visuals,
+                vision_distance: 4,
+            },
+        );
+
+        assert!(scan.food_visible);
+        assert_eq!(
+            scan.color,
+            ColorSignal {
+                red: 0.0,
+                green: 1.0,
+                blue: 0.0,
+            }
+        );
+    }
+
+    #[test]
+    fn scan_ray_spike_tile_blocks_farther_entities() {
+        let world_width = 5;
+        let mut occupancy = vec![None; (world_width * world_width) as usize];
+        let mut spike_map = vec![false; occupancy.len()];
+        spike_map[1 * world_width as usize + 2] = true;
+        occupancy[1 * world_width as usize + 3] = Some(Occupant::Food(FoodId(0)));
+        let food_visuals = vec![food_visual(sim_types::FoodKind::Plant)];
+
+        let scan = scan_ray(
+            (1, 1),
+            FacingDirection::East,
+            RaycastContext {
+                organism_id: OrganismId(1),
+                world_width,
+                occupancy: &occupancy,
+                spike_map: &spike_map,
+                organism_colors: &[],
+                food_visuals: &food_visuals,
+                vision_distance: 4,
+            },
+        );
+
+        assert!(!scan.food_visible);
+        assert_eq!(
+            scan.color,
+            ColorSignal {
+                red: 1.0,
+                green: 0.0,
+                blue: 0.0,
+            }
+        );
     }
 }
