@@ -440,6 +440,8 @@ pub struct InterNeuronState {
     pub state: f32,
     pub alpha: f32,
     pub synapses: Vec<SynapseEdge>,
+    #[serde(default, skip)]
+    pub action_synapse_start: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

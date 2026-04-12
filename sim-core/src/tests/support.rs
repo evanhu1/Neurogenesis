@@ -198,6 +198,7 @@ fn forced_brain_with_action(preferred_action: ActionType, confidence: f32) -> Br
         state: inter_state,
         alpha: 1.0,
         synapses: inter_synapses,
+        action_synapse_start: 0,
     }];
     let mut action: Vec<_> = ActionType::ALL
         .iter()

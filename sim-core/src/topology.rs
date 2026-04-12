@@ -83,6 +83,9 @@ pub(crate) fn refresh_parent_ids_and_synapse_count(brain: &mut BrainState) {
         parents.sort();
         parents.dedup();
         inter.neuron.parent_ids = parents;
+        inter.action_synapse_start = inter
+            .synapses
+            .partition_point(|edge| edge.post_neuron_id.0 < ACTION_ID_BASE);
     }
     for (idx, action) in brain.action.iter_mut().enumerate() {
         let mut parents = std::mem::take(&mut action_parent_ids[idx]);
@@ -98,14 +101,6 @@ pub(crate) fn refresh_parent_ids_and_synapse_count(brain: &mut BrainState) {
         .sum::<usize>()
         + brain.inter.iter().map(|n| n.synapses.len()).sum::<usize>();
     brain.synapse_count = synapse_count as u32;
-}
-
-pub(crate) fn split_inter_and_action_edges(
-    edges: &[SynapseEdge],
-) -> (&[SynapseEdge], &[SynapseEdge]) {
-    debug_assert_sorted_by_post_neuron_id(edges);
-    let split_idx = edges.partition_point(|edge| edge.post_neuron_id.0 < ACTION_ID_BASE);
-    edges.split_at(split_idx)
 }
 
 pub(crate) fn split_inter_and_action_edges_mut(

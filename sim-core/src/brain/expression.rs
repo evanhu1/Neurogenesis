@@ -28,6 +28,7 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
             state: 0.0,
             alpha,
             synapses: Vec::new(),
+            action_synapse_start: 0,
         });
     }
 

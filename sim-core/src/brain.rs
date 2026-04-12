@@ -10,7 +10,7 @@ use crate::genome::{
 use crate::profiling::{self, BrainStage};
 use crate::topology::{
     action_neuron_id, constrain_weight, inter_index, inter_neuron_id,
-    refresh_parent_ids_and_synapse_count, split_inter_and_action_edges,
+    refresh_parent_ids_and_synapse_count,
 };
 use sim_types::{
     ActionNeuronState, ActionType, BrainLocation, BrainState, InterNeuronState, NeuronId,

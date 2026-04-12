@@ -66,7 +66,7 @@ pub(crate) fn evaluate_brain(
         );
     }
     for inter in &brain.inter {
-        let (inter_edges, _) = split_inter_and_action_edges(&inter.synapses);
+        let (inter_edges, _) = inter.synapses.split_at(inter.action_synapse_start);
         result.synapse_ops += accumulate_inter_inputs(
             inter_edges,
             inter.neuron.activation,
@@ -90,7 +90,7 @@ pub(crate) fn evaluate_brain(
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     for inter in &brain.inter {
-        let (_, action_edges) = split_inter_and_action_edges(&inter.synapses);
+        let (_, action_edges) = inter.synapses.split_at(inter.action_synapse_start);
         result.synapse_ops +=
             accumulate_action_inputs(action_edges, inter.neuron.activation, &mut action_inputs);
     }
