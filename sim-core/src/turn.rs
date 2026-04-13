@@ -7,7 +7,10 @@ mod snapshot;
 
 #[cfg(feature = "instrumentation")]
 use crate::brain::scan_rays;
-use crate::brain::{action_index, evaluate_brain, BrainEvalContext, BrainScratch, ACTION_COUNT};
+use crate::brain::{
+    action_index, evaluate_brain, BrainEvalContext, BrainScratch, FoodVisualLookup,
+    OrganismColorLookup, ACTION_COUNT,
+};
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right, wrap_position};
 use crate::plasticity::{
     apply_runtime_weight_updates_with_multiplier, compute_pending_coactivations,
@@ -23,8 +26,7 @@ use reproduction::ReproductionPhaseState;
 use sim_types::ActionRecord;
 use sim_types::{
     ActionType, EntityId, FacingDirection, FoodKind, FoodState, Occupant, OrganismFacing,
-    OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, RgbColor, TickDelta,
-    VisualProperties, WorldConfig,
+    OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, TickDelta, WorldConfig,
 };
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};

@@ -13,7 +13,7 @@ use crate::topology::{
     refresh_parent_ids_and_synapse_count,
 };
 use sim_types::{
-    ActionNeuronState, ActionType, BrainLocation, BrainState, InterNeuronState, NeuronId,
+    ActionNeuronState, ActionType, BrainLocation, BrainState, FoodId, InterNeuronState, NeuronId,
     NeuronState, NeuronType, Occupant, OrganismGenome, OrganismId, OrganismState, RgbColor,
     SensoryNeuronState, SensoryReceptor, SynapseEdge, VisionChannel, VisualProperties,
 };
@@ -35,6 +35,8 @@ const DEFAULT_BIAS: f32 = 0.0;
 const MIN_ACTION_TEMPERATURE: f32 = 1.0e-6;
 pub(crate) const EXPLICIT_IDLE_LOGIT_BIAS: f32 = -0.01;
 pub(crate) const VISION_RAY_COUNT: usize = SensoryReceptor::VISION_RAY_OFFSETS.len();
+pub(crate) type OrganismColorLookup = Vec<(OrganismId, RgbColor)>;
+pub(crate) type FoodVisualLookup = Vec<(FoodId, VisualProperties)>;
 
 #[derive(Default)]
 pub(crate) struct BrainEvaluation {

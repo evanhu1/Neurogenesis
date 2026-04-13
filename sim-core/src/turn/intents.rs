@@ -10,8 +10,8 @@ struct IntentBuildContext<'a> {
     world_width: i32,
     occupancy: &'a [Option<Occupant>],
     spike_map: &'a [bool],
-    organism_colors: &'a [RgbColor],
-    food_visuals: &'a [VisualProperties],
+    organism_colors: &'a OrganismColorLookup,
+    food_visuals: &'a FoodVisualLookup,
     pending_actions: &'a [PendingActionState],
     action_temperature: f32,
     runtime_plasticity_enabled: bool,
@@ -238,26 +238,15 @@ fn select_action_for_organism(
     }
 }
 
-fn build_organism_color_lookup(organisms: &[OrganismState]) -> Vec<RgbColor> {
-    let max_id = organisms
+fn build_organism_color_lookup(organisms: &[OrganismState]) -> OrganismColorLookup {
+    organisms
         .iter()
-        .map(|organism| organism.id.0 as usize)
-        .max();
-    let mut colors = vec![RgbColor::default(); max_id.map_or(0, |id| id.saturating_add(1))];
-    for organism in organisms {
-        colors[organism.id.0 as usize] = organism.genome.body_color;
-    }
-    colors
+        .map(|organism| (organism.id, organism.genome.body_color))
+        .collect()
 }
 
-fn build_food_visual_lookup(foods: &[FoodState]) -> Vec<VisualProperties> {
-    let max_id = foods.iter().map(|food| food.id.0 as usize).max();
-    let mut visuals =
-        vec![VisualProperties::default(); max_id.map_or(0, |id| id.saturating_add(1))];
-    for food in foods {
-        visuals[food.id.0 as usize] = food.visual;
-    }
-    visuals
+fn build_food_visual_lookup(foods: &[FoodState]) -> FoodVisualLookup {
+    foods.iter().map(|food| (food.id, food.visual)).collect()
 }
 
 fn translate_action_to_intent(

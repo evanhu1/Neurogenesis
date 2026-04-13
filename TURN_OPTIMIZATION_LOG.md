@@ -25,14 +25,14 @@
 - Planned change:
   Keep RGB outputs, but stop the ray when the first non-self organism, food, or wall is encountered. Spikes remain visible only on the hit cell.
 - Status:
-  Kept.
+  Invalidated.
 - Validation:
   `cargo test -p sim-core --release`
 - 10000-turn comparison:
   Baseline: `avg_wall_us_per_turn 621.124`, `scan_ahead 0.177 us/call`
   Attempt 1: `avg_wall_us_per_turn 505.993`, `scan_ahead 0.088 us/call`
 - Notes:
-  This restores the pre-RGB stopping rule while keeping RGB channels, and it materially reduces both total wall time and per-call sensing cost.
+  This was fast, but it changed the intended opacity semantics. Later reverted after confirming that translucent visuals should continue accumulating through the ray.
 
 ## Attempt 2
 
@@ -89,3 +89,17 @@
   Attempt 5 candidate: `avg_wall_us_per_turn 499.810`
 - Notes:
   `scan_ahead` improved noticeably, but end-to-end wall time moved by only about `0.06%`. Not enough to justify extra specialized routing logic.
+
+## Attempt 6
+
+- Hypothesis:
+  The real long-run slowdown is not a classic leak in ray math; it is the RGB lookup plumbing rebuilding dense `id -> visual` vectors every tick, sized by the highest organism/food ID ever allocated instead of current live entity counts.
+- Planned change:
+  Restore opacity-based ray accumulation and replace the dense `max_id + 1` lookup vectors with compact sorted live-entity lookup tables keyed by current IDs.
+- Status:
+  Kept.
+- 100000-turn comparison:
+  Checkpoint `e014e54`: `avg_wall_us_per_turn 2264.745`, `max RSS 8636710912 bytes`
+  Attempt 6: `avg_wall_us_per_turn 584.346`, `max RSS 41992192 bytes`
+- Notes:
+  This removes the unbounded working-set growth introduced by the RGB vision lookup path. The short 10000-turn sanity run also improved to `avg_wall_us_per_turn 478.828` with about `36 MB` RSS.
