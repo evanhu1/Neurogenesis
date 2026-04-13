@@ -91,6 +91,10 @@ impl<'a> CommitPhaseContext<'a> {
 
             self.sim.occupancy[from_idx] = None;
             self.sim.occupancy[to_idx] = Some(Occupant::Organism(resolution.actor_id));
+            if !self.sim.visual_map.is_empty() {
+                self.sim.visual_map[to_idx] = self.sim.visual_map[from_idx];
+                self.sim.visual_map[from_idx] = self.sim.visual_map_base[from_idx];
+            }
             let organism = &mut self.sim.organisms[resolution.actor_idx];
             organism.q = resolution.to.0;
             organism.r = resolution.to.1;
@@ -168,6 +172,9 @@ impl<'a> CommitPhaseContext<'a> {
         let food = self.sim.foods[food_idx].clone();
         self.removed_food[food_idx] = true;
         self.sim.occupancy[target_idx] = None;
+        if !self.sim.visual_map.is_empty() {
+            self.sim.visual_map[target_idx] = self.sim.visual_map_base[target_idx];
+        }
         if food.kind == FoodKind::Plant {
             self.sim.schedule_food_regrowth(target_idx);
         }
@@ -254,6 +261,9 @@ impl<'a> CommitPhaseContext<'a> {
             r: position.1,
         });
         self.sim.occupancy[cell_idx] = None;
+        if !self.sim.visual_map.is_empty() {
+            self.sim.visual_map[cell_idx] = self.sim.visual_map_base[cell_idx];
+        }
         if let Some(corpse) = self.sim.spawn_corpse_at_cell(cell_idx, corpse_energy) {
             self.result.food_spawned.push(corpse);
         }

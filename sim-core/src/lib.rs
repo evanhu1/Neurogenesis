@@ -226,6 +226,7 @@ impl Simulation {
                     sim_types::terrain_visual(sim_types::TerrainType::Mountain);
             }
         }
+        self.visual_map = self.visual_map_base.clone();
     }
 
     pub fn turn(&self) -> u64 {

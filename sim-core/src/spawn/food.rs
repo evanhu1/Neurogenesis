@@ -157,6 +157,9 @@ impl Simulation {
             visual: sim_types::food_visual(kind),
         };
         self.occupancy[cell_idx] = Some(Occupant::Food(food.id));
+        if !self.visual_map.is_empty() {
+            self.visual_map[cell_idx] = food.visual;
+        }
         self.foods.push(food.clone());
         Some(food)
     }

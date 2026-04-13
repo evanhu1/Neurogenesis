@@ -41,13 +41,6 @@ struct ActionIntentOutcome {
 
 impl Simulation {
     pub(super) fn build_intents(&mut self, snapshot: &TurnSnapshot) -> Vec<OrganismIntent> {
-        rebuild_visual_map(
-            &mut self.visual_map,
-            &self.visual_map_base,
-            &self.organisms,
-            &self.foods,
-            self.config.world_width as usize,
-        );
         let context = IntentBuildContext {
             world_width: self.config.world_width as i32,
             occupancy: &self.occupancy,
@@ -236,26 +229,6 @@ fn select_action_for_organism(
         synapse_ops: evaluation.synapse_ops,
         #[cfg(feature = "instrumentation")]
         food_visible: evaluation.food_visible,
-    }
-}
-
-fn rebuild_visual_map(
-    visual_map: &mut Vec<VisualProperties>,
-    visual_map_base: &[VisualProperties],
-    organisms: &[OrganismState],
-    foods: &[FoodState],
-    world_width: usize,
-) {
-    let capacity = world_width * world_width;
-    visual_map.resize(capacity, VisualProperties::default());
-    visual_map.copy_from_slice(&visual_map_base[..capacity]);
-    for organism in organisms {
-        let idx = organism.r as usize * world_width + organism.q as usize;
-        visual_map[idx] = sim_types::organism_visual(organism.genome.body_color);
-    }
-    for food in foods {
-        let idx = food.r as usize * world_width + food.q as usize;
-        visual_map[idx] = food.visual;
     }
 }
 

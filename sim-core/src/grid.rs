@@ -174,6 +174,10 @@ impl Simulation {
         organism.r = r;
         refresh_organism_base_metabolic_cost(&mut organism);
         self.occupancy[cell_idx] = Some(Occupant::Organism(organism.id));
+        if !self.visual_map.is_empty() {
+            self.visual_map[cell_idx] =
+                sim_types::organism_visual(organism.genome.body_color);
+        }
         self.organisms.push(organism);
         self.pending_actions.push(PendingActionState::default());
         self.reward_ledgers.push(crate::RewardLedger::default());

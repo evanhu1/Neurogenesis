@@ -35,6 +35,9 @@ impl Simulation {
                 dead[idx] = true;
                 let cell_idx = organism.r as usize * world_width + organism.q as usize;
                 self.occupancy[cell_idx] = None;
+                if !self.visual_map.is_empty() {
+                    self.visual_map[cell_idx] = self.visual_map_base[cell_idx];
+                }
                 starved_positions.push(RemovedEntityPosition {
                     entity_id: EntityId::Organism(organism.id),
                     q: organism.q,
