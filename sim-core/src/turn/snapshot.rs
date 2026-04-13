@@ -1,28 +1,6 @@
 use super::*;
 
 impl Simulation {
-    pub(super) fn build_turn_snapshot(&self) -> TurnSnapshot {
-        let len = self.organisms.len();
-        let mut organism_ids = Vec::with_capacity(len);
-        let mut organism_states = Vec::with_capacity(len);
-
-        for organism in &self.organisms {
-            organism_ids.push(organism.id);
-            organism_states.push(SnapshotOrganismState {
-                q: organism.q,
-                r: organism.r,
-                facing: organism.facing,
-            });
-        }
-
-        TurnSnapshot {
-            world_width: self.config.world_width as i32,
-            organism_count: len,
-            organism_ids,
-            organism_states,
-        }
-    }
-
     pub(super) fn reconcile_pending_actions(&mut self) {
         if self.pending_actions.len() != self.organisms.len() {
             self.pending_actions
@@ -37,15 +15,10 @@ impl Simulation {
         }
     }
 
-    pub(super) fn clear_reward_ledgers(&mut self) {
-        for ledger in &mut self.reward_ledgers {
-            ledger.clear();
-        }
-    }
-
-    pub(super) fn clear_damage_state(&mut self) {
-        for organism in &mut self.organisms {
+    pub(super) fn clear_turn_transient_state(&mut self) {
+        for (organism, ledger) in self.organisms.iter_mut().zip(self.reward_ledgers.iter_mut()) {
             organism.damage_taken_last_turn = 0.0;
+            ledger.clear();
         }
     }
 

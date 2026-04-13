@@ -14,12 +14,12 @@ struct CommitPhaseContext<'a> {
 impl Simulation {
     pub(super) fn commit_phase(
         &mut self,
-        snapshot: &TurnSnapshot,
+        world_width: i32,
         intents: &[OrganismIntent],
         resolutions: &[MoveResolution],
         skip_pending_action_decrement: &mut Vec<bool>,
     ) -> CommitResult {
-        CommitPhaseContext::new(self, snapshot, intents, resolutions)
+        CommitPhaseContext::new(self, world_width, intents, resolutions)
             .run(skip_pending_action_decrement)
     }
 }
@@ -27,7 +27,7 @@ impl Simulation {
 impl<'a> CommitPhaseContext<'a> {
     fn new(
         sim: &'a mut Simulation,
-        snapshot: &TurnSnapshot,
+        world_width: i32,
         intents: &'a [OrganismIntent],
         resolutions: &'a [MoveResolution],
     ) -> Self {
@@ -37,7 +37,7 @@ impl<'a> CommitPhaseContext<'a> {
             sim,
             intents,
             resolutions,
-            world_width_usize: snapshot.world_width as usize,
+            world_width_usize: world_width as usize,
             removed_food: vec![false; food_count],
             dead_organisms: vec![false; org_count],
             result: CommitResult::default(),

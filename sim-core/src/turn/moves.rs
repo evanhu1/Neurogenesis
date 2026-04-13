@@ -3,13 +3,12 @@ use super::*;
 impl Simulation {
     pub(super) fn resolve_moves(
         &self,
-        snapshot: &TurnSnapshot,
+        world_width: i32,
         occupancy: &[Option<Occupant>],
         intents: &[OrganismIntent],
     ) -> Vec<MoveResolution> {
-        let w = snapshot.world_width as usize;
-        let mut best_by_cell: HashMap<usize, MoveCandidate> =
-            HashMap::with_capacity(intents.len().saturating_div(2).max(1));
+        let w = world_width as usize;
+        let mut candidates: Vec<(usize, MoveCandidate)> = Vec::new();
 
         for intent in intents {
             if !intent.wants_move {
@@ -22,32 +21,35 @@ impl Simulation {
             if occupancy[cell_idx].is_some() {
                 continue;
             }
-            let candidate = MoveCandidate {
-                actor_idx: intent.idx,
-                actor_id: intent.id,
-                from: intent.from,
-                target,
-                confidence: intent.move_confidence,
-            };
-            match best_by_cell.get_mut(&cell_idx) {
-                Some(current)
-                    if compare_move_candidates(&candidate, current) == Ordering::Greater =>
-                {
-                    *current = candidate;
-                }
-                Some(_) => {}
-                None => {
-                    best_by_cell.insert(cell_idx, candidate);
-                }
-            }
+            candidates.push((
+                cell_idx,
+                MoveCandidate {
+                    actor_idx: intent.idx,
+                    actor_id: intent.id,
+                    from: intent.from,
+                    target,
+                    confidence: intent.move_confidence,
+                },
+            ));
         }
 
-        let mut winners: Vec<MoveCandidate> = best_by_cell.into_values().collect();
-        winners.sort_by_key(|winner| winner.actor_idx);
+        // Sort by cell index, then best candidate first within each cell.
+        // dedup_by_key keeps the first (best) candidate per cell.
+        candidates.sort_unstable_by(|a, b| {
+            a.0.cmp(&b.0).then_with(|| {
+                b.1.confidence
+                    .total_cmp(&a.1.confidence)
+                    .then_with(|| a.1.actor_id.cmp(&b.1.actor_id))
+            })
+        });
+        candidates.dedup_by_key(|c| c.0);
 
-        winners
+        // Sort winners by actor_idx for deterministic commit ordering.
+        candidates.sort_unstable_by_key(|c| c.1.actor_idx);
+
+        candidates
             .into_iter()
-            .map(|winner| MoveResolution {
+            .map(|(_, winner)| MoveResolution {
                 actor_idx: winner.actor_idx,
                 actor_id: winner.actor_id,
                 from: winner.from,
@@ -55,10 +57,4 @@ impl Simulation {
             })
             .collect()
     }
-}
-
-pub(super) fn compare_move_candidates(a: &MoveCandidate, b: &MoveCandidate) -> Ordering {
-    a.confidence
-        .total_cmp(&b.confidence)
-        .then_with(|| b.actor_id.cmp(&a.actor_id))
 }

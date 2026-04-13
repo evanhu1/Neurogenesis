@@ -74,10 +74,10 @@ pub(crate) struct BrainScratch {
 impl BrainScratch {
     pub(crate) fn new() -> Self {
         Self {
-            inter_inputs: Vec::new(),
-            prev_inter: Vec::new(),
-            prev_inter_states: Vec::new(),
-            inter_activations: Vec::new(),
+            inter_inputs: Vec::with_capacity(32),
+            prev_inter: Vec::with_capacity(32),
+            prev_inter_states: Vec::with_capacity(32),
+            inter_activations: Vec::with_capacity(32),
             centered_action_post_signals: [0.0; ACTION_COUNT],
             selected_action_index: None,
             selected_action_confidence: 0.0,

@@ -25,8 +25,8 @@ use sim_types::{
     ActionType, EntityId, FacingDirection, FoodKind, FoodState, Occupant, OrganismFacing,
     OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, TickDelta, VisualProperties,
 };
-use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex, OnceLock};
 #[cfg(feature = "profiling")]
 use std::time::Instant;
@@ -46,12 +46,9 @@ struct SnapshotOrganismState {
     facing: FacingDirection,
 }
 
-#[derive(Clone)]
 struct TurnSnapshot {
     world_width: i32,
     organism_count: usize,
-    organism_ids: Vec<OrganismId>,
-    organism_states: Vec<SnapshotOrganismState>,
 }
 
 #[derive(Clone, Copy)]
@@ -141,7 +138,7 @@ impl Simulation {
     pub fn tick(&mut self) -> TickDelta {
         self.reconcile_pending_actions();
         self.reconcile_reward_ledgers();
-        self.clear_reward_ledgers();
+        self.clear_turn_transient_state();
 
         #[cfg(feature = "profiling")]
         let tick_started = Instant::now();
@@ -149,12 +146,13 @@ impl Simulation {
         let (starvations, starved_removed_positions, lifecycle_reproduction_events) =
             profile_turn_phase!(TurnPhase::Lifecycle, { self.lifecycle_phase() });
 
-        let snapshot = profile_turn_phase!(TurnPhase::Snapshot, { self.build_turn_snapshot() });
+        let snapshot = TurnSnapshot {
+            world_width: self.config.world_width as i32,
+            organism_count: self.organisms.len(),
+        };
 
         let intents = profile_turn_phase!(TurnPhase::Intents, {
-            let intents = self.build_intents(&snapshot);
-            self.clear_damage_state();
-            intents
+            self.build_intents(&snapshot)
         });
         let synapse_ops = intents.iter().map(|intent| intent.synapse_ops).sum::<u64>();
 
@@ -176,12 +174,12 @@ impl Simulation {
         });
 
         let resolutions = profile_turn_phase!(TurnPhase::MoveResolution, {
-            self.resolve_moves(&snapshot, &self.occupancy, &intents)
+            self.resolve_moves(snapshot.world_width, &self.occupancy, &intents)
         });
 
         let commit = profile_turn_phase!(TurnPhase::Commit, {
             let commit = self.commit_phase(
-                &snapshot,
+                snapshot.world_width,
                 &intents,
                 &resolutions,
                 reproduction_state.skip_pending_action_decrement_mut(),

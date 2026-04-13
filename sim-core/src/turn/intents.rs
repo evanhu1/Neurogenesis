@@ -42,7 +42,7 @@ struct ActionIntentOutcome {
 impl Simulation {
     pub(super) fn build_intents(&mut self, snapshot: &TurnSnapshot) -> Vec<OrganismIntent> {
         let context = IntentBuildContext {
-            world_width: self.config.world_width as i32,
+            world_width: snapshot.world_width,
             occupancy: &self.occupancy,
             spike_map: &self.spike_map,
             visual_map: &self.visual_map,
@@ -62,11 +62,16 @@ impl Simulation {
                 .with_min_len(INTENT_PARALLEL_MIN_LEN)
                 .enumerate()
                 .map_init(BrainScratch::new, |scratch, (idx, organism)| {
+                    let snapshot_state = SnapshotOrganismState {
+                        q: organism.q,
+                        r: organism.r,
+                        facing: organism.facing,
+                    };
                     build_intent_for_organism(
                         idx,
                         organism,
-                        snapshot.organism_states[idx],
-                        snapshot.organism_ids[idx],
+                        snapshot_state,
+                        organism.id,
                         context,
                         scratch,
                     )
