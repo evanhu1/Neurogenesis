@@ -36,6 +36,22 @@ const MIN_ACTION_TEMPERATURE: f32 = 1.0e-6;
 pub(crate) const EXPLICIT_IDLE_LOGIT_BIAS: f32 = -0.01;
 pub(crate) const VISION_RAY_COUNT: usize = SensoryReceptor::VISION_RAY_OFFSETS.len();
 
+/// Fast tanh approximation using a Padé rational polynomial.
+/// Accurate to ~1e-5 for |x| < 4.97, exact ±1.0 for larger inputs.
+#[inline(always)]
+pub(crate) fn fast_tanh(x: f32) -> f32 {
+    if x >= 4.97 {
+        return 1.0;
+    }
+    if x <= -4.97 {
+        return -1.0;
+    }
+    let x2 = x * x;
+    let num = x * (135135.0 + x2 * (17325.0 + x2 * (378.0 + x2)));
+    let den = 135135.0 + x2 * (62370.0 + x2 * (3150.0 + x2 * 28.0));
+    num / den
+}
+
 #[derive(Default)]
 pub(crate) struct BrainEvaluation {
     pub(crate) selected_action: ActionType,

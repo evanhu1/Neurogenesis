@@ -68,6 +68,8 @@ pub struct Simulation {
     food_regrowth_schedule: BTreeMap<u64, Vec<usize>>,
     #[serde(skip)]
     visual_map: Vec<VisualProperties>,
+    #[serde(skip)]
+    visual_map_base: Vec<VisualProperties>,
     #[cfg(feature = "instrumentation")]
     #[serde(skip)]
     action_records: Vec<ActionRecord>,
@@ -181,6 +183,7 @@ impl Simulation {
             foods: Vec::new(),
             occupancy: vec![None; capacity],
             visual_map: Vec::new(),
+            visual_map_base: Vec::new(),
             terrain_map: Vec::new(),
             spike_map: Vec::new(),
             food_fertility: Vec::new(),
@@ -194,6 +197,7 @@ impl Simulation {
         };
 
         sim.initialize_terrain();
+        sim.build_visual_map_base();
         sim.spawn_initial_population();
         sim.initialize_food_ecology();
         sim.seed_initial_food_supply();
@@ -211,6 +215,17 @@ impl Simulation {
         } else {
             1.0
         };
+    }
+
+    fn build_visual_map_base(&mut self) {
+        let capacity = self.config.world_width as usize * self.config.world_width as usize;
+        self.visual_map_base = vec![VisualProperties::default(); capacity];
+        for (idx, blocked) in self.terrain_map.iter().enumerate() {
+            if *blocked {
+                self.visual_map_base[idx] =
+                    sim_types::terrain_visual(sim_types::TerrainType::Mountain);
+            }
+        }
     }
 
     pub fn turn(&self) -> u64 {
@@ -285,6 +300,7 @@ impl Simulation {
         self.foods.clear();
         self.occupancy.fill(None);
         self.visual_map.clear();
+        self.visual_map_base.clear();
         self.terrain_map.clear();
         self.spike_map.clear();
         self.food_fertility.clear();
@@ -296,6 +312,7 @@ impl Simulation {
         self.action_record_indices.clear();
         self.metrics = MetricsSnapshot::default();
         self.initialize_terrain();
+        self.build_visual_map_base();
         self.spawn_initial_population();
         self.initialize_food_ecology();
         self.seed_initial_food_supply();

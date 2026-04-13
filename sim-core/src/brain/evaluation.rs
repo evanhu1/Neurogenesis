@@ -80,7 +80,7 @@ pub(crate) fn evaluate_brain(
         let alpha = neuron.alpha;
         let previous = scratch.prev_inter_states[idx];
         neuron.state = (1.0 - alpha) * previous + alpha * scratch.inter_inputs[idx];
-        neuron.neuron.activation = neuron.state.tanh();
+        neuron.neuron.activation = super::fast_tanh(neuron.state);
     }
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::InterActivation, stage_started.elapsed());

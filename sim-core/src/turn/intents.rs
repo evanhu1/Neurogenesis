@@ -43,9 +43,9 @@ impl Simulation {
     pub(super) fn build_intents(&mut self, snapshot: &TurnSnapshot) -> Vec<OrganismIntent> {
         rebuild_visual_map(
             &mut self.visual_map,
+            &self.visual_map_base,
             &self.organisms,
             &self.foods,
-            &self.terrain_map,
             self.config.world_width as usize,
         );
         let context = IntentBuildContext {
@@ -241,19 +241,14 @@ fn select_action_for_organism(
 
 fn rebuild_visual_map(
     visual_map: &mut Vec<VisualProperties>,
+    visual_map_base: &[VisualProperties],
     organisms: &[OrganismState],
     foods: &[FoodState],
-    terrain_map: &[bool],
     world_width: usize,
 ) {
     let capacity = world_width * world_width;
     visual_map.resize(capacity, VisualProperties::default());
-    visual_map.fill(VisualProperties::default());
-    for (idx, blocked) in terrain_map.iter().enumerate() {
-        if *blocked {
-            visual_map[idx] = sim_types::terrain_visual(sim_types::TerrainType::Mountain);
-        }
-    }
+    visual_map.copy_from_slice(&visual_map_base[..capacity]);
     for organism in organisms {
         let idx = organism.r as usize * world_width + organism.q as usize;
         visual_map[idx] = sim_types::organism_visual(organism.genome.body_color);

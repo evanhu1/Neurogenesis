@@ -1,4 +1,4 @@
-use crate::brain::BrainScratch;
+use crate::brain::{fast_tanh, BrainScratch};
 use crate::metabolism::refresh_organism_base_metabolic_cost;
 #[cfg(feature = "profiling")]
 use crate::profiling::{self, BrainStage};
@@ -156,9 +156,10 @@ impl PlasticityStepParams {
         };
 
         Self {
-            dopamine_signal: ((reward_ledger.reward_signal() * reward_signal_multiplier)
-                / DOPAMINE_ENERGY_DELTA_SCALE)
-                .tanh(),
+            dopamine_signal: fast_tanh(
+                (reward_ledger.reward_signal() * reward_signal_multiplier)
+                    / DOPAMINE_ENERGY_DELTA_SCALE,
+            ),
             eta,
             apply_weight_update: plasticity_started,
             eligibility_retention: organism.genome.eligibility_retention.clamp(0.0, 1.0),
