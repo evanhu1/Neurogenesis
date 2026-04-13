@@ -10,8 +10,7 @@ struct IntentBuildContext<'a> {
     world_width: i32,
     occupancy: &'a [Option<Occupant>],
     spike_map: &'a [bool],
-    organism_colors: &'a OrganismColorLookup,
-    food_visuals: &'a FoodVisualLookup,
+    visual_map: &'a [VisualProperties],
     pending_actions: &'a [PendingActionState],
     action_temperature: f32,
     runtime_plasticity_enabled: bool,
@@ -42,14 +41,18 @@ struct ActionIntentOutcome {
 
 impl Simulation {
     pub(super) fn build_intents(&mut self, snapshot: &TurnSnapshot) -> Vec<OrganismIntent> {
-        let organism_colors = build_organism_color_lookup(self.organisms());
-        let food_visuals = build_food_visual_lookup(&self.foods);
+        rebuild_visual_map(
+            &mut self.visual_map,
+            &self.organisms,
+            &self.foods,
+            &self.terrain_map,
+            self.config.world_width as usize,
+        );
         let context = IntentBuildContext {
             world_width: self.config.world_width as i32,
             occupancy: &self.occupancy,
             spike_map: &self.spike_map,
-            organism_colors: &organism_colors,
-            food_visuals: &food_visuals,
+            visual_map: &self.visual_map,
             pending_actions: &self.pending_actions,
             action_temperature: self.config.action_temperature,
             runtime_plasticity_enabled: self.config.runtime_plasticity_enabled,
@@ -188,8 +191,7 @@ fn select_action_for_organism(
                 context.world_width,
                 context.occupancy,
                 context.spike_map,
-                context.organism_colors,
-                context.food_visuals,
+                context.visual_map,
                 vision_distance,
             );
             ray_scans.map(|scan| scan.food_visible)
@@ -210,8 +212,7 @@ fn select_action_for_organism(
             world_width: context.world_width,
             occupancy: context.occupancy,
             spike_map: context.spike_map,
-            organism_colors: context.organism_colors,
-            food_visuals: context.food_visuals,
+            visual_map: context.visual_map,
             vision_distance,
             action_temperature: context.action_temperature,
             action_sample,
@@ -238,15 +239,29 @@ fn select_action_for_organism(
     }
 }
 
-fn build_organism_color_lookup(organisms: &[OrganismState]) -> OrganismColorLookup {
-    organisms
-        .iter()
-        .map(|organism| (organism.id, organism.genome.body_color))
-        .collect()
-}
-
-fn build_food_visual_lookup(foods: &[FoodState]) -> FoodVisualLookup {
-    foods.iter().map(|food| (food.id, food.visual)).collect()
+fn rebuild_visual_map(
+    visual_map: &mut Vec<VisualProperties>,
+    organisms: &[OrganismState],
+    foods: &[FoodState],
+    terrain_map: &[bool],
+    world_width: usize,
+) {
+    let capacity = world_width * world_width;
+    visual_map.resize(capacity, VisualProperties::default());
+    visual_map.fill(VisualProperties::default());
+    for (idx, blocked) in terrain_map.iter().enumerate() {
+        if *blocked {
+            visual_map[idx] = sim_types::terrain_visual(sim_types::TerrainType::Mountain);
+        }
+    }
+    for organism in organisms {
+        let idx = organism.r as usize * world_width + organism.q as usize;
+        visual_map[idx] = sim_types::organism_visual(organism.genome.body_color);
+    }
+    for food in foods {
+        let idx = food.r as usize * world_width + food.q as usize;
+        visual_map[idx] = food.visual;
+    }
 }
 
 fn translate_action_to_intent(

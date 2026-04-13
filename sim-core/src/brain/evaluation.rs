@@ -12,8 +12,7 @@ pub(crate) struct BrainEvalContext<'a> {
     pub(crate) world_width: i32,
     pub(crate) occupancy: &'a [Option<Occupant>],
     pub(crate) spike_map: &'a [bool],
-    pub(crate) organism_colors: &'a OrganismColorLookup,
-    pub(crate) food_visuals: &'a FoodVisualLookup,
+    pub(crate) visual_map: &'a [VisualProperties],
     pub(crate) vision_distance: u32,
     pub(crate) action_temperature: f32,
     pub(crate) action_sample: f32,
@@ -34,8 +33,7 @@ pub(crate) fn evaluate_brain(
         context.world_width,
         context.occupancy,
         context.spike_map,
-        context.organism_colors,
-        context.food_visuals,
+        context.visual_map,
         context.vision_distance,
     );
     #[cfg(feature = "instrumentation")]

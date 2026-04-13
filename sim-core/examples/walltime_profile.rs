@@ -1,6 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use sim_core::Simulation;
-use sim_types::WorldConfig;
+use sim_types::{SeedGenomeConfig, WorldConfig};
+use std::time::Instant;
 
 fn stable_perf_config() -> WorldConfig {
     WorldConfig {
@@ -12,7 +12,7 @@ fn stable_perf_config() -> WorldConfig {
         passive_metabolism_cost_per_unit: 0.005,
         move_action_energy_cost: 0.0,
         action_temperature: 0.5,
-        intent_parallel_threads: 8,
+        intent_parallel_threads: 1,
         food_regrowth_interval: 10,
         food_regrowth_jitter: 2,
         food_fertility_threshold: 0.6,
@@ -24,7 +24,7 @@ fn stable_perf_config() -> WorldConfig {
         meta_mutation_enabled: true,
         runtime_plasticity_enabled: true,
         force_random_actions: false,
-        seed_genome_config: sim_types::SeedGenomeConfig {
+        seed_genome_config: SeedGenomeConfig {
             num_neurons: 20,
             num_synapses: 80,
             spatial_prior_sigma: 3.5,
@@ -58,59 +58,22 @@ fn stable_perf_config() -> WorldConfig {
     }
 }
 
-fn bench_1000_turns(c: &mut Criterion) {
-    let config = stable_perf_config();
-    c.bench_function(
-        "turn throughput / 1000 turns (stable workload, seed 42)",
-        |b| {
-            b.iter_batched(
-                || Simulation::new(config.clone(), 42).expect("simulation init"),
-                |mut sim| black_box(sim.step_n(1000)),
-                criterion::BatchSize::SmallInput,
-            );
-        },
-    );
-}
-
-fn bench_1000_turns_headless(c: &mut Criterion) {
-    let config = stable_perf_config();
-    c.bench_function(
-        "turn throughput / 1000 turns headless (advance_n, seed 42)",
-        |b| {
-            b.iter_batched(
-                || Simulation::new(config.clone(), 42).expect("simulation init"),
-                |mut sim| {
-                    sim.advance_n(1000);
-                    black_box(&sim);
-                },
-                criterion::BatchSize::SmallInput,
-            );
-        },
-    );
-}
-
-fn bench_1000_turns_single_thread(c: &mut Criterion) {
+fn main() {
+    let threads: u32 = std::env::args()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
     let mut config = stable_perf_config();
-    config.intent_parallel_threads = 1;
-    c.bench_function(
-        "turn throughput / 1000 turns single-thread (seed 42)",
-        |b| {
-            b.iter_batched(
-                || Simulation::new(config.clone(), 42).expect("simulation init"),
-                |mut sim| {
-                    sim.advance_n(1000);
-                    black_box(&sim);
-                },
-                criterion::BatchSize::SmallInput,
-            );
-        },
+    config.intent_parallel_threads = threads;
+    let mut sim = Simulation::new(config, 42).expect("init");
+    sim.advance_n(200); // warmup
+    let started = Instant::now();
+    sim.advance_n(10000);
+    let elapsed = started.elapsed();
+    eprintln!(
+        "10000 turns ({} threads): {:.1}ms ({:.1} us/turn)",
+        threads,
+        elapsed.as_secs_f64() * 1000.0,
+        elapsed.as_micros() as f64 / 10000.0
     );
 }
-
-criterion_group!(
-    benches,
-    bench_1000_turns,
-    bench_1000_turns_headless,
-    bench_1000_turns_single_thread,
-);
-criterion_main!(benches);

@@ -41,8 +41,7 @@ struct RaycastContext<'a> {
     world_width: i32,
     occupancy: &'a [Option<Occupant>],
     spike_map: &'a [bool],
-    organism_colors: &'a OrganismColorLookup,
-    food_visuals: &'a FoodVisualLookup,
+    visual_map: &'a [VisualProperties],
     vision_distance: u32,
 }
 
@@ -51,8 +50,7 @@ pub(super) fn encode_sensory_inputs(
     world_width: i32,
     occupancy: &[Option<Occupant>],
     spike_map: &[bool],
-    organism_colors: &OrganismColorLookup,
-    food_visuals: &FoodVisualLookup,
+    visual_map: &[VisualProperties],
     vision_distance: u32,
 ) -> RayScans {
     let contact_ahead = contact_ahead_signal(
@@ -71,8 +69,7 @@ pub(super) fn encode_sensory_inputs(
         world_width,
         occupancy,
         spike_map,
-        organism_colors,
-        food_visuals,
+        visual_map,
         vision_distance,
     );
 
@@ -109,8 +106,7 @@ pub(crate) fn scan_rays(
     world_width: i32,
     occupancy: &[Option<Occupant>],
     spike_map: &[bool],
-    organism_colors: &OrganismColorLookup,
-    food_visuals: &FoodVisualLookup,
+    visual_map: &[VisualProperties],
     vision_distance: u32,
 ) -> RayScans {
     let context = RaycastContext {
@@ -118,8 +114,7 @@ pub(crate) fn scan_rays(
         world_width,
         occupancy,
         spike_map,
-        organism_colors,
-        food_visuals,
+        visual_map,
         vision_distance,
     };
     std::array::from_fn(|idx| {
@@ -188,28 +183,20 @@ fn scan_ray(
 
         match context.occupancy[idx] {
             Some(Occupant::Organism(id)) if id == context.organism_id => {}
-            Some(Occupant::Food(id)) => {
+            Some(Occupant::Food(_)) => {
                 food_visible |= remaining_visibility > 0.0;
                 accumulate_visual(
                     &mut color,
                     &mut remaining_visibility,
-                    food_visual_for_id(context.food_visuals, id),
+                    context.visual_map[idx],
                     distance_signal,
                 );
             }
-            Some(Occupant::Organism(id)) => {
+            Some(Occupant::Organism(_) | Occupant::Wall) => {
                 accumulate_visual(
                     &mut color,
                     &mut remaining_visibility,
-                    organism_visual_for_id(context.organism_colors, id),
-                    distance_signal,
-                );
-            }
-            Some(Occupant::Wall) => {
-                accumulate_visual(
-                    &mut color,
-                    &mut remaining_visibility,
-                    sim_types::terrain_visual(sim_types::TerrainType::Mountain),
+                    context.visual_map[idx],
                     distance_signal,
                 );
             }
@@ -244,22 +231,6 @@ fn accumulate_visual(
     *remaining_visibility *= 1.0 - visual.opacity.clamp(0.0, 1.0);
 }
 
-fn organism_visual_for_id(colors: &OrganismColorLookup, id: OrganismId) -> VisualProperties {
-    colors
-        .binary_search_by_key(&id, |(candidate_id, _)| *candidate_id)
-        .ok()
-        .map(|idx| sim_types::organism_visual(colors[idx].1))
-        .unwrap_or_default()
-}
-
-fn food_visual_for_id(visuals: &FoodVisualLookup, id: sim_types::FoodId) -> VisualProperties {
-    visuals
-        .binary_search_by_key(&id, |(candidate_id, _)| *candidate_id)
-        .ok()
-        .map(|idx| visuals[idx].1)
-        .unwrap_or_default()
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -268,8 +239,8 @@ mod tests {
     use rand::SeedableRng;
     use rand_chacha::ChaCha8Rng;
     use sim_types::{
-        BrainState, FacingDirection, FoodId, Occupant, OrganismId, OrganismState, RgbColor,
-        SpeciesId, VisualProperties,
+        BrainState, FacingDirection, FoodId, Occupant, OrganismId, OrganismState, SpeciesId,
+        VisualProperties,
     };
 
     fn test_organism() -> OrganismState {
@@ -370,31 +341,27 @@ mod tests {
     fn scan_ray_accumulates_translucent_hits_along_ray() {
         let world_width = 5;
         let mut occupancy = vec![None; (world_width * world_width) as usize];
-        let mut spike_map = vec![false; occupancy.len()];
+        let spike_map = vec![false; occupancy.len()];
+        let mut visual_map = vec![VisualProperties::default(); occupancy.len()];
+
+        let food_0_visual = VisualProperties {
+            r: 1.0,
+            g: 0.0,
+            b: 0.0,
+            opacity: 0.5,
+        };
+        let food_1_visual = VisualProperties {
+            r: 0.0,
+            g: 0.0,
+            b: 1.0,
+            opacity: 0.25,
+        };
+
         occupancy[1 * world_width as usize + 2] = Some(Occupant::Food(FoodId(0)));
+        visual_map[1 * world_width as usize + 2] = food_0_visual;
+
         occupancy[1 * world_width as usize + 3] = Some(Occupant::Food(FoodId(1)));
-        spike_map[1 * world_width as usize + 4] = true;
-        let organism_colors = Vec::new();
-        let food_visuals = vec![
-            (
-                FoodId(0),
-                VisualProperties {
-                    r: 1.0,
-                    g: 0.0,
-                    b: 0.0,
-                    opacity: 0.5,
-                },
-            ),
-            (
-                FoodId(1),
-                VisualProperties {
-                    r: 0.0,
-                    g: 0.0,
-                    b: 1.0,
-                    opacity: 0.25,
-                },
-            ),
-        ];
+        visual_map[1 * world_width as usize + 3] = food_1_visual;
 
         let scan = scan_ray(
             (1, 1),
@@ -404,19 +371,20 @@ mod tests {
                 world_width,
                 occupancy: &occupancy,
                 spike_map: &spike_map,
-                organism_colors: &organism_colors,
-                food_visuals: &food_visuals,
+                visual_map: &visual_map,
                 vision_distance: 4,
             },
         );
 
         assert!(scan.food_visible);
+        // Food(0) at distance 1: signal=1.0, vis=1.0 → red += 1.0, vis *= 0.5 → 0.5
+        // Food(1) at distance 2: signal=0.75, vis=0.5 → blue += 0.375, vis *= 0.75 → 0.375
         assert_eq!(
             scan.color,
             ColorSignal {
                 red: 1.0,
                 green: 0.0,
-                blue: 0.5,
+                blue: 0.375,
             }
         );
     }

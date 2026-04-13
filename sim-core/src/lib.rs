@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use sim_types::ActionRecord;
 use sim_types::{
     FoodState, MetricsSnapshot, OccupancyCell, Occupant, OrganismGenome, OrganismId, OrganismState,
-    TerrainCell, TerrainType, TickDelta, WorldConfig, WorldSnapshot,
+    TerrainCell, TerrainType, TickDelta, VisualProperties, WorldConfig, WorldSnapshot,
 };
 use std::collections::BTreeMap;
 #[cfg(feature = "instrumentation")]
@@ -65,6 +65,8 @@ pub struct Simulation {
     food_regrowth_due_turn: Vec<u64>,
     #[serde(default)]
     food_regrowth_schedule: BTreeMap<u64, Vec<usize>>,
+    #[serde(skip)]
+    visual_map: Vec<VisualProperties>,
     #[cfg(feature = "instrumentation")]
     #[serde(skip)]
     action_records: Vec<ActionRecord>,
@@ -177,6 +179,7 @@ impl Simulation {
             reward_signal_multiplier: 1.0,
             foods: Vec::new(),
             occupancy: vec![None; capacity],
+            visual_map: Vec::new(),
             terrain_map: Vec::new(),
             spike_map: Vec::new(),
             food_fertility: Vec::new(),
@@ -280,6 +283,7 @@ impl Simulation {
         self.reward_ledgers.clear();
         self.foods.clear();
         self.occupancy.fill(None);
+        self.visual_map.clear();
         self.terrain_map.clear();
         self.spike_map.clear();
         self.food_fertility.clear();
