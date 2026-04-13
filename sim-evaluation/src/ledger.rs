@@ -115,6 +115,7 @@ pub struct Ledger {
     survived_to_30: u64,
     survived_to_maturity: u64,
     pending_tracked_births: HashMap<OrganismId, ()>,
+    pending_threshold_checks: Vec<OrganismId>,
     parent_energy_after_successful_birth_sum: f64,
     parent_energy_after_successful_birth_count: u64,
     age_at_first_successful_reproduction_sum: f64,
@@ -138,6 +139,7 @@ impl Ledger {
             survived_to_30: 0,
             survived_to_maturity: 0,
             pending_tracked_births: HashMap::new(),
+            pending_threshold_checks: Vec::new(),
             parent_energy_after_successful_birth_sum: 0.0,
             parent_energy_after_successful_birth_count: 0,
             age_at_first_successful_reproduction_sum: 0.0,
@@ -153,6 +155,7 @@ impl Ledger {
         let tracked_reproduction_birth = self.pending_tracked_births.remove(&id).is_some();
         if tracked_reproduction_birth {
             self.births = self.births.saturating_add(1);
+            self.pending_threshold_checks.push(id);
         }
         self.sidecar.insert(
             id,
@@ -268,13 +271,17 @@ impl Ledger {
     }
 
     pub fn update_survival_thresholds(&mut self, organisms: &[OrganismState]) {
-        for organism in organisms {
-            let Some(entry) = self.sidecar.get_mut(&organism.id) else {
-                continue;
+        if self.pending_threshold_checks.is_empty() {
+            return;
+        }
+        self.pending_threshold_checks.retain(|id| {
+            let Ok(idx) = organisms.binary_search_by_key(id, |o| o.id) else {
+                return false;
             };
-            if !entry.tracked_reproduction_birth {
-                continue;
-            }
+            let organism = &organisms[idx];
+            let Some(entry) = self.sidecar.get_mut(id) else {
+                return false;
+            };
             if !entry.survived_to_30_recorded && organism.age_turns >= SURVIVAL_AGE_30 {
                 self.survived_to_30 = self.survived_to_30.saturating_add(1);
                 entry.survived_to_30_recorded = true;
@@ -285,7 +292,9 @@ impl Ledger {
                 self.survived_to_maturity = self.survived_to_maturity.saturating_add(1);
                 entry.survived_to_maturity_recorded = true;
             }
-        }
+            // Keep in set if still has pending thresholds to check
+            !entry.survived_to_30_recorded || !entry.survived_to_maturity_recorded
+        });
     }
 
     pub fn reproduction_analytics(&self) -> ReproductionAnalytics {

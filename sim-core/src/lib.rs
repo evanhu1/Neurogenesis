@@ -8,8 +8,6 @@ use sim_types::{
     TerrainCell, TerrainType, TickDelta, VisualProperties, WorldConfig, WorldSnapshot,
 };
 use std::collections::BTreeMap;
-#[cfg(feature = "instrumentation")]
-use std::collections::HashMap;
 use thiserror::Error;
 
 mod brain;
@@ -72,10 +70,7 @@ pub struct Simulation {
     visual_map_base: Vec<VisualProperties>,
     #[cfg(feature = "instrumentation")]
     #[serde(skip)]
-    action_records: Vec<ActionRecord>,
-    #[cfg(feature = "instrumentation")]
-    #[serde(skip)]
-    action_record_indices: HashMap<OrganismId, usize>,
+    action_records: Vec<Option<ActionRecord>>,
     metrics: MetricsSnapshot,
 }
 
@@ -191,8 +186,6 @@ impl Simulation {
             food_regrowth_schedule: BTreeMap::new(),
             #[cfg(feature = "instrumentation")]
             action_records: Vec::new(),
-            #[cfg(feature = "instrumentation")]
-            action_record_indices: HashMap::new(),
             metrics: MetricsSnapshot::default(),
         };
 
@@ -309,8 +302,6 @@ impl Simulation {
         self.food_regrowth_schedule.clear();
         #[cfg(feature = "instrumentation")]
         self.action_records.clear();
-        #[cfg(feature = "instrumentation")]
-        self.action_record_indices.clear();
         self.metrics = MetricsSnapshot::default();
         self.initialize_terrain();
         self.build_visual_map_base();
@@ -350,33 +341,20 @@ impl Simulation {
     }
 
     #[cfg(feature = "instrumentation")]
-    pub fn action_records(&self) -> &[ActionRecord] {
+    pub fn action_records(&self) -> &[Option<ActionRecord>] {
         &self.action_records
     }
 
     #[cfg(feature = "instrumentation")]
     pub fn clear_action_records(&mut self) {
         self.action_records.clear();
-        self.action_record_indices.clear();
     }
 
     #[cfg(feature = "instrumentation")]
-    pub(crate) fn record_action(&mut self, action_record: ActionRecord) {
-        let record_idx = self.action_records.len();
-        self.action_record_indices
-            .insert(action_record.organism_id, record_idx);
-        self.action_records.push(action_record);
-    }
-
-    #[cfg(feature = "instrumentation")]
-    pub(crate) fn mark_action_succeeded(&mut self, organism_id: OrganismId) {
-        let Some(record_idx) = self.action_record_indices.get(&organism_id).copied() else {
-            return;
-        };
-        let Some(record) = self.action_records.get_mut(record_idx) else {
-            return;
-        };
-        record.action_failed = false;
+    pub(crate) fn mark_action_succeeded(&mut self, organism_idx: usize) {
+        if let Some(Some(record)) = self.action_records.get_mut(organism_idx) {
+            record.action_failed = false;
+        }
     }
 
     pub fn validate_state(&self) -> Result<(), SimError> {

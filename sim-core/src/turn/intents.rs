@@ -56,7 +56,35 @@ impl Simulation {
         let thread_pool = sim_parallel_pool(self.config.intent_parallel_threads);
         #[cfg(feature = "profiling")]
         let brain_eval_started = Instant::now();
-        let built_intents: Vec<BuiltIntent> = thread_pool.install(|| {
+
+        #[cfg(feature = "instrumentation")]
+        let (intents, action_records): (Vec<OrganismIntent>, Vec<Option<ActionRecord>>) =
+            thread_pool.install(|| {
+                self.organisms
+                    .par_iter_mut()
+                    .with_min_len(INTENT_PARALLEL_MIN_LEN)
+                    .enumerate()
+                    .map_init(BrainScratch::new, |scratch, (idx, organism)| {
+                        let snapshot_state = SnapshotOrganismState {
+                            q: organism.q,
+                            r: organism.r,
+                            facing: organism.facing,
+                        };
+                        let built = build_intent_for_organism(
+                            idx,
+                            organism,
+                            snapshot_state,
+                            organism.id,
+                            context,
+                            scratch,
+                        );
+                        (built.intent, built.action_record)
+                    })
+                    .unzip()
+            });
+
+        #[cfg(not(feature = "instrumentation"))]
+        let intents: Vec<OrganismIntent> = thread_pool.install(|| {
             self.organisms
                 .par_iter_mut()
                 .with_min_len(INTENT_PARALLEL_MIN_LEN)
@@ -75,33 +103,18 @@ impl Simulation {
                         context,
                         scratch,
                     )
+                    .intent
                 })
                 .collect()
         });
+
         #[cfg(feature = "profiling")]
         profiling::record_brain_eval_total(brain_eval_started.elapsed());
 
         #[cfg(feature = "instrumentation")]
         {
-            self.action_records.clear();
-            self.action_record_indices.clear();
-            self.action_records.reserve(
-                built_intents
-                    .len()
-                    .saturating_sub(self.action_records.capacity()),
-            );
+            self.action_records = action_records;
         }
-
-        let intents = built_intents
-            .into_iter()
-            .map(|built| {
-                #[cfg(feature = "instrumentation")]
-                if let Some(action_record) = built.action_record {
-                    self.record_action(action_record);
-                }
-                built.intent
-            })
-            .collect();
 
         intents
     }

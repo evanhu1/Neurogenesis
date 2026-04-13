@@ -241,10 +241,9 @@ pub(crate) fn run_single_seed_evaluation(
         interval_predations =
             interval_predations.saturating_add(delta.metrics.predations_last_turn);
 
-        for record in sim.action_records() {
+        for record in sim.action_records().iter().flatten() {
             ledger.update(record);
         }
-        sim.clear_action_records();
         for event in delta.reproduction_events.iter().copied() {
             ledger.handle_reproduction_event(tick, event);
         }
