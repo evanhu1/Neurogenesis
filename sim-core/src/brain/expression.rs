@@ -58,7 +58,7 @@ pub(crate) fn make_sensory_neuron(
     location: BrainLocation,
 ) -> SensoryNeuronState {
     SensoryNeuronState {
-        neuron: make_neuron(NeuronId(id), NeuronType::Sensory, DEFAULT_BIAS, location),
+        neuron: make_neuron(NeuronId(id), NeuronType::Sensory, 0.0, location),
         receptor,
         synapses: Vec::new(),
     }

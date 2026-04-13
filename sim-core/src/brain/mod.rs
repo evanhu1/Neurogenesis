@@ -31,7 +31,6 @@ pub(crate) use expression::{express_genome, make_action_neuron, make_sensory_neu
 #[cfg_attr(not(feature = "instrumentation"), allow(unused_imports))]
 pub(crate) use sensing::scan_rays;
 
-const DEFAULT_BIAS: f32 = 0.0;
 const MIN_ACTION_TEMPERATURE: f32 = 1.0e-6;
 pub(crate) const EXPLICIT_IDLE_LOGIT_BIAS: f32 = -0.01;
 pub(crate) const VISION_RAY_COUNT: usize = SensoryReceptor::VISION_RAY_OFFSETS.len();

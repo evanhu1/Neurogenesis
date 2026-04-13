@@ -17,10 +17,10 @@ impl Simulation {
         world_width: i32,
         intents: &[OrganismIntent],
         resolutions: &[MoveResolution],
-        skip_pending_action_decrement: &mut Vec<bool>,
+        gestation_started_this_tick: &mut Vec<bool>,
     ) -> CommitResult {
         CommitPhaseContext::new(self, world_width, intents, resolutions)
-            .run(skip_pending_action_decrement)
+            .run(gestation_started_this_tick)
     }
 }
 
@@ -44,12 +44,12 @@ impl<'a> CommitPhaseContext<'a> {
         }
     }
 
-    fn run(mut self, skip_pending_action_decrement: &mut Vec<bool>) -> CommitResult {
+    fn run(mut self, gestation_started_this_tick: &mut Vec<bool>) -> CommitResult {
         self.apply_facing_and_action_costs();
         self.apply_moves();
         self.apply_spike_hazards();
         self.resolve_interactions();
-        self.finalize(skip_pending_action_decrement);
+        self.finalize(gestation_started_this_tick);
         self.result
     }
 
@@ -266,9 +266,9 @@ impl<'a> CommitPhaseContext<'a> {
         }
     }
 
-    fn finalize(&mut self, skip_pending_action_decrement: &mut Vec<bool>) {
+    fn finalize(&mut self, gestation_started_this_tick: &mut Vec<bool>) {
         self.sim
-            .compact_organism_state(&self.dead_organisms, Some(skip_pending_action_decrement));
+            .compact_organism_state(&self.dead_organisms, Some(gestation_started_this_tick));
 
         let food_count = self.removed_food.len();
         let mut write = 0_usize;

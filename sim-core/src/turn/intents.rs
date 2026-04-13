@@ -347,70 +347,36 @@ fn intent_from_selected_action(
 ) -> ActionIntentOutcome {
     let from = (snapshot_state.q, snapshot_state.r);
     let current_facing = snapshot_state.facing;
+    let forward_cell = || hex_neighbor(from, current_facing, world_width);
+
+    let mut outcome = ActionIntentOutcome {
+        facing_after_actions: current_facing,
+        wants_move: false,
+        wants_eat: false,
+        wants_attack: false,
+        wants_reproduce: false,
+        move_target: None,
+        interaction_target: None,
+    };
 
     match selected_action {
-        ActionType::Idle => ActionIntentOutcome {
-            facing_after_actions: current_facing,
-            wants_move: false,
-            wants_eat: false,
-            wants_attack: false,
-            wants_reproduce: false,
-            move_target: None,
-            interaction_target: None,
-        },
-        ActionType::TurnLeft => ActionIntentOutcome {
-            facing_after_actions: rotate_left(current_facing),
-            wants_move: false,
-            wants_eat: false,
-            wants_attack: false,
-            wants_reproduce: false,
-            move_target: None,
-            interaction_target: None,
-        },
-        ActionType::TurnRight => ActionIntentOutcome {
-            facing_after_actions: rotate_right(current_facing),
-            wants_move: false,
-            wants_eat: false,
-            wants_attack: false,
-            wants_reproduce: false,
-            move_target: None,
-            interaction_target: None,
-        },
-        ActionType::Forward => ActionIntentOutcome {
-            facing_after_actions: current_facing,
-            wants_move: true,
-            wants_eat: false,
-            wants_attack: false,
-            wants_reproduce: false,
-            move_target: Some(hex_neighbor(from, current_facing, world_width)),
-            interaction_target: None,
-        },
-        ActionType::Eat => ActionIntentOutcome {
-            facing_after_actions: current_facing,
-            wants_move: false,
-            wants_eat: true,
-            wants_attack: false,
-            wants_reproduce: false,
-            move_target: None,
-            interaction_target: Some(hex_neighbor(from, current_facing, world_width)),
-        },
-        ActionType::Attack => ActionIntentOutcome {
-            facing_after_actions: current_facing,
-            wants_move: false,
-            wants_eat: false,
-            wants_attack: true,
-            wants_reproduce: false,
-            move_target: None,
-            interaction_target: Some(hex_neighbor(from, current_facing, world_width)),
-        },
-        ActionType::Reproduce => ActionIntentOutcome {
-            facing_after_actions: current_facing,
-            wants_move: false,
-            wants_eat: false,
-            wants_attack: false,
-            wants_reproduce: true,
-            move_target: None,
-            interaction_target: None,
-        },
+        ActionType::Idle => {}
+        ActionType::TurnLeft => outcome.facing_after_actions = rotate_left(current_facing),
+        ActionType::TurnRight => outcome.facing_after_actions = rotate_right(current_facing),
+        ActionType::Forward => {
+            outcome.wants_move = true;
+            outcome.move_target = Some(forward_cell());
+        }
+        ActionType::Eat => {
+            outcome.wants_eat = true;
+            outcome.interaction_target = Some(forward_cell());
+        }
+        ActionType::Attack => {
+            outcome.wants_attack = true;
+            outcome.interaction_target = Some(forward_cell());
+        }
+        ActionType::Reproduce => outcome.wants_reproduce = true,
     }
+
+    outcome
 }

@@ -14,22 +14,65 @@ const MUTATION_RATE_LATENT_MIN: f32 = -8.0;
 const MUTATION_RATE_LATENT_MAX: f32 = 8.0;
 const MUTATION_RATE_LOGIT_EPSILON: f32 = 1.0e-6;
 
-pub(super) struct EffectiveMutationRates {
-    pub(super) age_of_maturity: f32,
-    pub(super) gestation_ticks: f32,
-    pub(super) max_organism_age: f32,
-    pub(super) vision_distance: f32,
-    pub(super) max_health: f32,
-    pub(super) inter_bias: f32,
-    pub(super) inter_update_rate: f32,
-    pub(super) eligibility_retention: f32,
-    pub(super) synapse_prune_threshold: f32,
-    pub(super) neuron_location: f32,
-    pub(super) synapse_weight_perturbation: f32,
-    pub(super) add_synapse: f32,
-    pub(super) remove_synapse: f32,
-    pub(super) remove_neuron: f32,
-    pub(super) add_neuron_split_edge: f32,
+/// Generates the `EffectiveMutationRates` struct and all gene-value
+/// extraction/application functions from a single field list. Adding or
+/// removing a mutation-rate gene only requires updating this invocation;
+/// the macro guarantees that the struct, the genome-to-array extraction,
+/// the config-to-array extraction, the array-to-genome application, and
+/// the effective-rate construction all stay in sync. The array size is
+/// cross-checked against `MUTATION_RATE_GENE_COUNT` at compile time.
+macro_rules! define_mutation_rate_ops {
+    ( $( $short:ident : $full:ident ),+ $(,)? ) => {
+        pub(super) struct EffectiveMutationRates {
+            $(pub(super) $short: f32,)+
+        }
+
+        pub(super) fn effective_mutation_rates(
+            genome: &OrganismGenome,
+            global_mutation_rate_modifier: f32,
+        ) -> EffectiveMutationRates {
+            EffectiveMutationRates {
+                $($short: effective_mutation_rate(genome.$full, global_mutation_rate_modifier),)+
+            }
+        }
+
+        fn mutation_rate_gene_values(genome: &OrganismGenome) -> [f32; MUTATION_RATE_GENE_COUNT] {
+            [$(genome.$full),+]
+        }
+
+        fn seed_mutation_rate_values(config: &SeedGenomeConfig) -> [f32; MUTATION_RATE_GENE_COUNT] {
+            [$(config.$full),+]
+        }
+
+        fn apply_mutation_rate_gene_values(
+            genome: &mut OrganismGenome,
+            rates: [f32; MUTATION_RATE_GENE_COUNT],
+        ) {
+            let mut _i = 0;
+            $(
+                genome.$full = rates[_i];
+                _i += 1;
+            )+
+        }
+    };
+}
+
+define_mutation_rate_ops! {
+    age_of_maturity:            mutation_rate_age_of_maturity,
+    gestation_ticks:            mutation_rate_gestation_ticks,
+    max_organism_age:           mutation_rate_max_organism_age,
+    vision_distance:            mutation_rate_vision_distance,
+    max_health:                 mutation_rate_max_health,
+    inter_bias:                 mutation_rate_inter_bias,
+    inter_update_rate:          mutation_rate_inter_update_rate,
+    eligibility_retention:      mutation_rate_eligibility_retention,
+    synapse_prune_threshold:    mutation_rate_synapse_prune_threshold,
+    neuron_location:            mutation_rate_neuron_location,
+    synapse_weight_perturbation: mutation_rate_synapse_weight_perturbation,
+    add_synapse:                mutation_rate_add_synapse,
+    remove_synapse:             mutation_rate_remove_synapse,
+    remove_neuron:              mutation_rate_remove_neuron,
+    add_neuron_split_edge:      mutation_rate_add_neuron_split_edge,
 }
 
 pub(super) fn mutate_mutation_rate_genes<R: Rng + ?Sized>(
@@ -55,137 +98,8 @@ pub(super) fn mutate_mutation_rate_genes<R: Rng + ?Sized>(
     apply_mutation_rate_gene_values(genome, rates);
 }
 
-pub(super) fn effective_mutation_rates(
-    genome: &OrganismGenome,
-    global_mutation_rate_modifier: f32,
-) -> EffectiveMutationRates {
-    EffectiveMutationRates {
-        age_of_maturity: effective_mutation_rate(
-            genome.mutation_rate_age_of_maturity,
-            global_mutation_rate_modifier,
-        ),
-        gestation_ticks: effective_mutation_rate(
-            genome.mutation_rate_gestation_ticks,
-            global_mutation_rate_modifier,
-        ),
-        max_organism_age: effective_mutation_rate(
-            genome.mutation_rate_max_organism_age,
-            global_mutation_rate_modifier,
-        ),
-        vision_distance: effective_mutation_rate(
-            genome.mutation_rate_vision_distance,
-            global_mutation_rate_modifier,
-        ),
-        max_health: effective_mutation_rate(
-            genome.mutation_rate_max_health,
-            global_mutation_rate_modifier,
-        ),
-        inter_bias: effective_mutation_rate(
-            genome.mutation_rate_inter_bias,
-            global_mutation_rate_modifier,
-        ),
-        inter_update_rate: effective_mutation_rate(
-            genome.mutation_rate_inter_update_rate,
-            global_mutation_rate_modifier,
-        ),
-        eligibility_retention: effective_mutation_rate(
-            genome.mutation_rate_eligibility_retention,
-            global_mutation_rate_modifier,
-        ),
-        synapse_prune_threshold: effective_mutation_rate(
-            genome.mutation_rate_synapse_prune_threshold,
-            global_mutation_rate_modifier,
-        ),
-        neuron_location: effective_mutation_rate(
-            genome.mutation_rate_neuron_location,
-            global_mutation_rate_modifier,
-        ),
-        synapse_weight_perturbation: effective_mutation_rate(
-            genome.mutation_rate_synapse_weight_perturbation,
-            global_mutation_rate_modifier,
-        ),
-        add_synapse: effective_mutation_rate(
-            genome.mutation_rate_add_synapse,
-            global_mutation_rate_modifier,
-        ),
-        remove_synapse: effective_mutation_rate(
-            genome.mutation_rate_remove_synapse,
-            global_mutation_rate_modifier,
-        ),
-        remove_neuron: effective_mutation_rate(
-            genome.mutation_rate_remove_neuron,
-            global_mutation_rate_modifier,
-        ),
-        add_neuron_split_edge: effective_mutation_rate(
-            genome.mutation_rate_add_neuron_split_edge,
-            global_mutation_rate_modifier,
-        ),
-    }
-}
-
 fn clamp_mutation_rate(rate: f32) -> f32 {
     rate.clamp(MUTATION_RATE_MIN, MUTATION_RATE_MAX)
-}
-
-fn mutation_rate_gene_values(genome: &OrganismGenome) -> [f32; MUTATION_RATE_GENE_COUNT] {
-    [
-        genome.mutation_rate_age_of_maturity,
-        genome.mutation_rate_gestation_ticks,
-        genome.mutation_rate_max_organism_age,
-        genome.mutation_rate_vision_distance,
-        genome.mutation_rate_max_health,
-        genome.mutation_rate_inter_bias,
-        genome.mutation_rate_inter_update_rate,
-        genome.mutation_rate_eligibility_retention,
-        genome.mutation_rate_synapse_prune_threshold,
-        genome.mutation_rate_neuron_location,
-        genome.mutation_rate_synapse_weight_perturbation,
-        genome.mutation_rate_add_synapse,
-        genome.mutation_rate_remove_synapse,
-        genome.mutation_rate_remove_neuron,
-        genome.mutation_rate_add_neuron_split_edge,
-    ]
-}
-
-fn seed_mutation_rate_values(config: &SeedGenomeConfig) -> [f32; MUTATION_RATE_GENE_COUNT] {
-    [
-        config.mutation_rate_age_of_maturity,
-        config.mutation_rate_gestation_ticks,
-        config.mutation_rate_max_organism_age,
-        config.mutation_rate_vision_distance,
-        config.mutation_rate_max_health,
-        config.mutation_rate_inter_bias,
-        config.mutation_rate_inter_update_rate,
-        config.mutation_rate_eligibility_retention,
-        config.mutation_rate_synapse_prune_threshold,
-        config.mutation_rate_neuron_location,
-        config.mutation_rate_synapse_weight_perturbation,
-        config.mutation_rate_add_synapse,
-        config.mutation_rate_remove_synapse,
-        config.mutation_rate_remove_neuron,
-        config.mutation_rate_add_neuron_split_edge,
-    ]
-}
-
-fn apply_mutation_rate_gene_values(
-    genome: &mut OrganismGenome,
-    rates: [f32; MUTATION_RATE_GENE_COUNT],
-) {
-    genome.mutation_rate_age_of_maturity = rates[0];
-    genome.mutation_rate_gestation_ticks = rates[1];
-    genome.mutation_rate_max_organism_age = rates[2];
-    genome.mutation_rate_vision_distance = rates[3];
-    genome.mutation_rate_max_health = rates[4];
-    genome.mutation_rate_inter_bias = rates[5];
-    genome.mutation_rate_inter_update_rate = rates[6];
-    genome.mutation_rate_eligibility_retention = rates[7];
-    genome.mutation_rate_synapse_prune_threshold = rates[8];
-    genome.mutation_rate_neuron_location = rates[9];
-    genome.mutation_rate_synapse_weight_perturbation = rates[10];
-    genome.mutation_rate_add_synapse = rates[11];
-    genome.mutation_rate_remove_synapse = rates[12];
-    genome.mutation_rate_remove_neuron = rates[13];
-    genome.mutation_rate_add_neuron_split_edge = rates[14];
 }
 
 fn random_untouched_index<R: Rng + ?Sized>(

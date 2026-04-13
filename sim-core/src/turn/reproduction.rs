@@ -15,7 +15,7 @@ pub(super) struct ReproductionPhaseState {
     spawn_requests: Vec<SpawnRequest>,
     successful_births: Vec<PendingBirthEvent>,
     reproduction_events: Vec<ReproductionEvent>,
-    skip_pending_action_decrement: Vec<bool>,
+    gestation_started_this_tick: Vec<bool>,
 }
 
 impl ReproductionPhaseState {
@@ -24,12 +24,12 @@ impl ReproductionPhaseState {
             spawn_requests: Vec::new(),
             successful_births: Vec::new(),
             reproduction_events: Vec::new(),
-            skip_pending_action_decrement: vec![false; organism_count],
+            gestation_started_this_tick: vec![false; organism_count],
         }
     }
 
-    pub(super) fn skip_pending_action_decrement_mut(&mut self) -> &mut Vec<bool> {
-        &mut self.skip_pending_action_decrement
+    pub(super) fn gestation_started_this_tick_mut(&mut self) -> &mut Vec<bool> {
+        &mut self.gestation_started_this_tick
     }
 
     pub(super) fn spawn_requests_mut(&mut self) -> &mut Vec<SpawnRequest> {
@@ -68,7 +68,9 @@ impl ReproductionPhaseState {
         intents: &[OrganismIntent],
         occupancy: &[Option<Occupant>],
         world_width: i32,
-        #[cfg(feature = "instrumentation")] action_records: &mut [Option<sim_types::ActionRecord>],
+        #[cfg(feature = "instrumentation")] action_records: &mut [Option<
+            sim_types::ActionRecord,
+        >],
     ) {
         for intent in intents {
             let org_idx = intent.idx;
@@ -107,7 +109,7 @@ impl ReproductionPhaseState {
                 turns_remaining: organism.genome.gestation_ticks,
                 reproduction_energy_bits: transfer_energy.to_bits(),
             };
-            self.skip_pending_action_decrement[org_idx] = organism.genome.gestation_ticks > 0;
+            self.gestation_started_this_tick[org_idx] = organism.genome.gestation_ticks > 0;
             #[cfg(feature = "instrumentation")]
             {
                 if let Some(Some(record)) = action_records.get_mut(org_idx) {
@@ -125,7 +127,7 @@ impl ReproductionPhaseState {
                 pending_action.kind = PendingActionKind::None;
                 continue;
             }
-            if self.skip_pending_action_decrement[idx] {
+            if self.gestation_started_this_tick[idx] {
                 continue;
             }
 

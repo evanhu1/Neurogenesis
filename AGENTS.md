@@ -7,18 +7,21 @@
   `seed_genome.toml`, typed loader/validation, owned defaults/policies,
   inline-commented TOML baselines).
 - `sim-core/`: deterministic simulation engine:
-  - `lib.rs`: `Simulation` struct, config validation.
-  - `turn.rs` + `turn/`: tick orchestration, lifecycle, snapshot, intents,
-    movement, reproduction, and commit phases.
-  - `brain.rs` + `brain/`: neural network evaluation, genome expression, and
-    sensing helpers.
-  - `plasticity.rs`: runtime eligibility/coactivation and Hebbian updates.
-  - `genome.rs` + `genome/`: seed generation, mutation-rate accessors, scalar
-    mutation, topology mutation, spatial prior, and sanitization.
-  - `spawn.rs` + `spawn/`: organism spawning, world generation, and food
-    ecology/regrowth.
-  - `topology.rs`: shared neuron/synapse topology helpers and invariants.
-  - `grid.rs`: hex-grid geometry and occupancy helpers.
+  - `lib.rs`: `Simulation` struct, module declarations, config validation.
+  - `reward.rs`: reward events, ledger accumulation, and pending-action state.
+  - `metabolism.rs`: passive metabolism cost calculation.
+  - `turn/`: tick orchestration — `mod.rs` (tick pipeline), `lifecycle.rs`,
+    `snapshot.rs`, `intents.rs`, `moves.rs`, `reproduction.rs`, `commit.rs`.
+  - `brain/`: neural network — `mod.rs`, `evaluation.rs`, `expression.rs`,
+    `sensing.rs`, `plasticity.rs` (Hebbian updates), `topology.rs` (shared
+    neuron/synapse helpers).
+  - `genome/`: genome operations — `mod.rs` (core mutation loop),
+    `mutation_rates.rs` (macro-generated rate accessors), `scalar.rs`,
+    `topology.rs` (add-neuron/synapse mutations), `spatial_prior.rs`,
+    `sanitization.rs`, `seed.rs`.
+  - `spawn/`: organism spawning, world generation, food ecology — `mod.rs`,
+    `organisms.rs`, `world.rs`, `food.rs`, `grid.rs` (hex-grid geometry and
+    occupancy helpers).
 - `sim-evaluation/`: headless evaluation harness split into CLI,
   orchestration, aggregation, comparison, output, and reporting modules.
 - `sim-server/`: Axum HTTP + WebSocket server (`src/main.rs`), with server-only

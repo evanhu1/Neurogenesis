@@ -18,7 +18,7 @@ mod spatial_prior;
 mod topology;
 
 use mutation_rates::{effective_mutation_rates, mutate_mutation_rate_genes};
-use sanitization::{align_genome_vectors, sync_synapse_genes_to_target};
+use sanitization::{align_genome_vectors, reconcile_synapse_count};
 pub(crate) use scalar::inter_alpha_from_log_time_constant;
 use scalar::{
     mutate_inter_biases, mutate_inter_update_rates, mutate_random_neuron_location,
@@ -67,6 +67,11 @@ pub(crate) const INTER_LOG_TIME_CONSTANT_MAX: f32 = LN_10;
 pub(crate) const DEFAULT_INTER_LOG_TIME_CONSTANT: f32 = -1.203_972_8;
 pub(crate) const BRAIN_SPACE_MIN: f32 = 0.0;
 pub(crate) const BRAIN_SPACE_MAX: f32 = 10.0;
+/// Center of the [BRAIN_SPACE_MIN, BRAIN_SPACE_MAX] brain coordinate space.
+const DEFAULT_BRAIN_LOCATION: BrainLocation = BrainLocation { x: 5.0, y: 5.0 };
+/// Perturbation stddev is halved when deriving a new neuron from an edge split,
+/// so the child neuron stays near the parent edge midpoint.
+const NEW_NEURON_PERTURBATION_SCALE: f32 = 0.5;
 const SPATIAL_PRIOR_LONG_RANGE_FLOOR: f32 = 0.01;
 const SYNAPSE_WEIGHT_LOG_NORMAL_MU: f32 = -0.5;
 const SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA: f32 = 0.8;
@@ -174,7 +179,7 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
         mutate_add_neuron_split_edge(genome, rng);
     }
 
-    sync_synapse_genes_to_target(genome, rng);
+    reconcile_synapse_count(genome, rng);
 
     if meta_mutation_enabled {
         // Mutation-rate genes are inherited strategy parameters. Update them after

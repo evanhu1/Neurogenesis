@@ -31,10 +31,7 @@ pub(super) fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome,
     sanitize_synapse_genes(genome);
 }
 
-pub(super) fn sync_synapse_genes_to_target<R: Rng + ?Sized>(
-    genome: &mut OrganismGenome,
-    rng: &mut R,
-) {
+pub(super) fn reconcile_synapse_count<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
     sanitize_synapse_genes(genome);
 
     let target = genome.num_synapses as usize;

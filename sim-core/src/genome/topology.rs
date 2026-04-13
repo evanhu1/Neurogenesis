@@ -1,6 +1,4 @@
-use super::sanitization::{
-    sanitize_synapse_genes, sort_synapse_genes, sync_synapse_genes_to_target,
-};
+use super::sanitization::{reconcile_synapse_count, sanitize_synapse_genes, sort_synapse_genes};
 use super::*;
 
 pub(crate) fn mutate_add_synapse<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
@@ -77,6 +75,27 @@ pub(crate) fn mutate_add_neuron_split_edge<R: Rng + ?Sized>(
         return;
     }
 
+    ensure_neuron_vectors_sized(genome);
+
+    let selected_idx = select_weighted_edge_index(&genome.edges, rng);
+    let selected_edge = genome.edges.swap_remove(selected_idx);
+    let new_inter_id = inter_neuron_id(genome.num_neurons);
+
+    let (new_bias, new_log_tau, new_location) =
+        derive_split_neuron_params(&selected_edge, genome, rng);
+
+    genome.num_neurons = genome.num_neurons.saturating_add(1);
+    genome.inter_biases.push(new_bias);
+    genome.inter_log_time_constants.push(new_log_tau);
+    genome.inter_locations.push(new_location);
+
+    insert_split_edges(genome, &selected_edge, new_inter_id);
+
+    genome.num_synapses = genome.num_synapses.saturating_add(1);
+    reconcile_synapse_count(genome, rng);
+}
+
+fn ensure_neuron_vectors_sized(genome: &mut OrganismGenome) {
     let target_inter_len = genome.num_neurons as usize;
     genome.inter_biases.resize(target_inter_len, 0.0);
     genome
@@ -84,72 +103,75 @@ pub(crate) fn mutate_add_neuron_split_edge<R: Rng + ?Sized>(
         .resize(target_inter_len, DEFAULT_INTER_LOG_TIME_CONSTANT);
     genome
         .inter_locations
-        .resize(target_inter_len, BrainLocation { x: 5.0, y: 5.0 });
+        .resize(target_inter_len, DEFAULT_BRAIN_LOCATION);
     genome
         .sensory_locations
-        .resize(SENSORY_COUNT as usize, BrainLocation { x: 5.0, y: 5.0 });
+        .resize(SENSORY_COUNT as usize, DEFAULT_BRAIN_LOCATION);
     genome
         .action_locations
-        .resize(ACTION_COUNT, BrainLocation { x: 5.0, y: 5.0 });
+        .resize(ACTION_COUNT, DEFAULT_BRAIN_LOCATION);
+}
 
-    let selected_idx = select_weighted_edge_index(&genome.edges, rng);
-    let selected_edge = genome.edges.swap_remove(selected_idx);
-
-    let new_inter_id = inter_neuron_id(genome.num_neurons);
-
-    let pre_tau = inter_log_time_constant_for_neuron(selected_edge.pre_neuron_id, genome);
-    let post_tau = inter_log_time_constant_for_neuron(selected_edge.post_neuron_id, genome);
+fn derive_split_neuron_params<R: Rng + ?Sized>(
+    edge: &SynapseEdge,
+    genome: &OrganismGenome,
+    rng: &mut R,
+) -> (f32, f32, BrainLocation) {
+    let pre_tau = inter_log_time_constant_for_neuron(edge.pre_neuron_id, genome);
+    let post_tau = inter_log_time_constant_for_neuron(edge.post_neuron_id, genome);
     let base_tau = match (pre_tau, post_tau) {
         (Some(pre), Some(post)) => 0.5 * (pre + post),
-        (Some(pre), None) => pre,
-        (None, Some(post)) => post,
+        (Some(v), None) | (None, Some(v)) => v,
         (None, None) => DEFAULT_INTER_LOG_TIME_CONSTANT,
     };
     let new_log_tau = perturb_clamped(
         base_tau,
-        INTER_LOG_TIME_CONSTANT_PERTURBATION_STDDEV * 0.5,
+        INTER_LOG_TIME_CONSTANT_PERTURBATION_STDDEV * NEW_NEURON_PERTURBATION_SCALE,
         INTER_LOG_TIME_CONSTANT_MIN,
         INTER_LOG_TIME_CONSTANT_MAX,
         rng,
     );
     let new_bias = perturb_clamped(
         0.0,
-        BIAS_PERTURBATION_STDDEV * 0.5,
+        BIAS_PERTURBATION_STDDEV * NEW_NEURON_PERTURBATION_SCALE,
         -BIAS_MAX,
         BIAS_MAX,
         rng,
     );
 
-    let pre_location = location_for_neuron(selected_edge.pre_neuron_id, genome);
-    let post_location = location_for_neuron(selected_edge.post_neuron_id, genome);
+    let pre_loc = location_for_neuron(edge.pre_neuron_id, genome);
+    let post_loc = location_for_neuron(edge.post_neuron_id, genome);
     let midpoint = BrainLocation {
-        x: 0.5 * (pre_location.x + post_location.x),
-        y: 0.5 * (pre_location.y + post_location.y),
+        x: 0.5 * (pre_loc.x + post_loc.x),
+        y: 0.5 * (pre_loc.y + post_loc.y),
     };
     let new_location = BrainLocation {
         x: perturb_clamped(
             midpoint.x,
-            LOCATION_PERTURBATION_STDDEV * 0.5,
+            LOCATION_PERTURBATION_STDDEV * NEW_NEURON_PERTURBATION_SCALE,
             BRAIN_SPACE_MIN,
             BRAIN_SPACE_MAX,
             rng,
         ),
         y: perturb_clamped(
             midpoint.y,
-            LOCATION_PERTURBATION_STDDEV * 0.5,
+            LOCATION_PERTURBATION_STDDEV * NEW_NEURON_PERTURBATION_SCALE,
             BRAIN_SPACE_MIN,
             BRAIN_SPACE_MAX,
             rng,
         ),
     };
 
-    genome.num_neurons = genome.num_neurons.saturating_add(1);
-    genome.inter_biases.push(new_bias);
-    genome.inter_log_time_constants.push(new_log_tau);
-    genome.inter_locations.push(new_location);
+    (new_bias, new_log_tau, new_location)
+}
 
+fn insert_split_edges(
+    genome: &mut OrganismGenome,
+    original_edge: &SynapseEdge,
+    new_inter_id: NeuronId,
+) {
     genome.edges.push(SynapseEdge {
-        pre_neuron_id: selected_edge.pre_neuron_id,
+        pre_neuron_id: original_edge.pre_neuron_id,
         post_neuron_id: new_inter_id,
         weight: 1.0,
         eligibility: 0.0,
@@ -157,14 +179,11 @@ pub(crate) fn mutate_add_neuron_split_edge<R: Rng + ?Sized>(
     });
     genome.edges.push(SynapseEdge {
         pre_neuron_id: new_inter_id,
-        post_neuron_id: selected_edge.post_neuron_id,
-        weight: constrain_weight(selected_edge.weight),
+        post_neuron_id: original_edge.post_neuron_id,
+        weight: constrain_weight(original_edge.weight),
         eligibility: 0.0,
         pending_coactivation: 0.0,
     });
-
-    genome.num_synapses = genome.num_synapses.saturating_add(1);
-    sync_synapse_genes_to_target(genome, rng);
 }
 
 fn select_weighted_edge_index<R: Rng + ?Sized>(edges: &[SynapseEdge], rng: &mut R) -> usize {
@@ -208,28 +227,17 @@ pub(super) fn location_for_neuron(neuron_id: NeuronId, genome: &OrganismGenome) 
             .sensory_locations
             .get(neuron_id.0 as usize)
             .copied()
-            .unwrap_or(BrainLocation { x: 5.0, y: 5.0 });
+            .unwrap_or(DEFAULT_BRAIN_LOCATION);
     }
     if is_inter_id(neuron_id, genome.num_neurons) {
-        let Some(inter_idx) = inter_index(neuron_id, genome.num_neurons as usize) else {
-            return BrainLocation { x: 5.0, y: 5.0 };
-        };
-        return genome
-            .inter_locations
-            .get(inter_idx)
-            .copied()
-            .unwrap_or(BrainLocation { x: 5.0, y: 5.0 });
+        return inter_index(neuron_id, genome.num_neurons as usize)
+            .and_then(|idx| genome.inter_locations.get(idx).copied())
+            .unwrap_or(DEFAULT_BRAIN_LOCATION);
     }
     if is_action_id(neuron_id) {
-        let Some(action_idx) = action_array_index(neuron_id) else {
-            return BrainLocation { x: 5.0, y: 5.0 };
-        };
-        return genome
-            .action_locations
-            .get(action_idx)
-            .copied()
-            .unwrap_or(BrainLocation { x: 5.0, y: 5.0 });
+        return action_array_index(neuron_id)
+            .and_then(|idx| genome.action_locations.get(idx).copied())
+            .unwrap_or(DEFAULT_BRAIN_LOCATION);
     }
-
-    BrainLocation { x: 5.0, y: 5.0 }
+    DEFAULT_BRAIN_LOCATION
 }

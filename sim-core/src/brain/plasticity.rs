@@ -84,7 +84,7 @@ fn should_prune_synapses(age_turns: u64, age_of_maturity: u32) -> bool {
     age_turns >= maturity_ticks && age_turns.is_multiple_of(SYNAPSE_PRUNE_INTERVAL_TICKS)
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn apply_runtime_weight_updates(
     organism: &mut OrganismState,
     reward_ledger: RewardLedger,

@@ -151,9 +151,7 @@ impl Simulation {
             organism_count: self.organisms.len(),
         };
 
-        let intents = profile_turn_phase!(TurnPhase::Intents, {
-            self.build_intents(&snapshot)
-        });
+        let intents = profile_turn_phase!(TurnPhase::Intents, { self.build_intents(&snapshot) });
         let synapse_ops = intents.iter().map(|intent| intent.synapse_ops).sum::<u64>();
 
         let mut reproduction_state = ReproductionPhaseState::new(snapshot.organism_count);
@@ -180,7 +178,7 @@ impl Simulation {
                 snapshot.world_width,
                 &intents,
                 &resolutions,
-                reproduction_state.skip_pending_action_decrement_mut(),
+                reproduction_state.gestation_started_this_tick_mut(),
             );
             reproduction_state.queue_completions(self, snapshot.world_width);
             commit
@@ -243,10 +241,7 @@ impl Simulation {
             return;
         }
 
-        let any_learners = self
-            .organisms
-            .iter()
-            .any(|o| o.genome.hebb_eta_gain > 0.0);
+        let any_learners = self.organisms.iter().any(|o| o.genome.hebb_eta_gain > 0.0);
 
         #[cfg(feature = "profiling")]
         let plasticity_started = Instant::now();
@@ -271,11 +266,7 @@ impl Simulation {
             for (organism, reward_ledger) in
                 self.organisms.iter_mut().zip(self.reward_ledgers.iter())
             {
-                apply_runtime_weight_updates_with_multiplier(
-                    organism,
-                    *reward_ledger,
-                    multiplier,
-                );
+                apply_runtime_weight_updates_with_multiplier(organism, *reward_ledger, multiplier);
             }
         }
 

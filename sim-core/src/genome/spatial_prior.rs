@@ -19,20 +19,11 @@ pub(super) fn add_synapse_genes_with_spatial_prior<R: Rng + ?Sized>(
     let mut weighted_candidates = Vec::new();
     let num_neurons = genome.num_neurons;
 
-    for sensory_idx in 0..SENSORY_COUNT {
-        let pre_id = NeuronId(sensory_idx);
-        for post_id in post_ids(num_neurons) {
-            if existing_pairs.contains(&(pre_id.0, post_id.0)) {
-                continue;
-            }
-            let probability = connection_probability(genome, pre_id, post_id);
-            let priority = weighted_without_replacement_priority(probability, rng);
-            weighted_candidates.push((priority, pre_id, post_id));
-        }
-    }
+    let all_presynaptic = (0..SENSORY_COUNT)
+        .map(NeuronId)
+        .chain((0..num_neurons).map(inter_neuron_id));
 
-    for inter_idx in 0..num_neurons {
-        let pre_id = inter_neuron_id(inter_idx);
+    for pre_id in all_presynaptic {
         for post_id in post_ids(num_neurons) {
             if !is_valid_synapse_pair(pre_id, post_id, num_neurons) {
                 continue;
@@ -56,7 +47,7 @@ pub(super) fn add_synapse_genes_with_spatial_prior<R: Rng + ?Sized>(
         genome.edges.push(SynapseEdge {
             pre_neuron_id: pre_id,
             post_neuron_id: post_id,
-            weight: sample_initial_synapse_weight(rng),
+            weight: sample_synapse_weight(INITIAL_SYNAPSE_EXCITATORY_PROBABILITY, rng),
             eligibility: 0.0,
             pending_coactivation: 0.0,
         });
@@ -64,11 +55,7 @@ pub(super) fn add_synapse_genes_with_spatial_prior<R: Rng + ?Sized>(
 }
 
 pub(super) fn sample_lognormal_weight<R: Rng + ?Sized>(rng: &mut R) -> f32 {
-    let z = standard_normal(rng);
-    let magnitude = (SYNAPSE_WEIGHT_LOG_NORMAL_MU + SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA * z)
-        .exp()
-        .clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX);
-    sample_signed_weight(magnitude, 0.5, rng)
+    sample_synapse_weight(0.5, rng)
 }
 
 fn post_ids(num_neurons: u32) -> impl Iterator<Item = NeuronId> {
@@ -94,19 +81,11 @@ fn weighted_without_replacement_priority<R: Rng + ?Sized>(weight: f32, rng: &mut
     -u.ln() / clamped_weight
 }
 
-fn sample_initial_synapse_weight<R: Rng + ?Sized>(rng: &mut R) -> f32 {
+fn sample_synapse_weight<R: Rng + ?Sized>(excitatory_probability: f32, rng: &mut R) -> f32 {
     let z = standard_normal(rng);
     let magnitude = (SYNAPSE_WEIGHT_LOG_NORMAL_MU + SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA * z)
         .exp()
         .clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX);
-    sample_signed_weight(magnitude, INITIAL_SYNAPSE_EXCITATORY_PROBABILITY, rng)
-}
-
-fn sample_signed_weight<R: Rng + ?Sized>(
-    magnitude: f32,
-    excitatory_probability: f32,
-    rng: &mut R,
-) -> f32 {
     if rng.random::<f32>() < excitatory_probability {
         magnitude
     } else {

@@ -16,7 +16,11 @@ impl Simulation {
     }
 
     pub(super) fn clear_turn_transient_state(&mut self) {
-        for (organism, ledger) in self.organisms.iter_mut().zip(self.reward_ledgers.iter_mut()) {
+        for (organism, ledger) in self
+            .organisms
+            .iter_mut()
+            .zip(self.reward_ledgers.iter_mut())
+        {
             organism.damage_taken_last_turn = 0.0;
             ledger.clear();
         }
@@ -25,12 +29,12 @@ impl Simulation {
     pub(super) fn compact_organism_state(
         &mut self,
         removed: &[bool],
-        mut skip_pending_action_decrement: Option<&mut Vec<bool>>,
+        mut gestation_started_this_tick: Option<&mut Vec<bool>>,
     ) {
         debug_assert_eq!(removed.len(), self.organisms.len());
         debug_assert_eq!(self.pending_actions.len(), self.organisms.len());
         debug_assert_eq!(self.reward_ledgers.len(), self.organisms.len());
-        if let Some(skip) = skip_pending_action_decrement.as_ref() {
+        if let Some(skip) = gestation_started_this_tick.as_ref() {
             debug_assert_eq!(skip.len(), self.organisms.len());
         }
 
@@ -45,7 +49,7 @@ impl Simulation {
                     self.organisms.swap(write, read);
                     self.pending_actions.swap(write, read);
                     self.reward_ledgers.swap(write, read);
-                    if let Some(ref mut skip) = skip_pending_action_decrement {
+                    if let Some(ref mut skip) = gestation_started_this_tick {
                         skip.swap(write, read);
                     }
                 }
@@ -55,7 +59,7 @@ impl Simulation {
         self.organisms.truncate(write);
         self.pending_actions.truncate(write);
         self.reward_ledgers.truncate(write);
-        if let Some(skip) = skip_pending_action_decrement {
+        if let Some(skip) = gestation_started_this_tick {
             skip.truncate(write);
         }
     }

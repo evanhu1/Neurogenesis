@@ -1,4 +1,4 @@
-use super::sanitization::sync_synapse_genes_to_target;
+use super::sanitization::reconcile_synapse_count;
 use super::*;
 
 pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
@@ -59,6 +59,6 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         action_locations,
         edges: Vec::new(),
     };
-    sync_synapse_genes_to_target(&mut genome, rng);
+    reconcile_synapse_count(&mut genome, rng);
     genome
 }

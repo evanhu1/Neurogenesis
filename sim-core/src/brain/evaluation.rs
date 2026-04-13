@@ -246,9 +246,7 @@ fn accumulate_mixed_inputs(
             };
             *input_slot += source_activation * edge.weight;
             synapse_ops += 1;
-            continue;
-        }
-        if edge.post_neuron_id.0 >= INTER_ID_BASE {
+        } else if edge.post_neuron_id.0 >= INTER_ID_BASE {
             let idx = edge.post_neuron_id.0.wrapping_sub(INTER_ID_BASE) as usize;
             let Some(input_slot) = inter_inputs.get_mut(idx) else {
                 continue;
