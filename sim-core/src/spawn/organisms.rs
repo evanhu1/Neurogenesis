@@ -9,6 +9,7 @@ impl Simulation {
                     let mut child_genome = reproduction.parent_genome.clone();
                     mutate_genome(
                         &mut child_genome,
+                        &self.config.seed_genome_config,
                         self.config.global_mutation_rate_modifier,
                         self.config.meta_mutation_enabled,
                         &mut self.rng,

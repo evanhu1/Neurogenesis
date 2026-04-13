@@ -74,17 +74,15 @@ const INITIAL_SYNAPSE_EXCITATORY_PROBABILITY: f32 = 0.8;
 
 pub(crate) fn mutate_genome<R: Rng + ?Sized>(
     genome: &mut OrganismGenome,
+    seed_genome_config: &SeedGenomeConfig,
     global_mutation_rate_modifier: f32,
     meta_mutation_enabled: bool,
     rng: &mut R,
 ) {
     align_genome_vectors(genome, rng);
-    if meta_mutation_enabled {
-        mutate_mutation_rate_genes(genome, rng);
-    }
-    let rates = effective_mutation_rates(genome, global_mutation_rate_modifier);
+    let inherited_rates = effective_mutation_rates(genome, global_mutation_rate_modifier);
 
-    if rng.random::<f32>() < rates.age_of_maturity {
+    if rng.random::<f32>() < inherited_rates.age_of_maturity {
         genome.age_of_maturity = step_u32(
             genome.age_of_maturity,
             MIN_MUTATED_AGE_OF_MATURITY,
@@ -92,7 +90,7 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
             rng,
         );
     }
-    if rng.random::<f32>() < rates.gestation_ticks {
+    if rng.random::<f32>() < inherited_rates.gestation_ticks {
         genome.gestation_ticks = step_u8(
             genome.gestation_ticks,
             MIN_MUTATED_GESTATION_TICKS,
@@ -100,7 +98,7 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
             rng,
         );
     }
-    if rng.random::<f32>() < rates.max_organism_age {
+    if rng.random::<f32>() < inherited_rates.max_organism_age {
         genome.max_organism_age = step_u32_by(
             genome.max_organism_age,
             MIN_MUTATED_MAX_ORGANISM_AGE,
@@ -109,7 +107,7 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
             rng,
         );
     }
-    if rng.random::<f32>() < rates.vision_distance {
+    if rng.random::<f32>() < inherited_rates.vision_distance {
         genome.vision_distance = step_u32(
             genome.vision_distance,
             MIN_MUTATED_VISION_DISTANCE,
@@ -118,7 +116,7 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
         );
     }
     genome.body_color = mutate_body_color(genome.body_color, rng);
-    if rng.random::<f32>() < rates.max_health {
+    if rng.random::<f32>() < inherited_rates.max_health {
         genome.max_health = perturb_clamped(
             genome.max_health,
             MAX_HEALTH_PERTURBATION_STDDEV,
@@ -127,13 +125,13 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
             rng,
         );
     }
-    if rng.random::<f32>() < rates.inter_bias {
+    if rng.random::<f32>() < inherited_rates.inter_bias {
         mutate_inter_biases(genome, rng);
     }
-    if rng.random::<f32>() < rates.inter_update_rate {
+    if rng.random::<f32>() < inherited_rates.inter_update_rate {
         mutate_inter_update_rates(genome, rng);
     }
-    if rng.random::<f32>() < rates.eligibility_retention {
+    if rng.random::<f32>() < inherited_rates.eligibility_retention {
         genome.eligibility_retention = perturb_clamped(
             genome.eligibility_retention,
             ELIGIBILITY_RETENTION_PERTURBATION_STDDEV,
@@ -142,7 +140,7 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
             rng,
         );
     }
-    if rng.random::<f32>() < rates.synapse_prune_threshold {
+    if rng.random::<f32>() < inherited_rates.synapse_prune_threshold {
         genome.synapse_prune_threshold = perturb_clamped(
             genome.synapse_prune_threshold,
             SYNAPSE_PRUNE_THRESHOLD_PERTURBATION_STDDEV,
@@ -151,26 +149,33 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
             rng,
         );
     }
-    if rng.random::<f32>() < rates.neuron_location {
+    if rng.random::<f32>() < inherited_rates.neuron_location {
         mutate_random_neuron_location(genome, rng);
     }
-    if rng.random::<f32>() < rates.synapse_weight_perturbation {
+    if rng.random::<f32>() < inherited_rates.synapse_weight_perturbation {
         mutate_synapse_weights(genome, rng);
     }
-    if rng.random::<f32>() < rates.add_synapse {
+    if rng.random::<f32>() < inherited_rates.add_synapse {
         mutate_add_synapse(genome, rng);
     }
-    if rng.random::<f32>() < rates.remove_synapse {
+    if rng.random::<f32>() < inherited_rates.remove_synapse {
         mutate_remove_synapse(genome, rng);
     }
-    if rng.random::<f32>() < rates.remove_neuron {
+    if rng.random::<f32>() < inherited_rates.remove_neuron {
         mutate_remove_neuron(genome, rng);
     }
-    if rng.random::<f32>() < rates.add_neuron_split_edge {
+    if rng.random::<f32>() < inherited_rates.add_neuron_split_edge {
         mutate_add_neuron_split_edge(genome, rng);
     }
 
     sync_synapse_genes_to_target(genome, rng);
+
+    if meta_mutation_enabled {
+        // Mutation-rate genes are inherited strategy parameters. Update them after
+        // offspring mutation so they affect the next generation rather than
+        // immediately rewarding anti-mutator lineages in the current child.
+        mutate_mutation_rate_genes(genome, seed_genome_config, rng);
+    }
 }
 
 fn align_vec_to<T>(values: &mut Vec<T>, target_len: usize, mut fill: impl FnMut() -> T) {

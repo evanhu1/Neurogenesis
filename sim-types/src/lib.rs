@@ -227,7 +227,7 @@ pub enum SensoryReceptor {
 
 impl SensoryReceptor {
     /// Fixed relative ray offsets around facing direction.
-    pub const VISION_RAY_OFFSETS: [i8; 1] = [0];
+    pub const VISION_RAY_OFFSETS: [i8; 3] = [-1, 0, 1];
     pub const VISION_CHANNEL_COUNT: u32 = VisionChannel::ALL.len() as u32;
     pub const SCALAR_NEURON_COUNT: u32 = 3;
     pub const VISION_NEURON_COUNT: u32 =
