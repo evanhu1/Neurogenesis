@@ -140,6 +140,7 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
             prey_consumptions_count: 0,
             reproductions_count: 0,
             last_action_taken: ActionType::Idle,
+            base_metabolic_cost: 0.0,
             #[cfg(feature = "instrumentation")]
             instrumentation: Default::default(),
             brain,
@@ -308,6 +309,7 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
             prey_consumptions_count: 0,
             reproductions_count: 0,
             last_action_taken: ActionType::Idle,
+            base_metabolic_cost: 0.0,
             #[cfg(feature = "instrumentation")]
             instrumentation: Default::default(),
             brain,
@@ -465,6 +467,7 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
             prey_consumptions_count: 0,
             reproductions_count: 0,
             last_action_taken: ActionType::Idle,
+            base_metabolic_cost: 0.0,
             #[cfg(feature = "instrumentation")]
             instrumentation: Default::default(),
             brain,
@@ -566,7 +569,7 @@ fn delayed_credit_assignment_organism(
 
     let brain = express_genome(&genome);
     let starting_energy = sim_types::offspring_transfer_energy(genome.gestation_ticks);
-    OrganismState {
+    let mut organism = OrganismState {
         id: sim_types::OrganismId(0),
         species_id: sim_types::SpeciesId(0),
         q: 0,
@@ -586,11 +589,14 @@ fn delayed_credit_assignment_organism(
         prey_consumptions_count: 0,
         reproductions_count: 0,
         last_action_taken: ActionType::Idle,
+        base_metabolic_cost: 0.0,
         #[cfg(feature = "instrumentation")]
         instrumentation: Default::default(),
         brain,
         genome,
-    }
+    };
+    crate::metabolism::refresh_organism_base_metabolic_cost(&mut organism);
+    organism
 }
 
 fn food_consume_edge(organism: &OrganismState) -> &SynapseEdge {

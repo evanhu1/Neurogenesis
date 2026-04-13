@@ -494,6 +494,8 @@ pub struct OrganismState {
     pub reproductions_count: u64,
     #[serde(default)]
     pub last_action_taken: ActionType,
+    #[serde(default)]
+    pub base_metabolic_cost: f32,
     #[cfg(feature = "instrumentation")]
     #[serde(default, skip)]
     pub instrumentation: OrganismInstrumentationState,
@@ -546,6 +548,7 @@ impl OrganismState {
             prey_consumptions_count,
             reproductions_count,
             last_action_taken,
+            base_metabolic_cost: 0.0,
             #[cfg(feature = "instrumentation")]
             instrumentation: Default::default(),
             brain,

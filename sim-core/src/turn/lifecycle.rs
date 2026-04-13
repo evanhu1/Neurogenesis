@@ -1,4 +1,5 @@
 use super::*;
+use crate::metabolism::organism_passive_metabolic_energy_cost;
 use sim_types::{ReproductionEvent, ReproductionFailureCause};
 
 impl Simulation {

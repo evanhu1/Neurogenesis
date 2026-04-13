@@ -1,4 +1,5 @@
 use super::*;
+use crate::metabolism::refresh_organism_base_metabolic_cost;
 
 impl Simulation {
     pub(crate) fn resolve_spawn_requests(&mut self, queue: &[SpawnRequest]) -> Vec<OrganismState> {
@@ -141,7 +142,7 @@ impl Simulation {
             .starting_energy_override
             .unwrap_or_else(|| sim_types::offspring_transfer_energy(genome.gestation_ticks));
         let max_health = genome.max_health.max(1.0);
-        OrganismState {
+        let mut organism = OrganismState {
             id,
             species_id: params.species_id,
             q: params.q,
@@ -161,11 +162,14 @@ impl Simulation {
             prey_consumptions_count: 0,
             reproductions_count: 0,
             last_action_taken: ActionType::Idle,
+            base_metabolic_cost: 0.0,
             #[cfg(feature = "instrumentation")]
             instrumentation: Default::default(),
             brain: express_genome(&genome),
             genome,
-        }
+        };
+        refresh_organism_base_metabolic_cost(&mut organism);
+        organism
     }
 
     fn random_facing(&mut self) -> FacingDirection {

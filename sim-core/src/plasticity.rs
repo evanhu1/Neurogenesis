@@ -1,4 +1,5 @@
 use crate::brain::BrainScratch;
+use crate::metabolism::refresh_organism_base_metabolic_cost;
 #[cfg(feature = "profiling")]
 use crate::profiling::{self, BrainStage};
 use crate::topology::{
@@ -128,7 +129,11 @@ pub(crate) fn apply_runtime_weight_updates_with_multiplier(
     if params.should_prune {
         #[cfg(feature = "profiling")]
         let stage_started = Instant::now();
-        prune_low_weight_synapses(&mut organism.brain, params.weight_prune_threshold);
+        let pruned_any =
+            prune_low_weight_synapses(&mut organism.brain, params.weight_prune_threshold);
+        if pruned_any {
+            refresh_organism_base_metabolic_cost(organism);
+        }
         #[cfg(feature = "profiling")]
         profiling::record_brain_stage(BrainStage::PlasticityPrune, stage_started.elapsed());
     }
@@ -258,7 +263,7 @@ fn for_each_synapse_group_vec_mut(
     }
 }
 
-fn prune_low_weight_synapses(brain: &mut BrainState, threshold: f32) {
+fn prune_low_weight_synapses(brain: &mut BrainState, threshold: f32) -> bool {
     let mut pruned_any = false;
 
     for_each_synapse_group_vec_mut(brain, |edges| {
@@ -273,4 +278,6 @@ fn prune_low_weight_synapses(brain: &mut BrainState, threshold: f32) {
     if pruned_any {
         refresh_parent_ids_and_synapse_count(brain);
     }
+
+    pruned_any
 }

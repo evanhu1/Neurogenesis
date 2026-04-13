@@ -169,6 +169,7 @@ function normalizeOrganismState(organism: ApiOrganismState): OrganismState {
     prey_consumptions_count: organism.prey_consumptions_count,
     reproductions_count: organism.reproductions_count,
     last_action_taken: organism.last_action_taken,
+    base_metabolic_cost: organism.base_metabolic_cost,
     brain: normalizeBrainState(organism.brain),
     genome: normalizeOrganismGenome(organism.genome),
   };

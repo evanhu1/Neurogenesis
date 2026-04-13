@@ -24,7 +24,6 @@ use sim_types::ActionRecord;
 use sim_types::{
     ActionType, EntityId, FacingDirection, FoodKind, FoodState, Occupant, OrganismFacing,
     OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, TickDelta, VisualProperties,
-    WorldConfig,
 };
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -269,13 +268,6 @@ impl Simulation {
     }
 }
 
-fn organism_passive_metabolic_energy_cost(config: &WorldConfig, organism: &OrganismState) -> f32 {
-    organism_passive_metabolic_energy_cost_from_complexity(
-        config.passive_metabolism_cost_per_unit,
-        organism,
-    )
-}
-
 fn organism_health_regeneration(organism: &OrganismState) -> f32 {
     (organism.max_health.max(1.0) * HEALTH_REGEN_FRACTION).max(0.0)
 }
@@ -285,18 +277,6 @@ fn food_consumption_energy_fraction(kind: FoodKind) -> f32 {
         FoodKind::Plant => PLANT_CONSUMPTION_ENERGY_FRACTION,
         FoodKind::Corpse => CORPSE_CONSUMPTION_ENERGY_FRACTION,
     }
-}
-
-fn organism_passive_metabolic_energy_cost_from_complexity(
-    passive_metabolism_cost_per_unit: f32,
-    organism: &OrganismState,
-) -> f32 {
-    let inter_neuron_count = organism.genome.num_neurons as f32;
-    let sensory_neuron_count = organism.brain.sensory.len() as f32;
-    let synapse_count = organism.brain.synapse_count as f32;
-    let vision_distance_cost_units = organism.genome.vision_distance as f32 / 3.0;
-    passive_metabolism_cost_per_unit
-        * (inter_neuron_count + sensory_neuron_count + synapse_count + vision_distance_cost_units)
 }
 
 fn occupancy_snapshot_cell(

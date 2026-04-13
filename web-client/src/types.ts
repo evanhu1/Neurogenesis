@@ -257,6 +257,7 @@ export type ApiOrganismState = {
   prey_consumptions_count: number;
   reproductions_count: number;
   last_action_taken: ActionType;
+  base_metabolic_cost: number;
   brain: ApiBrainState;
   genome: ApiOrganismGenome;
 };
@@ -281,6 +282,7 @@ export type OrganismState = {
   prey_consumptions_count: number;
   reproductions_count: number;
   last_action_taken: ActionType;
+  base_metabolic_cost: number;
   brain: BrainState;
   genome: OrganismGenome;
 };

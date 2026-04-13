@@ -15,6 +15,7 @@ use thiserror::Error;
 mod brain;
 pub(crate) mod genome;
 mod grid;
+mod metabolism;
 mod plasticity;
 #[cfg(feature = "profiling")]
 #[path = "../profiling/profiling.rs"]

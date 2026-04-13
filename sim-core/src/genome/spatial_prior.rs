@@ -80,9 +80,7 @@ fn post_ids(num_neurons: u32) -> impl Iterator<Item = NeuronId> {
 fn connection_probability(genome: &OrganismGenome, pre: NeuronId, post: NeuronId) -> f32 {
     let pre_location = location_for_neuron(pre, genome);
     let post_location = location_for_neuron(post, genome);
-    let dx = pre_location.x - post_location.x;
-    let dy = pre_location.y - post_location.y;
-    let distance_sq = dx * dx + dy * dy;
+    let distance_sq = distance_sq_between_locations(pre_location, post_location);
     let sigma = genome.spatial_prior_sigma.max(0.01);
     let sigma_sq = sigma * sigma;
     let local_bias = (-0.5 * distance_sq / sigma_sq).exp();

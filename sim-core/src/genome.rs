@@ -72,6 +72,12 @@ const SYNAPSE_WEIGHT_LOG_NORMAL_MU: f32 = -0.5;
 const SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA: f32 = 0.8;
 const INITIAL_SYNAPSE_EXCITATORY_PROBABILITY: f32 = 0.8;
 
+pub(crate) fn distance_sq_between_locations(a: BrainLocation, b: BrainLocation) -> f32 {
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    dx * dx + dy * dy
+}
+
 pub(crate) fn mutate_genome<R: Rng + ?Sized>(
     genome: &mut OrganismGenome,
     seed_genome_config: &SeedGenomeConfig,

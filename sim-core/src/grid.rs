@@ -1,3 +1,4 @@
+use crate::metabolism::refresh_organism_base_metabolic_cost;
 use crate::{PendingActionState, Simulation};
 use sim_types::FacingDirection;
 use sim_types::{Occupant, OrganismState};
@@ -157,6 +158,7 @@ impl Simulation {
 
         organism.q = q;
         organism.r = r;
+        refresh_organism_base_metabolic_cost(&mut organism);
         self.occupancy[cell_idx] = Some(Occupant::Organism(organism.id));
         self.organisms.push(organism);
         self.pending_actions.push(PendingActionState::default());

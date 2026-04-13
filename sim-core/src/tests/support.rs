@@ -29,6 +29,11 @@ impl IntoEnergy for f64 {
     }
 }
 
+fn finalize_test_organism(mut organism: OrganismState) -> OrganismState {
+    crate::metabolism::refresh_organism_base_metabolic_cost(&mut organism);
+    organism
+}
+
 pub(super) fn test_genome() -> OrganismGenome {
     let default_loc = BrainLocation { x: 5.0, y: 5.0 };
     OrganismGenome {
@@ -238,7 +243,7 @@ pub(super) fn make_single_action_organism(
 ) -> OrganismState {
     let energy = energy.into_energy();
     let initial_energy = if energy <= 0.0 { 10.0 } else { energy };
-    OrganismState {
+    finalize_test_organism(OrganismState {
         id: OrganismId(id),
         species_id: sim_types::SpeciesId(id),
         q,
@@ -258,11 +263,12 @@ pub(super) fn make_single_action_organism(
         prey_consumptions_count: 0,
         reproductions_count: 0,
         last_action_taken: ActionType::Idle,
+        base_metabolic_cost: 0.0,
         #[cfg(feature = "instrumentation")]
         instrumentation: Default::default(),
         brain: forced_brain_with_action(preferred_action, confidence),
         genome: test_genome(),
-    }
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -279,7 +285,7 @@ pub(super) fn make_organism(
 ) -> OrganismState {
     let energy = energy.into_energy();
     let initial_energy = if energy <= 0.0 { 10.0 } else { energy };
-    OrganismState {
+    finalize_test_organism(OrganismState {
         id: OrganismId(id),
         species_id: sim_types::SpeciesId(id),
         q,
@@ -299,11 +305,12 @@ pub(super) fn make_organism(
         prey_consumptions_count: 0,
         reproductions_count: 0,
         last_action_taken: ActionType::Idle,
+        base_metabolic_cost: 0.0,
         #[cfg(feature = "instrumentation")]
         instrumentation: Default::default(),
         brain: forced_brain(wants_move, turn_left, turn_right, confidence),
         genome: test_genome(),
-    }
+    })
 }
 
 pub(super) fn reproduction_request_from_parent(
@@ -362,6 +369,9 @@ pub(super) fn reproduction_request_at(
 }
 
 pub(super) fn configure_sim(sim: &mut Simulation, mut organisms: Vec<OrganismState>) {
+    for organism in &mut organisms {
+        crate::metabolism::refresh_organism_base_metabolic_cost(organism);
+    }
     organisms.sort_by_key(|organism| organism.id);
     sim.organisms = organisms;
     sim.pending_actions = vec![PendingActionState::default(); sim.organisms.len()];
