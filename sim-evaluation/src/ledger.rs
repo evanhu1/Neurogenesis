@@ -3,6 +3,26 @@ use sim_types::{
     ActionRecord, ActionType, OrganismId, OrganismState, ReproductionEvent, SensoryReceptor,
 };
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
+
+/// Identity hasher for integer-keyed HashMaps. OrganismId values are unique
+/// monotonic u64s, so the identity function is a perfect hash.
+#[derive(Default)]
+struct IdHasher(u64);
+
+impl Hasher for IdHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, _bytes: &[u8]) {
+        unreachable!("IdHasher only supports write_u64");
+    }
+    fn write_u64(&mut self, i: u64) {
+        self.0 = i;
+    }
+}
+
+type IdHashMap<K, V> = HashMap<K, V, BuildHasherDefault<IdHasher>>;
 
 pub const N_ACTIONS: usize = 7;
 pub const SENSORY_BIN_COUNT: usize = 1 + SensoryReceptor::VISION_RAY_OFFSETS.len();
@@ -105,7 +125,7 @@ impl OrganismEntry {
 
 #[derive(Debug)]
 pub struct Ledger {
-    sidecar: HashMap<OrganismId, OrganismEntry>,
+    sidecar: IdHashMap<OrganismId, OrganismEntry>,
     recently_deceased: IntervalLifetimeSummary,
     interval_action_stats: IntervalActionStats,
     births: u64,
@@ -114,7 +134,7 @@ pub struct Ledger {
     parent_died_during_reproduction: u64,
     survived_to_30: u64,
     survived_to_maturity: u64,
-    pending_tracked_births: HashMap<OrganismId, ()>,
+    pending_tracked_births: IdHashMap<OrganismId, ()>,
     pending_threshold_checks: Vec<OrganismId>,
     parent_energy_after_successful_birth_sum: f64,
     parent_energy_after_successful_birth_count: u64,
@@ -129,7 +149,7 @@ pub struct Ledger {
 impl Ledger {
     pub fn new(min_lifetime: u64) -> Self {
         Self {
-            sidecar: HashMap::new(),
+            sidecar: IdHashMap::default(),
             recently_deceased: IntervalLifetimeSummary::default(),
             interval_action_stats: IntervalActionStats::default(),
             births: 0,
@@ -138,7 +158,7 @@ impl Ledger {
             parent_died_during_reproduction: 0,
             survived_to_30: 0,
             survived_to_maturity: 0,
-            pending_tracked_births: HashMap::new(),
+            pending_tracked_births: IdHashMap::default(),
             pending_threshold_checks: Vec::new(),
             parent_energy_after_successful_birth_sum: 0.0,
             parent_energy_after_successful_birth_count: 0,
