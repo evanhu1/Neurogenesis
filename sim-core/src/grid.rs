@@ -50,13 +50,14 @@ pub(crate) fn wrap_position(position: (i32, i32), world_width: i32) -> (i32, i32
     )
 }
 
+#[inline(always)]
 pub(crate) fn hex_neighbor(
     position: (i32, i32),
     facing: FacingDirection,
     world_width: i32,
 ) -> (i32, i32) {
     let (q, r) = position;
-    let neighbor = match facing {
+    let (nq, nr) = match facing {
         FacingDirection::East => (q + 1, r),
         FacingDirection::NorthEast => (q + 1, r - 1),
         FacingDirection::NorthWest => (q, r - 1),
@@ -64,7 +65,20 @@ pub(crate) fn hex_neighbor(
         FacingDirection::SouthWest => (q - 1, r + 1),
         FacingDirection::SouthEast => (q, r + 1),
     };
-    wrap_position(neighbor, world_width)
+    (wrap_neighbor(nq, world_width), wrap_neighbor(nr, world_width))
+}
+
+/// Fast wraparound for coordinates known to be in `[-1, world_width]`.
+/// Valid only for single-step hex movement from a canonical position.
+#[inline(always)]
+fn wrap_neighbor(coord: i32, width: i32) -> i32 {
+    if coord < 0 {
+        coord + width
+    } else if coord >= width {
+        coord - width
+    } else {
+        coord
+    }
 }
 
 pub(crate) fn opposite_direction(direction: FacingDirection) -> FacingDirection {

@@ -52,7 +52,7 @@ impl Simulation {
     pub(super) fn compact_organism_state(
         &mut self,
         removed: &[bool],
-        skip_pending_action_decrement: Option<&mut Vec<bool>>,
+        mut skip_pending_action_decrement: Option<&mut Vec<bool>>,
     ) {
         debug_assert_eq!(removed.len(), self.organisms.len());
         debug_assert_eq!(self.pending_actions.len(), self.organisms.len());
@@ -65,39 +65,25 @@ impl Simulation {
             return;
         }
 
-        let mut survivors = Vec::with_capacity(self.organisms.len());
-        let mut survivor_pending_actions = Vec::with_capacity(self.pending_actions.len());
-        let mut survivor_reward_ledgers = Vec::with_capacity(self.reward_ledgers.len());
-        let mut survivor_skip = skip_pending_action_decrement
-            .as_ref()
-            .map(|skip| Vec::with_capacity(skip.len()));
-
-        for (idx, ((organism, pending_action), reward_ledger)) in self
-            .organisms
-            .drain(..)
-            .zip(self.pending_actions.drain(..))
-            .zip(self.reward_ledgers.drain(..))
-            .enumerate()
-        {
-            if removed[idx] {
-                continue;
-            }
-            survivors.push(organism);
-            survivor_pending_actions.push(pending_action);
-            survivor_reward_ledgers.push(reward_ledger);
-            if let Some(skip) = skip_pending_action_decrement.as_ref() {
-                survivor_skip
-                    .as_mut()
-                    .expect("skip sidecar capacity should be initialized")
-                    .push(skip[idx]);
+        let mut write = 0_usize;
+        for read in 0..self.organisms.len() {
+            if !removed[read] {
+                if write != read {
+                    self.organisms.swap(write, read);
+                    self.pending_actions.swap(write, read);
+                    self.reward_ledgers.swap(write, read);
+                    if let Some(ref mut skip) = skip_pending_action_decrement {
+                        skip.swap(write, read);
+                    }
+                }
+                write += 1;
             }
         }
-
-        self.organisms = survivors;
-        self.pending_actions = survivor_pending_actions;
-        self.reward_ledgers = survivor_reward_ledgers;
+        self.organisms.truncate(write);
+        self.pending_actions.truncate(write);
+        self.reward_ledgers.truncate(write);
         if let Some(skip) = skip_pending_action_decrement {
-            *skip = survivor_skip.unwrap_or_default();
+            skip.truncate(write);
         }
     }
 

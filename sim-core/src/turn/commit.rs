@@ -264,13 +264,16 @@ impl<'a> CommitPhaseContext<'a> {
             .compact_organism_state(&self.dead_organisms, Some(skip_pending_action_decrement));
 
         let food_count = self.removed_food.len();
-        let mut new_foods = Vec::with_capacity(self.sim.foods.len());
-        for (idx, food) in self.sim.foods.drain(..).enumerate() {
-            if idx >= food_count || !self.removed_food[idx] {
-                new_foods.push(food);
+        let mut write = 0_usize;
+        for read in 0..self.sim.foods.len() {
+            if read >= food_count || !self.removed_food[read] {
+                if write != read {
+                    self.sim.foods.swap(write, read);
+                }
+                write += 1;
             }
         }
-        self.sim.foods = new_foods;
+        self.sim.foods.truncate(write);
 
         self.result
             .food_spawned

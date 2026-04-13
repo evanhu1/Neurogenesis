@@ -247,22 +247,42 @@ impl Simulation {
             return;
         }
 
-        let thread_pool = sim_parallel_pool(self.config.intent_parallel_threads);
+        let any_learners = self
+            .organisms
+            .iter()
+            .any(|o| o.genome.hebb_eta_gain > 0.0);
+
         #[cfg(feature = "profiling")]
         let plasticity_started = Instant::now();
-        thread_pool.install(|| {
-            self.organisms
-                .par_iter_mut()
-                .zip(self.reward_ledgers.par_iter())
-                .with_min_len(INTENT_PARALLEL_MIN_LEN)
-                .for_each(|(organism, reward_ledger)| {
-                    apply_runtime_weight_updates_with_multiplier(
-                        organism,
-                        *reward_ledger,
-                        self.reward_signal_multiplier,
-                    );
-                });
-        });
+
+        if any_learners {
+            let thread_pool = sim_parallel_pool(self.config.intent_parallel_threads);
+            thread_pool.install(|| {
+                self.organisms
+                    .par_iter_mut()
+                    .zip(self.reward_ledgers.par_iter())
+                    .with_min_len(INTENT_PARALLEL_MIN_LEN)
+                    .for_each(|(organism, reward_ledger)| {
+                        apply_runtime_weight_updates_with_multiplier(
+                            organism,
+                            *reward_ledger,
+                            self.reward_signal_multiplier,
+                        );
+                    });
+            });
+        } else {
+            let multiplier = self.reward_signal_multiplier;
+            for (organism, reward_ledger) in
+                self.organisms.iter_mut().zip(self.reward_ledgers.iter())
+            {
+                apply_runtime_weight_updates_with_multiplier(
+                    organism,
+                    *reward_ledger,
+                    multiplier,
+                );
+            }
+        }
+
         #[cfg(feature = "profiling")]
         profiling::record_brain_plasticity_total(plasticity_started.elapsed());
     }

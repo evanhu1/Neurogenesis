@@ -2,21 +2,23 @@ use super::*;
 use crate::metabolism::refresh_organism_base_metabolic_cost;
 
 impl Simulation {
-    pub(crate) fn resolve_spawn_requests(&mut self, queue: &[SpawnRequest]) -> Vec<OrganismState> {
+    pub(crate) fn resolve_spawn_requests(
+        &mut self,
+        queue: &mut Vec<SpawnRequest>,
+    ) -> Vec<OrganismState> {
         let mut spawned = Vec::new();
-        for request in queue {
-            let organism = match &request.kind {
-                SpawnRequestKind::Reproduction(reproduction) => {
-                    let mut child_genome = reproduction.parent_genome.clone();
+        for request in queue.drain(..) {
+            let organism = match request.kind {
+                SpawnRequestKind::Reproduction(mut reproduction) => {
                     mutate_genome(
-                        &mut child_genome,
+                        &mut reproduction.parent_genome,
                         &self.config.seed_genome_config,
                         self.config.global_mutation_rate_modifier,
                         self.config.meta_mutation_enabled,
                         &mut self.rng,
                     );
                     self.build_organism(
-                        child_genome,
+                        reproduction.parent_genome,
                         OrganismSpawnParams {
                             species_id: reproduction.parent_species_id,
                             q: reproduction.q,
