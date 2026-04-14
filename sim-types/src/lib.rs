@@ -223,13 +223,17 @@ pub enum SensoryReceptor {
     ContactAhead,
     Energy,
     Health,
+    EnergyDelta,
+    Reward,
+    LastActionForward,
+    LastActionEat,
 }
 
 impl SensoryReceptor {
     /// Fixed relative ray offsets around facing direction.
     pub const VISION_RAY_OFFSETS: [i8; 3] = [-1, 0, 1];
     pub const VISION_CHANNEL_COUNT: u32 = VisionChannel::ALL.len() as u32;
-    pub const SCALAR_NEURON_COUNT: u32 = 3;
+    pub const SCALAR_NEURON_COUNT: u32 = 7;
     pub const VISION_NEURON_COUNT: u32 =
         (Self::VISION_RAY_OFFSETS.len() as u32) * Self::VISION_CHANNEL_COUNT;
     pub const TOTAL_NEURON_COUNT: u32 = Self::VISION_NEURON_COUNT + Self::SCALAR_NEURON_COUNT;
@@ -245,7 +249,15 @@ impl SensoryReceptor {
                         channel,
                     })
             })
-            .chain([Self::ContactAhead, Self::Energy, Self::Health])
+            .chain([
+                Self::ContactAhead,
+                Self::Energy,
+                Self::Health,
+                Self::EnergyDelta,
+                Self::Reward,
+                Self::LastActionForward,
+                Self::LastActionEat,
+            ])
     }
 
     pub fn current_index(self) -> Option<usize> {
@@ -268,10 +280,22 @@ mod tests {
     #[test]
     fn sensory_receptors_include_forward_rgb_plus_scalar_sensors() {
         let receptors = SensoryReceptor::ordered().collect::<Vec<_>>();
-        assert_eq!(receptors.len(), 6);
+        assert_eq!(receptors.len(), 16);
         assert_eq!(
             receptors,
             vec![
+                SensoryReceptor::VisionRay {
+                    ray_offset: -1,
+                    channel: VisionChannel::Red,
+                },
+                SensoryReceptor::VisionRay {
+                    ray_offset: -1,
+                    channel: VisionChannel::Green,
+                },
+                SensoryReceptor::VisionRay {
+                    ray_offset: -1,
+                    channel: VisionChannel::Blue,
+                },
                 SensoryReceptor::VisionRay {
                     ray_offset: 0,
                     channel: VisionChannel::Red,
@@ -284,9 +308,25 @@ mod tests {
                     ray_offset: 0,
                     channel: VisionChannel::Blue,
                 },
+                SensoryReceptor::VisionRay {
+                    ray_offset: 1,
+                    channel: VisionChannel::Red,
+                },
+                SensoryReceptor::VisionRay {
+                    ray_offset: 1,
+                    channel: VisionChannel::Green,
+                },
+                SensoryReceptor::VisionRay {
+                    ray_offset: 1,
+                    channel: VisionChannel::Blue,
+                },
                 SensoryReceptor::ContactAhead,
                 SensoryReceptor::Energy,
                 SensoryReceptor::Health,
+                SensoryReceptor::EnergyDelta,
+                SensoryReceptor::Reward,
+                SensoryReceptor::LastActionForward,
+                SensoryReceptor::LastActionEat,
             ]
         );
     }
