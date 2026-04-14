@@ -14,11 +14,8 @@ use std::time::Instant;
 const PLASTIC_WEIGHT_DECAY: f32 = 0.001;
 const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
 const PRUNE_ELIGIBILITY_MULTIPLIER: f32 = 2.0;
-/// Discount factor for TD-error target: `δ = r + γ·V(s_{t+1}) − V(s_t)`.
 const VALUE_DISCOUNT_GAMMA: f32 = 0.95;
-/// Learning rate for the value head's local gradient step on TD-error.
 const VALUE_LEARNING_RATE: f32 = 0.01;
-/// Max absolute magnitude for any single value-head weight.
 const VALUE_WEIGHT_CLAMP: f32 = 5.0;
 
 struct PlasticityStepParams {
@@ -96,9 +93,9 @@ pub(crate) fn apply_runtime_weight_updates(
     apply_runtime_weight_updates_with_multiplier(organism, reward_ledger, 1.0);
 }
 
-/// Linear value estimate V(s) = Σ w_i · activation_i over current inter neurons.
-/// Returns 0 when the weight vector size disagrees with the inter layer
-/// (which can happen transiently if mutations resize the layer between ticks).
+// V(s) = Σ w_i · activation_i over current inter neurons. Returns 0 when the
+// weight vector is out of sync with the inter layer — can happen transiently
+// after inter-layer mutations between ticks.
 fn compute_value_estimate(brain: &BrainState) -> f32 {
     if brain.value_weights.len() != brain.inter.len() {
         return 0.0;
@@ -118,38 +115,23 @@ pub(crate) fn apply_runtime_weight_updates_with_multiplier(
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
 
-    // Actor-critic TD-error dopamine:
-    //     δ = r_t + γ·V(s_t) − V(s_{t-1})
-    // V(s) is a learned linear projection of current inter activations via
-    // `brain.value_weights`. V(s_{t-1}) is stashed in `organism.value_prev`.
-    // The TD-error replaces the raw reward signal as the dopamine input, then
-    // goes through the same tanh squash to keep dopamine magnitude comparable
-    // to the baseline.
-    //
-    // A *state-conditional* value (unlike an EMA baseline) lets plasticity
-    // keep reinforcing learned behaviors even as reward becomes routine,
-    // because V adapts its prediction to the current state rather than to
-    // the running mean.
+    // Actor-critic TD-error dopamine: δ = r_t + γ·V(s_t) − V(s_{t-1}).
+    // A state-conditional V (not an EMA baseline) keeps plasticity reinforcing
+    // learned behaviors even as reward becomes routine.
     let v_current = compute_value_estimate(&organism.brain);
     let raw_reward = reward_ledger.weighted_reward_signal(&organism.genome.reward_weights)
         * reward_signal_multiplier;
     let td_error = raw_reward + VALUE_DISCOUNT_GAMMA * v_current - organism.value_prev;
-    // Unit-normalized tonic ledger signals give td_error in roughly [-2, +2];
-    // feeding directly into tanh gives good dynamic range without saturating
-    // on tonic baseline or collapsing phasic pulses.
     let dopamine_signal = fast_tanh(td_error);
 
-    let mut params =
-        PlasticityStepParams::from_organism(organism, reward_ledger, reward_signal_multiplier);
-    params.dopamine_signal = dopamine_signal;
+    let params = PlasticityStepParams::from_organism(organism, dopamine_signal);
     organism.dopamine = dopamine_signal;
     organism.energy_prev = organism.energy;
     organism.health_prev = organism.health;
 
-    // Local semi-gradient descent step on V(s_{t-1}) toward `r + γ·V(s_t)`.
-    // ∂V/∂w_i at the previous state equals the previous inter activation.
-    // Size must match; skip on the first tick when no stash exists or after
-    // inter-layer mutations changed the layer size.
+    // Semi-gradient descent on V(s_{t-1}) toward r + γ·V(s_t); ∂V/∂w_i is
+    // the previous inter activation. Skip when the stash is missing or its
+    // size disagrees with the current weight vector (post-mutation transient).
     if !organism.value_prev_inter_activations.is_empty()
         && organism.value_prev_inter_activations.len() == organism.brain.value_weights.len()
     {
@@ -172,8 +154,6 @@ pub(crate) fn apply_runtime_weight_updates_with_multiplier(
         }
     }
 
-    // Keep value_weights aligned with the inter layer in case mutations
-    // resized it between ticks.
     if organism.brain.value_weights.len() != organism.brain.inter.len() {
         organism
             .brain
@@ -181,12 +161,12 @@ pub(crate) fn apply_runtime_weight_updates_with_multiplier(
             .resize(organism.brain.inter.len(), 0.0);
     }
 
-    // Stash current-tick state so next tick can form V(s_{t+1}) - V(s_t).
     organism.value_prev = v_current;
-    organism.value_prev_inter_activations.clear();
-    organism
-        .value_prev_inter_activations
-        .extend(organism.brain.inter.iter().map(|i| i.neuron.activation));
+    let stash = &mut organism.value_prev_inter_activations;
+    stash.resize(organism.brain.inter.len(), 0.0);
+    for (slot, inter) in stash.iter_mut().zip(organism.brain.inter.iter()) {
+        *slot = inter.neuron.activation;
+    }
 
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::PlasticitySetup, stage_started.elapsed());
@@ -225,11 +205,7 @@ pub(crate) fn apply_runtime_weight_updates_with_multiplier(
 }
 
 impl PlasticityStepParams {
-    fn from_organism(
-        organism: &OrganismState,
-        reward_ledger: RewardLedger,
-        reward_signal_multiplier: f32,
-    ) -> Self {
+    fn from_organism(organism: &OrganismState, dopamine_signal: f32) -> Self {
         let is_mature = organism.age_turns >= u64::from(organism.genome.lifecycle.age_of_maturity);
         let juvenile_eta_scale = organism.genome.plasticity.juvenile_eta_scale.max(0.0);
         let eta = if is_mature {
@@ -239,13 +215,18 @@ impl PlasticityStepParams {
         };
 
         Self {
-            dopamine_signal: fast_tanh(
-                reward_ledger.weighted_reward_signal(&organism.genome.reward_weights)
-                    * reward_signal_multiplier,
-            ),
+            dopamine_signal,
             eta,
-            eligibility_retention: organism.genome.plasticity.eligibility_retention.clamp(0.0, 1.0),
-            max_weight_delta_per_tick: organism.genome.plasticity.max_weight_delta_per_tick.max(0.0),
+            eligibility_retention: organism
+                .genome
+                .plasticity
+                .eligibility_retention
+                .clamp(0.0, 1.0),
+            max_weight_delta_per_tick: organism
+                .genome
+                .plasticity
+                .max_weight_delta_per_tick
+                .max(0.0),
             should_prune: should_prune_synapses(
                 organism.age_turns,
                 organism.genome.lifecycle.age_of_maturity,

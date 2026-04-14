@@ -36,17 +36,16 @@ pub(super) fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome,
     sanitize_synapse_genes(genome);
 }
 
-/// Fill missing reward-weight slots with their default values and clamp every
-/// entry to the legal range. Legacy genomes deserialize with an empty vector;
-/// this turns them into the canonical +1/+1/-1/0/-1/+1 baseline so they match
-/// the previous hardcoded reward signal exactly.
 fn align_reward_weights(weights: &mut Vec<f32>) {
-    while weights.len() < crate::REWARD_WEIGHT_COUNT {
-        weights.push(crate::DEFAULT_REWARD_WEIGHTS[weights.len()]);
+    use crate::{
+        DEFAULT_REWARD_WEIGHTS, REWARD_WEIGHT_COUNT, REWARD_WEIGHT_MAX, REWARD_WEIGHT_MIN,
+    };
+    while weights.len() < REWARD_WEIGHT_COUNT {
+        weights.push(DEFAULT_REWARD_WEIGHTS[weights.len()]);
     }
-    weights.truncate(crate::REWARD_WEIGHT_COUNT);
+    weights.truncate(REWARD_WEIGHT_COUNT);
     for w in weights.iter_mut() {
-        *w = w.clamp(crate::REWARD_WEIGHT_MIN, crate::REWARD_WEIGHT_MAX);
+        *w = w.clamp(REWARD_WEIGHT_MIN, REWARD_WEIGHT_MAX);
     }
 }
 

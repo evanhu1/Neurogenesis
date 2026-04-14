@@ -237,23 +237,19 @@ impl Simulation {
     }
 
     fn apply_post_commit_runtime_weight_updates(&mut self) {
-        // Refresh the tonic reward ledger from current state before plasticity
-        // reads it. Done unconditionally (even with plasticity disabled) so the
-        // ledger reflects accurate state if anything else inspects it.
-        let food_energy = self.config.food_energy;
-        for (organism, ledger) in self
-            .organisms
-            .iter()
-            .zip(self.reward_ledgers.iter_mut())
-        {
-            ledger.observe(organism, food_energy);
-        }
-
         if !self.config.runtime_plasticity_enabled {
             return;
         }
 
-        let any_learners = self.organisms.iter().any(|o| o.genome.plasticity.hebb_eta_gain > 0.0);
+        let food_energy = self.config.food_energy;
+        for (organism, ledger) in self.organisms.iter().zip(self.reward_ledgers.iter_mut()) {
+            ledger.observe(organism, food_energy);
+        }
+
+        let any_learners = self
+            .organisms
+            .iter()
+            .any(|o| o.genome.plasticity.hebb_eta_gain > 0.0);
 
         #[cfg(feature = "profiling")]
         let plasticity_started = Instant::now();

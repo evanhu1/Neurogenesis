@@ -435,9 +435,9 @@ pub struct OrganismGenome {
     #[serde(default)]
     pub mutation_rates: MutationRateGenes,
     pub brain: BrainTopology,
-    /// Genomic coefficients applied to raw reward-ledger components before the
-    /// dopamine squash. Index order matches `RewardLedgerWeight` in sim-core.
-    /// Empty vectors are filled with defaults during genome sanitization.
+    /// Genomic coefficients applied to the tonic reward-ledger channels before
+    /// the dopamine squash. Index order matches `RewardLedger` fields in
+    /// sim-core. Empty vectors are filled with defaults during sanitization.
     #[serde(default)]
     pub reward_weights: Vec<f32>,
 }

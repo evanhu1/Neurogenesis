@@ -1,8 +1,8 @@
 use sim_types::OrganismState;
 
-/// Per-tick tonic reward signals. Overwritten each tick by `observe` — not
-/// accumulated across events. All channel magnitudes are unit-normalized so the
-/// weighted signal naturally sits in roughly [-2, +2] under default weights.
+// Per-tick tonic reward signals, overwritten each tick by `observe`. Channels
+// are unit-normalized so the weighted sum sits in roughly [-2, +2] under
+// default weights and feeds directly into tanh without a scaling divisor.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct RewardLedger {
     pub(crate) energy_level: f32,
@@ -14,9 +14,6 @@ pub(crate) struct RewardLedger {
 }
 
 impl RewardLedger {
-    /// Overwrites the ledger with tonic signals derived from the organism's
-    /// current state and its `energy_prev` / `health_prev` snapshots. Deltas
-    /// cover the full tick (from end of previous plasticity step to now).
     pub(crate) fn observe(&mut self, organism: &OrganismState, food_energy: f32) {
         let food_scale = food_energy.max(1e-3);
         let health_scale = organism.max_health.max(1e-3);
@@ -32,16 +29,11 @@ impl RewardLedger {
         self.health_delta_loss = (-health_delta).max(0.0) / health_scale;
     }
 
-    /// Weighted linear combination of the tonic channels. A short/malformed
-    /// weights slice falls back to `DEFAULT_REWARD_WEIGHTS` element-wise so
-    /// legacy organisms and deserialized genomes keep the baseline behavior.
+    // Short/malformed slices fall back to `DEFAULT_REWARD_WEIGHTS` element-wise
+    // so legacy genomes deserializing with an empty vector keep baseline behavior
+    // even if sanitization hasn't run yet.
     pub(crate) fn weighted_reward_signal(self, weights: &[f32]) -> f32 {
-        let w = |i: usize| {
-            weights
-                .get(i)
-                .copied()
-                .unwrap_or(DEFAULT_REWARD_WEIGHTS[i])
-        };
+        let w = |i: usize| weights.get(i).copied().unwrap_or(DEFAULT_REWARD_WEIGHTS[i]);
         w(0) * self.energy_level
             + w(1) * self.energy_delta_gain
             + w(2) * self.energy_delta_loss
@@ -51,21 +43,18 @@ impl RewardLedger {
     }
 }
 
-/// Number of genomic reward-weight coefficients; must match the channel count
-/// in `RewardLedger::weighted_reward_signal` and `DEFAULT_REWARD_WEIGHTS`.
 pub(crate) const REWARD_WEIGHT_COUNT: usize = 6;
 
-/// Default reward-weight vector, ordered to match the ledger fields:
-/// [energy_level, energy_delta_gain, energy_delta_loss,
-///  health_level, health_delta_gain, health_delta_loss].
-/// Level channels start at 0 / +1 so evolution can discover which absolute
-/// states matter; delta gain/loss defaults split into +1 / -1 so signed
-/// change in resources drives a symmetric dopamine response.
+// Ordered to match the ledger fields:
+// [energy_level, energy_delta_gain, energy_delta_loss,
+//  health_level, health_delta_gain, health_delta_loss].
+// energy_level starts at 0 (absolute energy is a predictor, not a goal on its
+// own) while health_level starts at +1 (higher health is always rewarded).
 pub(crate) const DEFAULT_REWARD_WEIGHTS: [f32; REWARD_WEIGHT_COUNT] =
     [0.0, 1.0, -1.0, 1.0, 1.0, -1.0];
 
-/// Bound on an individual reward weight. Evolution can flip signs and scale
-/// up to 3x, but cannot produce arbitrarily large dopamine magnitudes.
+// Bound each weight so evolution can flip signs and scale up to 3x without
+// producing arbitrarily large dopamine magnitudes.
 pub(crate) const REWARD_WEIGHT_MIN: f32 = -3.0;
 pub(crate) const REWARD_WEIGHT_MAX: f32 = 3.0;
 
