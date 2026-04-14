@@ -91,10 +91,10 @@ export function InspectorPanel({
         { label: 'Pregnant', value: focusedOrganism.is_gestating ? 'Yes' : 'No' },
         { label: 'Energy', value: formatFloat(focusedOrganism.energy, 2) },
         { label: 'Action', value: focusedOrganism.last_action_taken },
-        { label: 'Dopamine', value: formatFloat(focusedOrganism.dopamine, 3) },
+        { label: 'Reward', value: formatFloat(focusedOrganism.dopamine, 3) },
+        { label: 'Critic', value: formatFloat(focusedOrganism.value_prev, 3) },
         { label: 'Plants', value: String(focusedOrganism.plant_consumptions_count) },
         { label: 'Prey', value: String(focusedOrganism.prey_consumptions_count) },
-        { label: 'Meals', value: String(focusedOrganism.consumptions_count) },
         { label: 'Repr', value: String(focusedOrganism.reproductions_count) },
       ] satisfies StatItem[],
       brainStats: [
@@ -112,14 +112,16 @@ export function InspectorPanel({
         { label: 'Gestation', value: String(genome.gestation_ticks) },
         { label: 'Max Age', value: String(genome.max_organism_age) },
         { label: 'Max Health', value: formatFloat(genome.max_health, 1) },
-        { label: 'Plasticity Age', value: String(genome.plasticity_start_age) },
         { label: 'Hebb Gain', value: formatFloat(genome.hebb_eta_gain, 3) },
         { label: 'Juvenile Eta', value: formatFloat(genome.juvenile_eta_scale, 3) },
         { label: 'Elig Ret', value: formatFloat(genome.eligibility_retention, 3) },
-        { label: 'Wt Delta', value: formatFloat(genome.max_weight_delta_per_tick, 3) },
         { label: 'Prune Thr', value: formatFloat(genome.synapse_prune_threshold, 3) },
-        { label: 'Biases', value: String(genome.inter_biases.length) },
-        { label: 'Time Cst', value: String(genome.inter_log_time_constants.length) },
+        { label: 'Rw Eng Lvl', value: formatFloat(genome.reward_weights[0] ?? 0, 3) },
+        { label: 'Rw Eng +', value: formatFloat(genome.reward_weights[1] ?? 0, 3) },
+        { label: 'Rw Eng -', value: formatFloat(genome.reward_weights[2] ?? 0, 3) },
+        { label: 'Rw HP Lvl', value: formatFloat(genome.reward_weights[3] ?? 0, 3) },
+        { label: 'Rw HP +', value: formatFloat(genome.reward_weights[4] ?? 0, 3) },
+        { label: 'Rw HP -', value: formatFloat(genome.reward_weights[5] ?? 0, 3) },
       ] satisfies StatItem[],
       mutationRates,
     };
@@ -208,6 +210,7 @@ export function InspectorPanel({
             focusedBrain={focusedBrain}
             activeActionNeuronId={activeActionNeuronId}
             focusOrganismId={focusedOrganism?.id ?? null}
+            actionBiases={focusedOrganism?.genome.action_biases ?? []}
           />
         </div>
       </div>

@@ -11,7 +11,6 @@ gestation_ticks = 2
 max_organism_age = 1250
 
 [plasticity]
-plasticity_start_age = 0
 hebb_eta_gain = 0.02
 juvenile_eta_scale = 2.0
 eligibility_retention = 0.90

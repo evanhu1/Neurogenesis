@@ -187,7 +187,6 @@ mod tests {
                 age_of_maturity: 0,
                 gestation_ticks: 0,
                 max_organism_age: 100,
-                plasticity_start_age: 0,
                 hebb_eta_gain: 0.0,
                 juvenile_eta_scale: 0.5,
                 eligibility_retention: 0.9,

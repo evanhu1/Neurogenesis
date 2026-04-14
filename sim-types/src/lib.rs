@@ -361,8 +361,6 @@ pub struct OrganismGenome {
     pub gestation_ticks: u8,
     #[serde(default = "default_max_organism_age")]
     pub max_organism_age: u32,
-    #[serde(default = "default_plasticity_start_age")]
-    pub plasticity_start_age: u32,
     #[serde(default)]
     pub hebb_eta_gain: f32,
     #[serde(default = "default_juvenile_eta_scale")]
@@ -443,10 +441,6 @@ fn default_gestation_ticks() -> u8 {
 
 fn default_max_organism_age() -> u32 {
     u32::MAX
-}
-
-fn default_plasticity_start_age() -> u32 {
-    0
 }
 
 fn default_max_health() -> f32 {

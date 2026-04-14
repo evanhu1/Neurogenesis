@@ -38,6 +38,7 @@ export type BrainLayout = {
 export function computeBrainLayout(
   brain: BrainState,
   activeActionNeuronId: number | null,
+  actionBiases: number[] = [],
 ): BrainLayout {
   const nodes: BrainNode[] = [];
 
@@ -79,6 +80,7 @@ export function computeBrainLayout(
       type: 'action',
       label: neuron.action_type,
       value: neuron.logit,
+      bias: actionBiases[actionIdx],
       gx: finiteOr(neuron.x, 8.5),
       gy: finiteOr(neuron.y, actionIdx * 1.2 + 2),
       isActive: activeActionNeuronId === nid,
@@ -234,6 +236,7 @@ export function renderBrain(
   focusedBrain: BrainState | null,
   activeActionNeuronId: number | null,
   transform: BrainTransform,
+  actionBiases: number[] = [],
 ) {
   const width = canvas.width;
   const height = canvas.height;
@@ -246,7 +249,7 @@ export function renderBrain(
     return;
   }
 
-  const layout = computeBrainLayout(focusedBrain, activeActionNeuronId);
+  const layout = computeBrainLayout(focusedBrain, activeActionNeuronId, actionBiases);
   const { positions } = layout;
   const { scale } = transform;
 
@@ -459,9 +462,10 @@ export function renderBrain(
       const metricsY = hasLabel ? node.y + 16 : node.y + 4;
       const valueLabel = node.type === 'action' ? 'logit' : 'h';
       ctx.fillText(`${valueLabel}=${node.value.toFixed(2)}`, node.x + 12, metricsY);
-      if (node.type === 'inter') {
-        const bias = node.bias ?? 0;
-        ctx.fillText(`b=${bias.toFixed(2)}`, node.x + 12, metricsY + 12);
+      if (node.type === 'inter' || node.type === 'action') {
+        if (node.bias != null) {
+          ctx.fillText(`b=${node.bias.toFixed(2)}`, node.x + 12, metricsY + 12);
+        }
       }
       if (node.type === 'inter') {
         if (node.timeConstant != null) {

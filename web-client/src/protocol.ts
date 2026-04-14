@@ -91,6 +91,7 @@ function normalizeChampionPoolEntry(entry: ApiChampionPoolEntry) {
 function normalizeBrainState(brain: ApiOrganismState['brain']): BrainState {
   return {
     synapse_count: brain.synapse_count,
+    value_weights: brain.value_weights ?? [],
     sensory: brain.sensory.map((sensory) => {
       const normalized = {
         ...sensory,
@@ -163,6 +164,7 @@ function normalizeOrganismState(organism: ApiOrganismState): OrganismState {
     energy_prev: organism.energy_prev,
     health_prev: organism.health_prev,
     dopamine: organism.dopamine,
+    value_prev: organism.value_prev,
     damage_taken_last_turn: organism.damage_taken_last_turn,
     is_gestating: organism.is_gestating,
     consumptions_count: organism.consumptions_count,

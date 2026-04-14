@@ -12,12 +12,14 @@ type BrainCanvasProps = {
   focusedBrain: BrainState | null;
   activeActionNeuronId: number | null;
   focusOrganismId: number | null;
+  actionBiases: number[];
 };
 
 export function BrainCanvas({
   focusedBrain,
   activeActionNeuronId,
   focusOrganismId,
+  actionBiases,
 }: BrainCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const transformRef = useRef<BrainTransform>({ x: 0, y: 0, scale: 1 });
@@ -29,8 +31,8 @@ export function BrainCanvas({
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    renderBrain(ctx, canvas, focusedBrain, activeActionNeuronId, transformRef.current);
-  }, [focusedBrain, activeActionNeuronId]);
+    renderBrain(ctx, canvas, focusedBrain, activeActionNeuronId, transformRef.current, actionBiases);
+  }, [focusedBrain, activeActionNeuronId, actionBiases]);
 
   // Only auto-fit on focus/layout changes, not every tick update.
   useEffect(() => {
@@ -52,12 +54,12 @@ export function BrainCanvas({
       focusedBrain.action.length,
     ].join(':');
     if (fitKeyRef.current !== fitKey) {
-      const layout = computeBrainLayout(focusedBrain, activeActionNeuronId);
+      const layout = computeBrainLayout(focusedBrain, activeActionNeuronId, actionBiases);
       transformRef.current = zoomToFitBrain(layout, canvas.width, canvas.height);
       fitKeyRef.current = fitKey;
     }
     draw();
-  }, [focusOrganismId, focusedBrain, activeActionNeuronId, draw]);
+  }, [focusOrganismId, focusedBrain, activeActionNeuronId, actionBiases, draw]);
 
   // Wheel zoom (centered on cursor)
   useEffect(() => {

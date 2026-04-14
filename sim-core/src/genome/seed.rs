@@ -33,7 +33,6 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         age_of_maturity: config.age_of_maturity,
         gestation_ticks: config.gestation_ticks,
         max_organism_age: config.max_organism_age,
-        plasticity_start_age: config.plasticity_start_age,
         hebb_eta_gain: config.hebb_eta_gain,
         juvenile_eta_scale: config.juvenile_eta_scale,
         eligibility_retention: config.eligibility_retention,

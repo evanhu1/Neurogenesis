@@ -334,7 +334,6 @@ fn stable_perf_config() -> WorldConfig {
             age_of_maturity: 0,
             gestation_ticks: 2,
             max_organism_age: u32::MAX,
-            plasticity_start_age: 0,
             hebb_eta_gain: 0.0,
             juvenile_eta_scale: 0.5,
             eligibility_retention: 0.9,

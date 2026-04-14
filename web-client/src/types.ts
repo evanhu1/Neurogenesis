@@ -58,7 +58,6 @@ type GenomeCoreParams = {
   age_of_maturity: number;
   gestation_ticks: number;
   max_organism_age: number;
-  plasticity_start_age: number;
   hebb_eta_gain: number;
   juvenile_eta_scale: number;
   eligibility_retention: number;
@@ -132,6 +131,8 @@ type OrganismGenomeVectors<TEdge> = {
   sensory_locations: BrainLocation[];
   inter_locations: BrainLocation[];
   action_locations: BrainLocation[];
+  action_biases: number[];
+  reward_weights: number[];
   edges: TEdge[];
 };
 
@@ -228,6 +229,7 @@ export type ApiBrainState = {
   inter: ApiInterNeuronState[];
   action: ApiActionNeuronState[];
   synapse_count: number;
+  value_weights: number[];
 };
 
 export type BrainState = {
@@ -235,6 +237,7 @@ export type BrainState = {
   inter: InterNeuronState[];
   action: ActionNeuronState[];
   synapse_count: number;
+  value_weights: number[];
 };
 
 export type ApiOrganismState = {
@@ -251,6 +254,7 @@ export type ApiOrganismState = {
   energy_prev: number;
   health_prev: number;
   dopamine: number;
+  value_prev: number;
   damage_taken_last_turn: number;
   is_gestating: boolean;
   consumptions_count: number;
@@ -277,6 +281,7 @@ export type OrganismState = {
   energy_prev: number;
   health_prev: number;
   dopamine: number;
+  value_prev: number;
   damage_taken_last_turn: number;
   is_gestating: boolean;
   consumptions_count: number;

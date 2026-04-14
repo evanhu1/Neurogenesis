@@ -58,7 +58,6 @@ pub struct SeedGenomeConfigDefaults {
     pub max_health: f32,
     pub max_organism_age: u32,
     pub gestation_ticks: u8,
-    pub plasticity_start_age: u32,
     pub juvenile_eta_scale: f32,
     pub max_weight_delta_per_tick: f32,
 }
@@ -115,7 +114,6 @@ pub fn seed_genome_config_defaults() -> SeedGenomeConfigDefaults {
         max_health: 1.0,
         max_organism_age: u32::MAX,
         gestation_ticks: 2,
-        plasticity_start_age: 0,
         juvenile_eta_scale: 0.5,
         max_weight_delta_per_tick: 0.05,
     }
@@ -152,8 +150,6 @@ pub struct SeedGenomeConfig {
     pub max_health: f32,
     #[serde(default = "default_max_organism_age")]
     pub max_organism_age: u32,
-    #[serde(default = "default_plasticity_start_age")]
-    pub plasticity_start_age: u32,
     pub hebb_eta_gain: f32,
     #[serde(default = "default_juvenile_eta_scale")]
     pub juvenile_eta_scale: f32,
@@ -253,8 +249,6 @@ struct SeedGenomeLifecycleToml {
 
 #[derive(Debug, Clone, Deserialize)]
 struct SeedGenomePlasticityToml {
-    #[serde(default = "default_plasticity_start_age")]
-    plasticity_start_age: u32,
     hebb_eta_gain: f32,
     #[serde(default = "default_juvenile_eta_scale")]
     juvenile_eta_scale: f32,
@@ -299,7 +293,6 @@ impl From<SeedGenomeConfigToml> for SeedGenomeConfig {
             gestation_ticks: raw.lifecycle.gestation_ticks,
             max_health: raw.lifecycle.max_health,
             max_organism_age: raw.lifecycle.max_organism_age,
-            plasticity_start_age: raw.plasticity.plasticity_start_age,
             hebb_eta_gain: raw.plasticity.hebb_eta_gain,
             juvenile_eta_scale: raw.plasticity.juvenile_eta_scale,
             eligibility_retention: raw.plasticity.eligibility_retention,
@@ -642,8 +635,4 @@ fn default_runtime_plasticity_enabled() -> bool {
 
 fn default_force_random_actions() -> bool {
     world_config_defaults().flags.force_random_actions
-}
-
-fn default_plasticity_start_age() -> u32 {
-    seed_genome_config_defaults().plasticity_start_age
 }

@@ -24,7 +24,6 @@ const VALUE_WEIGHT_CLAMP: f32 = 5.0;
 struct PlasticityStepParams {
     dopamine_signal: f32,
     eta: f32,
-    apply_weight_update: bool,
     eligibility_retention: f32,
     max_weight_delta_per_tick: f32,
     should_prune: bool,
@@ -151,8 +150,7 @@ pub(crate) fn apply_runtime_weight_updates_with_multiplier(
     // ∂V/∂w_i at the previous state equals the previous inter activation.
     // Size must match; skip on the first tick when no stash exists or after
     // inter-layer mutations changed the layer size.
-    if params.apply_weight_update
-        && !organism.value_prev_inter_activations.is_empty()
+    if !organism.value_prev_inter_activations.is_empty()
         && organism.value_prev_inter_activations.len() == organism.brain.value_weights.len()
     {
         let is_mature = organism.age_turns >= u64::from(organism.genome.age_of_maturity);
@@ -233,8 +231,6 @@ impl PlasticityStepParams {
         reward_signal_multiplier: f32,
     ) -> Self {
         let is_mature = organism.age_turns >= u64::from(organism.genome.age_of_maturity);
-        let plasticity_started =
-            organism.age_turns >= u64::from(organism.genome.plasticity_start_age);
         let juvenile_eta_scale = organism.genome.juvenile_eta_scale.max(0.0);
         let eta = if is_mature {
             organism.genome.hebb_eta_gain.max(0.0)
@@ -248,7 +244,6 @@ impl PlasticityStepParams {
                     * reward_signal_multiplier,
             ),
             eta,
-            apply_weight_update: plasticity_started,
             eligibility_retention: organism.genome.eligibility_retention.clamp(0.0, 1.0),
             max_weight_delta_per_tick: organism.genome.max_weight_delta_per_tick.max(0.0),
             should_prune: should_prune_synapses(
@@ -305,16 +300,14 @@ fn apply_edge_weight_update_and_fold_pending(
 ) {
     let instantaneous_scale = 1.0 - params.eligibility_retention;
     for edge in edges {
-        if params.apply_weight_update {
-            let uncapped_delta = params.eta * params.dopamine_signal * edge.eligibility
-                - PLASTIC_WEIGHT_DECAY * edge.weight;
-            let capped_delta = uncapped_delta.clamp(
-                -params.max_weight_delta_per_tick,
-                params.max_weight_delta_per_tick,
-            );
-            let updated_weight = edge.weight + capped_delta;
-            edge.weight = constrain_weight(updated_weight);
-        }
+        let uncapped_delta = params.eta * params.dopamine_signal * edge.eligibility
+            - PLASTIC_WEIGHT_DECAY * edge.weight;
+        let capped_delta = uncapped_delta.clamp(
+            -params.max_weight_delta_per_tick,
+            params.max_weight_delta_per_tick,
+        );
+        let updated_weight = edge.weight + capped_delta;
+        edge.weight = constrain_weight(updated_weight);
         edge.eligibility = params.eligibility_retention * edge.eligibility
             + instantaneous_scale * edge.pending_coactivation;
         edge.pending_coactivation = 0.0;
