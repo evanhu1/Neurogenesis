@@ -157,6 +157,8 @@ impl Simulation {
             max_health,
             energy_prev: starting_energy,
             dopamine: 0.0,
+            value_prev: 0.0,
+            value_prev_inter_activations: Vec::new(),
             damage_taken_last_turn: 0.0,
             is_gestating: false,
             consumptions_count: 0,

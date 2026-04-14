@@ -502,6 +502,12 @@ pub struct BrainState {
     pub inter: Vec<InterNeuronState>,
     pub action: Vec<ActionNeuronState>,
     pub synapse_count: u32,
+    /// Linear actor-critic value head: V(s) = Σ value_weights[i] ·
+    /// inter[i].neuron.activation. Length matches `inter.len()` after genome
+    /// expression. Empty during legacy deserialization; plasticity resizes to
+    /// match the inter layer so mismatches cannot panic.
+    #[serde(default)]
+    pub value_weights: Vec<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -523,6 +529,13 @@ pub struct OrganismState {
     pub energy_prev: f32,
     #[serde(default)]
     pub dopamine: f32,
+    /// Previous-tick value estimate V(s_{t-1}); used to form TD-error dopamine.
+    #[serde(default)]
+    pub value_prev: f32,
+    /// Inter activations that produced `value_prev`; used as the pre-activation
+    /// vector for the value head's local gradient update.
+    #[serde(default)]
+    pub value_prev_inter_activations: Vec<f32>,
     #[serde(default)]
     pub damage_taken_last_turn: f32,
     #[serde(default)]
@@ -583,6 +596,8 @@ impl OrganismState {
             max_health,
             energy_prev,
             dopamine,
+            value_prev: 0.0,
+            value_prev_inter_activations: Vec::new(),
             damage_taken_last_turn,
             is_gestating,
             consumptions_count,

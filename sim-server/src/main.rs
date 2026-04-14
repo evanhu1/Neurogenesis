@@ -1327,6 +1327,7 @@ mod tests {
             inter: Vec::new(),
             action: Vec::new(),
             synapse_count: 0,
+            value_weights: Vec::new(),
         };
 
         let organisms = vec![

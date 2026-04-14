@@ -230,6 +230,7 @@ fn forced_brain_with_action(preferred_action: ActionType, confidence: f32) -> Br
         inter,
         action,
         synapse_count,
+        value_weights: vec![0.0],
     }
 }
 
@@ -257,6 +258,8 @@ pub(super) fn make_single_action_organism(
         max_health: initial_energy,
         energy_prev: initial_energy,
         dopamine: 0.0,
+        value_prev: 0.0,
+        value_prev_inter_activations: Vec::new(),
         damage_taken_last_turn: 0.0,
         is_gestating: false,
         consumptions_count: 0,
@@ -299,6 +302,8 @@ pub(super) fn make_organism(
         max_health: initial_energy,
         energy_prev: initial_energy,
         dopamine: 0.0,
+        value_prev: 0.0,
+        value_prev_inter_activations: Vec::new(),
         damage_taken_last_turn: 0.0,
         is_gestating: false,
         consumptions_count: 0,

@@ -124,6 +124,8 @@ mod tests {
             max_health: 100.0,
             energy_prev: 100.0,
             dopamine: 0.0,
+            value_prev: 0.0,
+            value_prev_inter_activations: Vec::new(),
             damage_taken_last_turn: 0.0,
             is_gestating: false,
             consumptions_count: 0,
@@ -172,6 +174,7 @@ mod tests {
                     action_type: ActionType::Forward,
                 }],
                 synapse_count: 0,
+                value_weights: Vec::new(),
             },
             genome: OrganismGenome {
                 num_neurons: 1,

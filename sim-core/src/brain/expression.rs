@@ -41,11 +41,13 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
         ));
     }
 
+    let num_inter = inter.len();
     let mut brain = BrainState {
         sensory,
         inter,
         action,
         synapse_count: 0,
+        value_weights: vec![0.0; num_inter],
     };
     wire_birth_synapses_from_genome(genome, &mut brain.sensory, &mut brain.inter);
     refresh_parent_ids_and_synapse_count(&mut brain);
