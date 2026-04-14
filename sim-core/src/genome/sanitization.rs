@@ -27,6 +27,9 @@ pub(super) fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome,
     align_vec_to(&mut genome.action_locations, ACTION_COUNT, || {
         sample_uniform_location(rng)
     });
+    align_vec_to(&mut genome.action_biases, ACTION_COUNT, || {
+        sample_initial_bias(rng)
+    });
 
     sanitize_synapse_genes(genome);
 }

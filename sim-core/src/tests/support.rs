@@ -76,6 +76,7 @@ pub(super) fn test_genome() -> OrganismGenome {
         sensory_locations: vec![default_loc; crate::brain::SENSORY_COUNT as usize],
         inter_locations: vec![default_loc],
         action_locations: vec![default_loc; ActionType::ALL.len()],
+        action_biases: vec![0.0; ActionType::ALL.len()],
         edges: Vec::new(),
     }
 }

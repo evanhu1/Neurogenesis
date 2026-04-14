@@ -43,6 +43,10 @@ pub(crate) fn evaluate_brain(
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::ScanAhead, stage_started.elapsed());
 
+    let mut action_bias_values = [0.0_f32; ACTION_COUNT];
+    if organism.genome.action_biases.len() == ACTION_COUNT {
+        action_bias_values.copy_from_slice(&organism.genome.action_biases[..ACTION_COUNT]);
+    }
     let brain = &mut organism.brain;
 
     #[cfg(feature = "profiling")]
@@ -97,6 +101,9 @@ pub(crate) fn evaluate_brain(
 
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
+    for (idx, input) in action_inputs.iter_mut().enumerate() {
+        *input += action_bias_values[idx];
+    }
     result.action_logits = action_inputs;
     for (idx, action) in brain.action.iter_mut().enumerate() {
         debug_assert_eq!(action_index(action.action_type), idx);

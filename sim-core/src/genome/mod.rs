@@ -21,8 +21,8 @@ use mutation_rates::{effective_mutation_rates, mutate_mutation_rate_genes};
 use sanitization::{align_genome_vectors, reconcile_synapse_count};
 pub(crate) use scalar::inter_alpha_from_log_time_constant;
 use scalar::{
-    mutate_inter_biases, mutate_inter_update_rates, mutate_random_neuron_location,
-    mutate_synapse_weights,
+    mutate_action_biases, mutate_inter_biases, mutate_inter_update_rates,
+    mutate_random_neuron_location, mutate_synapse_weights,
 };
 pub(crate) use seed::generate_seed_genome;
 pub(crate) use topology::{
@@ -138,6 +138,9 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
     }
     if rng.random::<f32>() < inherited_rates.inter_bias {
         mutate_inter_biases(genome, rng);
+    }
+    if rng.random::<f32>() < inherited_rates.inter_bias {
+        mutate_action_biases(genome, rng);
     }
     if rng.random::<f32>() < inherited_rates.inter_update_rate {
         mutate_inter_update_rates(genome, rng);

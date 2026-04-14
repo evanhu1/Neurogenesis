@@ -408,6 +408,8 @@ pub struct OrganismGenome {
     pub sensory_locations: Vec<BrainLocation>,
     pub inter_locations: Vec<BrainLocation>,
     pub action_locations: Vec<BrainLocation>,
+    #[serde(default)]
+    pub action_biases: Vec<f32>,
     pub edges: Vec<SynapseEdge>,
 }
 

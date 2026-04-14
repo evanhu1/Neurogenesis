@@ -209,6 +209,7 @@ mod tests {
                 sensory_locations: vec![BrainLocation { x: 0.0, y: 0.0 }],
                 inter_locations: vec![BrainLocation { x: 1.0, y: 1.0 }],
                 action_locations: vec![BrainLocation { x: 1.0, y: 1.0 }],
+                action_biases: vec![0.0; 6],
                 edges: Vec::new(),
             },
         };

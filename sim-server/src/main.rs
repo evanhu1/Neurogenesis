@@ -478,6 +478,7 @@ fn decode_persisted_genome(genome: PersistedOrganismGenome) -> OrganismGenome {
         sensory_locations,
         inter_locations: genome.inter_locations,
         action_locations,
+        action_biases: vec![0.0; ActionType::ALL.len()],
         edges,
     }
 }
@@ -1276,6 +1277,7 @@ mod tests {
                 sim_types::BrainLocation { x: 2.0, y: 2.0 };
                 ActionType::ALL.len()
             ],
+            action_biases: vec![0.0; ActionType::ALL.len()],
             edges: Vec::new(),
         };
         genome.num_neurons = generation as u32 + 1;

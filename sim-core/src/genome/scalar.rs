@@ -69,6 +69,17 @@ pub(crate) fn mutate_inter_biases<R: Rng + ?Sized>(genome: &mut OrganismGenome, 
     );
 }
 
+pub(crate) fn mutate_action_biases<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
+    mutate_many_or_one(
+        &mut genome.action_biases,
+        INTER_BIAS_PERTURB_NEURON_RATE,
+        rng,
+        |bias, rng| {
+            *bias = perturb_clamped(*bias, BIAS_PERTURBATION_STDDEV, -BIAS_MAX, BIAS_MAX, rng);
+        },
+    );
+}
+
 pub(crate) fn mutate_inter_update_rates<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
     mutate_many_or_one(
         &mut genome.inter_log_time_constants,
