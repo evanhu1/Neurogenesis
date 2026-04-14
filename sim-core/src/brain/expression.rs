@@ -132,9 +132,9 @@ fn wire_birth_synapses_from_genome(
         if !(INTER_ID_BASE..max_inter_id).contains(&edge.pre_neuron_id.0) {
             continue;
         }
-        if edge.pre_neuron_id == edge.post_neuron_id {
-            continue;
-        }
+        // Inter-neuron self-edges are preserved: `evaluate_brain` reads the
+        // presynaptic inter's previous-tick activation before updating state,
+        // so a self-edge acts as a gated memory retention term.
         let pre_idx = (edge.pre_neuron_id.0 - INTER_ID_BASE) as usize;
         let Some(pre) = inter.get_mut(pre_idx) else {
             continue;

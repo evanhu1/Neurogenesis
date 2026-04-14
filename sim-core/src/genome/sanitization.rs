@@ -66,10 +66,10 @@ pub(super) fn is_valid_synapse_pair(pre: NeuronId, post: NeuronId, num_neurons: 
         return false;
     }
 
-    if is_inter_id(pre, num_neurons) && is_inter_id(post, num_neurons) && pre == post {
-        return false;
-    }
-
+    // Inter-neuron self-connections are permitted: they act as gated memory
+    // cells because inter→inter edges read previous-tick activations in
+    // `evaluate_brain`, so a self-edge lets a neuron retain/gate its own
+    // state across ticks (useful for reversal learning / adaptation).
     true
 }
 
