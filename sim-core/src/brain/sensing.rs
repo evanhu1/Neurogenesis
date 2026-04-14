@@ -244,11 +244,12 @@ fn accumulate_visual(
         return;
     }
 
-    let contribution = distance_signal * *remaining_visibility;
+    let opacity = visual.opacity.clamp(0.0, 1.0);
+    let contribution = opacity * distance_signal * *remaining_visibility;
     color.red += visual.r * contribution;
     color.green += visual.g * contribution;
     color.blue += visual.b * contribution;
-    *remaining_visibility *= 1.0 - visual.opacity.clamp(0.0, 1.0);
+    *remaining_visibility *= 1.0 - opacity;
 }
 
 #[cfg(test)]
@@ -398,14 +399,14 @@ mod tests {
         );
 
         assert!(scan.food_visible);
-        // Food(0) at distance 1: signal=1.0, vis=1.0 → red += 1.0, vis *= 0.5 → 0.5
-        // Food(1) at distance 2: signal=0.75, vis=0.5 → blue += 0.375, vis *= 0.75 → 0.375
+        // Food(0) at distance 1: signal=1.0, vis=1.0, opacity=0.5 → red += 0.5, vis *= 0.5 → 0.5
+        // Food(1) at distance 2: signal=0.75, vis=0.5, opacity=0.25 → blue += 0.09375, vis *= 0.75 → 0.375
         assert_eq!(
             scan.color,
             ColorSignal {
-                red: 1.0,
+                red: 0.5,
                 green: 0.0,
-                blue: 0.375,
+                blue: 0.09375,
             }
         );
     }
