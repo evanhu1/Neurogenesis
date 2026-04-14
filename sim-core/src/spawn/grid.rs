@@ -162,7 +162,7 @@ impl Simulation {
         }
 
         if organism.max_health <= 0.0 {
-            organism.max_health = organism.genome.max_health.max(1.0);
+            organism.max_health = organism.genome.lifecycle.max_health.max(1.0);
         }
         if organism.health <= 0.0 {
             organism.health = organism.max_health;
@@ -176,7 +176,7 @@ impl Simulation {
         self.occupancy[cell_idx] = Some(Occupant::Organism(organism.id));
         if !self.visual_map.is_empty() {
             self.visual_map[cell_idx] =
-                sim_types::organism_visual(organism.genome.body_color);
+                sim_types::organism_visual(organism.genome.lifecycle.body_color);
         }
         self.organisms.push(organism);
         self.pending_actions.push(PendingActionState::default());

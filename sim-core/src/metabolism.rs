@@ -21,10 +21,10 @@ pub(crate) fn organism_passive_metabolic_energy_cost(
 }
 
 fn organism_base_metabolic_cost(organism: &OrganismState) -> f32 {
-    let inter_neuron_count = organism.genome.num_neurons as f32;
+    let inter_neuron_count = organism.genome.topology.num_neurons as f32;
     let sensory_neuron_count = organism.brain.sensory.len() as f32;
     let synapse_spatial_cost_units = organism_synapse_spatial_metabolic_cost_units(&organism.brain);
-    let vision_distance_cost_units = organism.genome.vision_distance as f32 / 3.0;
+    let vision_distance_cost_units = organism.genome.topology.vision_distance as f32 / 3.0;
     inter_neuron_count
         + sensory_neuron_count
         + synapse_spatial_cost_units
@@ -107,7 +107,7 @@ mod tests {
     use super::*;
     use sim_types::{
         ActionNeuronState, ActionType, FacingDirection, InterNeuronState, NeuronState, NeuronType,
-        OrganismGenome, OrganismId, RgbColor, SensoryNeuronState, SensoryReceptor, SpeciesId,
+        OrganismGenome, OrganismId, SensoryNeuronState, SensoryReceptor, SpeciesId,
     };
 
     fn metabolism_test_organism() -> OrganismState {
@@ -177,44 +177,13 @@ mod tests {
                 synapse_count: 0,
                 value_weights: Vec::new(),
             },
-            genome: OrganismGenome {
-                num_neurons: 1,
-                num_synapses: 0,
-                spatial_prior_sigma: 3.0,
-                vision_distance: 3,
-                body_color: RgbColor::default(),
-                max_health: 100.0,
-                age_of_maturity: 0,
-                gestation_ticks: 0,
-                max_organism_age: 100,
-                hebb_eta_gain: 0.0,
-                juvenile_eta_scale: 0.5,
-                eligibility_retention: 0.9,
-                max_weight_delta_per_tick: 0.05,
-                synapse_prune_threshold: 0.0,
-                mutation_rate_age_of_maturity: 0.0,
-                mutation_rate_gestation_ticks: 0.0,
-                mutation_rate_max_organism_age: 0.0,
-                mutation_rate_vision_distance: 0.0,
-                mutation_rate_max_health: 0.0,
-                mutation_rate_inter_bias: 0.0,
-                mutation_rate_inter_update_rate: 0.0,
-                mutation_rate_eligibility_retention: 0.0,
-                mutation_rate_synapse_prune_threshold: 0.0,
-                mutation_rate_neuron_location: 0.0,
-                mutation_rate_synapse_weight_perturbation: 0.0,
-                mutation_rate_add_synapse: 0.0,
-                mutation_rate_remove_synapse: 0.0,
-                mutation_rate_remove_neuron: 0.0,
-                mutation_rate_add_neuron_split_edge: 0.0,
-                inter_biases: vec![0.0],
-                inter_log_time_constants: vec![0.0],
-                sensory_locations: vec![BrainLocation { x: 0.0, y: 0.0 }],
-                inter_locations: vec![BrainLocation { x: 1.0, y: 1.0 }],
-                action_locations: vec![BrainLocation { x: 1.0, y: 1.0 }],
-                action_biases: vec![0.0; 6],
-                reward_weights: Vec::new(),
-                edges: Vec::new(),
+            genome: {
+                let mut genome = OrganismGenome::test_fixture();
+                genome.topology.vision_distance = 3;
+                genome.brain.sensory_locations = vec![BrainLocation { x: 0.0, y: 0.0 }; genome.brain.sensory_locations.len()];
+                genome.brain.inter_locations = vec![BrainLocation { x: 1.0, y: 1.0 }];
+                genome.brain.action_locations = vec![BrainLocation { x: 1.0, y: 1.0 }; genome.brain.action_locations.len()];
+                genome
             },
         };
         refresh_organism_base_metabolic_cost(&mut organism);
@@ -262,8 +231,8 @@ mod tests {
     #[test]
     fn pruned_synapses_stop_contributing_to_metabolic_cost() {
         let mut organism = metabolism_test_organism();
-        organism.genome.num_synapses = 1;
-        organism.genome.edges = vec![SynapseEdge {
+        organism.genome.topology.num_synapses = 1;
+        organism.genome.brain.edges = vec![SynapseEdge {
             pre_neuron_id: NeuronId(0),
             post_neuron_id: NeuronId(2000),
             weight: 1.0,

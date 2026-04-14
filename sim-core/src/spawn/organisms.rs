@@ -33,7 +33,7 @@ impl Simulation {
                     let genome =
                         generate_seed_genome(&self.config.seed_genome_config, &mut self.rng);
                     let starting_energy =
-                        sim_types::offspring_transfer_energy(genome.gestation_ticks);
+                        sim_types::offspring_transfer_energy(genome.lifecycle.gestation_ticks);
                     let species_id = founder_species_id(OrganismId(self.next_organism_id));
                     let facing = self.random_facing();
                     self.build_organism(
@@ -113,7 +113,7 @@ impl Simulation {
                 let idx = self.rng.random_range(0..champion_pool.len());
                 champion_pool[idx].clone()
             };
-            let starting_energy = sim_types::offspring_transfer_energy(genome.gestation_ticks);
+            let starting_energy = sim_types::offspring_transfer_energy(genome.lifecycle.gestation_ticks);
             let species_id = founder_species_id(OrganismId(self.next_organism_id));
             let facing = self.random_facing();
             let organism = self.build_organism(
@@ -137,13 +137,13 @@ impl Simulation {
         mut genome: OrganismGenome,
         params: OrganismSpawnParams,
     ) -> OrganismState {
-        genome.vision_distance = genome.vision_distance.clamp(1, 10);
-        genome.body_color = genome.body_color.clamped();
+        genome.topology.vision_distance = genome.topology.vision_distance.clamp(1, 10);
+        genome.lifecycle.body_color = genome.lifecycle.body_color.clamped();
         let id = self.alloc_organism_id();
         let starting_energy = params
             .starting_energy_override
-            .unwrap_or_else(|| sim_types::offspring_transfer_energy(genome.gestation_ticks));
-        let max_health = genome.max_health.max(1.0);
+            .unwrap_or_else(|| sim_types::offspring_transfer_energy(genome.lifecycle.gestation_ticks));
+        let max_health = genome.lifecycle.max_health.max(1.0);
         let mut organism = OrganismState {
             id,
             species_id: params.species_id,

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { BrainState, OrganismState } from '../../types';
+import type { BrainState, MutationRateGenes, OrganismState } from '../../types';
 import { BrainCanvas } from './BrainCanvas';
 
 type InspectorPanelProps = {
@@ -10,7 +10,7 @@ type InspectorPanelProps = {
 };
 
 type MutationRateItem = {
-  key: keyof OrganismState['genome'];
+  key: keyof MutationRateGenes;
   label: string;
   value: number;
 };
@@ -68,16 +68,16 @@ export function InspectorPanel({
     const activeNeuronCount = activeActionNeuronId === null ? 0 : 1;
 
     const mutationRates: MutationRateItem[] = [
-      { key: 'mutation_rate_age_of_maturity', label: 'Age Mat', value: genome.mutation_rate_age_of_maturity },
-      { key: 'mutation_rate_gestation_ticks', label: 'Gest', value: genome.mutation_rate_gestation_ticks },
-      { key: 'mutation_rate_vision_distance', label: 'Vision', value: genome.mutation_rate_vision_distance },
-      { key: 'mutation_rate_neuron_location', label: 'Neuron Loc', value: genome.mutation_rate_neuron_location },
-      { key: 'mutation_rate_inter_bias', label: 'Bias', value: genome.mutation_rate_inter_bias },
-      { key: 'mutation_rate_inter_update_rate', label: 'Update', value: genome.mutation_rate_inter_update_rate },
-      { key: 'mutation_rate_eligibility_retention', label: 'Elig Ret', value: genome.mutation_rate_eligibility_retention },
-      { key: 'mutation_rate_synapse_prune_threshold', label: 'Prune', value: genome.mutation_rate_synapse_prune_threshold },
-      { key: 'mutation_rate_synapse_weight_perturbation', label: 'Wt Perturb', value: genome.mutation_rate_synapse_weight_perturbation },
-      { key: 'mutation_rate_add_neuron_split_edge', label: 'Split Edge', value: genome.mutation_rate_add_neuron_split_edge },
+      { key: 'age_of_maturity', label: 'Age Mat', value: genome.mutation_rates.age_of_maturity },
+      { key: 'gestation_ticks', label: 'Gest', value: genome.mutation_rates.gestation_ticks },
+      { key: 'vision_distance', label: 'Vision', value: genome.mutation_rates.vision_distance },
+      { key: 'neuron_location', label: 'Neuron Loc', value: genome.mutation_rates.neuron_location },
+      { key: 'inter_bias', label: 'Bias', value: genome.mutation_rates.inter_bias },
+      { key: 'inter_update_rate', label: 'Update', value: genome.mutation_rates.inter_update_rate },
+      { key: 'eligibility_retention', label: 'Elig Ret', value: genome.mutation_rates.eligibility_retention },
+      { key: 'synapse_prune_threshold', label: 'Prune', value: genome.mutation_rates.synapse_prune_threshold },
+      { key: 'synapse_weight_perturbation', label: 'Wt Perturb', value: genome.mutation_rates.synapse_weight_perturbation },
+      { key: 'add_neuron_split_edge', label: 'Split Edge', value: genome.mutation_rates.add_neuron_split_edge },
     ];
 
     return {
@@ -87,7 +87,7 @@ export function InspectorPanel({
         { label: 'Gen', value: String(focusedOrganism.generation) },
         { label: 'Age', value: String(focusedOrganism.age_turns) },
         { label: 'Health', value: `${formatFloat(focusedOrganism.health, 1)} / ${formatFloat(focusedOrganism.max_health, 1)}` },
-        { label: 'Gest', value: String(genome.gestation_ticks) },
+        { label: 'Gest', value: String(genome.lifecycle.gestation_ticks) },
         { label: 'Pregnant', value: focusedOrganism.is_gestating ? 'Yes' : 'No' },
         { label: 'Energy', value: formatFloat(focusedOrganism.energy, 2) },
         { label: 'Action', value: focusedOrganism.last_action_taken },
@@ -105,17 +105,17 @@ export function InspectorPanel({
         { label: 'Active', value: String(activeNeuronCount) },
       ] satisfies StatItem[],
       genomeStats: [
-        { label: 'Neurons', value: String(genome.num_neurons) },
-        { label: 'Synapses', value: String(genome.num_synapses) },
-        { label: 'Vision', value: String(genome.vision_distance) },
-        { label: 'Maturity', value: String(genome.age_of_maturity) },
-        { label: 'Gestation', value: String(genome.gestation_ticks) },
-        { label: 'Max Age', value: String(genome.max_organism_age) },
-        { label: 'Max Health', value: formatFloat(genome.max_health, 1) },
-        { label: 'Hebb Gain', value: formatFloat(genome.hebb_eta_gain, 3) },
-        { label: 'Juvenile Eta', value: formatFloat(genome.juvenile_eta_scale, 3) },
-        { label: 'Elig Ret', value: formatFloat(genome.eligibility_retention, 3) },
-        { label: 'Prune Thr', value: formatFloat(genome.synapse_prune_threshold, 3) },
+        { label: 'Neurons', value: String(genome.topology.num_neurons) },
+        { label: 'Synapses', value: String(genome.topology.num_synapses) },
+        { label: 'Vision', value: String(genome.topology.vision_distance) },
+        { label: 'Maturity', value: String(genome.lifecycle.age_of_maturity) },
+        { label: 'Gestation', value: String(genome.lifecycle.gestation_ticks) },
+        { label: 'Max Age', value: String(genome.lifecycle.max_organism_age) },
+        { label: 'Max Health', value: formatFloat(genome.lifecycle.max_health, 1) },
+        { label: 'Hebb Gain', value: formatFloat(genome.plasticity.hebb_eta_gain, 3) },
+        { label: 'Juvenile Eta', value: formatFloat(genome.plasticity.juvenile_eta_scale, 3) },
+        { label: 'Elig Ret', value: formatFloat(genome.plasticity.eligibility_retention, 3) },
+        { label: 'Prune Thr', value: formatFloat(genome.plasticity.synapse_prune_threshold, 3) },
         { label: 'Rw Eng Lvl', value: formatFloat(genome.reward_weights[0] ?? 0, 3) },
         { label: 'Rw Eng +', value: formatFloat(genome.reward_weights[1] ?? 0, 3) },
         { label: 'Rw Eng -', value: formatFloat(genome.reward_weights[2] ?? 0, 3) },
@@ -210,7 +210,7 @@ export function InspectorPanel({
             focusedBrain={focusedBrain}
             activeActionNeuronId={activeActionNeuronId}
             focusOrganismId={focusedOrganism?.id ?? null}
-            actionBiases={focusedOrganism?.genome.action_biases ?? []}
+            actionBiases={focusedOrganism?.genome.brain.action_biases ?? []}
           />
         </div>
       </div>

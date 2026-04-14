@@ -189,7 +189,7 @@ fn select_action_for_organism(
     context: IntentBuildContext<'_>,
     scratch: &mut BrainScratch,
 ) -> SelectedActionState {
-    let vision_distance = organism.genome.vision_distance;
+    let vision_distance = organism.genome.topology.vision_distance;
     let action_sample = deterministic_action_sample(context.sim_seed, context.tick, organism_id);
 
     if context.force_random_actions {

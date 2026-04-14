@@ -35,50 +35,7 @@ fn finalize_test_organism(mut organism: OrganismState) -> OrganismState {
 }
 
 pub(super) fn test_genome() -> OrganismGenome {
-    let default_loc = BrainLocation { x: 5.0, y: 5.0 };
-    OrganismGenome {
-        num_neurons: 1,
-        num_synapses: 0,
-        spatial_prior_sigma: 3.5,
-        vision_distance: 2,
-        body_color: sim_types::RgbColor {
-            r: 0.4,
-            g: 0.7,
-            b: 0.9,
-        },
-        max_health: 100.0,
-        age_of_maturity: 0,
-        gestation_ticks: 2,
-        max_organism_age: 500,
-        hebb_eta_gain: 0.0,
-        juvenile_eta_scale: 0.5,
-        eligibility_retention: 0.9,
-        max_weight_delta_per_tick: 0.05,
-        synapse_prune_threshold: 0.01,
-        mutation_rate_age_of_maturity: 0.0,
-        mutation_rate_gestation_ticks: 0.0,
-        mutation_rate_max_organism_age: 0.0,
-        mutation_rate_vision_distance: 0.0,
-        mutation_rate_max_health: 0.0,
-        mutation_rate_inter_bias: 0.0,
-        mutation_rate_inter_update_rate: 0.0,
-        mutation_rate_eligibility_retention: 0.0,
-        mutation_rate_synapse_prune_threshold: 0.0,
-        mutation_rate_neuron_location: 0.0,
-        mutation_rate_synapse_weight_perturbation: 0.0,
-        mutation_rate_add_synapse: 0.0,
-        mutation_rate_remove_synapse: 0.0,
-        mutation_rate_remove_neuron: 0.0,
-        mutation_rate_add_neuron_split_edge: 0.0,
-        inter_biases: vec![0.0],
-        inter_log_time_constants: vec![0.0],
-        sensory_locations: vec![default_loc; crate::brain::SENSORY_COUNT as usize],
-        inter_locations: vec![default_loc],
-        action_locations: vec![default_loc; ActionType::ALL.len()],
-        action_biases: vec![0.0; ActionType::ALL.len()],
-        reward_weights: Vec::new(),
-        edges: Vec::new(),
-    }
+    OrganismGenome::test_fixture()
 }
 
 pub(super) fn stable_test_config() -> WorldConfig {
@@ -341,7 +298,7 @@ pub(super) fn reproduction_request_from_parent(
             parent_species_id: parent.species_id,
             parent_facing: parent.facing,
             offspring_starting_energy: sim_types::offspring_transfer_energy(
-                parent.genome.gestation_ticks,
+                parent.genome.lifecycle.gestation_ticks,
             ),
             q,
             r,
@@ -367,7 +324,7 @@ pub(super) fn reproduction_request_at(
             parent_species_id: parent.species_id,
             parent_facing: parent.facing,
             offspring_starting_energy: sim_types::offspring_transfer_energy(
-                parent.genome.gestation_ticks,
+                parent.genome.lifecycle.gestation_ticks,
             ),
             q,
             r,

@@ -77,7 +77,10 @@ function normalizeNeuronState(neuron: {
 function normalizeOrganismGenome(genome: ApiOrganismGenome): OrganismGenome {
   return {
     ...genome,
-    edges: genome.edges.map(normalizeSynapseEdge),
+    brain: {
+      ...genome.brain,
+      edges: genome.brain.edges.map(normalizeSynapseEdge),
+    },
   };
 }
 

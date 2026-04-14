@@ -170,7 +170,7 @@ fn living_brain_stats(living: &[OrganismState]) -> BrainStats {
 
     let mut sizes = living
         .iter()
-        .map(|organism| (organism.genome.num_neurons + organism.brain.synapse_count) as f64)
+        .map(|organism| (organism.genome.topology.num_neurons + organism.brain.synapse_count) as f64)
         .collect::<Vec<_>>();
     sizes.sort_by(|a, b| a.total_cmp(b));
 
@@ -240,7 +240,7 @@ fn mean_gestation_ticks(living: &[OrganismState]) -> Option<f64> {
     Some(
         living
             .iter()
-            .map(|organism| f64::from(organism.genome.gestation_ticks))
+            .map(|organism| f64::from(organism.genome.lifecycle.gestation_ticks))
             .sum::<f64>()
             / living.len() as f64,
     )
@@ -253,7 +253,7 @@ fn mean_offspring_transfer_energy(living: &[OrganismState]) -> Option<f64> {
     Some(
         living
             .iter()
-            .map(|organism| f64::from(offspring_transfer_energy(organism.genome.gestation_ticks)))
+            .map(|organism| f64::from(offspring_transfer_energy(organism.genome.lifecycle.gestation_ticks)))
             .sum::<f64>()
             / living.len() as f64,
     )

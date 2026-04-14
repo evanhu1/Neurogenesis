@@ -26,21 +26,21 @@ fn champion_pool_init_reset_and_replay_are_deterministic() {
     cfg.num_organisms = 32;
 
     let mut champion_a = test_genome();
-    champion_a.num_neurons = 2;
-    champion_a.vision_distance = 7;
-    champion_a.inter_biases = vec![0.1, -0.2];
-    champion_a.inter_log_time_constants = vec![0.0, 0.2];
-    champion_a.inter_locations = vec![
+    champion_a.topology.num_neurons = 2;
+    champion_a.topology.vision_distance = 7;
+    champion_a.brain.inter_biases = vec![0.1, -0.2];
+    champion_a.brain.inter_log_time_constants = vec![0.0, 0.2];
+    champion_a.brain.inter_locations = vec![
         BrainLocation { x: 1.0, y: 1.0 },
         BrainLocation { x: 2.0, y: 2.0 },
     ];
 
     let mut champion_b = champion_a.clone();
-    champion_b.num_neurons = 3;
-    champion_b.vision_distance = 9;
-    champion_b.inter_biases = vec![0.3, -0.4, 0.5];
-    champion_b.inter_log_time_constants = vec![0.0, 0.1, 0.2];
-    champion_b.inter_locations = vec![
+    champion_b.topology.num_neurons = 3;
+    champion_b.topology.vision_distance = 9;
+    champion_b.brain.inter_biases = vec![0.3, -0.4, 0.5];
+    champion_b.brain.inter_log_time_constants = vec![0.0, 0.1, 0.2];
+    champion_b.brain.inter_locations = vec![
         BrainLocation { x: 3.0, y: 3.0 },
         BrainLocation { x: 4.0, y: 4.0 },
         BrainLocation { x: 5.0, y: 5.0 },
@@ -78,11 +78,11 @@ fn reset_preserves_champion_pool_bootstrap_behavior() {
     cfg.num_organisms = 16;
 
     let mut champion = test_genome();
-    champion.num_neurons = 4;
-    champion.vision_distance = 10;
-    champion.inter_biases = vec![0.0, 0.1, 0.2, 0.3];
-    champion.inter_log_time_constants = vec![0.0, 0.1, 0.2, 0.3];
-    champion.inter_locations = vec![
+    champion.topology.num_neurons = 4;
+    champion.topology.vision_distance = 10;
+    champion.brain.inter_biases = vec![0.0, 0.1, 0.2, 0.3];
+    champion.brain.inter_log_time_constants = vec![0.0, 0.1, 0.2, 0.3];
+    champion.brain.inter_locations = vec![
         BrainLocation { x: 1.0, y: 1.0 },
         BrainLocation { x: 2.0, y: 2.0 },
         BrainLocation { x: 3.0, y: 3.0 },

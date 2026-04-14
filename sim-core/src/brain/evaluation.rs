@@ -44,8 +44,8 @@ pub(crate) fn evaluate_brain(
     profiling::record_brain_stage(BrainStage::ScanAhead, stage_started.elapsed());
 
     let mut action_bias_values = [0.0_f32; ACTION_COUNT];
-    if organism.genome.action_biases.len() == ACTION_COUNT {
-        action_bias_values.copy_from_slice(&organism.genome.action_biases[..ACTION_COUNT]);
+    if organism.genome.brain.action_biases.len() == ACTION_COUNT {
+        action_bias_values.copy_from_slice(&organism.genome.brain.action_biases[..ACTION_COUNT]);
     }
     let brain = &mut organism.brain;
 

@@ -22,9 +22,9 @@ const MUTATION_RATE_LOGIT_EPSILON: f32 = 1.0e-6;
 /// the effective-rate construction all stay in sync. The array size is
 /// cross-checked against `MUTATION_RATE_GENE_COUNT` at compile time.
 macro_rules! define_mutation_rate_ops {
-    ( $( $short:ident : $full:ident ),+ $(,)? ) => {
+    ( $( $gene:ident : $seed_field:ident ),+ $(,)? ) => {
         pub(super) struct EffectiveMutationRates {
-            $(pub(super) $short: f32,)+
+            $(pub(super) $gene: f32,)+
         }
 
         pub(super) fn effective_mutation_rates(
@@ -32,16 +32,19 @@ macro_rules! define_mutation_rate_ops {
             global_mutation_rate_modifier: f32,
         ) -> EffectiveMutationRates {
             EffectiveMutationRates {
-                $($short: effective_mutation_rate(genome.$full, global_mutation_rate_modifier),)+
+                $($gene: effective_mutation_rate(
+                    genome.mutation_rates.$gene,
+                    global_mutation_rate_modifier,
+                ),)+
             }
         }
 
         fn mutation_rate_gene_values(genome: &OrganismGenome) -> [f32; MUTATION_RATE_GENE_COUNT] {
-            [$(genome.$full),+]
+            [$(genome.mutation_rates.$gene),+]
         }
 
         fn seed_mutation_rate_values(config: &SeedGenomeConfig) -> [f32; MUTATION_RATE_GENE_COUNT] {
-            [$(config.$full),+]
+            [$(config.$seed_field),+]
         }
 
         fn apply_mutation_rate_gene_values(
@@ -50,7 +53,7 @@ macro_rules! define_mutation_rate_ops {
         ) {
             let mut _i = 0;
             $(
-                genome.$full = rates[_i];
+                genome.mutation_rates.$gene = rates[_i];
                 _i += 1;
             )+
         }
@@ -58,21 +61,21 @@ macro_rules! define_mutation_rate_ops {
 }
 
 define_mutation_rate_ops! {
-    age_of_maturity:            mutation_rate_age_of_maturity,
-    gestation_ticks:            mutation_rate_gestation_ticks,
-    max_organism_age:           mutation_rate_max_organism_age,
-    vision_distance:            mutation_rate_vision_distance,
-    max_health:                 mutation_rate_max_health,
-    inter_bias:                 mutation_rate_inter_bias,
-    inter_update_rate:          mutation_rate_inter_update_rate,
-    eligibility_retention:      mutation_rate_eligibility_retention,
-    synapse_prune_threshold:    mutation_rate_synapse_prune_threshold,
-    neuron_location:            mutation_rate_neuron_location,
+    age_of_maturity:             mutation_rate_age_of_maturity,
+    gestation_ticks:             mutation_rate_gestation_ticks,
+    max_organism_age:            mutation_rate_max_organism_age,
+    vision_distance:             mutation_rate_vision_distance,
+    max_health:                  mutation_rate_max_health,
+    inter_bias:                  mutation_rate_inter_bias,
+    inter_update_rate:           mutation_rate_inter_update_rate,
+    eligibility_retention:       mutation_rate_eligibility_retention,
+    synapse_prune_threshold:     mutation_rate_synapse_prune_threshold,
+    neuron_location:             mutation_rate_neuron_location,
     synapse_weight_perturbation: mutation_rate_synapse_weight_perturbation,
-    add_synapse:                mutation_rate_add_synapse,
-    remove_synapse:             mutation_rate_remove_synapse,
-    remove_neuron:              mutation_rate_remove_neuron,
-    add_neuron_split_edge:      mutation_rate_add_neuron_split_edge,
+    add_synapse:                 mutation_rate_add_synapse,
+    remove_synapse:              mutation_rate_remove_synapse,
+    remove_neuron:               mutation_rate_remove_neuron,
+    add_neuron_split_edge:       mutation_rate_add_neuron_split_edge,
 }
 
 pub(super) fn mutate_mutation_rate_genes<R: Rng + ?Sized>(

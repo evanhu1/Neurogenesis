@@ -50,7 +50,7 @@ export function ChampionPoolPanel({
                 {formatEnergy(entry.energy)}e
               </span>
               <span className="font-mono text-[10px] text-ink/25">
-                {entry.genome.num_neurons}n/{entry.genome.num_synapses}s
+                {entry.genome.topology.num_neurons}n/{entry.genome.topology.num_synapses}s
               </span>
               <button
                 type="button"

@@ -34,7 +34,7 @@ pub(crate) fn compute_pending_coactivations(
     organism: &mut OrganismState,
     scratch: &mut BrainScratch,
 ) {
-    if organism.genome.hebb_eta_gain <= 0.0 {
+    if organism.genome.plasticity.hebb_eta_gain <= 0.0 {
         return;
     }
 
@@ -153,12 +153,12 @@ pub(crate) fn apply_runtime_weight_updates_with_multiplier(
     if !organism.value_prev_inter_activations.is_empty()
         && organism.value_prev_inter_activations.len() == organism.brain.value_weights.len()
     {
-        let is_mature = organism.age_turns >= u64::from(organism.genome.age_of_maturity);
+        let is_mature = organism.age_turns >= u64::from(organism.genome.lifecycle.age_of_maturity);
         let lr = VALUE_LEARNING_RATE
             * if is_mature {
                 1.0
             } else {
-                organism.genome.juvenile_eta_scale.max(0.0)
+                organism.genome.plasticity.juvenile_eta_scale.max(0.0)
             };
         for (weight, pre_activation) in organism
             .brain
@@ -230,12 +230,12 @@ impl PlasticityStepParams {
         reward_ledger: RewardLedger,
         reward_signal_multiplier: f32,
     ) -> Self {
-        let is_mature = organism.age_turns >= u64::from(organism.genome.age_of_maturity);
-        let juvenile_eta_scale = organism.genome.juvenile_eta_scale.max(0.0);
+        let is_mature = organism.age_turns >= u64::from(organism.genome.lifecycle.age_of_maturity);
+        let juvenile_eta_scale = organism.genome.plasticity.juvenile_eta_scale.max(0.0);
         let eta = if is_mature {
-            organism.genome.hebb_eta_gain.max(0.0)
+            organism.genome.plasticity.hebb_eta_gain.max(0.0)
         } else {
-            organism.genome.hebb_eta_gain.max(0.0) * juvenile_eta_scale
+            organism.genome.plasticity.hebb_eta_gain.max(0.0) * juvenile_eta_scale
         };
 
         Self {
@@ -244,13 +244,13 @@ impl PlasticityStepParams {
                     * reward_signal_multiplier,
             ),
             eta,
-            eligibility_retention: organism.genome.eligibility_retention.clamp(0.0, 1.0),
-            max_weight_delta_per_tick: organism.genome.max_weight_delta_per_tick.max(0.0),
+            eligibility_retention: organism.genome.plasticity.eligibility_retention.clamp(0.0, 1.0),
+            max_weight_delta_per_tick: organism.genome.plasticity.max_weight_delta_per_tick.max(0.0),
             should_prune: should_prune_synapses(
                 organism.age_turns,
-                organism.genome.age_of_maturity,
+                organism.genome.lifecycle.age_of_maturity,
             ),
-            weight_prune_threshold: organism.genome.synapse_prune_threshold.max(0.0),
+            weight_prune_threshold: organism.genome.plasticity.synapse_prune_threshold.max(0.0),
         }
     }
 }

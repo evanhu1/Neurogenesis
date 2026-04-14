@@ -2,32 +2,33 @@ use super::spatial_prior::add_synapse_genes_with_spatial_prior;
 use super::*;
 
 pub(super) fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
-    genome.num_synapses = genome
+    genome.topology.num_synapses = genome
+        .topology
         .num_synapses
-        .min(max_possible_synapses(genome.num_neurons));
-    genome.spatial_prior_sigma = genome.spatial_prior_sigma.max(0.01);
+        .min(max_possible_synapses(genome.topology.num_neurons));
+    genome.topology.spatial_prior_sigma = genome.topology.spatial_prior_sigma.max(0.01);
 
-    let target_inter_len = genome.num_neurons as usize;
-    align_vec_to(&mut genome.inter_biases, target_inter_len, || {
+    let target_inter_len = genome.topology.num_neurons as usize;
+    align_vec_to(&mut genome.brain.inter_biases, target_inter_len, || {
         sample_initial_bias(rng)
     });
     align_vec_to(
-        &mut genome.inter_log_time_constants,
+        &mut genome.brain.inter_log_time_constants,
         target_inter_len,
         || sample_initial_log_time_constant(rng),
     );
-    align_vec_to(&mut genome.inter_locations, target_inter_len, || {
+    align_vec_to(&mut genome.brain.inter_locations, target_inter_len, || {
         sample_uniform_location(rng)
     });
     align_vec_to(
-        &mut genome.sensory_locations,
+        &mut genome.brain.sensory_locations,
         SENSORY_COUNT as usize,
         || sample_uniform_location(rng),
     );
-    align_vec_to(&mut genome.action_locations, ACTION_COUNT, || {
+    align_vec_to(&mut genome.brain.action_locations, ACTION_COUNT, || {
         sample_uniform_location(rng)
     });
-    align_vec_to(&mut genome.action_biases, ACTION_COUNT, || {
+    align_vec_to(&mut genome.brain.action_biases, ACTION_COUNT, || {
         sample_initial_bias(rng)
     });
     align_reward_weights(&mut genome.reward_weights);
@@ -52,29 +53,30 @@ fn align_reward_weights(weights: &mut Vec<f32>) {
 pub(super) fn reconcile_synapse_count<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
     sanitize_synapse_genes(genome);
 
-    let target = genome.num_synapses as usize;
-    if genome.edges.len() < target {
-        add_synapse_genes_with_spatial_prior(genome, target - genome.edges.len(), rng);
+    let target = genome.topology.num_synapses as usize;
+    if genome.brain.edges.len() < target {
+        add_synapse_genes_with_spatial_prior(genome, target - genome.brain.edges.len(), rng);
     }
 
-    sort_synapse_genes(&mut genome.edges);
-    genome.num_synapses = genome.edges.len() as u32;
+    sort_synapse_genes(&mut genome.brain.edges);
+    genome.topology.num_synapses = genome.brain.edges.len() as u32;
 }
 
 pub(super) fn sanitize_synapse_genes(genome: &mut OrganismGenome) {
-    let num_neurons = genome.num_neurons;
+    let num_neurons = genome.topology.num_neurons;
     genome
+        .brain
         .edges
         .retain(|edge| is_valid_synapse_pair(edge.pre_neuron_id, edge.post_neuron_id, num_neurons));
 
-    for edge in &mut genome.edges {
+    for edge in &mut genome.brain.edges {
         edge.weight = constrain_weight(edge.weight);
         edge.eligibility = 0.0;
         edge.pending_coactivation = 0.0;
     }
 
-    sort_synapse_genes(&mut genome.edges);
-    genome.edges.dedup_by(|a, b| {
+    sort_synapse_genes(&mut genome.brain.edges);
+    genome.brain.edges.dedup_by(|a, b| {
         a.pre_neuron_id == b.pre_neuron_id && a.post_neuron_id == b.post_neuron_id
     });
 }

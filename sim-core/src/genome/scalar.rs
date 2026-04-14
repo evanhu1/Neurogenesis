@@ -4,7 +4,7 @@ pub(crate) fn mutate_random_neuron_location<R: Rng + ?Sized>(
     genome: &mut OrganismGenome,
     rng: &mut R,
 ) {
-    let enabled_inter = genome.num_neurons as usize;
+    let enabled_inter = genome.topology.num_neurons as usize;
     let total = SENSORY_COUNT as usize + enabled_inter + ACTION_COUNT;
     if total == 0 {
         return;
@@ -12,13 +12,15 @@ pub(crate) fn mutate_random_neuron_location<R: Rng + ?Sized>(
 
     let idx = rng.random_range(0..total);
     let location = if idx < SENSORY_COUNT as usize {
-        genome.sensory_locations.get_mut(idx)
+        genome.brain.sensory_locations.get_mut(idx)
     } else if idx < SENSORY_COUNT as usize + enabled_inter {
         genome
+            .brain
             .inter_locations
             .get_mut(idx.saturating_sub(SENSORY_COUNT as usize))
     } else {
         genome
+            .brain
             .action_locations
             .get_mut(idx.saturating_sub(SENSORY_COUNT as usize + enabled_inter))
     };
@@ -43,7 +45,7 @@ pub(crate) fn mutate_random_neuron_location<R: Rng + ?Sized>(
 
 pub(crate) fn mutate_synapse_weights<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
     mutate_many_or_one(
-        &mut genome.edges,
+        &mut genome.brain.edges,
         SYNAPSE_WEIGHT_PERTURB_EDGE_RATE,
         rng,
         |edge, rng| {
@@ -60,7 +62,7 @@ pub(crate) fn mutate_synapse_weights<R: Rng + ?Sized>(genome: &mut OrganismGenom
 
 pub(crate) fn mutate_inter_biases<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
     mutate_many_or_one(
-        &mut genome.inter_biases,
+        &mut genome.brain.inter_biases,
         INTER_BIAS_PERTURB_NEURON_RATE,
         rng,
         |bias, rng| {
@@ -71,7 +73,7 @@ pub(crate) fn mutate_inter_biases<R: Rng + ?Sized>(genome: &mut OrganismGenome, 
 
 pub(crate) fn mutate_action_biases<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
     mutate_many_or_one(
-        &mut genome.action_biases,
+        &mut genome.brain.action_biases,
         INTER_BIAS_PERTURB_NEURON_RATE,
         rng,
         |bias, rng| {
@@ -99,7 +101,7 @@ pub(crate) fn mutate_reward_weights<R: Rng + ?Sized>(genome: &mut OrganismGenome
 
 pub(crate) fn mutate_inter_update_rates<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
     mutate_many_or_one(
-        &mut genome.inter_log_time_constants,
+        &mut genome.brain.inter_log_time_constants,
         INTER_UPDATE_RATE_PERTURB_NEURON_RATE,
         rng,
         |log_tau, rng| {

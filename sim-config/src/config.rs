@@ -221,111 +221,6 @@ pub struct WorldConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct SeedGenomeConfigToml {
-    topology: SeedGenomeTopologyToml,
-    lifecycle: SeedGenomeLifecycleToml,
-    plasticity: SeedGenomePlasticityToml,
-    mutation_rates: SeedGenomeMutationRatesToml,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct SeedGenomeTopologyToml {
-    num_neurons: u32,
-    num_synapses: u32,
-    spatial_prior_sigma: f32,
-    vision_distance: u32,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct SeedGenomeLifecycleToml {
-    #[serde(default = "default_max_health")]
-    max_health: f32,
-    age_of_maturity: u32,
-    #[serde(default = "default_gestation_ticks")]
-    gestation_ticks: u8,
-    #[serde(default = "default_max_organism_age")]
-    max_organism_age: u32,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct SeedGenomePlasticityToml {
-    hebb_eta_gain: f32,
-    #[serde(default = "default_juvenile_eta_scale")]
-    juvenile_eta_scale: f32,
-    eligibility_retention: f32,
-    #[serde(default = "default_max_weight_delta_per_tick")]
-    max_weight_delta_per_tick: f32,
-    synapse_prune_threshold: f32,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct SeedGenomeMutationRatesToml {
-    mutation_rate_age_of_maturity: f32,
-    mutation_rate_gestation_ticks: f32,
-    mutation_rate_max_organism_age: f32,
-    mutation_rate_vision_distance: f32,
-    mutation_rate_max_health: f32,
-    mutation_rate_inter_bias: f32,
-    mutation_rate_inter_update_rate: f32,
-    mutation_rate_eligibility_retention: f32,
-    mutation_rate_synapse_prune_threshold: f32,
-    mutation_rate_neuron_location: f32,
-    #[serde(default)]
-    mutation_rate_synapse_weight_perturbation: f32,
-    #[serde(default)]
-    mutation_rate_add_synapse: f32,
-    #[serde(default)]
-    mutation_rate_remove_synapse: f32,
-    #[serde(default)]
-    mutation_rate_remove_neuron: f32,
-    #[serde(default)]
-    mutation_rate_add_neuron_split_edge: f32,
-}
-
-impl From<SeedGenomeConfigToml> for SeedGenomeConfig {
-    fn from(raw: SeedGenomeConfigToml) -> Self {
-        Self {
-            num_neurons: raw.topology.num_neurons,
-            num_synapses: raw.topology.num_synapses,
-            spatial_prior_sigma: raw.topology.spatial_prior_sigma,
-            vision_distance: raw.topology.vision_distance,
-            age_of_maturity: raw.lifecycle.age_of_maturity,
-            gestation_ticks: raw.lifecycle.gestation_ticks,
-            max_health: raw.lifecycle.max_health,
-            max_organism_age: raw.lifecycle.max_organism_age,
-            hebb_eta_gain: raw.plasticity.hebb_eta_gain,
-            juvenile_eta_scale: raw.plasticity.juvenile_eta_scale,
-            eligibility_retention: raw.plasticity.eligibility_retention,
-            max_weight_delta_per_tick: raw.plasticity.max_weight_delta_per_tick,
-            synapse_prune_threshold: raw.plasticity.synapse_prune_threshold,
-            mutation_rate_age_of_maturity: raw.mutation_rates.mutation_rate_age_of_maturity,
-            mutation_rate_gestation_ticks: raw.mutation_rates.mutation_rate_gestation_ticks,
-            mutation_rate_max_organism_age: raw.mutation_rates.mutation_rate_max_organism_age,
-            mutation_rate_vision_distance: raw.mutation_rates.mutation_rate_vision_distance,
-            mutation_rate_max_health: raw.mutation_rates.mutation_rate_max_health,
-            mutation_rate_inter_bias: raw.mutation_rates.mutation_rate_inter_bias,
-            mutation_rate_inter_update_rate: raw.mutation_rates.mutation_rate_inter_update_rate,
-            mutation_rate_eligibility_retention: raw
-                .mutation_rates
-                .mutation_rate_eligibility_retention,
-            mutation_rate_synapse_prune_threshold: raw
-                .mutation_rates
-                .mutation_rate_synapse_prune_threshold,
-            mutation_rate_neuron_location: raw.mutation_rates.mutation_rate_neuron_location,
-            mutation_rate_synapse_weight_perturbation: raw
-                .mutation_rates
-                .mutation_rate_synapse_weight_perturbation,
-            mutation_rate_add_synapse: raw.mutation_rates.mutation_rate_add_synapse,
-            mutation_rate_remove_synapse: raw.mutation_rates.mutation_rate_remove_synapse,
-            mutation_rate_remove_neuron: raw.mutation_rates.mutation_rate_remove_neuron,
-            mutation_rate_add_neuron_split_edge: raw
-                .mutation_rates
-                .mutation_rate_add_neuron_split_edge,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
 struct WorldConfigToml {
     world: WorldGeometryToml,
     population: WorldPopulationToml,
@@ -439,8 +334,8 @@ pub fn world_config_from_toml_parts(
     seed_genome_raw: &str,
 ) -> Result<WorldConfig, toml::de::Error> {
     let world_config: WorldConfigToml = toml::from_str(world_raw)?;
-    let seed_genome_config: SeedGenomeConfigToml = toml::from_str(seed_genome_raw)?;
-    Ok(world_config.into_runtime(seed_genome_config.into()))
+    let seed_genome_config: SeedGenomeConfig = toml::from_str(seed_genome_raw)?;
+    Ok(world_config.into_runtime(seed_genome_config))
 }
 
 pub fn default_world_config() -> WorldConfig {

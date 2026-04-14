@@ -5,7 +5,10 @@ use crate::topology::{
 };
 use rand::Rng;
 use rand_distr::{Distribution, StandardNormal};
-use sim_types::{BrainLocation, NeuronId, OrganismGenome, SeedGenomeConfig, SynapseEdge};
+use sim_types::{
+    BrainLocation, BrainTopology, LifecycleGenes, MutationRateGenes, NeuronId, OrganismGenome,
+    PlasticityGenes, SeedGenomeConfig, SynapseEdge, TopologyGenes,
+};
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::f32::consts::LN_10;
@@ -99,24 +102,24 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
     let inherited_rates = effective_mutation_rates(genome, global_mutation_rate_modifier);
 
     if rng.random::<f32>() < inherited_rates.age_of_maturity {
-        genome.age_of_maturity = step_u32(
-            genome.age_of_maturity,
+        genome.lifecycle.age_of_maturity = step_u32(
+            genome.lifecycle.age_of_maturity,
             MIN_MUTATED_AGE_OF_MATURITY,
             MAX_MUTATED_AGE_OF_MATURITY,
             rng,
         );
     }
     if rng.random::<f32>() < inherited_rates.gestation_ticks {
-        genome.gestation_ticks = step_u8(
-            genome.gestation_ticks,
+        genome.lifecycle.gestation_ticks = step_u8(
+            genome.lifecycle.gestation_ticks,
             MIN_MUTATED_GESTATION_TICKS,
             MAX_MUTATED_GESTATION_TICKS,
             rng,
         );
     }
     if rng.random::<f32>() < inherited_rates.max_organism_age {
-        genome.max_organism_age = step_u32_by(
-            genome.max_organism_age,
+        genome.lifecycle.max_organism_age = step_u32_by(
+            genome.lifecycle.max_organism_age,
             MIN_MUTATED_MAX_ORGANISM_AGE,
             MAX_MUTATED_MAX_ORGANISM_AGE,
             MAX_ORGANISM_AGE_MUTATION_STEP,
@@ -124,17 +127,17 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
         );
     }
     if rng.random::<f32>() < inherited_rates.vision_distance {
-        genome.vision_distance = step_u32(
-            genome.vision_distance,
+        genome.topology.vision_distance = step_u32(
+            genome.topology.vision_distance,
             MIN_MUTATED_VISION_DISTANCE,
             MAX_MUTATED_VISION_DISTANCE,
             rng,
         );
     }
-    genome.body_color = mutate_body_color(genome.body_color, rng);
+    genome.lifecycle.body_color = mutate_body_color(genome.lifecycle.body_color, rng);
     if rng.random::<f32>() < inherited_rates.max_health {
-        genome.max_health = perturb_clamped(
-            genome.max_health,
+        genome.lifecycle.max_health = perturb_clamped(
+            genome.lifecycle.max_health,
             MAX_HEALTH_PERTURBATION_STDDEV,
             MIN_MUTATED_MAX_HEALTH,
             MAX_MUTATED_MAX_HEALTH,
@@ -154,8 +157,8 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
         mutate_inter_update_rates(genome, rng);
     }
     if rng.random::<f32>() < inherited_rates.eligibility_retention {
-        genome.eligibility_retention = perturb_clamped(
-            genome.eligibility_retention,
+        genome.plasticity.eligibility_retention = perturb_clamped(
+            genome.plasticity.eligibility_retention,
             ELIGIBILITY_RETENTION_PERTURBATION_STDDEV,
             ELIGIBILITY_RETENTION_MIN,
             ELIGIBILITY_RETENTION_MAX,
@@ -163,8 +166,8 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
         );
     }
     if rng.random::<f32>() < inherited_rates.synapse_prune_threshold {
-        genome.synapse_prune_threshold = perturb_clamped(
-            genome.synapse_prune_threshold,
+        genome.plasticity.synapse_prune_threshold = perturb_clamped(
+            genome.plasticity.synapse_prune_threshold,
             SYNAPSE_PRUNE_THRESHOLD_PERTURBATION_STDDEV,
             SYNAPSE_PRUNE_THRESHOLD_MIN,
             SYNAPSE_PRUNE_THRESHOLD_MAX,

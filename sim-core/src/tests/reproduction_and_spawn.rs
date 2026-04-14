@@ -47,9 +47,9 @@ fn reproduction_offspring_behavior_starts_from_genome_not_parent_runtime_state()
     let mut sim = Simulation::new(cfg, 31).expect("simulation should initialize");
     let mut parent =
         make_single_action_organism(0, 3, 3, FacingDirection::East, ActionType::Idle, 0.8, 500.0);
-    parent.genome.inter_biases = vec![0.9];
-    parent.genome.inter_log_time_constants = vec![0.0];
-    parent.genome.edges = ActionType::ALL
+    parent.genome.brain.inter_biases = vec![0.9];
+    parent.genome.brain.inter_log_time_constants = vec![0.0];
+    parent.genome.brain.edges = ActionType::ALL
         .iter()
         .copied()
         .enumerate()
@@ -65,7 +65,7 @@ fn reproduction_offspring_behavior_starts_from_genome_not_parent_runtime_state()
             pending_coactivation: 0.0,
         })
         .collect();
-    parent.genome.num_synapses = parent.genome.edges.len() as u32;
+    parent.genome.topology.num_synapses = parent.genome.brain.edges.len() as u32;
     parent.brain.inter[0].neuron.activation = 1.0;
     parent.brain.inter[0].state = 1.0;
     for action_neuron in &mut parent.brain.action {

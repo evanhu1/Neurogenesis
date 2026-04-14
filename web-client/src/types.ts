@@ -48,6 +48,48 @@ export type FacingDirection =
 
 export type EntityType = 'Food' | 'Organism' | 'Wall' | 'Spikes';
 
+export type TopologyGenes = {
+  num_neurons: number;
+  num_synapses: number;
+  spatial_prior_sigma: number;
+  vision_distance: number;
+};
+
+export type LifecycleGenes = {
+  body_color: RgbColor;
+  max_health: number;
+  age_of_maturity: number;
+  gestation_ticks: number;
+  max_organism_age: number;
+};
+
+export type PlasticityGenes = {
+  hebb_eta_gain: number;
+  juvenile_eta_scale: number;
+  eligibility_retention: number;
+  max_weight_delta_per_tick: number;
+  synapse_prune_threshold: number;
+};
+
+export type MutationRateGenes = {
+  age_of_maturity: number;
+  gestation_ticks: number;
+  max_organism_age: number;
+  vision_distance: number;
+  max_health: number;
+  inter_bias: number;
+  inter_update_rate: number;
+  eligibility_retention: number;
+  synapse_prune_threshold: number;
+  neuron_location: number;
+  synapse_weight_perturbation: number;
+  add_synapse: number;
+  remove_synapse: number;
+  remove_neuron: number;
+  add_neuron_split_edge: number;
+};
+
+// SeedGenomeConfig wire format stays flat (Rust SeedGenomeConfig is not nested).
 type GenomeCoreParams = {
   num_neurons: number;
   num_synapses: number;
@@ -125,20 +167,33 @@ export type SynapseEdge = {
   weight: number;
 };
 
-type OrganismGenomeVectors<TEdge> = {
+export type BrainTopologyGenes<TEdge> = {
   inter_biases: number[];
   inter_log_time_constants: number[];
   sensory_locations: BrainLocation[];
   inter_locations: BrainLocation[];
   action_locations: BrainLocation[];
   action_biases: number[];
-  reward_weights: number[];
   edges: TEdge[];
 };
 
-export type ApiOrganismGenome = GenomeHyperparams & OrganismGenomeVectors<ApiSynapseEdge>;
+export type ApiOrganismGenome = {
+  topology: TopologyGenes;
+  lifecycle: LifecycleGenes;
+  plasticity: PlasticityGenes;
+  mutation_rates: MutationRateGenes;
+  brain: BrainTopologyGenes<ApiSynapseEdge>;
+  reward_weights: number[];
+};
 
-export type OrganismGenome = GenomeHyperparams & OrganismGenomeVectors<SynapseEdge>;
+export type OrganismGenome = {
+  topology: TopologyGenes;
+  lifecycle: LifecycleGenes;
+  plasticity: PlasticityGenes;
+  mutation_rates: MutationRateGenes;
+  brain: BrainTopologyGenes<SynapseEdge>;
+  reward_weights: number[];
+};
 
 export type ApiNeuronState = {
   neuron_id: ApiNeuronId;

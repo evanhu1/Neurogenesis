@@ -8,11 +8,12 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
         .map(|(sensory_id, receptor)| make_sensory_neuron(sensory_id, receptor, sensory_spawn))
         .collect::<Vec<_>>();
 
-    let mut inter = Vec::with_capacity(genome.num_neurons as usize);
-    for i in 0..genome.num_neurons {
+    let mut inter = Vec::with_capacity(genome.topology.num_neurons as usize);
+    for i in 0..genome.topology.num_neurons {
         let idx = i as usize;
-        let bias = genome.inter_biases.get(idx).copied().unwrap_or(0.0);
+        let bias = genome.brain.inter_biases.get(idx).copied().unwrap_or(0.0);
         let log_time_constant = genome
+            .brain
             .inter_log_time_constants
             .get(idx)
             .copied()
@@ -23,7 +24,7 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
                 inter_neuron_id(i),
                 NeuronType::Inter,
                 bias,
-                location_or_default(&genome.inter_locations, idx),
+                location_or_default(&genome.brain.inter_locations, idx),
             ),
             state: 0.0,
             alpha,
@@ -116,7 +117,7 @@ fn wire_birth_synapses_from_genome(
     let max_inter_id = INTER_ID_BASE + inter.len() as u32;
     let max_action_id = ACTION_ID_BASE + ACTION_COUNT_U32;
 
-    for edge in &genome.edges {
+    for edge in &genome.brain.edges {
         let post_is_inter = (INTER_ID_BASE..max_inter_id).contains(&edge.post_neuron_id.0);
         let post_is_action = (ACTION_ID_BASE..max_action_id).contains(&edge.post_neuron_id.0);
         if !(post_is_inter || post_is_action) {

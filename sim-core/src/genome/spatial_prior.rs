@@ -11,13 +11,13 @@ pub(super) fn add_synapse_genes_with_spatial_prior<R: Rng + ?Sized>(
         return;
     }
 
-    let mut existing_pairs = HashSet::with_capacity(genome.edges.len());
-    for edge in &genome.edges {
+    let mut existing_pairs = HashSet::with_capacity(genome.brain.edges.len());
+    for edge in &genome.brain.edges {
         existing_pairs.insert((edge.pre_neuron_id.0, edge.post_neuron_id.0));
     }
 
     let mut weighted_candidates = Vec::new();
-    let num_neurons = genome.num_neurons;
+    let num_neurons = genome.topology.num_neurons;
 
     let all_presynaptic = (0..SENSORY_COUNT)
         .map(NeuronId)
@@ -44,7 +44,7 @@ pub(super) fn add_synapse_genes_with_spatial_prior<R: Rng + ?Sized>(
     });
 
     for &(_, pre_id, post_id) in weighted_candidates.iter().take(add_count) {
-        genome.edges.push(SynapseEdge {
+        genome.brain.edges.push(SynapseEdge {
             pre_neuron_id: pre_id,
             post_neuron_id: post_id,
             weight: sample_synapse_weight(INITIAL_SYNAPSE_EXCITATORY_PROBABILITY, rng),
@@ -68,7 +68,7 @@ fn connection_probability(genome: &OrganismGenome, pre: NeuronId, post: NeuronId
     let pre_location = location_for_neuron(pre, genome);
     let post_location = location_for_neuron(post, genome);
     let distance_sq = distance_sq_between_locations(pre_location, post_location);
-    let sigma = genome.spatial_prior_sigma.max(0.01);
+    let sigma = genome.topology.spatial_prior_sigma.max(0.01);
     let sigma_sq = sigma * sigma;
     let local_bias = (-0.5 * distance_sq / sigma_sq).exp();
     (SPATIAL_PRIOR_LONG_RANGE_FLOOR + (1.0 - SPATIAL_PRIOR_LONG_RANGE_FLOOR) * local_bias)

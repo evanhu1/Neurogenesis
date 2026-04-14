@@ -347,11 +347,15 @@ pub fn offspring_transfer_energy(gestation_ticks: u8) -> f32 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct OrganismGenome {
+pub struct TopologyGenes {
     pub num_neurons: u32,
     pub num_synapses: u32,
     pub spatial_prior_sigma: f32,
     pub vision_distance: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LifecycleGenes {
     pub body_color: RgbColor,
     #[serde(default = "default_max_health")]
     pub max_health: f32,
@@ -361,6 +365,10 @@ pub struct OrganismGenome {
     pub gestation_ticks: u8,
     #[serde(default = "default_max_organism_age")]
     pub max_organism_age: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PlasticityGenes {
     #[serde(default)]
     pub hebb_eta_gain: f32,
     #[serde(default = "default_juvenile_eta_scale")]
@@ -371,36 +379,44 @@ pub struct OrganismGenome {
     pub max_weight_delta_per_tick: f32,
     #[serde(default)]
     pub synapse_prune_threshold: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct MutationRateGenes {
     #[serde(default)]
-    pub mutation_rate_age_of_maturity: f32,
+    pub age_of_maturity: f32,
     #[serde(default)]
-    pub mutation_rate_gestation_ticks: f32,
+    pub gestation_ticks: f32,
     #[serde(default)]
-    pub mutation_rate_max_organism_age: f32,
+    pub max_organism_age: f32,
     #[serde(default)]
-    pub mutation_rate_vision_distance: f32,
+    pub vision_distance: f32,
     #[serde(default)]
-    pub mutation_rate_max_health: f32,
+    pub max_health: f32,
     #[serde(default)]
-    pub mutation_rate_inter_bias: f32,
+    pub inter_bias: f32,
     #[serde(default)]
-    pub mutation_rate_inter_update_rate: f32,
+    pub inter_update_rate: f32,
     #[serde(default)]
-    pub mutation_rate_eligibility_retention: f32,
+    pub eligibility_retention: f32,
     #[serde(default)]
-    pub mutation_rate_synapse_prune_threshold: f32,
+    pub synapse_prune_threshold: f32,
     #[serde(default)]
-    pub mutation_rate_neuron_location: f32,
+    pub neuron_location: f32,
     #[serde(default)]
-    pub mutation_rate_synapse_weight_perturbation: f32,
+    pub synapse_weight_perturbation: f32,
     #[serde(default)]
-    pub mutation_rate_add_synapse: f32,
+    pub add_synapse: f32,
     #[serde(default)]
-    pub mutation_rate_remove_synapse: f32,
+    pub remove_synapse: f32,
     #[serde(default)]
-    pub mutation_rate_remove_neuron: f32,
+    pub remove_neuron: f32,
     #[serde(default)]
-    pub mutation_rate_add_neuron_split_edge: f32,
+    pub add_neuron_split_edge: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BrainTopology {
     pub inter_biases: Vec<f32>,
     pub inter_log_time_constants: Vec<f32>,
     pub sensory_locations: Vec<BrainLocation>,
@@ -408,12 +424,66 @@ pub struct OrganismGenome {
     pub action_locations: Vec<BrainLocation>,
     #[serde(default)]
     pub action_biases: Vec<f32>,
+    pub edges: Vec<SynapseEdge>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OrganismGenome {
+    pub topology: TopologyGenes,
+    pub lifecycle: LifecycleGenes,
+    pub plasticity: PlasticityGenes,
+    #[serde(default)]
+    pub mutation_rates: MutationRateGenes,
+    pub brain: BrainTopology,
     /// Genomic coefficients applied to raw reward-ledger components before the
     /// dopamine squash. Index order matches `RewardLedgerWeight` in sim-core.
     /// Empty vectors are filled with defaults during genome sanitization.
     #[serde(default)]
     pub reward_weights: Vec<f32>,
-    pub edges: Vec<SynapseEdge>,
+}
+
+impl OrganismGenome {
+    /// Canonical test-only fixture used across unit tests, benches, and integration tests.
+    /// Callers mutate specific fields after construction as needed. Adding a new field on
+    /// `OrganismGenome` means updating only this one builder.
+    pub fn test_fixture() -> Self {
+        let default_loc = BrainLocation { x: 5.0, y: 5.0 };
+        let sensory_count = SensoryReceptor::ordered().count();
+        let action_count = ActionType::ALL.len();
+        Self {
+            topology: TopologyGenes {
+                num_neurons: 1,
+                num_synapses: 0,
+                spatial_prior_sigma: 3.5,
+                vision_distance: 2,
+            },
+            lifecycle: LifecycleGenes {
+                body_color: RgbColor::default(),
+                max_health: 100.0,
+                age_of_maturity: 0,
+                gestation_ticks: 2,
+                max_organism_age: 500,
+            },
+            plasticity: PlasticityGenes {
+                hebb_eta_gain: 0.0,
+                juvenile_eta_scale: 0.5,
+                eligibility_retention: 0.9,
+                max_weight_delta_per_tick: 0.05,
+                synapse_prune_threshold: 0.01,
+            },
+            mutation_rates: MutationRateGenes::default(),
+            brain: BrainTopology {
+                inter_biases: vec![0.0],
+                inter_log_time_constants: vec![0.0],
+                sensory_locations: vec![default_loc; sensory_count],
+                inter_locations: vec![default_loc],
+                action_locations: vec![default_loc; action_count],
+                action_biases: vec![0.0; action_count],
+                edges: Vec::new(),
+            },
+            reward_weights: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -617,7 +687,7 @@ impl OrganismState {
 }
 
 pub fn get_size(organism: &OrganismState) -> f32 {
-    offspring_transfer_energy(organism.genome.gestation_ticks)
+    offspring_transfer_energy(organism.genome.lifecycle.gestation_ticks)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

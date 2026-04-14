@@ -75,17 +75,17 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
 
     // Genome: zero inter neurons, one sensory→action synapse.
     let mut genome = test_genome();
-    genome.num_neurons = 0;
-    genome.num_synapses = 1;
-    genome.inter_biases.clear();
-    genome.inter_log_time_constants.clear();
-    genome.inter_locations.clear();
-    genome.hebb_eta_gain = 0.05;
-    genome.eligibility_retention = 0.9;
-    genome.synapse_prune_threshold = 0.0;
-    genome.age_of_maturity = 0;
-    genome.vision_distance = 5;
-    genome.edges = vec![SynapseEdge {
+    genome.topology.num_neurons = 0;
+    genome.topology.num_synapses = 1;
+    genome.brain.inter_biases.clear();
+    genome.brain.inter_log_time_constants.clear();
+    genome.brain.inter_locations.clear();
+    genome.plasticity.hebb_eta_gain = 0.05;
+    genome.plasticity.eligibility_retention = 0.9;
+    genome.plasticity.synapse_prune_threshold = 0.0;
+    genome.lifecycle.age_of_maturity = 0;
+    genome.topology.vision_distance = 5;
+    genome.brain.edges = vec![SynapseEdge {
         pre_neuron_id: food_ahead_sensory_id,
         post_neuron_id: consume_action_id,
         weight: initial_weight,
@@ -246,19 +246,19 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
     let consume_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Eat) as u32);
 
     let mut genome = test_genome();
-    genome.num_neurons = 0;
-    genome.num_synapses = 1;
-    genome.inter_biases.clear();
-    genome.inter_log_time_constants.clear();
-    genome.inter_locations.clear();
-    genome.hebb_eta_gain = default_seed.hebb_eta_gain;
-    genome.eligibility_retention = default_seed.eligibility_retention;
-    genome.synapse_prune_threshold = default_seed.synapse_prune_threshold;
-    genome.age_of_maturity = default_seed.age_of_maturity;
-    genome.max_organism_age = default_seed.max_organism_age;
-    genome.max_health = default_seed.max_health;
-    genome.vision_distance = default_seed.vision_distance;
-    genome.edges = vec![SynapseEdge {
+    genome.topology.num_neurons = 0;
+    genome.topology.num_synapses = 1;
+    genome.brain.inter_biases.clear();
+    genome.brain.inter_log_time_constants.clear();
+    genome.brain.inter_locations.clear();
+    genome.plasticity.hebb_eta_gain = default_seed.hebb_eta_gain;
+    genome.plasticity.eligibility_retention = default_seed.eligibility_retention;
+    genome.plasticity.synapse_prune_threshold = default_seed.synapse_prune_threshold;
+    genome.lifecycle.age_of_maturity = default_seed.age_of_maturity;
+    genome.lifecycle.max_organism_age = default_seed.max_organism_age;
+    genome.lifecycle.max_health = default_seed.max_health;
+    genome.topology.vision_distance = default_seed.vision_distance;
+    genome.brain.edges = vec![SynapseEdge {
         pre_neuron_id: food_ahead_sensory_id,
         post_neuron_id: consume_action_id,
         weight: initial_weight,
@@ -398,19 +398,19 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
     let consume_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Eat) as u32);
 
     let mut genome = test_genome();
-    genome.num_neurons = 0;
-    genome.num_synapses = 2;
-    genome.inter_biases.clear();
-    genome.inter_log_time_constants.clear();
-    genome.inter_locations.clear();
-    genome.hebb_eta_gain = default_seed.hebb_eta_gain;
-    genome.eligibility_retention = default_seed.eligibility_retention;
-    genome.synapse_prune_threshold = default_seed.synapse_prune_threshold;
-    genome.age_of_maturity = default_seed.age_of_maturity;
-    genome.max_organism_age = default_seed.max_organism_age;
-    genome.max_health = default_seed.max_health;
-    genome.vision_distance = default_seed.vision_distance;
-    genome.edges = vec![
+    genome.topology.num_neurons = 0;
+    genome.topology.num_synapses = 2;
+    genome.brain.inter_biases.clear();
+    genome.brain.inter_log_time_constants.clear();
+    genome.brain.inter_locations.clear();
+    genome.plasticity.hebb_eta_gain = default_seed.hebb_eta_gain;
+    genome.plasticity.eligibility_retention = default_seed.eligibility_retention;
+    genome.plasticity.synapse_prune_threshold = default_seed.synapse_prune_threshold;
+    genome.lifecycle.age_of_maturity = default_seed.age_of_maturity;
+    genome.lifecycle.max_organism_age = default_seed.max_organism_age;
+    genome.lifecycle.max_health = default_seed.max_health;
+    genome.topology.vision_distance = default_seed.vision_distance;
+    genome.brain.edges = vec![
         SynapseEdge {
             pre_neuron_id: food_ahead_sensory_id,
             post_neuron_id: forward_action_id,
@@ -559,16 +559,16 @@ fn delayed_credit_assignment_organism(
     let consume_action_id = NeuronId(ACTION_ID_BASE + action_index(ActionType::Eat) as u32);
 
     let mut genome = test_genome();
-    genome.num_neurons = 0;
-    genome.num_synapses = 1;
-    genome.inter_biases.clear();
-    genome.inter_log_time_constants.clear();
-    genome.inter_locations.clear();
-    genome.hebb_eta_gain = hebb_eta_gain;
-    genome.eligibility_retention = eligibility_retention;
-    genome.synapse_prune_threshold = 0.0;
-    genome.age_of_maturity = 0;
-    genome.edges = vec![SynapseEdge {
+    genome.topology.num_neurons = 0;
+    genome.topology.num_synapses = 1;
+    genome.brain.inter_biases.clear();
+    genome.brain.inter_log_time_constants.clear();
+    genome.brain.inter_locations.clear();
+    genome.plasticity.hebb_eta_gain = hebb_eta_gain;
+    genome.plasticity.eligibility_retention = eligibility_retention;
+    genome.plasticity.synapse_prune_threshold = 0.0;
+    genome.lifecycle.age_of_maturity = 0;
+    genome.brain.edges = vec![SynapseEdge {
         pre_neuron_id: food_ahead_sensory_id,
         post_neuron_id: consume_action_id,
         weight: initial_weight,
@@ -577,7 +577,7 @@ fn delayed_credit_assignment_organism(
     }];
 
     let brain = express_genome(&genome);
-    let starting_energy = sim_types::offspring_transfer_energy(genome.gestation_ticks);
+    let starting_energy = sim_types::offspring_transfer_energy(genome.lifecycle.gestation_ticks);
     let mut organism = OrganismState {
         id: sim_types::OrganismId(0),
         species_id: sim_types::SpeciesId(0),
@@ -587,10 +587,10 @@ fn delayed_credit_assignment_organism(
         age_turns: 0,
         facing: FacingDirection::East,
         energy: starting_energy,
-        health: genome.max_health.max(1.0),
-        max_health: genome.max_health.max(1.0),
+        health: genome.lifecycle.max_health.max(1.0),
+        max_health: genome.lifecycle.max_health.max(1.0),
         energy_prev: starting_energy,
-        health_prev: genome.max_health.max(1.0),
+        health_prev: genome.lifecycle.max_health.max(1.0),
         dopamine: 0.0,
         value_prev: 0.0,
         value_prev_inter_activations: Vec::new(),

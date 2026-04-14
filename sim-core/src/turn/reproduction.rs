@@ -80,12 +80,12 @@ impl ReproductionPhaseState {
                 continue;
             }
 
-            let transfer_energy = offspring_transfer_energy(organism.genome.gestation_ticks);
+            let transfer_energy = offspring_transfer_energy(organism.genome.lifecycle.gestation_ticks);
             let parent_energy = organism.energy;
             if parent_energy < transfer_energy {
                 continue;
             }
-            let maturity_age = u64::from(organism.genome.age_of_maturity);
+            let maturity_age = u64::from(organism.genome.lifecycle.age_of_maturity);
             if organism.age_turns < maturity_age {
                 continue;
             }
@@ -102,10 +102,10 @@ impl ReproductionPhaseState {
             organism.is_gestating = true;
             pending_actions[org_idx] = PendingActionState {
                 kind: PendingActionKind::Reproduce,
-                turns_remaining: organism.genome.gestation_ticks,
+                turns_remaining: organism.genome.lifecycle.gestation_ticks,
                 reproduction_energy_bits: transfer_energy.to_bits(),
             };
-            self.gestation_started_this_tick[org_idx] = organism.genome.gestation_ticks > 0;
+            self.gestation_started_this_tick[org_idx] = organism.genome.lifecycle.gestation_ticks > 0;
             #[cfg(feature = "instrumentation")]
             {
                 if let Some(Some(record)) = action_records.get_mut(org_idx) {

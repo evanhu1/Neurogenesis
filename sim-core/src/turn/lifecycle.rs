@@ -18,7 +18,7 @@ impl Simulation {
             organism.health = (organism.health + organism_health_regeneration(organism))
                 .min(organism.max_health.max(1.0));
             if organism.energy <= 0.0
-                || organism.age_turns >= u64::from(organism.genome.max_organism_age)
+                || organism.age_turns >= u64::from(organism.genome.lifecycle.max_organism_age)
             {
                 if self.pending_actions[idx].kind == PendingActionKind::Reproduce {
                     reproduction_events.push(ReproductionEvent {

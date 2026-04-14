@@ -253,7 +253,7 @@ impl Simulation {
             return;
         }
 
-        let any_learners = self.organisms.iter().any(|o| o.genome.hebb_eta_gain > 0.0);
+        let any_learners = self.organisms.iter().any(|o| o.genome.plasticity.hebb_eta_gain > 0.0);
 
         #[cfg(feature = "profiling")]
         let plasticity_started = Instant::now();
