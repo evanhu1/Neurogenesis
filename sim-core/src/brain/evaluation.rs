@@ -151,30 +151,11 @@ fn sample_action_from_logits(
     for (idx, logit) in action_logits.iter().copied().enumerate() {
         let scaled = (logit - max_logit) / temperature;
         let weight = scaled.exp();
-        if weight.is_finite() {
-            weights[idx] = weight;
-            weight_sum += weight;
-        }
+        weights[idx] = weight;
+        weight_sum += weight;
     }
     let idle_weight = ((idle_bias - max_logit) / temperature).exp();
-    if idle_weight.is_finite() {
-        weight_sum += idle_weight;
-    }
-
-    if !weight_sum.is_finite() || weight_sum <= 0.0 {
-        let best_idx = argmax_index(&action_logits);
-        return if action_logits[best_idx] >= idle_bias {
-            SampledAction {
-                action: ActionType::ALL[best_idx],
-                confidence: 1.0,
-            }
-        } else {
-            SampledAction {
-                action: ActionType::Idle,
-                confidence: 1.0,
-            }
-        };
-    }
+    weight_sum += idle_weight;
 
     let sample = action_sample.clamp(0.0, 1.0 - f32::EPSILON) * weight_sum;
     let mut cumulative = 0.0_f32;
@@ -187,30 +168,10 @@ fn sample_action_from_logits(
             };
         }
     }
-    if idle_weight.is_finite() && sample < cumulative + idle_weight {
-        SampledAction {
-            action: ActionType::Idle,
-            confidence: idle_weight / weight_sum,
-        }
-    } else {
-        let final_weight = weights[ACTION_COUNT - 1];
-        SampledAction {
-            action: ActionType::ALL[ACTION_COUNT - 1],
-            confidence: final_weight / weight_sum,
-        }
+    SampledAction {
+        action: ActionType::Idle,
+        confidence: idle_weight / weight_sum,
     }
-}
-
-fn argmax_index(values: &[f32]) -> usize {
-    let mut best_idx = 0usize;
-    let mut best_value = values[0];
-    for (idx, value) in values.iter().copied().enumerate().skip(1) {
-        if value > best_value {
-            best_idx = idx;
-            best_value = value;
-        }
-    }
-    best_idx
 }
 
 fn accumulate_inter_inputs(
