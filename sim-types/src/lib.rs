@@ -410,6 +410,11 @@ pub struct OrganismGenome {
     pub action_locations: Vec<BrainLocation>,
     #[serde(default)]
     pub action_biases: Vec<f32>,
+    /// Genomic coefficients applied to raw reward-ledger components before the
+    /// dopamine squash. Index order matches `RewardLedgerWeight` in sim-core.
+    /// Empty vectors are filled with defaults during genome sanitization.
+    #[serde(default)]
+    pub reward_weights: Vec<f32>,
     pub edges: Vec<SynapseEdge>,
 }
 
@@ -528,6 +533,8 @@ pub struct OrganismState {
     #[serde(default)]
     pub energy_prev: f32,
     #[serde(default)]
+    pub health_prev: f32,
+    #[serde(default)]
     pub dopamine: f32,
     /// Previous-tick value estimate V(s_{t-1}); used to form TD-error dopamine.
     #[serde(default)]
@@ -595,6 +602,7 @@ impl OrganismState {
             health,
             max_health,
             energy_prev,
+            health_prev: health,
             dopamine,
             value_prev: 0.0,
             value_prev_inter_activations: Vec::new(),

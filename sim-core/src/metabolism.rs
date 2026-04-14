@@ -123,6 +123,7 @@ mod tests {
             health: 100.0,
             max_health: 100.0,
             energy_prev: 100.0,
+            health_prev: 100.0,
             dopamine: 0.0,
             value_prev: 0.0,
             value_prev_inter_activations: Vec::new(),
@@ -213,6 +214,7 @@ mod tests {
                 inter_locations: vec![BrainLocation { x: 1.0, y: 1.0 }],
                 action_locations: vec![BrainLocation { x: 1.0, y: 1.0 }],
                 action_biases: vec![0.0; 6],
+                reward_weights: Vec::new(),
                 edges: Vec::new(),
             },
         };

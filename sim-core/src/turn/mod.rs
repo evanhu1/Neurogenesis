@@ -15,7 +15,7 @@ use crate::plasticity::{
 use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
 #[cfg(feature = "profiling")]
 use crate::{profiling, profiling::TurnPhase};
-use crate::{PendingActionKind, PendingActionState, RewardEvent, Simulation};
+use crate::{PendingActionKind, PendingActionState, Simulation};
 use rayon::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use reproduction::ReproductionPhaseState;
@@ -36,6 +36,7 @@ const RNG_ORGANISM_MIX: u64 = 0xBF58_476D_1CE4_E5B9;
 const PLANT_CONSUMPTION_ENERGY_FRACTION: f32 = 0.20;
 const CORPSE_CONSUMPTION_ENERGY_FRACTION: f32 = 0.80;
 const SPIKE_DAMAGE_FRACTION: f32 = 0.10;
+const ATTACK_DAMAGE_FRACTION: f32 = 0.5;
 const HEALTH_REGEN_FRACTION: f32 = 0.01;
 const INTENT_PARALLEL_MIN_LEN: usize = 64;
 
@@ -160,7 +161,6 @@ impl Simulation {
             reproduction_state.apply_triggers(
                 &mut self.organisms,
                 &mut self.pending_actions,
-                &mut self.reward_ledgers,
                 &intents,
                 &self.occupancy,
                 snapshot.world_width,
@@ -237,6 +237,18 @@ impl Simulation {
     }
 
     fn apply_post_commit_runtime_weight_updates(&mut self) {
+        // Refresh the tonic reward ledger from current state before plasticity
+        // reads it. Done unconditionally (even with plasticity disabled) so the
+        // ledger reflects accurate state if anything else inspects it.
+        let food_energy = self.config.food_energy;
+        for (organism, ledger) in self
+            .organisms
+            .iter()
+            .zip(self.reward_ledgers.iter_mut())
+        {
+            ledger.observe(organism, food_energy);
+        }
+
         if !self.config.runtime_plasticity_enabled {
             return;
         }

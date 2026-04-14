@@ -161,6 +161,7 @@ function normalizeOrganismState(organism: ApiOrganismState): OrganismState {
     health: organism.health,
     max_health: organism.max_health,
     energy_prev: organism.energy_prev,
+    health_prev: organism.health_prev,
     dopamine: organism.dopamine,
     damage_taken_last_turn: organism.damage_taken_last_turn,
     is_gestating: organism.is_gestating,

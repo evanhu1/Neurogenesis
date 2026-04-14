@@ -132,6 +132,7 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
             health: initial_energy.max(1.0),
             max_health: initial_energy.max(1.0),
             energy_prev: initial_energy,
+            health_prev: initial_energy.max(1.0),
             dopamine: 0.0,
             value_prev: 0.0,
             value_prev_inter_activations: Vec::new(),
@@ -303,6 +304,7 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
             health: initial_energy.max(1.0),
             max_health: initial_energy.max(1.0),
             energy_prev: initial_energy,
+            health_prev: initial_energy.max(1.0),
             dopamine: 0.0,
             value_prev: 0.0,
             value_prev_inter_activations: Vec::new(),
@@ -463,6 +465,7 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
             health: initial_energy.max(1.0),
             max_health: initial_energy.max(1.0),
             energy_prev: initial_energy,
+            health_prev: initial_energy.max(1.0),
             dopamine: 0.0,
             value_prev: 0.0,
             value_prev_inter_activations: Vec::new(),
@@ -587,6 +590,7 @@ fn delayed_credit_assignment_organism(
         health: genome.max_health.max(1.0),
         max_health: genome.max_health.max(1.0),
         energy_prev: starting_energy,
+        health_prev: genome.max_health.max(1.0),
         dopamine: 0.0,
         value_prev: 0.0,
         value_prev_inter_activations: Vec::new(),
@@ -655,10 +659,13 @@ fn run_delayed_reward_sequence(
     // increase therefore has to come from the retained eligibility trace.
     set_pending_food_consume_coactivation(&mut organism, &mut scratch, 0.0, 0.0);
     organism.energy += 20.0;
+    // Synthesize a food-gain pulse in the tonic ledger: one food_energy's worth
+    // of energy gained this tick. Matches the channel the new ledger populates
+    // for delayed-credit-via-eating scenarios.
     apply_runtime_weight_updates(
         &mut organism,
         RewardLedger {
-            food_consumed_energy: 20.0,
+            energy_delta_gain: 1.0,
             ..RewardLedger::default()
         },
     );

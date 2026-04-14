@@ -156,6 +156,7 @@ impl Simulation {
             health: max_health,
             max_health,
             energy_prev: starting_energy,
+            health_prev: max_health,
             dopamine: 0.0,
             value_prev: 0.0,
             value_prev_inter_activations: Vec::new(),

@@ -26,7 +26,10 @@ mod spawn;
 mod topology;
 mod turn;
 
-pub(crate) use reward::{PendingActionKind, PendingActionState, RewardEvent, RewardLedger};
+pub(crate) use reward::{
+    PendingActionKind, PendingActionState, RewardLedger, DEFAULT_REWARD_WEIGHTS,
+    REWARD_WEIGHT_COUNT, REWARD_WEIGHT_MAX, REWARD_WEIGHT_MIN,
+};
 
 pub use brain::derive_active_action_neuron_id;
 

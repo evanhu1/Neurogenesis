@@ -22,7 +22,7 @@ use sanitization::{align_genome_vectors, reconcile_synapse_count};
 pub(crate) use scalar::inter_alpha_from_log_time_constant;
 use scalar::{
     mutate_action_biases, mutate_inter_biases, mutate_inter_update_rates,
-    mutate_random_neuron_location, mutate_synapse_weights,
+    mutate_random_neuron_location, mutate_reward_weights, mutate_synapse_weights,
 };
 pub(crate) use seed::generate_seed_genome;
 pub(crate) use topology::{
@@ -55,6 +55,11 @@ const SYNAPSE_PRUNE_THRESHOLD_PERTURBATION_STDDEV: f32 = 0.02;
 const MAX_HEALTH_PERTURBATION_STDDEV: f32 = 25.0;
 const INTER_BIAS_PERTURB_NEURON_RATE: f32 = 0.8;
 const INTER_UPDATE_RATE_PERTURB_NEURON_RATE: f32 = 0.8;
+/// Per-coefficient rate for the reward-weight mutator. Lower than the bias
+/// rate because reward weights scale dopamine directly; the outer
+/// `mutation_rate_inter_bias` gate restricts how often the operator fires.
+const REWARD_WEIGHT_PERTURB_RATE: f32 = 0.5;
+const REWARD_WEIGHT_PERTURBATION_STDDEV: f32 = 0.15;
 const SYNAPSE_WEIGHT_PERTURBATION_STDDEV: f32 = 0.15;
 const SYNAPSE_WEIGHT_PERTURB_EDGE_RATE: f32 = 0.8;
 const SYNAPSE_WEIGHT_REPLACEMENT_RATE: f32 = 0.1;
@@ -141,6 +146,9 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
     }
     if rng.random::<f32>() < inherited_rates.inter_bias {
         mutate_action_biases(genome, rng);
+    }
+    if rng.random::<f32>() < inherited_rates.inter_bias {
+        mutate_reward_weights(genome, rng);
     }
     if rng.random::<f32>() < inherited_rates.inter_update_rate {
         mutate_inter_update_rates(genome, rng);

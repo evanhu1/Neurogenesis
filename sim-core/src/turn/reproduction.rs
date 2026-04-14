@@ -64,7 +64,6 @@ impl ReproductionPhaseState {
         &mut self,
         organisms: &mut [OrganismState],
         pending_actions: &mut [PendingActionState],
-        reward_ledgers: &mut [crate::RewardLedger],
         intents: &[OrganismIntent],
         occupancy: &[Option<Occupant>],
         world_width: i32,
@@ -101,9 +100,6 @@ impl ReproductionPhaseState {
             organism.energy -= transfer_energy;
             organism.reproductions_count = organism.reproductions_count.saturating_add(1);
             organism.is_gestating = true;
-            reward_ledgers[org_idx].record(RewardEvent::ReproductionInvested {
-                energy: transfer_energy,
-            });
             pending_actions[org_idx] = PendingActionState {
                 kind: PendingActionKind::Reproduce,
                 turns_remaining: organism.genome.gestation_ticks,
@@ -143,9 +139,6 @@ impl ReproductionPhaseState {
             if occupancy_snapshot_cell(&sim.occupancy, world_width, q, r).is_none()
                 && reserved_spawn_cells.insert((q, r))
             {
-                sim.reward_ledgers[idx].record(RewardEvent::OffspringSpawned {
-                    reward: sim.config.food_energy * PLANT_CONSUMPTION_ENERGY_FRACTION,
-                });
                 self.spawn_requests.push(SpawnRequest {
                     kind: SpawnRequestKind::Reproduction(Box::new(ReproductionSpawn {
                         parent_genome: parent.genome.clone(),

@@ -77,6 +77,7 @@ pub(super) fn test_genome() -> OrganismGenome {
         inter_locations: vec![default_loc],
         action_locations: vec![default_loc; ActionType::ALL.len()],
         action_biases: vec![0.0; ActionType::ALL.len()],
+        reward_weights: Vec::new(),
         edges: Vec::new(),
     }
 }
@@ -257,6 +258,7 @@ pub(super) fn make_single_action_organism(
         health: initial_energy,
         max_health: initial_energy,
         energy_prev: initial_energy,
+        health_prev: initial_energy,
         dopamine: 0.0,
         value_prev: 0.0,
         value_prev_inter_activations: Vec::new(),
@@ -301,6 +303,7 @@ pub(super) fn make_organism(
         health: initial_energy,
         max_health: initial_energy,
         energy_prev: initial_energy,
+        health_prev: initial_energy,
         dopamine: 0.0,
         value_prev: 0.0,
         value_prev_inter_activations: Vec::new(),

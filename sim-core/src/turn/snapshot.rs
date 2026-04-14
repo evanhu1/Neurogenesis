@@ -16,13 +16,8 @@ impl Simulation {
     }
 
     pub(super) fn clear_turn_transient_state(&mut self) {
-        for (organism, ledger) in self
-            .organisms
-            .iter_mut()
-            .zip(self.reward_ledgers.iter_mut())
-        {
+        for organism in self.organisms.iter_mut() {
             organism.damage_taken_last_turn = 0.0;
-            ledger.clear();
         }
     }
 

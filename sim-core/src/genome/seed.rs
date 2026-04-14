@@ -21,6 +21,7 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         .map(|_| sample_uniform_location(rng))
         .collect();
     let action_biases = (0..ACTION_COUNT).map(|_| sample_initial_bias(rng)).collect();
+    let reward_weights = crate::DEFAULT_REWARD_WEIGHTS.to_vec();
 
     let mut genome = OrganismGenome {
         num_neurons,
@@ -59,6 +60,7 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         inter_locations,
         action_locations,
         action_biases,
+        reward_weights,
         edges: Vec::new(),
     };
     reconcile_synapse_count(&mut genome, rng);

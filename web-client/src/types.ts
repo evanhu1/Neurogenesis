@@ -249,6 +249,7 @@ export type ApiOrganismState = {
   health: number;
   max_health: number;
   energy_prev: number;
+  health_prev: number;
   dopamine: number;
   damage_taken_last_turn: number;
   is_gestating: boolean;
@@ -274,6 +275,7 @@ export type OrganismState = {
   health: number;
   max_health: number;
   energy_prev: number;
+  health_prev: number;
   dopamine: number;
   damage_taken_last_turn: number;
   is_gestating: boolean;

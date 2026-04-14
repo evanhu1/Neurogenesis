@@ -479,6 +479,7 @@ fn decode_persisted_genome(genome: PersistedOrganismGenome) -> OrganismGenome {
         inter_locations: genome.inter_locations,
         action_locations,
         action_biases: vec![0.0; ActionType::ALL.len()],
+        reward_weights: Vec::new(),
         edges,
     }
 }
@@ -1278,6 +1279,7 @@ mod tests {
                 ActionType::ALL.len()
             ],
             action_biases: vec![0.0; ActionType::ALL.len()],
+            reward_weights: Vec::new(),
             edges: Vec::new(),
         };
         genome.num_neurons = generation as u32 + 1;

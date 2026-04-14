@@ -70,9 +70,6 @@ impl<'a> CommitPhaseContext<'a> {
             if action_count > 0 {
                 let energy_cost = action_energy_cost * intent.action_cost_count as f32;
                 organism.energy -= energy_cost;
-                self.sim.reward_ledgers[idx].record(RewardEvent::MoveCost {
-                    energy: energy_cost,
-                });
             }
         }
     }
@@ -128,9 +125,6 @@ impl<'a> CommitPhaseContext<'a> {
             let organism = &mut self.sim.organisms[idx];
             organism.health = (organism.health - spike_damage).max(0.0);
             organism.damage_taken_last_turn += spike_damage;
-            self.sim.reward_ledgers[idx].record(RewardEvent::DamageTaken {
-                energy: spike_damage,
-            });
 
             if organism.health <= 0.0 {
                 self.mark_organism_dead(idx, organism_id, cell_idx, (q, r), corpse_energy);
@@ -193,9 +187,6 @@ impl<'a> CommitPhaseContext<'a> {
                     predator.prey_consumptions_count.saturating_add(1);
             }
         }
-        self.sim.reward_ledgers[predator_idx].record(RewardEvent::FoodConsumed {
-            energy: gained_energy,
-        });
         #[cfg(feature = "instrumentation")]
         self.sim.mark_action_succeeded(predator_idx);
         self.result.consumptions += 1;
@@ -219,24 +210,29 @@ impl<'a> CommitPhaseContext<'a> {
             return;
         }
 
-        let prey_energy = self.sim.organisms[prey_idx].energy.max(0.0);
         let predator_size = sim_types::get_size(&self.sim.organisms[predator_idx]).max(1.0);
         let prey_size = sim_types::get_size(&self.sim.organisms[prey_idx]).max(1.0);
         let predation_success = (predator_size / prey_size).clamp(0.0, 1.0);
-        let (prey_q, prey_r) = (
-            self.sim.organisms[prey_idx].q,
-            self.sim.organisms[prey_idx].r,
-        );
         if self.sim.rng.random::<f32>() >= predation_success {
             return;
         }
-        self.sim.reward_ledgers[predator_idx].record(RewardEvent::PredationSucceeded {
-            energy: prey_energy,
-        });
+
+        let prey = &mut self.sim.organisms[prey_idx];
+        let damage = (prey.max_health * ATTACK_DAMAGE_FRACTION).min(prey.health.max(0.0));
+        prey.health = (prey.health - damage).max(0.0);
+        prey.damage_taken_last_turn += damage;
+        let killed = prey.health <= 0.0;
+        let prey_q = prey.q;
+        let prey_r = prey.r;
+        let prey_energy = prey.energy.max(0.0);
+
         #[cfg(feature = "instrumentation")]
         self.sim.mark_action_succeeded(predator_idx);
-        self.result.predations += 1;
-        self.mark_organism_dead(prey_idx, prey_id, target_idx, (prey_q, prey_r), prey_energy);
+
+        if killed {
+            self.result.predations += 1;
+            self.mark_organism_dead(prey_idx, prey_id, target_idx, (prey_q, prey_r), prey_energy);
+        }
     }
 
     fn mark_organism_dead(

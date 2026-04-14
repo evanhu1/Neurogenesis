@@ -11,7 +11,6 @@ use sim_types::{BrainState, OrganismState, SynapseEdge};
 #[cfg(feature = "profiling")]
 use std::time::Instant;
 
-const DOPAMINE_ENERGY_DELTA_SCALE: f32 = 20.0;
 const PLASTIC_WEIGHT_DECAY: f32 = 0.001;
 const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
 const PRUNE_ELIGIBILITY_MULTIPLIER: f32 = 2.0;
@@ -133,15 +132,20 @@ pub(crate) fn apply_runtime_weight_updates_with_multiplier(
     // because V adapts its prediction to the current state rather than to
     // the running mean.
     let v_current = compute_value_estimate(&organism.brain);
-    let raw_reward = reward_ledger.reward_signal() * reward_signal_multiplier;
+    let raw_reward = reward_ledger.weighted_reward_signal(&organism.genome.reward_weights)
+        * reward_signal_multiplier;
     let td_error = raw_reward + VALUE_DISCOUNT_GAMMA * v_current - organism.value_prev;
-    let dopamine_signal = fast_tanh(td_error / DOPAMINE_ENERGY_DELTA_SCALE);
+    // Unit-normalized tonic ledger signals give td_error in roughly [-2, +2];
+    // feeding directly into tanh gives good dynamic range without saturating
+    // on tonic baseline or collapsing phasic pulses.
+    let dopamine_signal = fast_tanh(td_error);
 
     let mut params =
         PlasticityStepParams::from_organism(organism, reward_ledger, reward_signal_multiplier);
     params.dopamine_signal = dopamine_signal;
     organism.dopamine = dopamine_signal;
     organism.energy_prev = organism.energy;
+    organism.health_prev = organism.health;
 
     // Local semi-gradient descent step on V(s_{t-1}) toward `r + γ·V(s_t)`.
     // ∂V/∂w_i at the previous state equals the previous inter activation.
@@ -240,8 +244,8 @@ impl PlasticityStepParams {
 
         Self {
             dopamine_signal: fast_tanh(
-                (reward_ledger.reward_signal() * reward_signal_multiplier)
-                    / DOPAMINE_ENERGY_DELTA_SCALE,
+                reward_ledger.weighted_reward_signal(&organism.genome.reward_weights)
+                    * reward_signal_multiplier,
             ),
             eta,
             apply_weight_update: plasticity_started,
