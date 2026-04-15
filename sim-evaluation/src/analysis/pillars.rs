@@ -6,7 +6,6 @@ use crate::output::{mean_histogram, mean_option};
 use crate::types::{IntervalMetrics, PillarScores};
 
 const MEAN_MI_SATURATION: f64 = 0.16;
-const FORAGING_RATE_SATURATION: f64 = 0.025;
 const UTILIZATION_SATURATION: f64 = 0.60;
 
 /// Which slice of the timeseries feeds pillar computation. Defaults to the
@@ -50,8 +49,6 @@ pub fn compute_pillar_scores(
 
     let mean_p_fwd_food = mean_option(slice.iter().map(|row| row.p_fwd_food));
     let mean_mi_sa = mean_option(slice.iter().map(|row| row.mi_sa));
-    let mean_predation_rate = mean_option(slice.iter().map(|row| row.predation_rate));
-    let mean_foraging_rate = mean_option(slice.iter().map(|row| row.foraging_rate));
     let mean_attack_attempt_rate = mean_option(slice.iter().map(|row| row.attack_attempt_rate));
     let mean_attack_success_rate = mean_option(slice.iter().map(|row| row.attack_success_rate));
     let mean_failed_action_rate = mean_option(slice.iter().map(|row| row.failed_action_rate));
@@ -69,9 +66,6 @@ pub fn compute_pillar_scores(
     let action_effectiveness_component = mean_failed_action_rate
         .map(|value| clamp01(1.0 - value))
         .unwrap_or(0.0);
-    let foraging_rate_component = mean_foraging_rate
-        .map(|value| clamp01(value / FORAGING_RATE_SATURATION))
-        .unwrap_or(0.0);
     let anti_idle_component = mean_idle_fraction
         .map(|value| clamp01(1.0 - value / 0.60))
         .unwrap_or(0.0);
@@ -85,10 +79,7 @@ pub fn compute_pillar_scores(
         .map(|value| clamp01(value / 0.01))
         .unwrap_or(0.0);
 
-    let foraging_pillar = weighted_geometric_mean(&[
-        (p_fwd_food_component, 0.65),
-        (foraging_rate_component, 0.35),
-    ]);
+    let foraging_pillar = p_fwd_food_component;
     let intelligence_pillar = weighted_geometric_mean(&[
         (action_effectiveness_component, 0.50),
         (mean_mi_component, 0.28),
@@ -105,8 +96,6 @@ pub fn compute_pillar_scores(
         window_end_tick,
         mean_p_fwd_food,
         mean_mi_sa,
-        mean_predation_rate,
-        mean_foraging_rate,
         mean_attack_attempt_rate,
         mean_attack_success_rate,
         mean_failed_action_rate,
@@ -114,7 +103,6 @@ pub fn compute_pillar_scores(
         mean_util,
         mean_action_histogram,
         foraging_p_fwd_food_component: p_fwd_food_component,
-        foraging_rate_component,
         intelligence_mi_component: mean_mi_component,
         intelligence_action_effectiveness_component: action_effectiveness_component,
         intelligence_anti_idle_component: anti_idle_component,

@@ -128,7 +128,6 @@ fn comparison_metric_rows(
         paired("idle_fraction", |p| p.mean_idle_fraction),
         paired("p_fwd_food", |p| p.mean_p_fwd_food),
         paired("mi_sa", |p| p.mean_mi_sa),
-        paired("foraging_rate", |p| p.mean_foraging_rate),
         paired("attack_attempt_rate", |p| p.mean_attack_attempt_rate),
         paired("attack_success_rate", |p| p.mean_attack_success_rate),
         paired("failed_action_rate", |p| p.mean_failed_action_rate),

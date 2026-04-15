@@ -17,8 +17,6 @@ pub fn average_pillar_scores(seed_summaries: &[SeedEvaluationSummary]) -> Pillar
         window_end_tick: first.pillars.window_end_tick,
         mean_p_fwd_food: mean_option(pillars(|s| &s.pillars).map(|p| p.mean_p_fwd_food)),
         mean_mi_sa: mean_option(pillars(|s| &s.pillars).map(|p| p.mean_mi_sa)),
-        mean_predation_rate: mean_option(pillars(|s| &s.pillars).map(|p| p.mean_predation_rate)),
-        mean_foraging_rate: mean_option(pillars(|s| &s.pillars).map(|p| p.mean_foraging_rate)),
         mean_attack_attempt_rate: mean_option(
             pillars(|s| &s.pillars).map(|p| p.mean_attack_attempt_rate),
         ),
@@ -35,9 +33,6 @@ pub fn average_pillar_scores(seed_summaries: &[SeedEvaluationSummary]) -> Pillar
         ),
         foraging_p_fwd_food_component: mean_f64(
             pillars(|s| &s.pillars).map(|p| p.foraging_p_fwd_food_component),
-        ),
-        foraging_rate_component: mean_f64(
-            pillars(|s| &s.pillars).map(|p| p.foraging_rate_component),
         ),
         intelligence_mi_component: mean_f64(
             pillars(|s| &s.pillars).map(|p| p.intelligence_mi_component),
@@ -158,16 +153,6 @@ pub fn average_timeseries(seed_summaries: &[SeedEvaluationSummary]) -> Vec<Inter
                 seed_summaries
                     .iter()
                     .map(|summary| summary.timeseries[row_idx].max_generation),
-            ),
-            predation_rate: mean_option(
-                seed_summaries
-                    .iter()
-                    .map(|summary| summary.timeseries[row_idx].predation_rate),
-            ),
-            foraging_rate: mean_option(
-                seed_summaries
-                    .iter()
-                    .map(|summary| summary.timeseries[row_idx].foraging_rate),
             ),
             attack_attempt_rate: mean_option(
                 seed_summaries

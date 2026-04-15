@@ -10,7 +10,7 @@ use crate::analysis::{
 };
 use crate::dataset::{
     DatasetReader, DatasetWriter as DatasetWriterTrait, Manifest, PartitionedParquetWriter,
-    PopulationSnapshotRow, TickSummaryRow, SCHEMA_VERSION,
+    TickSummaryRow, SCHEMA_VERSION,
 };
 use crate::ledger::Ledger;
 use crate::output::{write_summary_json, write_timeseries_csv};
@@ -322,8 +322,9 @@ fn run_single_seed_evaluation(
         if flush_tick {
             // Population-wide snapshot (brain stats, lineage diversity) only at
             // flush boundaries — iterating every organism is expensive.
-            let snapshot = compute_population_snapshot(tick, sim.organisms());
-            writer.emit_population_snapshot(snapshot);
+            for row in ledger.population_snapshot_rows(tick, sim.organisms()) {
+                writer.emit_population_snapshot(row);
+            }
 
             if let Some(top) = ledger.top_reproducer() {
                 if let Ok(idx) = sim
@@ -480,62 +481,6 @@ fn format_duration_compact(duration: Duration) -> String {
         format!("{hours:02}:{minutes:02}:{seconds:02}")
     } else {
         format!("{minutes:02}:{seconds:02}")
-    }
-}
-
-fn compute_population_snapshot(tick: u64, organisms: &[OrganismState]) -> PopulationSnapshotRow {
-    if organisms.is_empty() {
-        return PopulationSnapshotRow {
-            tick,
-            brain_size_mean: None,
-            brain_size_stddev: None,
-            brain_size_p10: None,
-            brain_size_p50: None,
-            brain_size_p90: None,
-            lineage_diversity: None,
-        };
-    }
-
-    let mut sizes: Vec<f64> = organisms
-        .iter()
-        .map(|o| (o.genome.topology.num_neurons + o.brain.synapse_count) as f64)
-        .collect();
-    sizes.sort_by(|a, b| a.total_cmp(b));
-    let len = sizes.len() as f64;
-    let mean = sizes.iter().sum::<f64>() / len;
-    let variance = sizes
-        .iter()
-        .map(|v| {
-            let d = *v - mean;
-            d * d
-        })
-        .sum::<f64>()
-        / len;
-
-    let percentile = |fraction: f64| -> Option<f64> {
-        let idx = ((sizes.len() - 1) as f64 * fraction.clamp(0.0, 1.0)).round() as usize;
-        sizes.get(idx).copied()
-    };
-
-    let mut counts = std::collections::HashMap::new();
-    for organism in organisms {
-        *counts.entry(organism.species_id).or_insert(0_u64) += 1;
-    }
-    let total = organisms.len() as f64;
-    let mut shannon = 0.0;
-    for count in counts.values() {
-        let p = *count as f64 / total;
-        shannon -= p * p.log2();
-    }
-
-    PopulationSnapshotRow {
-        tick,
-        brain_size_mean: Some(mean),
-        brain_size_stddev: Some(variance.sqrt()),
-        brain_size_p10: percentile(0.10),
-        brain_size_p50: percentile(0.50),
-        brain_size_p90: percentile(0.90),
-        lineage_diversity: Some(shannon),
     }
 }
 

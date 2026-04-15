@@ -88,10 +88,8 @@ pub(crate) fn print_evaluation_summary(out_dir: &Path, summary: &EvaluationSumma
     println!("worker_threads: {}", summary.worker_threads);
     let pillars = &summary.pillars;
     println!(
-        "foraging_pillar: {:.3} [p_fwd_food={:.3} foraging_rate={:.3}]",
-        pillars.foraging_pillar,
-        pillars.foraging_p_fwd_food_component,
-        pillars.foraging_rate_component,
+        "foraging_pillar: {:.3} [p_fwd_food={:.3}]",
+        pillars.foraging_pillar, pillars.foraging_p_fwd_food_component,
     );
     println!(
         "intelligence_pillar: {:.3} [effectiveness={:.3} mi={:.3} anti_idle={:.3} util={:.3}]",

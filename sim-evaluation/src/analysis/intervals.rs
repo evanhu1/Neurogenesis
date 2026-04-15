@@ -7,6 +7,7 @@
 
 use crate::dataset::{DatasetReader, ACTION_COUNT, JOINT_LEN, SENSORY_BIN_COUNT};
 use crate::types::IntervalMetrics;
+use std::collections::BTreeMap;
 
 const IDLE: usize = 0;
 const FORWARD: usize = 3;
@@ -16,6 +17,15 @@ const REPRODUCE: usize = 6;
 
 /// Actions whose failure is a meaningful signal (non-no-op, non-turn).
 const CONTINGENT_ACTIONS: [usize; 4] = [FORWARD, EAT, ATTACK, REPRODUCE];
+
+#[derive(Clone, Copy)]
+struct PopulationSnapshotSummary {
+    brain_size_mean: Option<f64>,
+    brain_size_stddev: Option<f64>,
+    brain_size_p10: Option<f64>,
+    brain_size_p50: Option<f64>,
+    brain_size_p90: Option<f64>,
+}
 
 pub fn derive_interval_metrics(
     dataset: &DatasetReader,
@@ -69,15 +79,19 @@ pub fn derive_interval_metrics(
             accs[idx].add_lifetime(row);
         }
     }
-    // Population snapshots are sparse (one per flush). For each interval, use
-    // the most recent snapshot at or before the interval end.
-    let snapshot_cursor = &dataset.population_snapshots;
+    // Population snapshots are sparse (one flush boundary per interval). Use
+    // the most recent raw organism snapshot rows at or before the interval end
+    // and derive population-level readouts from them here in analysis.
+    let mut snapshot_rows_by_tick: BTreeMap<u64, Vec<&crate::dataset::PopulationSnapshotRow>> =
+        BTreeMap::new();
+    for row in &dataset.population_snapshots {
+        snapshot_rows_by_tick.entry(row.tick).or_default().push(row);
+    }
     accs.iter_mut().for_each(|acc| {
-        acc.population_snapshot = snapshot_cursor
-            .iter()
-            .filter(|row| row.tick <= acc.end_tick)
-            .max_by_key(|row| row.tick)
-            .cloned();
+        acc.population_snapshot = snapshot_rows_by_tick
+            .range(..=acc.end_tick)
+            .next_back()
+            .map(|(_, rows)| summarize_population_snapshot(rows));
     });
 
     accs.into_iter().map(|acc| acc.finalize()).collect()
@@ -93,8 +107,6 @@ struct IntervalAccumulator {
     // tick_summary
     births: u64,
     deaths: u64,
-    consumptions: u64,
-    predations: u64,
     population_exposure: u64,
     last_pop: u32,
     last_food: u32,
@@ -111,7 +123,7 @@ struct IntervalAccumulator {
     fwd_when_food_ahead_sum: u64,
     pooled_joint: [u64; JOINT_LEN],
     // population snapshot (filled post-walk)
-    population_snapshot: Option<crate::dataset::PopulationSnapshotRow>,
+    population_snapshot: Option<PopulationSnapshotSummary>,
 }
 
 impl IntervalAccumulator {
@@ -120,8 +132,6 @@ impl IntervalAccumulator {
             end_tick,
             births: 0,
             deaths: 0,
-            consumptions: 0,
-            predations: 0,
             population_exposure: 0,
             last_pop: 0,
             last_food: 0,
@@ -142,10 +152,6 @@ impl IntervalAccumulator {
     fn add_tick_summary(&mut self, row: &crate::dataset::TickSummaryRow) {
         self.births = self.births.saturating_add(u64::from(row.births));
         self.deaths = self.deaths.saturating_add(u64::from(row.deaths));
-        self.consumptions = self
-            .consumptions
-            .saturating_add(u64::from(row.consumptions));
-        self.predations = self.predations.saturating_add(u64::from(row.predations));
         self.population_exposure = self
             .population_exposure
             .saturating_add(u64::from(row.population));
@@ -185,8 +191,6 @@ impl IntervalAccumulator {
         let attack_successes = attack_attempts.saturating_sub(self.action_failed[ATTACK]);
 
         let attack_attempt_rate = event_rate(attack_attempts, self.population_exposure);
-        let foraging_rate = event_rate(self.consumptions, self.population_exposure);
-        let predation_rate = event_rate(self.predations, self.population_exposure);
         let attack_success_rate = if attack_attempts == 0 {
             None
         } else {
@@ -242,8 +246,6 @@ impl IntervalAccumulator {
             deaths: self.deaths,
             food: u64::from(self.last_food),
             max_generation: self.last_max_generation,
-            predation_rate,
-            foraging_rate,
             attack_attempt_rate,
             attack_success_rate,
             failed_action_rate,
@@ -266,6 +268,49 @@ impl IntervalAccumulator {
 fn pool_joint(into: &mut [u64; JOINT_LEN], from: &[u64]) {
     for (idx, value) in from.iter().take(JOINT_LEN).enumerate() {
         into[idx] = into[idx].saturating_add(*value);
+    }
+}
+
+fn summarize_population_snapshot(
+    rows: &[&crate::dataset::PopulationSnapshotRow],
+) -> PopulationSnapshotSummary {
+    if rows.is_empty() {
+        return PopulationSnapshotSummary {
+            brain_size_mean: None,
+            brain_size_stddev: None,
+            brain_size_p10: None,
+            brain_size_p50: None,
+            brain_size_p90: None,
+        };
+    }
+
+    let mut sizes: Vec<f64> = rows
+        .iter()
+        .map(|row| (row.num_neurons + row.synapse_count) as f64)
+        .collect();
+    sizes.sort_by(|a, b| a.total_cmp(b));
+
+    let len = sizes.len() as f64;
+    let mean = sizes.iter().sum::<f64>() / len;
+    let variance = sizes
+        .iter()
+        .map(|value| {
+            let delta = *value - mean;
+            delta * delta
+        })
+        .sum::<f64>()
+        / len;
+    let percentile = |fraction: f64| {
+        let idx = ((sizes.len() - 1) as f64 * fraction.clamp(0.0, 1.0)).round() as usize;
+        sizes.get(idx).copied()
+    };
+
+    PopulationSnapshotSummary {
+        brain_size_mean: Some(mean),
+        brain_size_stddev: Some(variance.sqrt()),
+        brain_size_p10: percentile(0.10),
+        brain_size_p50: percentile(0.50),
+        brain_size_p90: percentile(0.90),
     }
 }
 

@@ -18,10 +18,9 @@ pub const SENSORY_BIN_COUNT: usize = 1 + SensoryReceptor::VISION_RAY_OFFSETS.len
 /// Length of the flattened joint-sensory-action histogram.
 pub const JOINT_LEN: usize = SENSORY_BIN_COUNT * ACTION_COUNT;
 
-/// One row per tick. All fields are cheap scalars; expensive population
-/// statistics (brain-size distribution, lineage diversity) live in
-/// `population_snapshots` instead because they require iterating every living
-/// organism.
+/// One row per tick. All fields are cheap scalars. More expensive living
+/// population facts that require iterating organisms at flush boundaries live
+/// in `population_snapshots`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TickSummaryRow {
     pub tick: u64,
@@ -35,17 +34,21 @@ pub struct TickSummaryRow {
     pub food_spawned: u32,
 }
 
-/// Expensive per-population statistics sampled at each flush boundary. Sparse
-/// by design — there is one row per reporting interval, not one per tick.
+/// One row per living organism at a flush boundary. This is raw snapshot data;
+/// analysis derives population-level statistics such as brain-size
+/// percentiles later.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PopulationSnapshotRow {
     pub tick: u64,
-    pub brain_size_mean: Option<f64>,
-    pub brain_size_stddev: Option<f64>,
-    pub brain_size_p10: Option<f64>,
-    pub brain_size_p50: Option<f64>,
-    pub brain_size_p90: Option<f64>,
-    pub lineage_diversity: Option<f64>,
+    pub organism_id: u64,
+    pub parent_id: Option<u64>,
+    pub species_id: u64,
+    pub generation: u64,
+    pub birth_tick: u64,
+    pub age_turns: u64,
+    pub age_of_maturity: u32,
+    pub num_neurons: u32,
+    pub synapse_count: u32,
 }
 
 /// Long-format action counters: one row per (tick, action_type). Adding new

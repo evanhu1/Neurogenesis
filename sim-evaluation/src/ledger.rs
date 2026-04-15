@@ -8,10 +8,10 @@
 //! can pick the top reproducer at each flush boundary.
 
 use crate::dataset::{
-    ActionCountRow, OrganismLifetimeRow, ReproductionEventRow, ReproductionOutcome, ACTION_COUNT,
-    JOINT_LEN,
+    ActionCountRow, OrganismLifetimeRow, PopulationSnapshotRow, ReproductionEventRow,
+    ReproductionOutcome, ACTION_COUNT, JOINT_LEN,
 };
-use sim_types::{ActionRecord, ActionType, OrganismId, ReproductionEvent};
+use sim_types::{ActionRecord, ActionType, OrganismId, OrganismState, ReproductionEvent};
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 
@@ -327,6 +327,31 @@ impl Ledger {
         survivors
             .into_values()
             .map(|entry| entry.into_lifetime_row(None))
+            .collect()
+    }
+
+    pub fn population_snapshot_rows(
+        &self,
+        tick: u64,
+        organisms: &[OrganismState],
+    ) -> Vec<PopulationSnapshotRow> {
+        organisms
+            .iter()
+            .filter_map(|organism| {
+                let entry = self.sidecar.get(&organism.id)?;
+                Some(PopulationSnapshotRow {
+                    tick,
+                    organism_id: organism.id.0,
+                    parent_id: entry.parent_id,
+                    species_id: organism.species_id.0,
+                    generation: organism.generation,
+                    birth_tick: entry.birth_tick,
+                    age_turns: organism.age_turns,
+                    age_of_maturity: entry.age_of_maturity,
+                    num_neurons: organism.genome.topology.num_neurons,
+                    synapse_count: organism.brain.synapse_count,
+                })
+            })
             .collect()
     }
 

@@ -337,12 +337,15 @@ mod tests {
         });
         writer.emit_population_snapshot(PopulationSnapshotRow {
             tick: 1,
-            brain_size_mean: Some(24.0),
-            brain_size_stddev: Some(2.5),
-            brain_size_p10: Some(20.0),
-            brain_size_p50: Some(24.0),
-            brain_size_p90: Some(28.0),
-            lineage_diversity: Some(0.9),
+            organism_id: 42,
+            parent_id: Some(7),
+            species_id: 1,
+            generation: 2,
+            birth_tick: 0,
+            age_turns: 15,
+            age_of_maturity: 15,
+            num_neurons: 10,
+            synapse_count: 14,
         });
         writer.emit_action_count(ActionCountRow {
             tick: 1,

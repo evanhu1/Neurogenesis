@@ -74,7 +74,6 @@ pub struct HtmlReportMeta {
     pub intelligence_pillar: f64,
     pub competition_pillar: f64,
     pub foraging_p_fwd_food_component: f64,
-    pub foraging_rate_component: f64,
     pub intelligence_mi_component: f64,
     pub intelligence_action_effectiveness_component: f64,
     pub intelligence_anti_idle_component: f64,
@@ -113,7 +112,6 @@ impl HtmlReportMeta {
             intelligence_pillar: pillars.intelligence_pillar,
             competition_pillar: pillars.competition_pillar,
             foraging_p_fwd_food_component: pillars.foraging_p_fwd_food_component,
-            foraging_rate_component: pillars.foraging_rate_component,
             intelligence_mi_component: pillars.intelligence_mi_component,
             intelligence_action_effectiveness_component: pillars
                 .intelligence_action_effectiveness_component,
@@ -236,10 +234,7 @@ pub fn write_html_report(
         &mut html,
         "Foraging",
         &format!("{:.3}", meta.foraging_pillar),
-        &[
-            ("P(Fwd|food)", meta.foraging_p_fwd_food_component),
-            ("Foraging rate", meta.foraging_rate_component),
-        ],
+        &[("P(Fwd|food)", meta.foraging_p_fwd_food_component)],
     );
     pillar_card(
         &mut html,
@@ -362,18 +357,6 @@ pub fn write_html_report(
             metric_series(rows, |r| r.max_generation.map(|value| value as f64)),
             None,
             "#7e22ce",
-        ),
-        (
-            "Predation Rate",
-            metric_series(rows, |r| r.predation_rate),
-            Some(0.0),
-            "#be123c",
-        ),
-        (
-            "Foraging Rate",
-            metric_series(rows, |r| r.foraging_rate),
-            Some(0.0),
-            "#16a34a",
         ),
         (
             "Attack Attempt Rate",
