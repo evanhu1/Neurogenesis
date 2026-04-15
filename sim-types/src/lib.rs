@@ -577,6 +577,17 @@ pub struct BrainState {
     /// match the inter layer so mismatches cannot panic.
     #[serde(default)]
     pub value_weights: Vec<f32>,
+    /// Per-sensory-neuron EMA of activation used to center pending
+    /// coactivations (covariance rule). Length tracks `sensory.len()`.
+    #[serde(skip)]
+    pub sensory_mean_activation: Vec<f32>,
+    #[serde(skip)]
+    pub sensory_mean_initialized: Vec<bool>,
+    /// Per-inter-neuron EMA of activation. Length tracks `inter.len()`.
+    #[serde(skip)]
+    pub inter_mean_activation: Vec<f32>,
+    #[serde(skip)]
+    pub inter_mean_initialized: Vec<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

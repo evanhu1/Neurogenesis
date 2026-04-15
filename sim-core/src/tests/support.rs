@@ -136,6 +136,10 @@ fn forced_brain_with_action(preferred_action: ActionType, confidence: f32) -> Br
         action,
         synapse_count,
         value_weights: vec![0.0],
+        sensory_mean_activation: vec![0.0],
+        sensory_mean_initialized: vec![false],
+        inter_mean_activation: vec![0.0],
+        inter_mean_initialized: vec![false],
     }
 }
 

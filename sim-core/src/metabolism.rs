@@ -177,6 +177,10 @@ mod tests {
                 }],
                 synapse_count: 0,
                 value_weights: Vec::new(),
+                sensory_mean_activation: Vec::new(),
+                sensory_mean_initialized: Vec::new(),
+                inter_mean_activation: Vec::new(),
+                inter_mean_initialized: Vec::new(),
             },
             genome: {
                 let mut genome = OrganismGenome::test_fixture();

@@ -972,6 +972,10 @@ mod tests {
             action: Vec::new(),
             synapse_count: 0,
             value_weights: Vec::new(),
+            sensory_mean_activation: Vec::new(),
+            sensory_mean_initialized: Vec::new(),
+            inter_mean_activation: Vec::new(),
+            inter_mean_initialized: Vec::new(),
         };
 
         let organisms = vec![
