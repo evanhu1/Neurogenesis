@@ -182,18 +182,39 @@ fn scan_ray(
     context: RaycastContext<'_>,
 ) -> ScanResult {
     let max_dist = context.vision_distance.max(1);
-    let mut current = position;
     let inv_max_dist = 1.0 / max_dist as f32;
+    let world_width = context.world_width;
+    let world_width_usize = world_width as usize;
+    let occupancy = context.occupancy;
+    let spike_map = context.spike_map;
+    let visual_map = context.visual_map;
+    let organism_id = context.organism_id;
+
+    // Hex step deltas for the chosen facing — hoisted out of the loop.
+    let (dq, dr) = facing_delta(ray_facing);
+    let mut q = position.0;
+    let mut r = position.1;
     let mut color = ColorSignal::default();
     let mut food_visible = false;
     let mut remaining_visibility = 1.0_f32;
 
     for distance in 1..=max_dist {
-        current = hex_neighbor(current, ray_facing, context.world_width);
-        let idx = current.1 as usize * context.world_width as usize + current.0 as usize;
+        q += dq;
+        if q < 0 {
+            q += world_width;
+        } else if q >= world_width {
+            q -= world_width;
+        }
+        r += dr;
+        if r < 0 {
+            r += world_width;
+        } else if r >= world_width {
+            r -= world_width;
+        }
+        let idx = r as usize * world_width_usize + q as usize;
         let distance_signal = (max_dist - distance + 1) as f32 * inv_max_dist;
 
-        if context.spike_map[idx] {
+        if spike_map[idx] {
             accumulate_visual(
                 &mut color,
                 &mut remaining_visibility,
@@ -202,14 +223,14 @@ fn scan_ray(
             );
         }
 
-        match context.occupancy[idx] {
-            Some(Occupant::Organism(id)) if id == context.organism_id => {}
+        match occupancy[idx] {
+            Some(Occupant::Organism(id)) if id == organism_id => {}
             Some(Occupant::Food(_)) => {
                 food_visible |= remaining_visibility > 0.0;
                 accumulate_visual(
                     &mut color,
                     &mut remaining_visibility,
-                    context.visual_map[idx],
+                    visual_map[idx],
                     distance_signal,
                 );
             }
@@ -217,7 +238,7 @@ fn scan_ray(
                 accumulate_visual(
                     &mut color,
                     &mut remaining_visibility,
-                    context.visual_map[idx],
+                    visual_map[idx],
                     distance_signal,
                 );
             }
@@ -232,6 +253,22 @@ fn scan_ray(
     ScanResult {
         color: color.clamped(),
         food_visible,
+    }
+}
+
+/// Per-step (dq, dr) offset for a given facing direction. Inlining this lets
+/// the optimizer hoist the offset out of the inner ray-walk loop instead of
+/// matching on the facing every step.
+#[inline(always)]
+fn facing_delta(facing: sim_types::FacingDirection) -> (i32, i32) {
+    use sim_types::FacingDirection::*;
+    match facing {
+        East => (1, 0),
+        NorthEast => (1, -1),
+        NorthWest => (0, -1),
+        West => (-1, 0),
+        SouthWest => (-1, 1),
+        SouthEast => (0, 1),
     }
 }
 
