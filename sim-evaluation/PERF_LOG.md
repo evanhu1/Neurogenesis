@@ -118,10 +118,41 @@ roughly one bounds check per edge per organism per tick.
 
 `cargo test -p sim-core` and `-p sim-evaluation` both pass.
 
+### 4. Give each seed its own rayon pool (committed as 627d78d)
+
+**This was the big one.** Thanks to a pointed question about whether 8 seeds ×
+8 intent threads might be oversubscribing, re-measured on the actual hardware:
+this machine has 14 logical cores, so the default config was asking for
+8 × 8 = 64 workers on 14 cores.
+
+Worse, the global `sim_parallel_pool(thread_count)` cached one pool per
+thread-count across *all* simulations. Every seed in the harness pushed its
+`par_iter_mut` work into the same 8-worker pool, so intent work was
+effectively serialized through that pool while 8 seed threads also competed
+for the same cores.
+
+Fix: moved the rayon pool onto `Simulation` as
+`OnceLock<Arc<ThreadPool>>`, and picked `intent_parallel_threads` in the
+evaluation harness as `ceil(cores / worker_threads)` capped at 4. For the
+default 8-seed run that's 2 threads per sim (16 total, comfortably within 14
+cores with hyperthreading); for a single-seed run it's 4 threads.
+
+| Bench | Baseline | Commits 1–3 | After change 4 | Total Δ |
+| --- | --- | --- | --- | --- |
+| single seed, 10k ticks | 2.222 s | 2.128 s | **1.712 s** | **-23%** |
+| 8 seeds, 5k ticks | 2.912 s | 2.710 s | **2.562 s** | **-12%** |
+| 8 seeds, 25k ticks | 23.38 s | ~21.5 s | **18.85 s** | **-19%** |
+
+CPU utilization on the multi-seed bench jumped from 770% → 930% after this
+change — the previous bottleneck was genuinely pool contention, not core
+limits. Projected full 100k × 8-seed run: 94 s → ~75 s.
+
 ### Conclusion
 
-Cumulative wins over commits 1–3: roughly **4% on single-seed** and **7% on
-multi-seed**. Far short of the requested 5x.
+Cumulative wins over commits 1–4: roughly **23% on single-seed** and **19% on
+multi-seed**. Still short of the requested 5x (that would need the brain-
+kernel refactor discussed above), but the pool-contention fix alone captured
+the large bulk of realistically available gain.
 
 Most of the wall time is genuinely inside `sim.tick()` and not in the
 evaluation harness's instrumentation. Reproduced with a `RAW_TICK_ONLY`
