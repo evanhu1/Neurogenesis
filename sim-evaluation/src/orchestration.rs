@@ -42,7 +42,7 @@ pub(crate) fn run_evaluation_across_seeds(
         let ticks = options.ticks;
         let report_every = options.report_every;
         let min_lifetime = options.min_lifetime;
-        let baseline = options.baseline;
+        let control = options.control;
 
         handles.push(thread::spawn(move || loop {
             let seed = match seed_queue.lock() {
@@ -62,7 +62,7 @@ pub(crate) fn run_evaluation_across_seeds(
                 title: title
                     .as_ref()
                     .map(|run_title| format!("{run_title} (seed {seed})")),
-                baseline,
+                control,
                 reward_reversal_tick: reward_reversal_tick_for_run(ticks),
             };
             let result = run_single_seed_evaluation(config.clone(), seed_options);
@@ -111,7 +111,7 @@ pub(crate) fn run_evaluation_across_seeds(
         title: options.title.clone(),
         seeds: options.seeds.clone(),
         ticks: options.ticks,
-        baseline: options.baseline,
+        control: options.control,
         worker_threads,
         total_time_seconds,
         aggregate_score: aggregate_score.clone(),
@@ -129,7 +129,7 @@ pub(crate) fn run_evaluation_across_seeds(
             ticks: summary.ticks,
             report_every: options.report_every,
             min_lifetime: options.min_lifetime,
-            baseline: summary.baseline,
+            control: summary.control,
             total_time_seconds: summary.total_time_seconds,
             generated_at_utc,
             aggregate_score: summary.aggregate_score.score,
@@ -319,7 +319,7 @@ pub(crate) fn run_single_seed_evaluation(
         title: options.title.clone(),
         seed: options.seed,
         ticks: options.ticks,
-        baseline: options.baseline,
+        control: options.control,
         total_time_seconds,
         aggregate_score: aggregate_score.clone(),
         experiment_readouts,
@@ -335,7 +335,7 @@ pub(crate) fn run_single_seed_evaluation(
             ticks: summary.ticks,
             report_every: options.report_every,
             min_lifetime: options.min_lifetime,
-            baseline: summary.baseline,
+            control: summary.control,
             total_time_seconds: summary.total_time_seconds,
             generated_at_utc,
             aggregate_score: summary.aggregate_score.score,
@@ -439,7 +439,7 @@ mod tests {
             min_lifetime: 10,
             out_dir: out_a.clone(),
             title: None,
-            baseline: false,
+            control: false,
             reward_reversal_tick: reward_reversal_tick_for_run(100),
         };
         let options_b = SeedRunOptions {

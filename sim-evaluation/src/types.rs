@@ -10,7 +10,7 @@ pub(crate) struct HarnessRunOptions {
     pub(crate) min_lifetime: u64,
     pub(crate) out_dir: PathBuf,
     pub(crate) title: Option<String>,
-    pub(crate) baseline: bool,
+    pub(crate) control: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -21,7 +21,7 @@ pub(crate) struct SeedRunOptions {
     pub(crate) min_lifetime: u64,
     pub(crate) out_dir: PathBuf,
     pub(crate) title: Option<String>,
-    pub(crate) baseline: bool,
+    pub(crate) control: bool,
     pub(crate) reward_reversal_tick: Option<u64>,
 }
 
@@ -30,7 +30,7 @@ pub(crate) struct SeedEvaluationSummary {
     pub(crate) title: Option<String>,
     pub(crate) seed: u64,
     pub(crate) ticks: u64,
-    pub(crate) baseline: bool,
+    pub(crate) control: bool,
     pub(crate) total_time_seconds: f64,
     pub(crate) aggregate_score: AggregateScore,
     pub(crate) experiment_readouts: ReproductionAnalytics,
@@ -43,7 +43,7 @@ pub(crate) struct EvaluationSummary {
     pub(crate) title: Option<String>,
     pub(crate) seeds: Vec<u64>,
     pub(crate) ticks: u64,
-    pub(crate) baseline: bool,
+    pub(crate) control: bool,
     pub(crate) worker_threads: usize,
     pub(crate) total_time_seconds: f64,
     pub(crate) aggregate_score: AggregateScore,

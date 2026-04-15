@@ -78,7 +78,7 @@ pub struct HtmlReportMeta {
     pub ticks: u64,
     pub report_every: u64,
     pub min_lifetime: u64,
-    pub baseline: bool,
+    pub control: bool,
     pub total_time_seconds: f64,
     pub generated_at_utc: String,
     pub aggregate_score: f64,
@@ -202,8 +202,8 @@ pub fn write_html_report(
     kv(&mut html, "Min Lifetime", &meta.min_lifetime.to_string());
     kv(
         &mut html,
-        "Baseline",
-        if meta.baseline { "true" } else { "false" },
+        "Random-action control",
+        if meta.control { "true" } else { "false" },
     );
     kv(
         &mut html,

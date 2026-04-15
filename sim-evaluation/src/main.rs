@@ -28,7 +28,7 @@ fn main() -> Result<()> {
     }
 
     let mut control_config = load_world_config_from_path(&cli.config)?;
-    if cli.baseline {
+    if cli.control {
         control_config.force_random_actions = true;
     }
     let overrides = FeatureOverrides {
@@ -47,7 +47,7 @@ fn main() -> Result<()> {
         min_lifetime: cli.min_lifetime,
         out_dir: cli.out.unwrap_or_else(|| default_output_dir(&seeds)),
         title: cli.title,
-        baseline: cli.baseline,
+        control: cli.control,
     };
 
     if cli.compare || overrides.has_overrides() {

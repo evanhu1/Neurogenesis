@@ -55,8 +55,8 @@ pub(crate) fn run_comparison_evaluation(
         },
     )?;
 
-    let control_label = if options.baseline {
-        "control (baseline)".to_owned()
+    let control_label = if options.control {
+        "random-action control".to_owned()
     } else {
         "control".to_owned()
     };

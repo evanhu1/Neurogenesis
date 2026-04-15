@@ -27,8 +27,10 @@ pub(crate) struct Cli {
     pub(crate) out: Option<PathBuf>,
     #[arg(long)]
     pub(crate) title: Option<String>,
+    /// Force organisms to act randomly — a degenerate control run used to
+    /// measure the random-policy floor of the evaluation scoring system.
     #[arg(long, default_value_t = false)]
-    pub(crate) baseline: bool,
+    pub(crate) control: bool,
     #[arg(long, default_value_t = false)]
     pub(crate) compare: bool,
     #[arg(long, default_value_t = false)]
