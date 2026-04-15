@@ -1,4 +1,4 @@
-//! Derive `ReproductionAnalytics` (aggregate lineage-tracking readouts) from
+//! Derive `DemographicAnalytics` (aggregate lineage-tracking readouts) from
 //! the `reproduction_events` and `organism_lifetimes` tables.
 //!
 //! "Descendants" are organisms with `parent_id.is_some()` — everyone born
@@ -6,15 +6,15 @@
 //! injection.
 
 use crate::dataset::{DatasetReader, ReproductionOutcome};
-use crate::types::ReproductionAnalytics;
+use crate::types::DemographicAnalytics;
 use std::collections::HashMap;
 
 const SURVIVAL_AGE_30: u64 = 30;
 
-pub fn compute_reproduction_analytics(
+pub fn compute_demographic_analytics(
     dataset: &DatasetReader,
     total_ticks: u64,
-) -> ReproductionAnalytics {
+) -> DemographicAnalytics {
     // ---- reproduction_events rollup -------------------------------------
     let mut successful_births = 0_u64;
     let mut blocked_births = 0_u64;
@@ -77,7 +77,7 @@ pub fn compute_reproduction_analytics(
         }
     }
 
-    ReproductionAnalytics {
+    DemographicAnalytics {
         births: successful_births,
         successful_births,
         blocked_births,

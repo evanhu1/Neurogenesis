@@ -1,7 +1,7 @@
 use crate::{
     dataset::ACTION_COUNT,
     report::Reporter,
-    types::{ComparisonSummary, EvaluationSummary, IntervalMetrics, ReproductionAnalytics},
+    types::{ComparisonSummary, EvaluationSummary, IntervalMetrics, DemographicAnalytics},
 };
 use anyhow::Result;
 use serde::Serialize;
@@ -132,7 +132,7 @@ pub(crate) fn print_evaluation_summary(out_dir: &Path, summary: &EvaluationSumma
             p.adaptation_pillar,
         );
     }
-    print_reproduction("aggregate", &summary.reproduction);
+    print_demographics("aggregate", &summary.demographics);
     println!("total_time_seconds: {:.3}", summary.total_time_seconds);
 }
 
@@ -224,7 +224,7 @@ fn fmt_option(value: Option<f64>, decimals: usize) -> String {
         .unwrap_or_else(|| "NA".to_owned())
 }
 
-fn print_reproduction(label: &str, readouts: &ReproductionAnalytics) {
+fn print_demographics(label: &str, readouts: &DemographicAnalytics) {
     println!("{label}_tracked_births: {}", readouts.births);
     println!("{label}_successful_births: {}", readouts.successful_births);
     println!("{label}_blocked_births: {}", readouts.blocked_births);

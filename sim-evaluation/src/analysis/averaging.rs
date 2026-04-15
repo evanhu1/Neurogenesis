@@ -1,11 +1,11 @@
 //! Cross-seed averaging of analysis outputs. Multi-seed runs fold per-seed
-//! `IntervalMetrics` / `PillarScores` / `ReproductionAnalytics` into a single
+//! `IntervalMetrics` / `PillarScores` / `DemographicAnalytics` into a single
 //! "mean across seeds" view for reports.
 
 use crate::output::{
     mean_f64, mean_histogram, mean_option, mean_option_u64, mean_round_u32, mean_round_u64,
 };
-use crate::types::{IntervalMetrics, PillarScores, ReproductionAnalytics, SeedEvaluationSummary};
+use crate::types::{IntervalMetrics, PillarScores, DemographicAnalytics, SeedEvaluationSummary};
 
 pub fn average_pillar_scores(seed_summaries: &[SeedEvaluationSummary]) -> PillarScores {
     let Some(first) = seed_summaries.first() else {
@@ -87,58 +87,58 @@ pub fn average_pillar_scores(seed_summaries: &[SeedEvaluationSummary]) -> Pillar
     }
 }
 
-pub fn average_reproduction_analytics(
+pub fn average_demographic_analytics(
     seed_summaries: &[SeedEvaluationSummary],
-) -> ReproductionAnalytics {
-    ReproductionAnalytics {
+) -> DemographicAnalytics {
+    DemographicAnalytics {
         births: mean_round_u64(
             seed_summaries
                 .iter()
-                .map(|summary| summary.reproduction.births),
+                .map(|summary| summary.demographics.births),
         ),
         successful_births: mean_round_u64(
             seed_summaries
                 .iter()
-                .map(|summary| summary.reproduction.successful_births),
+                .map(|summary| summary.demographics.successful_births),
         ),
         blocked_births: mean_round_u64(
             seed_summaries
                 .iter()
-                .map(|summary| summary.reproduction.blocked_births),
+                .map(|summary| summary.demographics.blocked_births),
         ),
         parent_died_during_reproduction: mean_round_u64(
             seed_summaries
                 .iter()
-                .map(|summary| summary.reproduction.parent_died_during_reproduction),
+                .map(|summary| summary.demographics.parent_died_during_reproduction),
         ),
         survived_to_30: mean_round_u64(
             seed_summaries
                 .iter()
-                .map(|summary| summary.reproduction.survived_to_30),
+                .map(|summary| summary.demographics.survived_to_30),
         ),
         survived_to_maturity: mean_round_u64(
             seed_summaries
                 .iter()
-                .map(|summary| summary.reproduction.survived_to_maturity),
+                .map(|summary| summary.demographics.survived_to_maturity),
         ),
         mean_parent_energy_after_successful_birth: mean_option(seed_summaries.iter().map(
             |summary| {
                 summary
-                    .reproduction
+                    .demographics
                     .mean_parent_energy_after_successful_birth
             },
         )),
         mean_age_at_first_successful_reproduction: mean_option(seed_summaries.iter().map(
             |summary| {
                 summary
-                    .reproduction
+                    .demographics
                     .mean_age_at_first_successful_reproduction
             },
         )),
         mean_successful_birth_interval: mean_option(
             seed_summaries
                 .iter()
-                .map(|summary| summary.reproduction.mean_successful_birth_interval),
+                .map(|summary| summary.demographics.mean_successful_birth_interval),
         ),
     }
 }

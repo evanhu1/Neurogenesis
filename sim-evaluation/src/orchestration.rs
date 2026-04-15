@@ -5,7 +5,7 @@
 //! dataset.
 
 use crate::analysis::{
-    analyze, average_pillar_scores, average_reproduction_analytics, average_timeseries,
+    analyze, average_pillar_scores, average_demographic_analytics, average_timeseries,
     write_per_seed_artifacts, AnalysisOptions, ScoringWindow,
 };
 use crate::dataset::{
@@ -104,7 +104,7 @@ pub(crate) fn run_evaluation_across_seeds(
     write_timeseries_csv(&options.out_dir, &averaged_timeseries)?;
 
     let pillars = average_pillar_scores(&seed_summaries);
-    let reproduction = average_reproduction_analytics(&seed_summaries);
+    let demographics = average_demographic_analytics(&seed_summaries);
     let total_time_seconds = run_started.elapsed().as_secs_f64();
     let generated_at_utc = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
 
@@ -115,7 +115,7 @@ pub(crate) fn run_evaluation_across_seeds(
             out_dir: PathBuf::from(format!("seed_{}", summary.seed)),
             total_time_seconds: summary.total_time_seconds,
             pillars: summary.pillars.clone(),
-            reproduction: summary.reproduction.clone(),
+            demographics: summary.demographics.clone(),
             state_hash: summary.state_hash.clone(),
         })
         .collect::<Vec<_>>();
@@ -128,7 +128,7 @@ pub(crate) fn run_evaluation_across_seeds(
         worker_threads,
         total_time_seconds,
         pillars: pillars.clone(),
-        reproduction,
+        demographics,
         seed_summaries: seed_run_summaries.clone(),
         timeseries: averaged_timeseries.clone(),
     };
@@ -328,7 +328,7 @@ pub(crate) fn run_single_seed_evaluation(
         control: options.control,
         total_time_seconds,
         pillars: analysis.pillars.clone(),
-        reproduction: analysis.reproduction.clone(),
+        demographics: analysis.demographics.clone(),
         state_hash,
         timeseries: analysis.timeseries.clone(),
     };

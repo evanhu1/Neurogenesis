@@ -1,23 +1,23 @@
 //! Derive interpretable metrics from a persisted dataset. This is the only
 //! place that knows how to turn raw rows into `IntervalMetrics`, pillar
-//! scores, and reproduction analytics. The sim-run layer emits raw data; the
+//! scores, and demographic analytics. The sim-run layer emits raw data; the
 //! reporting layer consumes analysis output; this module is the pivot.
 
 pub mod averaging;
 pub mod cli;
 pub mod intervals;
 pub mod pillars;
-pub mod reproduction;
+pub mod demographics;
 
-pub use averaging::{average_pillar_scores, average_reproduction_analytics, average_timeseries};
+pub use averaging::{average_pillar_scores, average_demographic_analytics, average_timeseries};
 pub use intervals::derive_interval_metrics;
 pub use pillars::{compute_pillar_scores, ScoringWindow};
-pub use reproduction::compute_reproduction_analytics;
+pub use demographics::compute_demographic_analytics;
 
 use crate::dataset::DatasetReader;
 use crate::output::{write_summary_json, write_timeseries_csv};
 use crate::report::{write_html_report, HtmlReportContext, HtmlReportMeta};
-use crate::types::{IntervalMetrics, PillarScores, ReproductionAnalytics, SeedEvaluationSummary};
+use crate::types::{IntervalMetrics, PillarScores, DemographicAnalytics, SeedEvaluationSummary};
 use anyhow::Result;
 use chrono::Utc;
 use std::path::Path;
@@ -32,7 +32,7 @@ pub struct AnalysisOptions {
 pub struct AnalysisOutput {
     pub timeseries: Vec<IntervalMetrics>,
     pub pillars: PillarScores,
-    pub reproduction: ReproductionAnalytics,
+    pub demographics: DemographicAnalytics,
 }
 
 pub fn analyze(dataset: &DatasetReader, options: &AnalysisOptions) -> AnalysisOutput {
@@ -43,11 +43,11 @@ pub fn analyze(dataset: &DatasetReader, options: &AnalysisOptions) -> AnalysisOu
         options.min_lifetime,
     );
     let pillars = compute_pillar_scores(&timeseries, options.scoring_window);
-    let reproduction = compute_reproduction_analytics(dataset, options.total_ticks);
+    let demographics = compute_demographic_analytics(dataset, options.total_ticks);
     AnalysisOutput {
         timeseries,
         pillars,
-        reproduction,
+        demographics,
     }
 }
 

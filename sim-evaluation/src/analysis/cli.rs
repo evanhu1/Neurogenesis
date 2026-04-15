@@ -31,7 +31,7 @@ pub fn analyze_dataset_dir(dataset_dir: &Path) -> Result<()> {
         control: false,
         total_time_seconds: 0.0,
         pillars: analysis.pillars.clone(),
-        reproduction: analysis.reproduction.clone(),
+        demographics: analysis.demographics.clone(),
         state_hash: String::new(),
         timeseries: analysis.timeseries.clone(),
     };
