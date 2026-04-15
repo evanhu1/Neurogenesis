@@ -103,10 +103,25 @@ impact tiny because `scan_ahead` is only ~28% of brain time.
 
 Determinism preserved: `cargo test -p sim-evaluation` and `-p sim-core` pass.
 
+### 3. Drop redundant bounds check in `compute_pending_edge_coactivations` (committed as 347a35d)
+
+The inner loop validated the post-neuron index twice: once via `inter_index`
+(which already returned `Option<usize>` on success) and once via
+`inter_activations.get(idx)`. Replaced the second check with
+`get_unchecked` after asserting the safety invariant in a comment. Saves
+roughly one bounds check per edge per organism per tick.
+
+| Bench | Before | After | Δ |
+| --- | --- | --- | --- |
+| single seed, 10k ticks | 2.130 s | 2.128 s | ~0% |
+| 8 seeds, 5k ticks | 2.790 s | 2.710 s | -2.9% |
+
+`cargo test -p sim-core` and `-p sim-evaluation` both pass.
+
 ### Conclusion
 
-Combined wins of changes 1 + 2: roughly **4–5% wall-time** on both single-seed
-and multi-seed benchmarks. Far short of the requested 5x.
+Cumulative wins over commits 1–3: roughly **4% on single-seed** and **7% on
+multi-seed**. Far short of the requested 5x.
 
 Most of the wall time is genuinely inside `sim.tick()` and not in the
 evaluation harness's instrumentation. Reproduced with a `RAW_TICK_ONLY`
