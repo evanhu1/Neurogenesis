@@ -10,6 +10,8 @@ use sim_types::{
 use std::collections::BTreeMap;
 use thiserror::Error;
 
+#[path = "brain/actor_critic.rs"]
+mod actor_critic;
 mod brain;
 pub(crate) mod genome;
 #[path = "spawn/grid.rs"]
@@ -20,6 +22,7 @@ mod plasticity;
 #[cfg(feature = "profiling")]
 #[path = "../profiling/profiling.rs"]
 pub mod profiling;
+#[path = "brain/reward.rs"]
 mod reward;
 mod spawn;
 #[path = "brain/topology.rs"]

@@ -116,6 +116,7 @@ pub(crate) fn evaluate_brain(
         EXPLICIT_IDLE_LOGIT_BIAS,
         context.action_temperature,
         context.action_sample,
+        &mut scratch.action_probabilities,
     );
     scratch.selected_action_index = match sampled_action.action {
         ActionType::Idle => None,
@@ -143,6 +144,7 @@ fn sample_action_from_logits(
     idle_bias: f32,
     action_temperature: f32,
     action_sample: f32,
+    action_probabilities: &mut [f32; ACTION_COUNT],
 ) -> SampledAction {
     let temperature = action_temperature.max(MIN_ACTION_TEMPERATURE);
     let max_logit = action_logits.iter().copied().fold(idle_bias, f32::max);
@@ -156,6 +158,10 @@ fn sample_action_from_logits(
     }
     let idle_weight = ((idle_bias - max_logit) / temperature).exp();
     weight_sum += idle_weight;
+
+    for (idx, weight) in weights.iter().copied().enumerate() {
+        action_probabilities[idx] = weight / weight_sum;
+    }
 
     let sample = action_sample.clamp(0.0, 1.0 - f32::EPSILON) * weight_sum;
     let mut cumulative = 0.0_f32;
