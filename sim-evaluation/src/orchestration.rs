@@ -5,7 +5,7 @@
 //! dataset.
 
 use crate::analysis::{
-    analyze, average_pillar_scores, average_demographic_analytics, average_timeseries,
+    analyze, average_demographic_analytics, average_pillar_scores, average_timeseries,
     write_per_seed_artifacts, AnalysisOptions, ScoringWindow,
 };
 use crate::dataset::{
@@ -23,13 +23,34 @@ use chrono::Utc;
 use sim_core::Simulation;
 use sim_types::{EntityId, OrganismState, WorldConfig};
 use std::collections::hash_map::DefaultHasher;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::hash::{Hash, Hasher};
+use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+enum WorkerMessage {
+    Progress {
+        seed: u64,
+        tick: u64,
+        total_ticks: u64,
+        elapsed: Duration,
+    },
+    Finished {
+        _seed: u64,
+        result: Result<SeedEvaluationSummary>,
+    },
+}
+
+#[derive(Clone, Copy)]
+struct SeedProgress {
+    tick: u64,
+    total_ticks: u64,
+    elapsed: Duration,
+}
 
 pub(crate) fn run_evaluation_across_seeds(
     config: WorldConfig,
@@ -41,6 +62,8 @@ pub(crate) fn run_evaluation_across_seeds(
     let seed_queue = Arc::new(Mutex::new(VecDeque::from(options.seeds.clone())));
     let (tx, rx) = mpsc::channel();
     let mut handles = Vec::with_capacity(worker_threads);
+    let mut progress_rows_rendered = 0_usize;
+    let mut latest_progress = HashMap::with_capacity(options.seeds.len());
 
     // When multiple seed workers share the machine, split the available cores
     // across them so each seed's simulation gets a dedicated slice of threads
@@ -78,8 +101,14 @@ pub(crate) fn run_evaluation_across_seeds(
                     .map(|run_title| format!("{run_title} (seed {seed})")),
                 control,
             };
-            let result = run_single_seed_evaluation(config.clone(), seed_options);
-            if tx.send((seed, result)).is_err() {
+            let result = run_single_seed_evaluation(config.clone(), seed_options, &tx);
+            if tx
+                .send(WorkerMessage::Finished {
+                    _seed: seed,
+                    result,
+                })
+                .is_err()
+            {
                 break;
             }
         }));
@@ -87,11 +116,39 @@ pub(crate) fn run_evaluation_across_seeds(
     drop(tx);
 
     let mut seed_summaries = Vec::with_capacity(options.seeds.len());
-    for _ in 0..options.seeds.len() {
-        let (_seed, result) = rx
+    while seed_summaries.len() < options.seeds.len() {
+        match rx
             .recv()
-            .map_err(|_| anyhow!("evaluation worker exited before reporting all seeds"))?;
-        seed_summaries.push(result?);
+            .map_err(|_| anyhow!("evaluation worker exited before reporting all seeds"))?
+        {
+            WorkerMessage::Progress {
+                seed,
+                tick,
+                total_ticks,
+                elapsed,
+            } => {
+                latest_progress.insert(
+                    seed,
+                    SeedProgress {
+                        tick,
+                        total_ticks,
+                        elapsed,
+                    },
+                );
+                render_seed_progress(
+                    &options.seeds,
+                    options.ticks,
+                    &latest_progress,
+                    &mut progress_rows_rendered,
+                )?;
+            }
+            WorkerMessage::Finished { _seed: _, result } => {
+                seed_summaries.push(result?);
+            }
+        }
+    }
+    if progress_rows_rendered > 0 {
+        eprintln!();
     }
     for handle in handles {
         handle
@@ -165,9 +222,10 @@ pub(crate) fn run_evaluation_across_seeds(
     Ok(summary)
 }
 
-pub(crate) fn run_single_seed_evaluation(
+fn run_single_seed_evaluation(
     config: WorldConfig,
     options: SeedRunOptions,
+    progress_tx: &mpsc::Sender<WorkerMessage>,
 ) -> Result<SeedEvaluationSummary> {
     let run_started = Instant::now();
     fs::create_dir_all(&options.out_dir)?;
@@ -243,7 +301,11 @@ pub(crate) fn run_single_seed_evaluation(
         writer.emit_tick(TickSummaryRow {
             tick,
             population,
-            max_generation: if population > 0 { Some(max_generation) } else { None },
+            max_generation: if population > 0 {
+                Some(max_generation)
+            } else {
+                None
+            },
             births,
             deaths,
             food_count: current_food_count as u32,
@@ -280,12 +342,12 @@ pub(crate) fn run_single_seed_evaluation(
                 }
             }
 
-            let fraction = tick as f64 / options.ticks as f64;
-            println!(
-                "progress[seed={}]: {tick}/{total} ({fraction:.3})",
-                options.seed,
-                total = options.ticks
-            );
+            let _ = progress_tx.send(WorkerMessage::Progress {
+                seed: options.seed,
+                tick,
+                total_ticks: options.ticks,
+                elapsed: run_started.elapsed(),
+            });
             writer.flush()?;
         }
     }
@@ -341,6 +403,84 @@ pub(crate) fn run_single_seed_evaluation(
     )?;
 
     Ok(summary)
+}
+
+fn render_seed_progress(
+    seeds: &[u64],
+    default_total_ticks: u64,
+    latest_progress: &HashMap<u64, SeedProgress>,
+    rows_rendered: &mut usize,
+) -> Result<()> {
+    if seeds.is_empty() || !io::stderr().is_terminal() {
+        return Ok(());
+    }
+
+    let mut stderr = io::stderr().lock();
+    if *rows_rendered > 0 {
+        write!(stderr, "\x1b[{}A", *rows_rendered)?;
+    }
+    for seed in seeds {
+        let progress = latest_progress.get(seed).copied().unwrap_or(SeedProgress {
+            tick: 0,
+            total_ticks: default_total_ticks,
+            elapsed: Duration::ZERO,
+        });
+        write!(
+            stderr,
+            "\r\x1b[2K{}\n",
+            format_seed_progress_line(*seed, progress)
+        )?;
+    }
+    stderr.flush()?;
+    *rows_rendered = seeds.len();
+    Ok(())
+}
+
+fn format_seed_progress_line(seed: u64, progress: SeedProgress) -> String {
+    const BAR_WIDTH: usize = 30;
+
+    let total_ticks = progress.total_ticks.max(1);
+    let tick = progress.tick.min(total_ticks);
+    let fraction = tick as f64 / total_ticks as f64;
+    let filled = ((fraction * BAR_WIDTH as f64).round() as usize).min(BAR_WIDTH);
+    let mut bar = String::with_capacity(BAR_WIDTH);
+    for idx in 0..BAR_WIDTH {
+        bar.push(if idx < filled { '#' } else { '-' });
+    }
+    let eta = estimate_eta(progress);
+
+    format!(
+        "seed {seed:<8} [{bar}] {:>6.1}% {tick}/{total_ticks} eta {}",
+        fraction * 100.0,
+        format_duration_compact(eta)
+    )
+}
+
+fn estimate_eta(progress: SeedProgress) -> Duration {
+    let total_ticks = progress.total_ticks.max(1);
+    let tick = progress.tick.min(total_ticks);
+    if tick == 0 || progress.elapsed.is_zero() {
+        return Duration::ZERO;
+    }
+    let remaining_ticks = total_ticks.saturating_sub(tick);
+    if remaining_ticks == 0 {
+        return Duration::ZERO;
+    }
+
+    Duration::from_secs_f64(progress.elapsed.as_secs_f64() * remaining_ticks as f64 / tick as f64)
+}
+
+fn format_duration_compact(duration: Duration) -> String {
+    let total_seconds = duration.as_secs();
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let seconds = total_seconds % 60;
+
+    if hours > 0 {
+        format!("{hours:02}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes:02}:{seconds:02}")
+    }
 }
 
 fn compute_population_snapshot(tick: u64, organisms: &[OrganismState]) -> PopulationSnapshotRow {
@@ -442,6 +582,7 @@ fn per_seed_intent_threads(worker_threads: usize) -> u32 {
 mod tests {
     use super::*;
     use sim_types::WorldConfig;
+    use std::sync::mpsc;
 
     #[test]
     fn same_seed_yields_same_summary_hash() {
@@ -470,10 +611,11 @@ mod tests {
             ..options_a.clone()
         };
 
-        let summary_a =
-            run_single_seed_evaluation(cfg.clone(), options_a).expect("first run should succeed");
+        let (tx, _rx) = mpsc::channel();
+        let summary_a = run_single_seed_evaluation(cfg.clone(), options_a, &tx)
+            .expect("first run should succeed");
         let summary_b =
-            run_single_seed_evaluation(cfg, options_b).expect("second run should succeed");
+            run_single_seed_evaluation(cfg, options_b, &tx).expect("second run should succeed");
 
         assert_eq!(summary_a.state_hash, summary_b.state_hash);
         assert_eq!(

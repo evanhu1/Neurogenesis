@@ -86,7 +86,6 @@ pub(crate) struct IntervalMetrics {
     pub deaths: u64,
     pub food: u64,
     pub max_generation: Option<u64>,
-    pub life_mean: Option<f64>,
     pub predation_rate: Option<f64>,
     pub foraging_rate: Option<f64>,
     pub attack_attempt_rate: Option<f64>,
@@ -99,62 +98,42 @@ pub(crate) struct IntervalMetrics {
     pub brain_size_p10: Option<f64>,
     pub brain_size_p50: Option<f64>,
     pub brain_size_p90: Option<f64>,
-    pub lineage_diversity: Option<f64>,
     pub p_fwd_food: Option<f64>,
     pub mi_sa: Option<f64>,
-    pub mi_sa_juvenile: Option<f64>,
-    pub mi_sa_adult: Option<f64>,
     pub idle_fraction: Option<f64>,
-    /// Mean parent age across every successful reproduction event in the
-    /// interval. None when no successful births happened.
-    pub generation_time: Option<f64>,
     pub util: Option<f64>,
     pub action_histogram: [f64; ACTION_COUNT],
 }
 
 /// Per-pillar evaluation readout. There is deliberately no single aggregate
 /// score here — each pillar stands on its own. The intelligence pillar is
-/// composed of niche-agnostic behavioural measures so predators, foragers,
-/// and r-strategists can all be compared on the same axis.
+/// composed of niche-agnostic behavioural measures so predators and foragers
+/// can still be compared on the same axis.
 #[derive(Debug, Clone, Serialize, Default)]
 pub(crate) struct PillarScores {
     pub(crate) window_start_tick: u64,
     pub(crate) window_end_tick: u64,
-    pub(crate) mean_life_mean: Option<f64>,
     pub(crate) mean_p_fwd_food: Option<f64>,
     pub(crate) mean_mi_sa: Option<f64>,
-    pub(crate) mean_mi_sa_juvenile: Option<f64>,
-    pub(crate) mean_mi_sa_adult: Option<f64>,
     pub(crate) mean_predation_rate: Option<f64>,
     pub(crate) mean_foraging_rate: Option<f64>,
     pub(crate) mean_attack_attempt_rate: Option<f64>,
     pub(crate) mean_attack_success_rate: Option<f64>,
     pub(crate) mean_failed_action_rate: Option<f64>,
     pub(crate) mean_idle_fraction: Option<f64>,
-    /// Average parent age across every successful reproduction event in the
-    /// scoring window. Shorter = faster generational turnover.
-    pub(crate) mean_generation_time: Option<f64>,
-    pub(crate) mean_lineage_diversity: Option<f64>,
     pub(crate) mean_util: Option<f64>,
     pub(crate) mean_action_histogram: [f64; ACTION_COUNT],
-    pub(crate) viability_life_component: f64,
-    pub(crate) viability_reproduction_component: f64,
     pub(crate) foraging_p_fwd_food_component: f64,
     pub(crate) foraging_rate_component: f64,
-    pub(crate) intelligence_adult_mi_component: f64,
+    pub(crate) intelligence_mi_component: f64,
     pub(crate) intelligence_action_effectiveness_component: f64,
     pub(crate) intelligence_anti_idle_component: f64,
     pub(crate) intelligence_util_component: f64,
-    pub(crate) competition_predation_component: f64,
     pub(crate) competition_attack_success_component: f64,
     pub(crate) competition_attack_attempt_component: f64,
-    pub(crate) adaptation_juvenile_mi_component: f64,
-    pub(crate) adaptation_diversity_component: f64,
-    pub(crate) viability_pillar: f64,
     pub(crate) foraging_pillar: f64,
     pub(crate) intelligence_pillar: f64,
     pub(crate) competition_pillar: f64,
-    pub(crate) adaptation_pillar: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]

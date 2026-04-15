@@ -58,14 +58,14 @@ pub struct ActionCountRow {
     pub action_type: u8,
     pub count: u64,
     pub failed_count: u64,
-    pub juvenile_count: u64,
-    pub adult_count: u64,
+    pub pre_maturity_count: u64,
+    pub post_maturity_count: u64,
 }
 
 /// One row per organism, emitted at death (or at end-of-run for survivors).
-/// Joints are stored split by maturity stage so the analysis layer can derive
-/// `mi_sa_juvenile`/`mi_sa_adult` by pooling across organisms that died (or
-/// were still alive at run end) inside each reporting interval.
+/// Stores the organism-specific maturity cutoff plus a compact pre/post
+/// maturity behavior summary so derived views can compare early vs late life
+/// without requiring full per-tick action logs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OrganismLifetimeRow {
     pub id: u64,
@@ -74,7 +74,10 @@ pub struct OrganismLifetimeRow {
     pub birth_tick: u64,
     pub death_tick: Option<u64>,
     pub generation: u64,
+    /// Mature from `maturity_tick` onward. Ages strictly below
+    /// `age_of_maturity` are pre-maturity.
     pub age_of_maturity: u32,
+    pub maturity_tick: u64,
     pub num_offspring: u32,
     pub total_consumptions: u64,
     pub total_actions: u64,
@@ -83,11 +86,22 @@ pub struct OrganismLifetimeRow {
     pub utilization: f32,
     pub food_ahead_ticks: u32,
     pub fwd_when_food_ahead: u32,
-    /// Row-major flattened `[SENSORY_BIN_COUNT][ACTION_COUNT]`, juvenile-only
-    /// samples (ages strictly below `age_of_maturity`).
-    pub joint_juvenile: Vec<u64>,
-    /// Row-major flattened `[SENSORY_BIN_COUNT][ACTION_COUNT]`, adult-only.
-    pub joint_adult: Vec<u64>,
+    /// Row-major flattened `[SENSORY_BIN_COUNT][ACTION_COUNT]` across the
+    /// whole lifetime.
+    pub joint_sensory_action: Vec<u64>,
+    pub pre_maturity_actions: u64,
+    pub post_maturity_actions: u64,
+    /// Length `ACTION_COUNT`. Counts for samples with age strictly below
+    /// `age_of_maturity`.
+    pub pre_maturity_action_histogram: Vec<u64>,
+    /// Length `ACTION_COUNT`. Counts for samples at or after `maturity_tick`.
+    pub post_maturity_action_histogram: Vec<u64>,
+    pub pre_maturity_consumptions: u64,
+    pub post_maturity_consumptions: u64,
+    pub pre_maturity_food_ahead_ticks: u32,
+    pub post_maturity_food_ahead_ticks: u32,
+    pub pre_maturity_fwd_when_food_ahead: u32,
+    pub post_maturity_fwd_when_food_ahead: u32,
 }
 
 /// One row per reproduction attempt.

@@ -122,18 +122,12 @@ fn comparison_metric_rows(
         )
     };
     vec![
-        paired("viability_pillar", |p| Some(p.viability_pillar)),
         paired("foraging_pillar", |p| Some(p.foraging_pillar)),
         paired("intelligence_pillar", |p| Some(p.intelligence_pillar)),
         paired("competition_pillar", |p| Some(p.competition_pillar)),
-        paired("adaptation_pillar", |p| Some(p.adaptation_pillar)),
-        paired("life_mean", |p| p.mean_life_mean),
         paired("idle_fraction", |p| p.mean_idle_fraction),
         paired("p_fwd_food", |p| p.mean_p_fwd_food),
         paired("mi_sa", |p| p.mean_mi_sa),
-        paired("mi_sa_juvenile", |p| p.mean_mi_sa_juvenile),
-        paired("mi_sa_adult", |p| p.mean_mi_sa_adult),
-        paired("generation_time", |p| p.mean_generation_time),
         paired("foraging_rate", |p| p.mean_foraging_rate),
         paired("attack_attempt_rate", |p| p.mean_attack_attempt_rate),
         paired("attack_success_rate", |p| p.mean_attack_success_rate),

@@ -66,18 +66,9 @@ pub fn derive_interval_metrics(
             continue;
         }
         if let Some(idx) = interval_index(&boundaries, death_tick) {
-            accs[idx].add_lifetime(row, lifetime);
+            accs[idx].add_lifetime(row);
         }
     }
-    for event in &dataset.reproduction_events {
-        if event.outcome != 0 {
-            continue;
-        }
-        if let Some(idx) = interval_index(&boundaries, event.tick) {
-            accs[idx].add_reproduction(event.parent_age_turns);
-        }
-    }
-
     // Population snapshots are sparse (one per flush). For each interval, use
     // the most recent snapshot at or before the interval end.
     let snapshot_cursor = &dataset.population_snapshots;
@@ -113,17 +104,12 @@ struct IntervalAccumulator {
     action_failed: [u64; ACTION_COUNT],
     // deceased
     deceased_count: u64,
-    lifetime_sum: u64,
     ate_count: u64,
     consumptions_sum: u64,
     utilization_sum: f64,
     food_ahead_ticks_sum: u64,
     fwd_when_food_ahead_sum: u64,
-    pooled_juvenile: [u64; JOINT_LEN],
-    pooled_adult: [u64; JOINT_LEN],
-    // reproduction_events
-    age_sum: f64,
-    age_count: u64,
+    pooled_joint: [u64; JOINT_LEN],
     // population snapshot (filled post-walk)
     population_snapshot: Option<crate::dataset::PopulationSnapshotRow>,
 }
@@ -143,16 +129,12 @@ impl IntervalAccumulator {
             action_counts: [0; ACTION_COUNT],
             action_failed: [0; ACTION_COUNT],
             deceased_count: 0,
-            lifetime_sum: 0,
             ate_count: 0,
             consumptions_sum: 0,
             utilization_sum: 0.0,
             food_ahead_ticks_sum: 0,
             fwd_when_food_ahead_sum: 0,
-            pooled_juvenile: [0; JOINT_LEN],
-            pooled_adult: [0; JOINT_LEN],
-            age_sum: 0.0,
-            age_count: 0,
+            pooled_joint: [0; JOINT_LEN],
             population_snapshot: None,
         }
     }
@@ -160,7 +142,9 @@ impl IntervalAccumulator {
     fn add_tick_summary(&mut self, row: &crate::dataset::TickSummaryRow) {
         self.births = self.births.saturating_add(u64::from(row.births));
         self.deaths = self.deaths.saturating_add(u64::from(row.deaths));
-        self.consumptions = self.consumptions.saturating_add(u64::from(row.consumptions));
+        self.consumptions = self
+            .consumptions
+            .saturating_add(u64::from(row.consumptions));
         self.predations = self.predations.saturating_add(u64::from(row.predations));
         self.population_exposure = self
             .population_exposure
@@ -179,9 +163,8 @@ impl IntervalAccumulator {
         self.action_failed[idx] = self.action_failed[idx].saturating_add(row.failed_count);
     }
 
-    fn add_lifetime(&mut self, row: &crate::dataset::OrganismLifetimeRow, lifetime: u64) {
+    fn add_lifetime(&mut self, row: &crate::dataset::OrganismLifetimeRow) {
         self.deceased_count = self.deceased_count.saturating_add(1);
-        self.lifetime_sum = self.lifetime_sum.saturating_add(lifetime);
         if row.total_consumptions > 0 {
             self.ate_count = self.ate_count.saturating_add(1);
         }
@@ -193,18 +176,13 @@ impl IntervalAccumulator {
         self.fwd_when_food_ahead_sum = self
             .fwd_when_food_ahead_sum
             .saturating_add(u64::from(row.fwd_when_food_ahead));
-        pool_joint(&mut self.pooled_juvenile, &row.joint_juvenile);
-        pool_joint(&mut self.pooled_adult, &row.joint_adult);
-    }
-
-    fn add_reproduction(&mut self, parent_age_turns: u64) {
-        self.age_sum += parent_age_turns as f64;
-        self.age_count = self.age_count.saturating_add(1);
+        pool_joint(&mut self.pooled_joint, &row.joint_sensory_action);
     }
 
     fn finalize(self) -> IntervalMetrics {
         let total_actions: u64 = self.action_counts.iter().sum();
         let attack_attempts = self.action_counts[ATTACK];
+        let attack_successes = attack_attempts.saturating_sub(self.action_failed[ATTACK]);
 
         let attack_attempt_rate = event_rate(attack_attempts, self.population_exposure);
         let foraging_rate = event_rate(self.consumptions, self.population_exposure);
@@ -212,7 +190,7 @@ impl IntervalAccumulator {
         let attack_success_rate = if attack_attempts == 0 {
             None
         } else {
-            Some(self.predations as f64 / attack_attempts as f64)
+            Some(attack_successes as f64 / attack_attempts as f64)
         };
         let mut contingent_total = 0_u64;
         let mut contingent_failed = 0_u64;
@@ -238,13 +216,11 @@ impl IntervalAccumulator {
             Some(action_histogram[IDLE])
         };
 
-        let pooled_total = sum_joints(&self.pooled_juvenile, &self.pooled_adult);
-        let (life_mean, ate_pct, cons_mean, util) = if self.deceased_count == 0 {
-            (None, None, None, None)
+        let (ate_pct, cons_mean, util) = if self.deceased_count == 0 {
+            (None, None, None)
         } else {
             let count_f = self.deceased_count as f64;
             (
-                Some(self.lifetime_sum as f64 / count_f),
                 Some(100.0 * self.ate_count as f64 / count_f),
                 Some(self.consumptions_sum as f64 / count_f),
                 Some(self.utilization_sum / count_f),
@@ -255,15 +231,7 @@ impl IntervalAccumulator {
         } else {
             Some(self.fwd_when_food_ahead_sum as f64 / self.food_ahead_ticks_sum as f64)
         };
-        let mi_sa = mi_from_joint(&pooled_total);
-        let mi_sa_juvenile = mi_from_joint(&self.pooled_juvenile);
-        let mi_sa_adult = mi_from_joint(&self.pooled_adult);
-
-        let generation_time = if self.age_count == 0 {
-            None
-        } else {
-            Some(self.age_sum / self.age_count as f64)
-        };
+        let mi_sa = mi_from_joint(&self.pooled_joint);
 
         let snapshot = self.population_snapshot.as_ref();
 
@@ -274,7 +242,6 @@ impl IntervalAccumulator {
             deaths: self.deaths,
             food: u64::from(self.last_food),
             max_generation: self.last_max_generation,
-            life_mean,
             predation_rate,
             foraging_rate,
             attack_attempt_rate,
@@ -287,13 +254,9 @@ impl IntervalAccumulator {
             brain_size_p10: snapshot.and_then(|r| r.brain_size_p10),
             brain_size_p50: snapshot.and_then(|r| r.brain_size_p50),
             brain_size_p90: snapshot.and_then(|r| r.brain_size_p90),
-            lineage_diversity: snapshot.and_then(|r| r.lineage_diversity),
             p_fwd_food,
             mi_sa,
-            mi_sa_juvenile,
-            mi_sa_adult,
             idle_fraction,
-            generation_time,
             util,
             action_histogram,
         }
@@ -304,14 +267,6 @@ fn pool_joint(into: &mut [u64; JOINT_LEN], from: &[u64]) {
     for (idx, value) in from.iter().take(JOINT_LEN).enumerate() {
         into[idx] = into[idx].saturating_add(*value);
     }
-}
-
-fn sum_joints(a: &[u64; JOINT_LEN], b: &[u64; JOINT_LEN]) -> [u64; JOINT_LEN] {
-    let mut out = [0_u64; JOINT_LEN];
-    for idx in 0..JOINT_LEN {
-        out[idx] = a[idx].saturating_add(b[idx]);
-    }
-    out
 }
 
 /// Miller-Madow-corrected mutual information I(S;A) from a pooled joint

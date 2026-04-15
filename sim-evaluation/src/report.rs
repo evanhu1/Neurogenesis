@@ -20,7 +20,7 @@ impl Reporter {
         let mut csv = BufWriter::new(File::create(csv_path)?);
         writeln!(
             csv,
-            "tick,pop,births,deaths,food,max_generation,life_mean,predation_rate,foraging_rate,attack_attempt_rate,attack_success_rate,failed_action_rate,ate_pct,cons_mean,brain_size,brain_size_stddev,brain_size_p10,brain_size_p50,brain_size_p90,lineage_diversity,p_fwd_food,mi_sa,mi_sa_juvenile,mi_sa_adult,idle_fraction,generation_time,util"
+            "tick,pop,births,deaths,food,max_generation,attack_attempt_rate,attack_success_rate,failed_action_rate,ate_pct,cons_mean,brain_size,brain_size_stddev,brain_size_p10,brain_size_p50,brain_size_p90,p_fwd_food,mi_sa,idle_fraction,util"
         )?;
         Ok(Self { csv })
     }
@@ -28,16 +28,13 @@ impl Reporter {
     pub fn emit(&mut self, metrics: &IntervalMetrics) -> Result<()> {
         writeln!(
             self.csv,
-            "{tick},{pop},{births},{deaths},{food},{max_generation},{life_mean},{predation_rate},{foraging_rate},{attack_attempt_rate},{attack_success_rate},{failed_action_rate},{ate_pct},{cons_mean},{brain_size},{brain_size_stddev},{brain_size_p10},{brain_size_p50},{brain_size_p90},{lineage_diversity},{p_fwd_food},{mi_sa},{mi_sa_juvenile},{mi_sa_adult},{idle_fraction},{generation_time},{util}",
+            "{tick},{pop},{births},{deaths},{food},{max_generation},{attack_attempt_rate},{attack_success_rate},{failed_action_rate},{ate_pct},{cons_mean},{brain_size},{brain_size_stddev},{brain_size_p10},{brain_size_p50},{brain_size_p90},{p_fwd_food},{mi_sa},{idle_fraction},{util}",
             tick = metrics.tick,
             pop = metrics.pop,
             births = metrics.births,
             deaths = metrics.deaths,
             food = metrics.food,
             max_generation = csv_opt_u64(metrics.max_generation),
-            life_mean = csv_opt(metrics.life_mean),
-            predation_rate = csv_opt(metrics.predation_rate),
-            foraging_rate = csv_opt(metrics.foraging_rate),
             attack_attempt_rate = csv_opt(metrics.attack_attempt_rate),
             attack_success_rate = csv_opt(metrics.attack_success_rate),
             failed_action_rate = csv_opt(metrics.failed_action_rate),
@@ -48,13 +45,9 @@ impl Reporter {
             brain_size_p10 = csv_opt(metrics.brain_size_p10),
             brain_size_p50 = csv_opt(metrics.brain_size_p50),
             brain_size_p90 = csv_opt(metrics.brain_size_p90),
-            lineage_diversity = csv_opt(metrics.lineage_diversity),
             p_fwd_food = csv_opt(metrics.p_fwd_food),
             mi_sa = csv_opt(metrics.mi_sa),
-            mi_sa_juvenile = csv_opt(metrics.mi_sa_juvenile),
-            mi_sa_adult = csv_opt(metrics.mi_sa_adult),
             idle_fraction = csv_opt(metrics.idle_fraction),
-            generation_time = csv_opt(metrics.generation_time),
             util = csv_opt(metrics.util),
         )?;
 
@@ -77,24 +70,17 @@ pub struct HtmlReportMeta {
     pub generated_at_utc: String,
     pub pillar_window_start_tick: u64,
     pub pillar_window_end_tick: u64,
-    pub viability_pillar: f64,
     pub foraging_pillar: f64,
     pub intelligence_pillar: f64,
     pub competition_pillar: f64,
-    pub adaptation_pillar: f64,
-    pub viability_life_component: f64,
-    pub viability_reproduction_component: f64,
     pub foraging_p_fwd_food_component: f64,
     pub foraging_rate_component: f64,
-    pub intelligence_adult_mi_component: f64,
+    pub intelligence_mi_component: f64,
     pub intelligence_action_effectiveness_component: f64,
     pub intelligence_anti_idle_component: f64,
     pub intelligence_util_component: f64,
-    pub competition_predation_component: f64,
     pub competition_attack_success_component: f64,
     pub competition_attack_attempt_component: f64,
-    pub adaptation_juvenile_mi_component: f64,
-    pub adaptation_diversity_component: f64,
     pub timeseries_label: String,
     pub per_seed_rows: Vec<PerSeedReportRow>,
 }
@@ -123,25 +109,18 @@ impl HtmlReportMeta {
             generated_at_utc: ctx.generated_at_utc,
             pillar_window_start_tick: pillars.window_start_tick,
             pillar_window_end_tick: pillars.window_end_tick,
-            viability_pillar: pillars.viability_pillar,
             foraging_pillar: pillars.foraging_pillar,
             intelligence_pillar: pillars.intelligence_pillar,
             competition_pillar: pillars.competition_pillar,
-            adaptation_pillar: pillars.adaptation_pillar,
-            viability_life_component: pillars.viability_life_component,
-            viability_reproduction_component: pillars.viability_reproduction_component,
             foraging_p_fwd_food_component: pillars.foraging_p_fwd_food_component,
             foraging_rate_component: pillars.foraging_rate_component,
-            intelligence_adult_mi_component: pillars.intelligence_adult_mi_component,
+            intelligence_mi_component: pillars.intelligence_mi_component,
             intelligence_action_effectiveness_component: pillars
                 .intelligence_action_effectiveness_component,
             intelligence_anti_idle_component: pillars.intelligence_anti_idle_component,
             intelligence_util_component: pillars.intelligence_util_component,
-            competition_predation_component: pillars.competition_predation_component,
             competition_attack_success_component: pillars.competition_attack_success_component,
             competition_attack_attempt_component: pillars.competition_attack_attempt_component,
-            adaptation_juvenile_mi_component: pillars.adaptation_juvenile_mi_component,
-            adaptation_diversity_component: pillars.adaptation_diversity_component,
             timeseries_label: ctx.timeseries_label,
             per_seed_rows: ctx.per_seed_rows,
         }
@@ -206,6 +185,8 @@ pub fn write_html_report(
         .meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}\
         .k{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}.v{font-weight:600}\
         table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:8px;border-bottom:1px solid var(--line);text-align:right}th:first-child,td:first-child{text-align:left}\
+        .table-scroll{max-width:100%;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}\
+        .table-scroll table{min-width:1280px}\
         .chart{margin:8px 0 20px 0}svg{width:100%;height:auto;border:1px solid var(--line);border-radius:8px;background:#fff}\
         .note{color:var(--muted);font-size:12px}\
         .score-big{font-size:42px;font-weight:700;line-height:1;margin:0}\
@@ -253,15 +234,6 @@ pub fn write_html_report(
     html.push_str("<div class=\"pillar-list\">");
     pillar_card(
         &mut html,
-        "Viability",
-        &format!("{:.3}", meta.viability_pillar),
-        &[
-            ("Life", meta.viability_life_component),
-            ("Reproduction", meta.viability_reproduction_component),
-        ],
-    );
-    pillar_card(
-        &mut html,
         "Foraging",
         &format!("{:.3}", meta.foraging_pillar),
         &[
@@ -278,7 +250,7 @@ pub fn write_html_report(
                 "Action effectiveness",
                 meta.intelligence_action_effectiveness_component,
             ),
-            ("Adult MI", meta.intelligence_adult_mi_component),
+            ("MI(S;A)", meta.intelligence_mi_component),
             ("Anti-idle", meta.intelligence_anti_idle_component),
             ("Util", meta.intelligence_util_component),
         ],
@@ -288,18 +260,8 @@ pub fn write_html_report(
         "Competition",
         &format!("{:.3}", meta.competition_pillar),
         &[
-            ("Predation", meta.competition_predation_component),
             ("Attack success", meta.competition_attack_success_component),
             ("Attack attempts", meta.competition_attack_attempt_component),
-        ],
-    );
-    pillar_card(
-        &mut html,
-        "Adaptation",
-        &format!("{:.3}", meta.adaptation_pillar),
-        &[
-            ("Juvenile MI", meta.adaptation_juvenile_mi_component),
-            ("Diversity", meta.adaptation_diversity_component),
         ],
     );
     html.push_str("</div></div>");
@@ -322,7 +284,7 @@ pub fn write_html_report(
 
     let _ = write!(
         html,
-        "<div class=\"panel\"><h2>Timeseries</h2><p class=\"note\">{}</p><table><thead><tr>",
+        "<div class=\"panel\"><h2>Timeseries</h2><p class=\"note\">{}</p><div class=\"table-scroll\"><table><thead><tr>",
         meta.timeseries_label
     );
     for header in [
@@ -330,25 +292,16 @@ pub fn write_html_report(
         "pop",
         "births",
         "deaths",
-        "food",
         "max_generation",
-        "life_mean",
-        "predation_rate",
-        "foraging_rate",
         "attack_attempt_rate",
         "attack_success_rate",
         "failed_action_rate",
         "ate_pct",
         "cons_mean",
         "brain_size",
-        "brain_size_stddev",
-        "lineage_diversity",
         "p_fwd_food",
         "mi_sa",
-        "mi_sa_juvenile",
-        "mi_sa_adult",
         "idle_fraction",
-        "generation_time",
         "util",
     ] {
         let _ = write!(html, "<th>{header}</th>");
@@ -361,32 +314,23 @@ pub fn write_html_report(
             row.pop.to_string(),
             row.births.to_string(),
             row.deaths.to_string(),
-            row.food.to_string(),
             fmt_opt_u64(row.max_generation),
-            fmt_opt(row.life_mean, 2),
-            fmt_opt(row.predation_rate, 6),
-            fmt_opt(row.foraging_rate, 6),
             fmt_opt(row.attack_attempt_rate, 6),
             fmt_opt(row.attack_success_rate, 4),
             fmt_opt(row.failed_action_rate, 4),
             fmt_opt(row.ate_pct, 2),
             fmt_opt(row.cons_mean, 2),
             fmt_opt(row.brain_size, 2),
-            fmt_opt(row.brain_size_stddev, 2),
-            fmt_opt(row.lineage_diversity, 4),
             fmt_opt(row.p_fwd_food, 4),
             fmt_opt(row.mi_sa, 4),
-            fmt_opt(row.mi_sa_juvenile, 4),
-            fmt_opt(row.mi_sa_adult, 4),
             fmt_opt(row.idle_fraction, 4),
-            fmt_opt(row.generation_time, 2),
             fmt_opt(row.util, 4),
         ] {
             let _ = write!(html, "<td>{cell}</td>");
         }
         html.push_str("</tr>");
     }
-    html.push_str("</tbody></table></div>");
+    html.push_str("</tbody></table></div></div>");
 
     let charts = [
         (
@@ -418,12 +362,6 @@ pub fn write_html_report(
             metric_series(rows, |r| r.max_generation.map(|value| value as f64)),
             None,
             "#7e22ce",
-        ),
-        (
-            "Life Length Mean",
-            metric_series(rows, |r| r.life_mean),
-            None,
-            "#7c3aed",
         ),
         (
             "Predation Rate",
@@ -481,34 +419,10 @@ pub fn write_html_report(
             "#9333ea",
         ),
         (
-            "MI(S;A) Juvenile",
-            metric_series(rows, |r| r.mi_sa_juvenile),
-            Some(0.0),
-            "#7c3aed",
-        ),
-        (
-            "MI(S;A) Adult",
-            metric_series(rows, |r| r.mi_sa_adult),
-            Some(0.0),
-            "#581c87",
-        ),
-        (
             "Idle Fraction",
             metric_series(rows, |r| r.idle_fraction),
             Some(action_baseline_probability()),
             "#f97316",
-        ),
-        (
-            "Generation Time (ticks)",
-            metric_series(rows, |r| r.generation_time),
-            None,
-            "#0ea5e9",
-        ),
-        (
-            "Lineage Diversity",
-            metric_series(rows, |r| r.lineage_diversity),
-            Some(0.0),
-            "#0f766e",
         ),
         (
             "Inter Utilization",
@@ -805,15 +719,6 @@ fn append_interpretation_guidance(html: &mut String) {
     html.push_str("</ul>");
     html.push_str("<p>If this number is flat at baseline after thousands of generations, the evolutionary loop is broken. Check energy economics first (is eating actually rewarded enough to matter?), then mutation rates (can evolution explore fast enough?).</p>");
 
-    html.push_str("<h3>Generation time -- \"How fast does the lineage turn over?\"</h3>");
-    html.push_str("<p>Average parent age across every successful reproduction event in the interval. Shorter means faster generational turnover.</p>");
-    html.push_str("<ul>");
-    html.push_str("<li><code>100-200</code> ticks: healthy r-strategist range. Lineages reproduce promptly once mature.</li>");
-    html.push_str("<li><code>300+</code> ticks: slow. Organisms delay reproduction or die trying. Often co-occurs with low successful birth count.</li>");
-    html.push_str("<li><code>None</code>: no successful reproductions in the interval — either population is too small or reproduction is blocked.</li>");
-    html.push_str("</ul>");
-    html.push_str("<p>Interpret alongside <code>life_mean</code>: generation time should be well under life_mean for a stable lineage. Generation time ~ life_mean means each individual reproduces roughly once before dying — a knife-edge regime.</p>");
-
     html.push_str("<h3>MI(S;A) -- \"Do they react?\"</h3>");
     html.push_str("<p>Mutual information between what the organism sees and what it does. The general version of P(Fwd|food) - captures all sensory-action coupling, not just the food-ahead case.</p>");
     html.push_str("<ul>");
@@ -821,7 +726,7 @@ fn append_interpretation_guidance(html: &mut String) {
     html.push_str("<li><code>0.01-0.05</code>: weak coupling. Noisy but present. Typical of early evolution where a few organisms have partial stimulus-response wiring.</li>");
     html.push_str("<li><code>0.10+</code>: meaningful sensory-motor coupling. Organisms are making different decisions in different sensory contexts.</li>");
     html.push_str("</ul>");
-    html.push_str("<p>MI is biased upward with small sample sizes (short-lived organisms produce noisy histograms that look like they have structure). The Miller-Madow correction helps but does not eliminate this. If MI looks suspiciously high in early intervals when organisms are dying young, it is probably bias. Trust MI trends over absolute values. Trust it more when life_mean is high (more samples per organism).</p>");
+    html.push_str("<p>MI is biased upward with small sample sizes (short-lived organisms produce noisy histograms that look like they have structure). The Miller-Madow correction helps but does not eliminate this. If MI looks suspiciously high in early intervals when organisms are dying young, it is probably bias. Trust MI trends over absolute values.</p>");
     html.push_str("<p>The relationship between MI and P(Fwd|food): MI can be positive even when P(Fwd|food) is at baseline, if organisms are reacting to non-food stimuli (avoiding walls, turning away from other organisms). This is still interesting - it means brains are sensory-responsive, just not for the behavior you expected.</p>");
 
     html.push_str("<h3>Failed action rate -- \"Do they choose actions that actually work?\"</h3>");
@@ -851,12 +756,10 @@ fn append_interpretation_guidance(html: &mut String) {
     html.push_str("<table><thead><tr><th>Pattern</th><th>Diagnosis</th></tr></thead><tbody>");
     html.push_str("<tr><td>Pop stable, all Tier 3 flat at baseline</td><td>Evolution running but not finding anything. Fix energy economics or mutation rates.</td></tr>");
     html.push_str("<tr><td>Pop crashing, high death rate</td><td>Organisms cannot survive. Food too scarce, metabolism too high, or starting energy too low.</td></tr>");
-    html.push_str("<tr><td>Pop stable, life_mean rising, Tier 3 flat</td><td>Selection is working but optimizing non-cognitive traits (reproduction timing, energy hoarding). Brains are not the path to fitness.</td></tr>");
     html.push_str("<tr><td>P(Fwd|food) rising, MI rising</td><td>The good outcome. Evolution is discovering sensory-motor coupling.</td></tr>");
     html.push_str("<tr><td>P(Fwd|food) rising, brain shrinking</td><td>Evolution found a minimal circuit for foraging and is trimming waste. Efficient, possibly a local optimum.</td></tr>");
     html.push_str("<tr><td>Idle fraction high, pop stable</td><td>Idle-degenerate niche. Organisms survive by not moving (if idle is cheap enough). Fix by making idle cost energy too.</td></tr>");
     html.push_str("<tr><td>MI rising but P(Fwd|food) flat</td><td>Organisms are reacting to stimuli but not food specifically. Check if they are responding to walls or other organisms instead. Might need to adjust sensory salience or food density.</td></tr>");
-    html.push_str("<tr><td>Generation time rising, pop shrinking</td><td>Lineages take too long to reproduce and starve first. Either maturation is too slow (raise mutation pressure on age_of_maturity) or energy economics make early reproduction too costly.</td></tr>");
     html.push_str("</tbody></table>");
 
     html.push_str("</div>");

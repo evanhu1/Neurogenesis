@@ -5,19 +5,19 @@
 
 pub mod averaging;
 pub mod cli;
+pub mod demographics;
 pub mod intervals;
 pub mod pillars;
-pub mod demographics;
 
-pub use averaging::{average_pillar_scores, average_demographic_analytics, average_timeseries};
+pub use averaging::{average_demographic_analytics, average_pillar_scores, average_timeseries};
+pub use demographics::compute_demographic_analytics;
 pub use intervals::derive_interval_metrics;
 pub use pillars::{compute_pillar_scores, ScoringWindow};
-pub use demographics::compute_demographic_analytics;
 
 use crate::dataset::DatasetReader;
 use crate::output::{write_summary_json, write_timeseries_csv};
 use crate::report::{write_html_report, HtmlReportContext, HtmlReportMeta};
-use crate::types::{IntervalMetrics, PillarScores, DemographicAnalytics, SeedEvaluationSummary};
+use crate::types::{DemographicAnalytics, IntervalMetrics, PillarScores, SeedEvaluationSummary};
 use anyhow::Result;
 use chrono::Utc;
 use std::path::Path;

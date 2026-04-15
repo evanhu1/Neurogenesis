@@ -1,7 +1,7 @@
 use crate::{
     dataset::ACTION_COUNT,
     report::Reporter,
-    types::{ComparisonSummary, EvaluationSummary, IntervalMetrics, DemographicAnalytics},
+    types::{ComparisonSummary, DemographicAnalytics, EvaluationSummary, IntervalMetrics},
 };
 use anyhow::Result;
 use serde::Serialize;
@@ -88,48 +88,30 @@ pub(crate) fn print_evaluation_summary(out_dir: &Path, summary: &EvaluationSumma
     println!("worker_threads: {}", summary.worker_threads);
     let pillars = &summary.pillars;
     println!(
-        "viability_pillar: {:.3} [life={:.3} reproduction={:.3}]",
-        pillars.viability_pillar,
-        pillars.viability_life_component,
-        pillars.viability_reproduction_component,
-    );
-    println!(
         "foraging_pillar: {:.3} [p_fwd_food={:.3} foraging_rate={:.3}]",
         pillars.foraging_pillar,
         pillars.foraging_p_fwd_food_component,
         pillars.foraging_rate_component,
     );
     println!(
-        "intelligence_pillar: {:.3} [effectiveness={:.3} adult_mi={:.3} anti_idle={:.3} util={:.3}]",
+        "intelligence_pillar: {:.3} [effectiveness={:.3} mi={:.3} anti_idle={:.3} util={:.3}]",
         pillars.intelligence_pillar,
         pillars.intelligence_action_effectiveness_component,
-        pillars.intelligence_adult_mi_component,
+        pillars.intelligence_mi_component,
         pillars.intelligence_anti_idle_component,
         pillars.intelligence_util_component,
     );
     println!(
-        "competition_pillar: {:.3} [predation={:.3} attack_success={:.3} attack_attempts={:.3}]",
+        "competition_pillar: {:.3} [attack_success={:.3} attack_attempts={:.3}]",
         pillars.competition_pillar,
-        pillars.competition_predation_component,
         pillars.competition_attack_success_component,
         pillars.competition_attack_attempt_component,
-    );
-    println!(
-        "adaptation_pillar: {:.3} [juvenile_mi={:.3} diversity={:.3}]",
-        pillars.adaptation_pillar,
-        pillars.adaptation_juvenile_mi_component,
-        pillars.adaptation_diversity_component,
     );
     for seed_summary in &summary.seed_summaries {
         let p = &seed_summary.pillars;
         println!(
-            "seed[{}]: viability={:.3} foraging={:.3} intelligence={:.3} competition={:.3} adaptation={:.3}",
-            seed_summary.seed,
-            p.viability_pillar,
-            p.foraging_pillar,
-            p.intelligence_pillar,
-            p.competition_pillar,
-            p.adaptation_pillar,
+            "seed[{}]: foraging={:.3} intelligence={:.3} competition={:.3}",
+            seed_summary.seed, p.foraging_pillar, p.intelligence_pillar, p.competition_pillar,
         );
     }
     print_demographics("aggregate", &summary.demographics);

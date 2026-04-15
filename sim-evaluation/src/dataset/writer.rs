@@ -178,10 +178,9 @@ where
     T: Serialize + for<'de> serde::Deserialize<'de> + 'static,
 {
     fn new(table: &'static str) -> Self {
-        let fields = Vec::<FieldRef>::from_type::<T>(
-            TracingOptions::default().allow_null_fields(true),
-        )
-        .unwrap_or_else(|err| panic!("deriving schema for table {table}: {err}"));
+        let fields =
+            Vec::<FieldRef>::from_type::<T>(TracingOptions::default().allow_null_fields(true))
+                .unwrap_or_else(|err| panic!("deriving schema for table {table}: {err}"));
         Self {
             table,
             rows: Vec::new(),
@@ -233,8 +232,8 @@ where
         Some(ext) => format!("{}.tmp", ext.to_string_lossy()),
         None => "tmp".to_owned(),
     });
-    let file = File::create(&tmp_path)
-        .with_context(|| format!("creating {}", tmp_path.display()))?;
+    let file =
+        File::create(&tmp_path).with_context(|| format!("creating {}", tmp_path.display()))?;
     write(file)?;
     fs::rename(&tmp_path, final_path)?;
     Ok(())
@@ -245,7 +244,7 @@ mod tests {
     use super::super::reader::DatasetReader;
     use super::super::schema::{
         ActionCountRow, OrganismLifetimeRow, PopulationSnapshotRow, ReproductionEventRow,
-        ReproductionOutcome, TickSummaryRow, JOINT_LEN,
+        ReproductionOutcome, TickSummaryRow, ACTION_COUNT, JOINT_LEN,
     };
     use super::*;
     use std::env;
@@ -350,8 +349,8 @@ mod tests {
             action_type: 3,
             count: 7,
             failed_count: 2,
-            juvenile_count: 3,
-            adult_count: 4,
+            pre_maturity_count: 3,
+            post_maturity_count: 4,
         });
         writer.emit_organism_lifetime(OrganismLifetimeRow {
             id: 42,
@@ -361,6 +360,7 @@ mod tests {
             death_tick: Some(100),
             generation: 2,
             age_of_maturity: 15,
+            maturity_tick: 15,
             num_offspring: 3,
             total_consumptions: 15,
             total_actions: 100,
@@ -368,8 +368,17 @@ mod tests {
             utilization: 0.42,
             food_ahead_ticks: 8,
             fwd_when_food_ahead: 5,
-            joint_juvenile: vec![0; JOINT_LEN],
-            joint_adult: vec![0; JOINT_LEN],
+            joint_sensory_action: vec![0; JOINT_LEN],
+            pre_maturity_actions: 40,
+            post_maturity_actions: 60,
+            pre_maturity_action_histogram: vec![4, 8, 12, 6, 4, 4, 2],
+            post_maturity_action_histogram: vec![6, 12, 18, 9, 6, 6, 3],
+            pre_maturity_consumptions: 6,
+            post_maturity_consumptions: 9,
+            pre_maturity_food_ahead_ticks: 3,
+            post_maturity_food_ahead_ticks: 5,
+            pre_maturity_fwd_when_food_ahead: 2,
+            post_maturity_fwd_when_food_ahead: 3,
         });
         writer.emit_reproduction_event(ReproductionEventRow {
             tick: 50,
@@ -393,8 +402,20 @@ mod tests {
         assert_eq!(dataset.genome_snapshots.len(), 0);
         assert_eq!(dataset.organism_lifetimes[0].action_histogram.len(), 7);
         assert_eq!(
-            dataset.organism_lifetimes[0].joint_juvenile.len(),
+            dataset.organism_lifetimes[0].joint_sensory_action.len(),
             JOINT_LEN
+        );
+        assert_eq!(
+            dataset.organism_lifetimes[0]
+                .pre_maturity_action_histogram
+                .len(),
+            ACTION_COUNT
+        );
+        assert_eq!(
+            dataset.organism_lifetimes[0]
+                .post_maturity_action_histogram
+                .len(),
+            ACTION_COUNT
         );
     }
 }

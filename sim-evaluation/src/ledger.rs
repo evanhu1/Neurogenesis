@@ -40,8 +40,8 @@ type IdHashMap<K, V> = HashMap<K, V, BuildHasherDefault<IdHasher>>;
 pub struct TickActionAggregates {
     pub counts: [u64; ACTION_COUNT],
     pub failed: [u64; ACTION_COUNT],
-    pub juvenile: [u64; ACTION_COUNT],
-    pub adult: [u64; ACTION_COUNT],
+    pub pre_maturity: [u64; ACTION_COUNT],
+    pub post_maturity: [u64; ACTION_COUNT],
 }
 
 impl TickActionAggregates {
@@ -49,8 +49,8 @@ impl TickActionAggregates {
         Self {
             counts: [0; ACTION_COUNT],
             failed: [0; ACTION_COUNT],
-            juvenile: [0; ACTION_COUNT],
-            adult: [0; ACTION_COUNT],
+            pre_maturity: [0; ACTION_COUNT],
+            post_maturity: [0; ACTION_COUNT],
         }
     }
 
@@ -61,10 +61,31 @@ impl TickActionAggregates {
                 action_type,
                 count: self.counts[action_type as usize],
                 failed_count: self.failed[action_type as usize],
-                juvenile_count: self.juvenile[action_type as usize],
-                adult_count: self.adult[action_type as usize],
+                pre_maturity_count: self.pre_maturity[action_type as usize],
+                post_maturity_count: self.post_maturity[action_type as usize],
             })
             .collect()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct MaturityWindowSummary {
+    action_count: u64,
+    consumptions: u64,
+    action_histogram: [u64; ACTION_COUNT],
+    food_ahead_ticks: u32,
+    fwd_when_food_ahead: u32,
+}
+
+impl MaturityWindowSummary {
+    fn new() -> Self {
+        Self {
+            action_count: 0,
+            consumptions: 0,
+            action_histogram: [0; ACTION_COUNT],
+            food_ahead_ticks: 0,
+            fwd_when_food_ahead: 0,
+        }
     }
 }
 
@@ -76,6 +97,7 @@ pub struct OrganismEntry {
     pub generation: u64,
     pub birth_tick: u64,
     pub age_of_maturity: u32,
+    maturity_tick: u64,
     pub num_offspring: u32,
     pub total_actions: u64,
     /// Lifetime count of consumptions. Tracked from `ActionRecord::consumptions_count`
@@ -86,10 +108,11 @@ pub struct OrganismEntry {
     pub utilization: f32,
     pub food_ahead_ticks: u32,
     pub fwd_when_food_ahead: u32,
-    /// Row-major `[SENSORY_BIN_COUNT][ACTION_COUNT]` flattened, juvenile-only.
-    pub joint_juvenile: Vec<u64>,
-    /// Row-major `[SENSORY_BIN_COUNT][ACTION_COUNT]` flattened, adult-only.
-    pub joint_adult: Vec<u64>,
+    /// Row-major `[SENSORY_BIN_COUNT][ACTION_COUNT]` flattened across the
+    /// whole lifetime.
+    joint_sensory_action: Vec<u64>,
+    pre_maturity: MaturityWindowSummary,
+    post_maturity: MaturityWindowSummary,
 }
 
 impl OrganismEntry {
@@ -108,6 +131,7 @@ impl OrganismEntry {
             generation,
             birth_tick,
             age_of_maturity,
+            maturity_tick: birth_tick.saturating_add(u64::from(age_of_maturity)),
             num_offspring: 0,
             total_actions: 0,
             total_consumptions: 0,
@@ -115,8 +139,9 @@ impl OrganismEntry {
             utilization: 0.0,
             food_ahead_ticks: 0,
             fwd_when_food_ahead: 0,
-            joint_juvenile: vec![0; JOINT_LEN],
-            joint_adult: vec![0; JOINT_LEN],
+            joint_sensory_action: vec![0; JOINT_LEN],
+            pre_maturity: MaturityWindowSummary::new(),
+            post_maturity: MaturityWindowSummary::new(),
         }
     }
 
@@ -129,6 +154,7 @@ impl OrganismEntry {
             death_tick,
             generation: self.generation,
             age_of_maturity: self.age_of_maturity,
+            maturity_tick: self.maturity_tick,
             num_offspring: self.num_offspring,
             total_consumptions: self.total_consumptions,
             total_actions: self.total_actions,
@@ -136,8 +162,17 @@ impl OrganismEntry {
             utilization: self.utilization,
             food_ahead_ticks: self.food_ahead_ticks,
             fwd_when_food_ahead: self.fwd_when_food_ahead,
-            joint_juvenile: self.joint_juvenile,
-            joint_adult: self.joint_adult,
+            joint_sensory_action: self.joint_sensory_action,
+            pre_maturity_actions: self.pre_maturity.action_count,
+            post_maturity_actions: self.post_maturity.action_count,
+            pre_maturity_action_histogram: self.pre_maturity.action_histogram.to_vec(),
+            post_maturity_action_histogram: self.post_maturity.action_histogram.to_vec(),
+            pre_maturity_consumptions: self.pre_maturity.consumptions,
+            post_maturity_consumptions: self.post_maturity.consumptions,
+            pre_maturity_food_ahead_ticks: self.pre_maturity.food_ahead_ticks,
+            post_maturity_food_ahead_ticks: self.post_maturity.food_ahead_ticks,
+            pre_maturity_fwd_when_food_ahead: self.pre_maturity.fwd_when_food_ahead,
+            post_maturity_fwd_when_food_ahead: self.post_maturity.fwd_when_food_ahead,
         }
     }
 }
@@ -190,7 +225,7 @@ impl Ledger {
     pub fn record_action(&mut self, record: &ActionRecord) {
         let action_idx = action_index(record.selected_action);
         let sensory_bin = sensory_bin(record);
-        let is_juvenile_record = self
+        let is_pre_maturity_record = self
             .sidecar
             .get(&record.organism_id)
             .map(|entry| record.age_turns < u64::from(entry.age_of_maturity))
@@ -202,32 +237,44 @@ impl Ledger {
             self.tick_aggregates.failed[action_idx] =
                 self.tick_aggregates.failed[action_idx].saturating_add(1);
         }
-        if is_juvenile_record {
-            self.tick_aggregates.juvenile[action_idx] =
-                self.tick_aggregates.juvenile[action_idx].saturating_add(1);
+        if is_pre_maturity_record {
+            self.tick_aggregates.pre_maturity[action_idx] =
+                self.tick_aggregates.pre_maturity[action_idx].saturating_add(1);
         } else {
-            self.tick_aggregates.adult[action_idx] =
-                self.tick_aggregates.adult[action_idx].saturating_add(1);
+            self.tick_aggregates.post_maturity[action_idx] =
+                self.tick_aggregates.post_maturity[action_idx].saturating_add(1);
         }
 
         let Some(entry) = self.sidecar.get_mut(&record.organism_id) else {
             return;
         };
 
+        let consumption_delta = record
+            .consumptions_count
+            .saturating_sub(entry.total_consumptions);
         entry.total_actions = entry.total_actions.saturating_add(1);
         entry.total_consumptions = record.consumptions_count;
         entry.action_histogram[action_idx] = entry.action_histogram[action_idx].saturating_add(1);
         entry.utilization = record.utilization.clamp(0.0, 1.0);
         let joint_idx = sensory_bin * ACTION_COUNT + action_idx;
-        if is_juvenile_record {
-            entry.joint_juvenile[joint_idx] = entry.joint_juvenile[joint_idx].saturating_add(1);
+        entry.joint_sensory_action[joint_idx] =
+            entry.joint_sensory_action[joint_idx].saturating_add(1);
+        let stage_summary = if is_pre_maturity_record {
+            &mut entry.pre_maturity
         } else {
-            entry.joint_adult[joint_idx] = entry.joint_adult[joint_idx].saturating_add(1);
-        }
+            &mut entry.post_maturity
+        };
+        stage_summary.action_count = stage_summary.action_count.saturating_add(1);
+        stage_summary.consumptions = stage_summary.consumptions.saturating_add(consumption_delta);
+        stage_summary.action_histogram[action_idx] =
+            stage_summary.action_histogram[action_idx].saturating_add(1);
         if record.food_visible_at_offset(0) {
             entry.food_ahead_ticks = entry.food_ahead_ticks.saturating_add(1);
+            stage_summary.food_ahead_ticks = stage_summary.food_ahead_ticks.saturating_add(1);
             if record.selected_action == ActionType::Forward {
                 entry.fwd_when_food_ahead = entry.fwd_when_food_ahead.saturating_add(1);
+                stage_summary.fwd_when_food_ahead =
+                    stage_summary.fwd_when_food_ahead.saturating_add(1);
             }
         }
     }
