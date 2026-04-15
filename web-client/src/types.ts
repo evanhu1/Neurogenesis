@@ -159,12 +159,14 @@ export type ApiSynapseEdge = {
   pre_neuron_id: ApiNeuronId;
   post_neuron_id: ApiNeuronId;
   weight: number;
+  eligibility: number;
 };
 
 export type SynapseEdge = {
   pre_neuron_id: NeuronId;
   post_neuron_id: NeuronId;
   weight: number;
+  eligibility: number;
 };
 
 export type BrainTopologyGenes<TEdge> = {

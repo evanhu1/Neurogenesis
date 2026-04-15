@@ -264,8 +264,10 @@ export function renderBrain(
     pre: { x: number; y: number },
     post: { x: number; y: number },
     weight: number,
+    eligibility: number,
   ) => {
     const wLabel = weight.toFixed(2);
+    const eLabel = `e=${eligibility.toFixed(2)}`;
     const vx = post.x - pre.x;
     const vy = post.y - pre.y;
     const length = Math.hypot(vx, vy) || 1;
@@ -275,14 +277,18 @@ export function renderBrain(
     const midY = (pre.y + post.y) / 2 + ny * 7;
 
     ctx.font = '10px Outfit';
-    const textWidth = ctx.measureText(wLabel).width;
+    const weightWidth = ctx.measureText(wLabel).width;
+    const eligibilityWidth = ctx.measureText(eLabel).width;
+    const boxWidth = Math.max(weightWidth, eligibilityWidth) + 4;
     ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-    ctx.fillRect(midX - textWidth / 2 - 2, midY - 7, textWidth + 4, 14);
+    ctx.fillRect(midX - boxWidth / 2, midY - 7, boxWidth, 26);
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = weight >= 0 ? '#38bdf8' : '#f87171';
     ctx.fillText(wLabel, midX, midY);
+    ctx.fillStyle = '#cbd5f5';
+    ctx.fillText(eLabel, midX, midY + 12);
     ctx.textAlign = 'start';
     ctx.textBaseline = 'alphabetic';
   };
@@ -375,20 +381,26 @@ export function renderBrain(
   const drawSelfSynapseWeightLabel = (
     node: { x: number; y: number },
     weight: number,
+    eligibility: number,
   ) => {
     const labelX = node.x - 50;
     const labelY = node.y - 2;
     const wLabel = weight.toFixed(2);
+    const eLabel = `e=${eligibility.toFixed(2)}`;
 
     ctx.font = '10px Outfit';
-    const textWidth = ctx.measureText(wLabel).width;
+    const weightWidth = ctx.measureText(wLabel).width;
+    const eligibilityWidth = ctx.measureText(eLabel).width;
+    const boxWidth = Math.max(weightWidth, eligibilityWidth) + 4;
     ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-    ctx.fillRect(labelX - textWidth / 2 - 2, labelY - 7, textWidth + 4, 14);
+    ctx.fillRect(labelX - boxWidth / 2, labelY - 7, boxWidth, 26);
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = weight >= 0 ? '#38bdf8' : '#f87171';
     ctx.fillText(wLabel, labelX, labelY);
+    ctx.fillStyle = '#cbd5f5';
+    ctx.fillText(eLabel, labelX, labelY + 12);
     ctx.textAlign = 'start';
     ctx.textBaseline = 'alphabetic';
   };
@@ -406,10 +418,11 @@ export function renderBrain(
       const strokeWidth = Math.max(0.5, (Math.abs(synapse.weight) / 8) * 2);
       if (pre.id === postId) {
         drawSelfSynapse(pre, strokeColor, strokeWidth);
-        if (showWeightLabels) drawSelfSynapseWeightLabel(pre, synapse.weight);
+        if (showWeightLabels) drawSelfSynapseWeightLabel(pre, synapse.weight, synapse.eligibility);
       } else {
         drawDirectedSynapse(pre, post, strokeColor, strokeWidth);
-        if (showWeightLabels) drawSynapseWeightLabel(pre, post, synapse.weight);
+        if (showWeightLabels)
+          drawSynapseWeightLabel(pre, post, synapse.weight, synapse.eligibility);
       }
     }
   }
@@ -425,10 +438,11 @@ export function renderBrain(
       const strokeWidth = Math.max(0.5, (Math.abs(synapse.weight) / 8) * 2);
       if (pre.id === postId) {
         drawSelfSynapse(pre, strokeColor, strokeWidth);
-        if (showWeightLabels) drawSelfSynapseWeightLabel(pre, synapse.weight);
+        if (showWeightLabels) drawSelfSynapseWeightLabel(pre, synapse.weight, synapse.eligibility);
       } else {
         drawDirectedSynapse(pre, post, strokeColor, strokeWidth);
-        if (showWeightLabels) drawSynapseWeightLabel(pre, post, synapse.weight);
+        if (showWeightLabels)
+          drawSynapseWeightLabel(pre, post, synapse.weight, synapse.eligibility);
       }
     }
   }

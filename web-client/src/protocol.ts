@@ -51,6 +51,7 @@ function normalizeSynapseEdge(edge: ApiSynapseEdge): SynapseEdge {
     pre_neuron_id: unwrapId(edge.pre_neuron_id),
     post_neuron_id: unwrapId(edge.post_neuron_id),
     weight: edge.weight,
+    eligibility: edge.eligibility,
   };
 }
 
