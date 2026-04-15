@@ -34,7 +34,6 @@ pub struct IntervalLifetimeSummary {
     pub lifetime_sum: u64,
     pub ate_count: u64,
     pub consumptions_sum: u64,
-    pub action_counts: [u64; N_ACTIONS],
     pub joint: [[u64; N_ACTIONS]; SENSORY_BIN_COUNT],
     pub food_ahead_ticks_sum: u64,
     pub fwd_when_food_ahead_sum: u64,
@@ -58,9 +57,6 @@ impl IntervalLifetimeSummary {
             .fwd_when_food_ahead_sum
             .saturating_add(u64::from(entry.fwd_when_food_ahead));
         self.utilization_sum += f64::from(entry.utilization.clamp(0.0, 1.0));
-        for (idx, count) in entry.action_counts.iter().enumerate() {
-            self.action_counts[idx] = self.action_counts[idx].saturating_add(u64::from(*count));
-        }
         for (sensory_idx, row) in entry.joint.iter().enumerate() {
             for (action_idx, count) in row.iter().enumerate() {
                 self.joint[sensory_idx][action_idx] =
@@ -78,7 +74,6 @@ pub struct IntervalActionStats {
     pub adult_joint: [[u64; N_ACTIONS]; SENSORY_BIN_COUNT],
     pub failed_action_count: u64,
     pub failure_candidate_count: u64,
-    pub reproduction_attempts: u64,
 }
 
 impl IntervalActionStats {
@@ -97,7 +92,6 @@ struct OrganismEntry {
     survived_to_maturity_recorded: bool,
     last_successful_birth_tick: Option<u64>,
     last_consumptions: u64,
-    action_counts: [u32; N_ACTIONS],
     joint: [[u32; N_ACTIONS]; SENSORY_BIN_COUNT],
     food_ahead_ticks: u32,
     fwd_when_food_ahead: u32,
@@ -114,7 +108,6 @@ impl OrganismEntry {
             survived_to_maturity_recorded: false,
             last_successful_birth_tick: None,
             last_consumptions: 0,
-            action_counts: [0; N_ACTIONS],
             joint: [[0; N_ACTIONS]; SENSORY_BIN_COUNT],
             food_ahead_ticks: 0,
             fwd_when_food_ahead: 0,
@@ -142,6 +135,11 @@ pub struct Ledger {
     age_at_first_successful_reproduction_count: u64,
     successful_birth_interval_sum: f64,
     successful_birth_interval_count: u64,
+    /// Sum of parent ages at every successful reproduction event in the current
+    /// reporting interval. Divided by `interval_generation_count` to produce
+    /// `generation_time`, the average age at which individuals reproduce.
+    interval_generation_time_sum: f64,
+    interval_generation_time_count: u64,
     pub neonatal_deaths: u64,
     min_lifetime: u64,
 }
@@ -166,6 +164,8 @@ impl Ledger {
             age_at_first_successful_reproduction_count: 0,
             successful_birth_interval_sum: 0.0,
             successful_birth_interval_count: 0,
+            interval_generation_time_sum: 0.0,
+            interval_generation_time_count: 0,
             neonatal_deaths: 0,
             min_lifetime,
         }
@@ -200,12 +200,6 @@ impl Ledger {
                 .failed_action_count
                 .saturating_add(u64::from(record.action_failed));
         }
-        if record.selected_action == ActionType::Reproduce {
-            self.interval_action_stats.reproduction_attempts = self
-                .interval_action_stats
-                .reproduction_attempts
-                .saturating_add(1);
-        }
 
         let Some(entry) = self.sidecar.get_mut(&record.organism_id) else {
             return;
@@ -220,7 +214,6 @@ impl Ledger {
                 self.interval_action_stats.adult_joint[sensory_bin][action_idx].saturating_add(1);
         }
         entry.last_consumptions = record.consumptions_count;
-        entry.action_counts[action_idx] = entry.action_counts[action_idx].saturating_add(1);
         entry.joint[sensory_bin][action_idx] =
             entry.joint[sensory_bin][action_idx].saturating_add(1);
         entry.utilization = record.utilization.clamp(0.0, 1.0);
@@ -260,6 +253,9 @@ impl Ledger {
                 self.parent_energy_after_successful_birth_count = self
                     .parent_energy_after_successful_birth_count
                     .saturating_add(1);
+                self.interval_generation_time_sum += event.parent_age_turns as f64;
+                self.interval_generation_time_count =
+                    self.interval_generation_time_count.saturating_add(1);
                 if let Some(entry) = self.sidecar.get_mut(&event.parent_id) {
                     if entry.last_successful_birth_tick.is_none() {
                         self.age_at_first_successful_reproduction_sum +=
@@ -342,9 +338,18 @@ impl Ledger {
         &self.interval_action_stats
     }
 
+    pub fn interval_generation_time(&self) -> Option<f64> {
+        mean_or_none(
+            self.interval_generation_time_sum,
+            self.interval_generation_time_count,
+        )
+    }
+
     pub fn clear_interval(&mut self) {
         self.recently_deceased = IntervalLifetimeSummary::default();
         self.interval_action_stats = IntervalActionStats::default();
+        self.interval_generation_time_sum = 0.0;
+        self.interval_generation_time_count = 0;
         self.neonatal_deaths = 0;
     }
 }

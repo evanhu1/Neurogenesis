@@ -233,6 +233,7 @@ pub(crate) fn run_single_seed_evaluation(
                 ledger.recently_deceased(),
                 sim.organisms(),
                 ledger.interval_action_stats(),
+                ledger.interval_generation_time(),
             );
             reporter.emit(&interval)?;
             timeseries.push(interval);
@@ -319,7 +320,6 @@ fn html_report_meta(
         intelligence_adult_mi_component: pillars.intelligence_adult_mi_component,
         intelligence_action_effectiveness_component: pillars
             .intelligence_action_effectiveness_component,
-        intelligence_entropy_component: pillars.intelligence_entropy_component,
         intelligence_anti_idle_component: pillars.intelligence_anti_idle_component,
         intelligence_util_component: pillars.intelligence_util_component,
         competition_predation_component: pillars.competition_predation_component,

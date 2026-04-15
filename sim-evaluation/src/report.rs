@@ -1,6 +1,6 @@
 use crate::{
     ledger::N_ACTIONS,
-    metrics::{action_baseline_entropy, action_baseline_probability, IntervalMetrics},
+    metrics::{action_baseline_probability, IntervalMetrics},
 };
 use anyhow::Result;
 use serde::Serialize;
@@ -19,7 +19,7 @@ impl Reporter {
         let mut csv = BufWriter::new(File::create(csv_path)?);
         writeln!(
             csv,
-            "tick,pop,births,deaths,food,max_generation,life_mean,predation_rate,foraging_rate,attack_attempt_rate,attack_success_rate,failed_action_count,failed_action_rate,ate_pct,cons_mean,brain_size,brain_size_stddev,brain_size_p10,brain_size_p50,brain_size_p90,lineage_diversity,p_fwd_food,mi_sa,mi_sa_juvenile,mi_sa_adult,h_action,idle_fraction,reproduction_efficiency,mean_gestation_ticks,mean_offspring_transfer_energy,util"
+            "tick,pop,births,deaths,food,max_generation,life_mean,predation_rate,foraging_rate,attack_attempt_rate,attack_success_rate,failed_action_rate,ate_pct,cons_mean,brain_size,brain_size_stddev,brain_size_p10,brain_size_p50,brain_size_p90,lineage_diversity,p_fwd_food,mi_sa,mi_sa_juvenile,mi_sa_adult,idle_fraction,generation_time,util"
         )?;
         Ok(Self { csv })
     }
@@ -27,7 +27,7 @@ impl Reporter {
     pub fn emit(&mut self, metrics: &IntervalMetrics) -> Result<()> {
         writeln!(
             self.csv,
-            "{tick},{pop},{births},{deaths},{food},{max_generation},{life_mean},{predation_rate},{foraging_rate},{attack_attempt_rate},{attack_success_rate},{failed_action_count},{failed_action_rate},{ate_pct},{cons_mean},{brain_size},{brain_size_stddev},{brain_size_p10},{brain_size_p50},{brain_size_p90},{lineage_diversity},{p_fwd_food},{mi_sa},{mi_sa_juvenile},{mi_sa_adult},{h_action},{idle_fraction},{reproduction_efficiency},{mean_gestation_ticks},{mean_offspring_transfer_energy},{util}",
+            "{tick},{pop},{births},{deaths},{food},{max_generation},{life_mean},{predation_rate},{foraging_rate},{attack_attempt_rate},{attack_success_rate},{failed_action_rate},{ate_pct},{cons_mean},{brain_size},{brain_size_stddev},{brain_size_p10},{brain_size_p50},{brain_size_p90},{lineage_diversity},{p_fwd_food},{mi_sa},{mi_sa_juvenile},{mi_sa_adult},{idle_fraction},{generation_time},{util}",
             tick = metrics.tick,
             pop = metrics.pop,
             births = metrics.births,
@@ -39,7 +39,6 @@ impl Reporter {
             foraging_rate = csv_opt(metrics.foraging_rate),
             attack_attempt_rate = csv_opt(metrics.attack_attempt_rate),
             attack_success_rate = csv_opt(metrics.attack_success_rate),
-            failed_action_count = metrics.failed_action_count,
             failed_action_rate = csv_opt(metrics.failed_action_rate),
             ate_pct = csv_opt(metrics.ate_pct),
             cons_mean = csv_opt(metrics.cons_mean),
@@ -53,11 +52,8 @@ impl Reporter {
             mi_sa = csv_opt(metrics.mi_sa),
             mi_sa_juvenile = csv_opt(metrics.mi_sa_juvenile),
             mi_sa_adult = csv_opt(metrics.mi_sa_adult),
-            h_action = csv_opt(metrics.h_action),
             idle_fraction = csv_opt(metrics.idle_fraction),
-            reproduction_efficiency = csv_opt(metrics.reproduction_efficiency),
-            mean_gestation_ticks = csv_opt(metrics.mean_gestation_ticks),
-            mean_offspring_transfer_energy = csv_opt(metrics.mean_offspring_transfer_energy),
+            generation_time = csv_opt(metrics.generation_time),
             util = csv_opt(metrics.util),
         )?;
 
@@ -91,7 +87,6 @@ pub struct HtmlReportMeta {
     pub foraging_rate_component: f64,
     pub intelligence_adult_mi_component: f64,
     pub intelligence_action_effectiveness_component: f64,
-    pub intelligence_entropy_component: f64,
     pub intelligence_anti_idle_component: f64,
     pub intelligence_util_component: f64,
     pub competition_predation_component: f64,
@@ -234,7 +229,6 @@ pub fn write_html_report(
                 meta.intelligence_action_effectiveness_component,
             ),
             ("Adult MI", meta.intelligence_adult_mi_component),
-            ("Entropy", meta.intelligence_entropy_component),
             ("Anti-idle", meta.intelligence_anti_idle_component),
             ("Util", meta.intelligence_util_component),
         ],
@@ -293,7 +287,6 @@ pub fn write_html_report(
         "foraging_rate",
         "attack_attempt_rate",
         "attack_success_rate",
-        "failed_action_count",
         "failed_action_rate",
         "ate_pct",
         "cons_mean",
@@ -304,11 +297,8 @@ pub fn write_html_report(
         "mi_sa",
         "mi_sa_juvenile",
         "mi_sa_adult",
-        "h_action",
         "idle_fraction",
-        "reproduction_efficiency",
-        "mean_gestation_ticks",
-        "mean_offspring_transfer_energy",
+        "generation_time",
         "util",
     ] {
         let _ = write!(html, "<th>{header}</th>");
@@ -328,7 +318,6 @@ pub fn write_html_report(
             fmt_opt(row.foraging_rate, 6),
             fmt_opt(row.attack_attempt_rate, 6),
             fmt_opt(row.attack_success_rate, 4),
-            row.failed_action_count.to_string(),
             fmt_opt(row.failed_action_rate, 4),
             fmt_opt(row.ate_pct, 2),
             fmt_opt(row.cons_mean, 2),
@@ -339,11 +328,8 @@ pub fn write_html_report(
             fmt_opt(row.mi_sa, 4),
             fmt_opt(row.mi_sa_juvenile, 4),
             fmt_opt(row.mi_sa_adult, 4),
-            fmt_opt(row.h_action, 4),
             fmt_opt(row.idle_fraction, 4),
-            fmt_opt(row.reproduction_efficiency, 4),
-            fmt_opt(row.mean_gestation_ticks, 4),
-            fmt_opt(row.mean_offspring_transfer_energy, 2),
+            fmt_opt(row.generation_time, 2),
             fmt_opt(row.util, 4),
         ] {
             let _ = write!(html, "<td>{cell}</td>");
@@ -414,12 +400,6 @@ pub fn write_html_report(
             "#b91c1c",
         ),
         (
-            "Failed Action Count",
-            metric_series(rows, |r| Some(r.failed_action_count as f64)),
-            Some(0.0),
-            "#7f1d1d",
-        ),
-        (
             "Failed Action Rate",
             metric_series(rows, |r| r.failed_action_rate),
             Some(0.0),
@@ -463,34 +443,16 @@ pub fn write_html_report(
             "#581c87",
         ),
         (
-            "H(Action)",
-            metric_series(rows, |r| r.h_action),
-            Some(action_baseline_entropy()),
-            "#b45309",
-        ),
-        (
             "Idle Fraction",
             metric_series(rows, |r| r.idle_fraction),
             Some(action_baseline_probability()),
             "#f97316",
         ),
         (
-            "Reproduction Efficiency",
-            metric_series(rows, |r| r.reproduction_efficiency),
-            Some(0.0),
-            "#0ea5e9",
-        ),
-        (
-            "Mean Gestation Ticks",
-            metric_series(rows, |r| r.mean_gestation_ticks),
-            Some(0.0),
-            "#7c2d12",
-        ),
-        (
-            "Mean Offspring Transfer Energy",
-            metric_series(rows, |r| r.mean_offspring_transfer_energy),
+            "Generation Time (ticks)",
+            metric_series(rows, |r| r.generation_time),
             None,
-            "#1f2937",
+            "#0ea5e9",
         ),
         (
             "Lineage Diversity",
@@ -777,7 +739,6 @@ fn line_chart_svg(series: &[(u64, f64)], baseline: Option<f64>, color: &str) -> 
 
 fn append_interpretation_guidance(html: &mut String) {
     let baseline_probability = action_baseline_probability();
-    let baseline_entropy = action_baseline_entropy();
 
     html.push_str("<div class=\"panel guide\"><h2>Interpreting The Metrics</h2>");
 
@@ -794,18 +755,14 @@ fn append_interpretation_guidance(html: &mut String) {
     html.push_str("</ul>");
     html.push_str("<p>If this number is flat at baseline after thousands of generations, the evolutionary loop is broken. Check energy economics first (is eating actually rewarded enough to matter?), then mutation rates (can evolution explore fast enough?).</p>");
 
-    html.push_str("<h3>H(action) -- \"Are they decisive?\"</h3>");
-    html.push_str("<p>Shannon entropy of the action distribution. The preferred regime for the Intelligence pillar is low but nonzero entropy: a small, purposeful repertoire is better than random wandering, but also better than single-action collapse.</p>");
+    html.push_str("<h3>Generation time -- \"How fast does the lineage turn over?\"</h3>");
+    html.push_str("<p>Average parent age across every successful reproduction event in the interval. Shorter means faster generational turnover.</p>");
     html.push_str("<ul>");
-    html.push_str("<li><code>~= 0</code>: over-collapsed. Usually a rigid fixed-action policy rather than intelligent sequencing.</li>");
-    html.push_str("<li><code>~0.8-1.1</code> bits: preferred band. Typically means mostly forward movement, periodic consumes, and occasional turns when the state demands them.</li>");
-    let _ = write!(
-        html,
-        "<li><code>~= log2(N_ACTIONS)</code> (<code>{baseline_entropy:.2}</code> for {N_ACTIONS} actions): uniform random. No preferences. Brain output is noise.</li>",
-    );
-    html.push_str("<li><code>1.5+</code> bits: too diffuse. There may be some structure, but too much behavior is still being left to randomness.</li>");
+    html.push_str("<li><code>100-200</code> ticks: healthy r-strategist range. Lineages reproduce promptly once mature.</li>");
+    html.push_str("<li><code>300+</code> ticks: slow. Organisms delay reproduction or die trying. Often co-occurs with low successful birth count.</li>");
+    html.push_str("<li><code>None</code>: no successful reproductions in the interval — either population is too small or reproduction is blocked.</li>");
     html.push_str("</ul>");
-    html.push_str("<p>Read H together with P(Fwd|food) and MI(S;A). The ideal is low entropy plus strong sensory coupling: a policy that commits hard within each situation while still using different actions across situations. Near-zero entropy with weak coupling is a dumb reflex. High entropy is just noise.</p>");
+    html.push_str("<p>Interpret alongside <code>life_mean</code>: generation time should be well under life_mean for a stable lineage. Generation time ~ life_mean means each individual reproduces roughly once before dying — a knife-edge regime.</p>");
 
     html.push_str("<h3>MI(S;A) -- \"Do they react?\"</h3>");
     html.push_str("<p>Mutual information between what the organism sees and what it does. The general version of P(Fwd|food) - captures all sensory-action coupling, not just the food-ahead case.</p>");
@@ -845,10 +802,11 @@ fn append_interpretation_guidance(html: &mut String) {
     html.push_str("<tr><td>Pop stable, all Tier 3 flat at baseline</td><td>Evolution running but not finding anything. Fix energy economics or mutation rates.</td></tr>");
     html.push_str("<tr><td>Pop crashing, high death rate</td><td>Organisms cannot survive. Food too scarce, metabolism too high, or starting energy too low.</td></tr>");
     html.push_str("<tr><td>Pop stable, life_mean rising, Tier 3 flat</td><td>Selection is working but optimizing non-cognitive traits (reproduction timing, energy hoarding). Brains are not the path to fitness.</td></tr>");
-    html.push_str("<tr><td>P(Fwd|food) rising, MI rising, H intermediate</td><td>The good outcome. Evolution is discovering sensory-motor coupling.</td></tr>");
+    html.push_str("<tr><td>P(Fwd|food) rising, MI rising</td><td>The good outcome. Evolution is discovering sensory-motor coupling.</td></tr>");
     html.push_str("<tr><td>P(Fwd|food) rising, brain shrinking</td><td>Evolution found a minimal circuit for foraging and is trimming waste. Efficient, possibly a local optimum.</td></tr>");
-    html.push_str("<tr><td>H ~= 0, pop stable</td><td>Idle-degenerate niche. Organisms survive by not moving (if idle is cheap enough). Fix by making idle cost energy too.</td></tr>");
+    html.push_str("<tr><td>Idle fraction high, pop stable</td><td>Idle-degenerate niche. Organisms survive by not moving (if idle is cheap enough). Fix by making idle cost energy too.</td></tr>");
     html.push_str("<tr><td>MI rising but P(Fwd|food) flat</td><td>Organisms are reacting to stimuli but not food specifically. Check if they are responding to walls or other organisms instead. Might need to adjust sensory salience or food density.</td></tr>");
+    html.push_str("<tr><td>Generation time rising, pop shrinking</td><td>Lineages take too long to reproduce and starve first. Either maturation is too slow (raise mutation pressure on age_of_maturity) or energy economics make early reproduction too costly.</td></tr>");
     html.push_str("</tbody></table>");
 
     html.push_str("</div>");

@@ -1,6 +1,6 @@
 use crate::ledger::{IntervalActionStats, IntervalLifetimeSummary, N_ACTIONS, SENSORY_BIN_COUNT};
 use serde::Serialize;
-use sim_types::{offspring_transfer_energy, OrganismState};
+use sim_types::OrganismState;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize)]
@@ -16,7 +16,6 @@ pub struct IntervalMetrics {
     pub foraging_rate: Option<f64>,
     pub attack_attempt_rate: Option<f64>,
     pub attack_success_rate: Option<f64>,
-    pub failed_action_count: u64,
     pub failed_action_rate: Option<f64>,
     pub ate_pct: Option<f64>,
     pub cons_mean: Option<f64>,
@@ -30,11 +29,11 @@ pub struct IntervalMetrics {
     pub mi_sa: Option<f64>,
     pub mi_sa_juvenile: Option<f64>,
     pub mi_sa_adult: Option<f64>,
-    pub h_action: Option<f64>,
     pub idle_fraction: Option<f64>,
-    pub reproduction_efficiency: Option<f64>,
-    pub mean_gestation_ticks: Option<f64>,
-    pub mean_offspring_transfer_energy: Option<f64>,
+    /// Average age-at-reproduction of parents across every successful
+    /// reproduction event in the interval. `None` when no successful births
+    /// happened in the interval.
+    pub generation_time: Option<f64>,
     pub util: Option<f64>,
     pub action_histogram: [f64; N_ACTIONS],
 }
@@ -52,6 +51,7 @@ pub fn compute_interval_metrics(
     deceased: &IntervalLifetimeSummary,
     living: &[OrganismState],
     action_stats: &IntervalActionStats,
+    generation_time: Option<f64>,
 ) -> IntervalMetrics {
     let brain_stats = living_brain_stats(living);
     let max_generation = living.iter().map(|organism| organism.generation).max();
@@ -72,23 +72,15 @@ pub fn compute_interval_metrics(
     } else {
         Some(failed_action_count as f64 / action_stats.failure_candidate_count as f64)
     };
-    let reproduction_efficiency = if action_stats.reproduction_attempts == 0 {
-        None
-    } else {
-        Some(births as f64 / action_stats.reproduction_attempts as f64)
-    };
     let action_histogram = action_histogram(action_stats);
     let idle_fraction = if total_actions == 0 {
         None
     } else {
         Some(action_histogram[0])
     };
-    let mean_gestation_ticks = mean_gestation_ticks(living);
-    let mean_offspring_transfer_energy = mean_offspring_transfer_energy(living);
 
-    let (life_mean, ate_pct, cons_mean, p_fwd_food, mi_sa, h_action, util) = if deceased.count == 0
-    {
-        (None, None, None, None, None, None, None)
+    let (life_mean, ate_pct, cons_mean, p_fwd_food, mi_sa, util) = if deceased.count == 0 {
+        (None, None, None, None, None, None)
     } else {
         (
             Some(deceased.lifetime_sum as f64 / deceased.count as f64),
@@ -96,7 +88,6 @@ pub fn compute_interval_metrics(
             Some(deceased.consumptions_sum as f64 / deceased.count as f64),
             pooled_p_fwd_food(deceased),
             pooled_mi_sa(deceased),
-            pooled_action_entropy(deceased),
             Some(deceased.utilization_sum / deceased.count as f64),
         )
     };
@@ -113,7 +104,6 @@ pub fn compute_interval_metrics(
         foraging_rate,
         attack_attempt_rate,
         attack_success_rate,
-        failed_action_count,
         failed_action_rate,
         ate_pct,
         cons_mean,
@@ -127,11 +117,8 @@ pub fn compute_interval_metrics(
         mi_sa,
         mi_sa_juvenile: pooled_mi_sa_from_u64(&action_stats.juvenile_joint),
         mi_sa_adult: pooled_mi_sa_from_u64(&action_stats.adult_joint),
-        h_action,
         idle_fraction,
-        reproduction_efficiency,
-        mean_gestation_ticks,
-        mean_offspring_transfer_energy,
+        generation_time,
         util,
         action_histogram,
     }
@@ -223,58 +210,11 @@ fn lineage_diversity(living: &[OrganismState]) -> Option<f64> {
     Some(shannon)
 }
 
-fn mean_gestation_ticks(living: &[OrganismState]) -> Option<f64> {
-    if living.is_empty() {
-        return None;
-    }
-    Some(
-        living
-            .iter()
-            .map(|organism| f64::from(organism.genome.lifecycle.gestation_ticks))
-            .sum::<f64>()
-            / living.len() as f64,
-    )
-}
-
-fn mean_offspring_transfer_energy(living: &[OrganismState]) -> Option<f64> {
-    if living.is_empty() {
-        return None;
-    }
-    Some(
-        living
-            .iter()
-            .map(|organism| f64::from(offspring_transfer_energy(organism.genome.lifecycle.gestation_ticks)))
-            .sum::<f64>()
-            / living.len() as f64,
-    )
-}
-
 fn pooled_p_fwd_food(deceased: &IntervalLifetimeSummary) -> Option<f64> {
     if deceased.food_ahead_ticks_sum == 0 {
         return None;
     }
     Some(deceased.fwd_when_food_ahead_sum as f64 / deceased.food_ahead_ticks_sum as f64)
-}
-
-fn pooled_action_entropy(deceased: &IntervalLifetimeSummary) -> Option<f64> {
-    action_entropy_from_counts(&deceased.action_counts)
-}
-
-fn action_entropy_from_counts(counts: &[u64; N_ACTIONS]) -> Option<f64> {
-    let total: u64 = counts.iter().sum();
-    if total == 0 {
-        return None;
-    }
-
-    let mut entropy = 0.0;
-    for count in counts {
-        if *count == 0 {
-            continue;
-        }
-        let p = *count as f64 / total as f64;
-        entropy -= p * p.log2();
-    }
-    Some(entropy)
 }
 
 fn pooled_mi_sa(deceased: &IntervalLifetimeSummary) -> Option<f64> {
@@ -326,8 +266,4 @@ fn pooled_mi_sa_from_u64(pooled_joint: &[[u64; N_ACTIONS]; SENSORY_BIN_COUNT]) -
 
 pub fn action_baseline_probability() -> f64 {
     1.0 / N_ACTIONS as f64
-}
-
-pub fn action_baseline_entropy() -> f64 {
-    (N_ACTIONS as f64).log2()
 }

@@ -125,14 +125,11 @@ fn comparison_metric_rows(
         paired("adaptation_pillar", |p| Some(p.adaptation_pillar)),
         paired("life_mean", |p| p.mean_life_mean),
         paired("idle_fraction", |p| p.mean_idle_fraction),
-        paired("action_entropy", |p| p.mean_h_action),
         paired("p_fwd_food", |p| p.mean_p_fwd_food),
         paired("mi_sa", |p| p.mean_mi_sa),
         paired("mi_sa_juvenile", |p| p.mean_mi_sa_juvenile),
         paired("mi_sa_adult", |p| p.mean_mi_sa_adult),
-        paired("reproduction_efficiency", |p| {
-            p.mean_reproduction_efficiency
-        }),
+        paired("generation_time", |p| p.mean_generation_time),
         paired("foraging_rate", |p| p.mean_foraging_rate),
         paired("attack_attempt_rate", |p| p.mean_attack_attempt_rate),
         paired("attack_success_rate", |p| p.mean_attack_success_rate),

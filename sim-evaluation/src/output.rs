@@ -101,11 +101,10 @@ pub(crate) fn print_evaluation_summary(out_dir: &Path, summary: &EvaluationSumma
         pillars.foraging_rate_component,
     );
     println!(
-        "intelligence_pillar: {:.3} [effectiveness={:.3} adult_mi={:.3} entropy={:.3} anti_idle={:.3} util={:.3}]",
+        "intelligence_pillar: {:.3} [effectiveness={:.3} adult_mi={:.3} anti_idle={:.3} util={:.3}]",
         pillars.intelligence_pillar,
         pillars.intelligence_action_effectiveness_component,
         pillars.intelligence_adult_mi_component,
-        pillars.intelligence_entropy_component,
         pillars.intelligence_anti_idle_component,
         pillars.intelligence_util_component,
     );
