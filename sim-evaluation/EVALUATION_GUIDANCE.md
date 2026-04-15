@@ -82,3 +82,55 @@ during this session and had to reset. Reviewers of agent work should:
   baseline, not the experiment's commit.
 - Keep experiment branches in `.claude/worktrees/*` for later reuse — reruns,
   longer horizons, stacking.
+
+## 7. Experiment documentation
+
+Every evaluated experiment — supported, rejected, or inconclusive — gets
+written up in `~/code/neurogenesis-research/wiki/`. Negative results are as
+valuable as positive ones; the writeup is what prevents the same idea from
+being re-run six months later.
+
+### Procedure
+
+1. Read `~/code/neurogenesis-research/wiki/experiments.md` (the index) and list
+   `~/code/neurogenesis-research/wiki/experiments/` to see existing writeups
+   and match their format.
+2. Create a new file at
+   `~/code/neurogenesis-research/wiki/experiments/<slug>.md` using the
+   established structure — see existing entries
+   (`evolvable_gestation.md`, `action_trace_policy_gradient.md`) as templates.
+3. Add a row to the index table in `wiki/experiments.md` linking to the new
+   file.
+
+### Required sections in each writeup
+
+- **Status** — implemented / evaluated / adopted-or-not, in one line.
+- **Question** — the hypothesis under test, stated as a question.
+- **Background** — what the current system does and why the change might help.
+  Cite specific files/functions in `sim-core` so a future reader can find the
+  surface area.
+- **Mechanism** — exactly what changed. Enough detail that the experiment
+  could be reproduced from scratch.
+- **Evaluation Design** — seed suite, horizon(s), baseline definition,
+  treatment definition, and any non-default config. Note explicitly when
+  baseline and treatment share a binary (e.g. behaviorally-disabled channel)
+  vs. when they differ structurally.
+- **Results** — aggregate metrics, per-seed scores, and pillar/component
+  breakdown. Tables, not prose. Bold the load-bearing numbers.
+- **Observations** — what the data shows, before interpretation. Call out
+  per-seed variance, ceiling vs. floor movement, and which pillars/components
+  moved.
+- **Interpretation** — what the data *means*. Be explicit about the
+  mechanism. Multiple plausible causes are fine; rank them by evidence.
+- **Conclusion** — adopted or not, and why, in one paragraph.
+- **Follow-Up Questions** — variations worth trying, ablations that would
+  isolate the cause, or different horizons/configs that might change the
+  verdict. This is where future agents look first.
+- **Source Traceability** — paths to changed source files and to the
+  evaluation report directories so the artifacts can be re-inspected.
+
+### Tone
+
+Write for a future agent (possibly yourself) who has lost all context. State
+results directly. Don't oversell positive findings or hedge negative ones —
+both mislead the next reader.
