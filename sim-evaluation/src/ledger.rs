@@ -92,6 +92,7 @@ impl IntervalActionStats {
 struct OrganismEntry {
     birth_tick: u64,
     age_of_maturity: u32,
+    #[allow(dead_code)]
     tracked_reproduction_birth: bool,
     survived_to_30_recorded: bool,
     survived_to_maturity_recorded: bool,
@@ -185,7 +186,7 @@ impl Ledger {
 
     pub fn update(&mut self, record: &ActionRecord) {
         let action_idx = action_index(record.selected_action);
-        let sensory_bin = sensory_bin(&record);
+        let sensory_bin = sensory_bin(record);
         self.interval_action_stats.action_counts[action_idx] =
             self.interval_action_stats.action_counts[action_idx].saturating_add(1);
         self.interval_action_stats.joint[sensory_bin][action_idx] =

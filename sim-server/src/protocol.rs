@@ -213,6 +213,7 @@ impl From<TickDelta> for TickDeltaView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data")]
+#[allow(clippy::large_enum_variant)]
 pub enum ServerEvent {
     StateSnapshot(WorldSnapshotView),
     TickDelta(TickDeltaView),

@@ -39,8 +39,8 @@ impl Simulation {
         }
 
         let mut write = 0_usize;
-        for read in 0..self.organisms.len() {
-            if !removed[read] {
+        for (read, removed_flag) in removed.iter().enumerate() {
+            if !*removed_flag {
                 if write != read {
                     self.organisms.swap(write, read);
                     self.pending_actions.swap(write, read);

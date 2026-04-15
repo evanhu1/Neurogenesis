@@ -950,7 +950,8 @@ mod tests {
         let strong = make_record(8, 5, 9, 80.0);
         let duplicate_strong = strong.clone();
 
-        let merged = merge_champion_entries(&[weak.clone()], &[duplicate_strong, strong.clone()]);
+        let merged =
+            merge_champion_entries(std::slice::from_ref(&weak), &[duplicate_strong, strong.clone()]);
 
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0], strong);

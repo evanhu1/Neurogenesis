@@ -41,6 +41,7 @@ pub struct IntervalMetrics {
     pub action_histogram: [f64; N_ACTIONS],
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn compute_interval_metrics(
     tick: u64,
     pop: u32,

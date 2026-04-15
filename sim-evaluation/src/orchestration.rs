@@ -421,12 +421,14 @@ mod tests {
 
     #[test]
     fn same_seed_yields_same_summary_hash() {
-        let mut cfg = WorldConfig::default();
-        cfg.world_width = 40;
-        cfg.num_organisms = 300;
-        cfg.periodic_injection_interval_turns = 0;
-        cfg.periodic_injection_count = 0;
-        cfg.force_random_actions = false;
+        let cfg = WorldConfig {
+            world_width: 40,
+            num_organisms: 300,
+            periodic_injection_interval_turns: 0,
+            periodic_injection_count: 0,
+            force_random_actions: false,
+            ..Default::default()
+        };
 
         let out_a = test_output_dir("a");
         let out_b = test_output_dir("b");

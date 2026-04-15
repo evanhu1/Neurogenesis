@@ -107,6 +107,7 @@ pub(super) fn vision_ray_signal(
     ray_scans[ray_idx].color.signal_for(channel)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn scan_rays(
     position: (i32, i32),
     facing: sim_types::FacingDirection,
@@ -317,7 +318,7 @@ mod tests {
             0.0
         );
 
-        occupancy[1 * world_width as usize + 2] = Some(sim_types::Occupant::Wall);
+        occupancy[world_width as usize + 2] = Some(sim_types::Occupant::Wall);
         assert_eq!(
             contact_ahead_signal(
                 (1, 1),
@@ -329,8 +330,8 @@ mod tests {
             1.0
         );
 
-        occupancy[1 * world_width as usize + 2] = None;
-        spike_map[1 * world_width as usize + 2] = true;
+        occupancy[world_width as usize + 2] = None;
+        spike_map[world_width as usize + 2] = true;
         assert_eq!(
             contact_ahead_signal(
                 (1, 1),
@@ -379,11 +380,11 @@ mod tests {
             opacity: 0.25,
         };
 
-        occupancy[1 * world_width as usize + 2] = Some(Occupant::Food(FoodId(0)));
-        visual_map[1 * world_width as usize + 2] = food_0_visual;
+        occupancy[world_width as usize + 2] = Some(Occupant::Food(FoodId(0)));
+        visual_map[world_width as usize + 2] = food_0_visual;
 
-        occupancy[1 * world_width as usize + 3] = Some(Occupant::Food(FoodId(1)));
-        visual_map[1 * world_width as usize + 3] = food_1_visual;
+        occupancy[world_width as usize + 3] = Some(Occupant::Food(FoodId(1)));
+        visual_map[world_width as usize + 3] = food_1_visual;
 
         let scan = scan_ray(
             (1, 1),
