@@ -1,7 +1,7 @@
 use crate::{
     dataset::ACTION_COUNT,
     report::Reporter,
-    types::{ComparisonSummary, DemographicAnalytics, EvaluationSummary, IntervalMetrics},
+    types::{ComparisonSummary, EvaluationSummary, IntervalMetrics},
 };
 use anyhow::Result;
 use serde::Serialize;
@@ -112,7 +112,6 @@ pub(crate) fn print_evaluation_summary(out_dir: &Path, summary: &EvaluationSumma
             seed_summary.seed, p.foraging_pillar, p.intelligence_pillar, p.competition_pillar,
         );
     }
-    print_demographics("aggregate", &summary.demographics);
     println!("total_time_seconds: {:.3}", summary.total_time_seconds);
 }
 
@@ -202,33 +201,6 @@ fn fmt_option(value: Option<f64>, decimals: usize) -> String {
     value
         .map(|value| format!("{value:.decimals$}"))
         .unwrap_or_else(|| "NA".to_owned())
-}
-
-fn print_demographics(label: &str, readouts: &DemographicAnalytics) {
-    println!("{label}_tracked_births: {}", readouts.births);
-    println!("{label}_successful_births: {}", readouts.successful_births);
-    println!("{label}_blocked_births: {}", readouts.blocked_births);
-    println!(
-        "{label}_parent_died_during_reproduction: {}",
-        readouts.parent_died_during_reproduction
-    );
-    println!("{label}_survived_to_30: {}", readouts.survived_to_30);
-    println!(
-        "{label}_survived_to_maturity: {}",
-        readouts.survived_to_maturity
-    );
-    println!(
-        "{label}_mean_parent_energy_after_successful_birth: {}",
-        fmt_option(readouts.mean_parent_energy_after_successful_birth, 3)
-    );
-    println!(
-        "{label}_mean_age_at_first_successful_reproduction: {}",
-        fmt_option(readouts.mean_age_at_first_successful_reproduction, 3)
-    );
-    println!(
-        "{label}_mean_successful_birth_interval: {}",
-        fmt_option(readouts.mean_successful_birth_interval, 3)
-    );
 }
 
 fn browser_file_url(path: &Path) -> String {

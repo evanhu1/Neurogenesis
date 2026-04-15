@@ -1,6 +1,5 @@
 use crate::{
     analysis::intervals::action_baseline_probability,
-    dataset::ACTION_COUNT as N_ACTIONS,
     types::{IntervalMetrics, PillarScores},
 };
 use anyhow::Result;
@@ -185,6 +184,10 @@ pub fn write_html_report(
         table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:8px;border-bottom:1px solid var(--line);text-align:right}th:first-child,td:first-child{text-align:left}\
         .table-scroll{max-width:100%;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}\
         .table-scroll table{min-width:1280px}\
+        .th-tip{position:relative;display:inline-block;cursor:help;border-bottom:1px dotted var(--muted);padding-bottom:1px}\
+        .th-tip .tip{position:absolute;left:50%;bottom:calc(100% + 10px);transform:translateX(-50%);width:min(320px,70vw);padding:10px 12px;border-radius:10px;background:#0f172a;color:#f8fafc;font-size:12px;font-weight:500;line-height:1.45;text-align:left;box-shadow:0 12px 30px rgba(15,23,42,.22);opacity:0;visibility:hidden;pointer-events:none;z-index:20}\
+        .th-tip .tip::after{content:\"\";position:absolute;left:50%;top:100%;transform:translateX(-50%);border:6px solid transparent;border-top-color:#0f172a}\
+        .th-tip:hover .tip,.th-tip:focus-visible .tip{opacity:1;visibility:visible}\
         .chart{margin:8px 0 20px 0}svg{width:100%;height:auto;border:1px solid var(--line);border-radius:8px;background:#fff}\
         .note{color:var(--muted);font-size:12px}\
         .score-big{font-size:42px;font-weight:700;line-height:1;margin:0}\
@@ -198,8 +201,6 @@ pub fn write_html_report(
         .pillar-subscore{display:flex;justify-content:space-between;gap:12px;padding-top:8px;border-top:1px solid var(--line);font-size:13px}\
         .pillar-subscore-name{color:var(--muted)}\
         .pillar-subscore-value{font-weight:600}\
-        .guide h3{margin:14px 0 8px 0;font-size:16px}.guide p{margin:0 0 10px 0;line-height:1.45}.guide ul{margin:0 0 12px 20px;line-height:1.45}\
-        .guide li{margin:4px 0}.guide code{background:#f1f5f9;padding:1px 5px;border-radius:4px;border:1px solid #e2e8f0}\
         </style></head><body><div class=\"wrap\">",
     );
 
@@ -282,24 +283,73 @@ pub fn write_html_report(
         "<div class=\"panel\"><h2>Timeseries</h2><p class=\"note\">{}</p><div class=\"table-scroll\"><table><thead><tr>",
         meta.timeseries_label
     );
-    for header in [
-        "tick",
-        "pop",
-        "births",
-        "deaths",
-        "max_generation",
-        "attack_attempt_rate",
-        "attack_success_rate",
-        "failed_action_rate",
-        "ate_pct",
-        "cons_mean",
-        "brain_size",
-        "p_fwd_food",
-        "mi_sa",
-        "idle_fraction",
-        "util",
-    ] {
-        let _ = write!(html, "<th>{header}</th>");
+    let baseline_probability = action_baseline_probability();
+    let timeseries_headers = [
+        (
+            "tick",
+            "End tick of this reporting interval. Each row summarizes the ticks after the previous boundary and up to this tick.".to_owned(),
+        ),
+        (
+            "pop",
+            "Population at the final tick of the interval, not an interval average.".to_owned(),
+        ),
+        (
+            "births",
+            "Total births during the interval, summed across ticks.".to_owned(),
+        ),
+        (
+            "deaths",
+            "Total deaths during the interval, summed across ticks.".to_owned(),
+        ),
+        (
+            "max_generation",
+            "Highest generation present at the end of the interval, taken from the latest tick summary in the window.".to_owned(),
+        ),
+        (
+            "attack_attempt_rate",
+            "Attack selections per unit population exposure: total Attack actions in the interval divided by the sum of population counts over ticks.".to_owned(),
+        ),
+        (
+            "attack_success_rate",
+            "Share of Attack selections that did not fail: successful attacks divided by total attack attempts in the interval.".to_owned(),
+        ),
+        (
+            "failed_action_rate",
+            "Share of contingent actions that failed. Counts Forward, Eat, Attack, and Reproduce failures; excludes Idle and turning.".to_owned(),
+        ),
+        (
+            "ate_pct",
+            "Percent of sampled organisms in this interval's lifetime cohort that consumed food at least once. Uses organisms that died in the interval and passed the minimum-lifetime filter.".to_owned(),
+        ),
+        (
+            "cons_mean",
+            "Mean lifetime food consumptions for the interval's deceased-organism cohort after the minimum-lifetime filter.".to_owned(),
+        ),
+        (
+            "brain_size",
+            "Mean brain size at the latest flush snapshot at or before the interval end. Brain size is neurons plus synapses across living organisms in that snapshot.".to_owned(),
+        ),
+        (
+            "p_fwd_food",
+            format!(
+                "Among recorded action ticks where food was visible straight ahead, the fraction that chose Forward. Random-choice baseline is {baseline_probability:.4}."
+            ),
+        ),
+        (
+            "mi_sa",
+            "Miller-Madow-corrected mutual information between coarse food-visibility context and selected action, pooled from qualifying lifetime histograms.".to_owned(),
+        ),
+        (
+            "idle_fraction",
+            "Share of all selected actions in the interval that were Idle.".to_owned(),
+        ),
+        (
+            "util",
+            "Mean inter-neuron utilization across the interval's deceased-organism cohort. This is the per-organism fraction of inter neurons with sustained nonzero activation.".to_owned(),
+        ),
+    ];
+    for (header, tooltip) in timeseries_headers {
+        tooltip_th(&mut html, header, &tooltip);
     }
     html.push_str("</tr></thead><tbody>");
     for row in rows {
@@ -429,7 +479,6 @@ pub fn write_html_report(
         html.push_str("</div>");
     }
     html.push_str("</div>");
-    append_interpretation_guidance(&mut html);
 
     html.push_str("</div></body></html>");
     std::fs::write(report_path, html)?;
@@ -684,66 +733,26 @@ fn line_chart_svg(series: &[(u64, f64)], baseline: Option<f64>, color: &str) -> 
     svg
 }
 
-fn append_interpretation_guidance(html: &mut String) {
-    let baseline_probability = action_baseline_probability();
-
-    html.push_str("<div class=\"panel guide\"><h2>Interpreting The Metrics</h2>");
-
-    html.push_str("<h3>P(Fwd|food) -- \"Can they see?\"</h3>");
-    html.push_str("<p>This is the single most important number. It answers: when food is directly ahead, does the organism walk toward it more often than chance?</p>");
-    html.push_str("<ul>");
+fn tooltip_th(html: &mut String, label: &str, tooltip: &str) {
     let _ = write!(
         html,
-        "<li><code>{baseline_probability:.2}</code> ({N_ACTIONS} actions): random. Brains are not influencing behavior in a useful way. Evolution has not discovered stimulus-response coupling.</li>",
+        "<th><span class=\"th-tip\" tabindex=\"0\">{}<span class=\"tip\">{}</span></span></th>",
+        escape_html(label),
+        escape_html(tooltip),
     );
-    html.push_str("<li><code>0.30-0.40</code>: weak signal. Something is working but unreliably. Could be a small subpopulation of competent foragers diluted by many random walkers.</li>");
-    html.push_str("<li><code>0.50+</code>: strong directed foraging. Evolution has found brains that reliably turn sensory input into adaptive action.</li>");
-    html.push_str("<li>Below baseline: actively food-avoidant. Possible if the action encoding or sensory wiring has an inversion bug.</li>");
-    html.push_str("</ul>");
-    html.push_str("<p>If this number is flat at baseline after thousands of generations, the evolutionary loop is broken. Check energy economics first (is eating actually rewarded enough to matter?), then mutation rates (can evolution explore fast enough?).</p>");
+}
 
-    html.push_str("<h3>MI(S;A) -- \"Do they react?\"</h3>");
-    html.push_str("<p>Mutual information between what the organism sees and what it does. The general version of P(Fwd|food) - captures all sensory-action coupling, not just the food-ahead case.</p>");
-    html.push_str("<ul>");
-    html.push_str("<li><code>0.00</code>: actions are statistically independent of sensory input. The brain is ignoring its eyes.</li>");
-    html.push_str("<li><code>0.01-0.05</code>: weak coupling. Noisy but present. Typical of early evolution where a few organisms have partial stimulus-response wiring.</li>");
-    html.push_str("<li><code>0.10+</code>: meaningful sensory-motor coupling. Organisms are making different decisions in different sensory contexts.</li>");
-    html.push_str("</ul>");
-    html.push_str("<p>MI is biased upward with small sample sizes (short-lived organisms produce noisy histograms that look like they have structure). The Miller-Madow correction helps but does not eliminate this. If MI looks suspiciously high in early intervals when organisms are dying young, it is probably bias. Trust MI trends over absolute values.</p>");
-    html.push_str("<p>The relationship between MI and P(Fwd|food): MI can be positive even when P(Fwd|food) is at baseline, if organisms are reacting to non-food stimuli (avoiding walls, turning away from other organisms). This is still interesting - it means brains are sensory-responsive, just not for the behavior you expected.</p>");
-
-    html.push_str("<h3>Failed action rate -- \"Do they choose actions that actually work?\"</h3>");
-    html.push_str("<p>This measures how often contingent actions fail to produce their intended effect. The current definition counts failed <code>Forward</code>, <code>Eat</code>, <code>Attack</code>, and <code>Reproduce</code> selections, and it is the primary subscore inside the Intelligence pillar.</p>");
-    html.push_str("<ul>");
-    html.push_str(
-        "<li><code>0.00-0.10</code>: strong. Brains usually avoid obviously useless actions.</li>",
-    );
-    html.push_str("<li><code>0.20-0.40</code>: mixed. Organisms have some situational competence but still waste many actions.</li>");
-    html.push_str("<li><code>0.50+</code>: weak behavioural competence. A large share of costly actions are doing nothing useful.</li>");
-    html.push_str("</ul>");
-    html.push_str("<p>Interpret this together with MI and P(Fwd|food). High MI with high failed-action rate usually means the brain is reacting to stimuli, but choosing the wrong motor output for the situation.</p>");
-
-    html.push_str("<h3>Inter-neuron utilization -- \"Is the brain earning its keep?\"</h3>");
-    html.push_str("<p>Fraction of inter neurons with sustained nonzero activation.</p>");
-    html.push_str("<ul>");
-    html.push_str(
-        "<li>Low util + small brain: fine. A minimal brain where every neuron matters.</li>",
-    );
-    html.push_str("<li>Low util + large brain: metabolic waste. Evolution added neurons but they are dead weight. Usually means neuron-addition mutations are happening but selection is not strong enough to prune useless neurons (or metabolism cost is too low to penalize them).</li>");
-    html.push_str("<li>High util + rising brain size: the best signal. Evolution is growing brains AND using the new capacity. Complexity is paying for itself.</li>");
-    html.push_str("<li>Falling util over time: brains are growing faster than they are being utilized. Topology mutations outpacing functional integration.</li>");
-    html.push_str("</ul>");
-
-    html.push_str("<h3>Reading the table as a whole</h3>");
-    html.push_str("<p>The diagnostic story emerges from metric combinations:</p>");
-    html.push_str("<table><thead><tr><th>Pattern</th><th>Diagnosis</th></tr></thead><tbody>");
-    html.push_str("<tr><td>Pop stable, all Tier 3 flat at baseline</td><td>Evolution running but not finding anything. Fix energy economics or mutation rates.</td></tr>");
-    html.push_str("<tr><td>Pop crashing, high death rate</td><td>Organisms cannot survive. Food too scarce, metabolism too high, or starting energy too low.</td></tr>");
-    html.push_str("<tr><td>P(Fwd|food) rising, MI rising</td><td>The good outcome. Evolution is discovering sensory-motor coupling.</td></tr>");
-    html.push_str("<tr><td>P(Fwd|food) rising, brain shrinking</td><td>Evolution found a minimal circuit for foraging and is trimming waste. Efficient, possibly a local optimum.</td></tr>");
-    html.push_str("<tr><td>Idle fraction high, pop stable</td><td>Idle-degenerate niche. Organisms survive by not moving (if idle is cheap enough). Fix by making idle cost energy too.</td></tr>");
-    html.push_str("<tr><td>MI rising but P(Fwd|food) flat</td><td>Organisms are reacting to stimuli but not food specifically. Check if they are responding to walls or other organisms instead. Might need to adjust sensory salience or food density.</td></tr>");
-    html.push_str("</tbody></table>");
-
-    html.push_str("</div>");
+fn escape_html(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
 }
