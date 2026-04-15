@@ -79,7 +79,6 @@ pub struct IntervalActionStats {
     pub failed_action_count: u64,
     pub failure_candidate_count: u64,
     pub reproduction_attempts: u64,
-    pub total_damage_taken: f64,
 }
 
 impl IntervalActionStats {
@@ -207,8 +206,6 @@ impl Ledger {
                 .reproduction_attempts
                 .saturating_add(1);
         }
-        self.interval_action_stats.total_damage_taken +=
-            f64::from(record.damage_taken_last_turn.max(0.0));
 
         let Some(entry) = self.sidecar.get_mut(&record.organism_id) else {
             return;

@@ -35,8 +35,6 @@ pub struct IntervalMetrics {
     pub reproduction_efficiency: Option<f64>,
     pub mean_gestation_ticks: Option<f64>,
     pub mean_offspring_transfer_energy: Option<f64>,
-    pub damage_avoidance: Option<f64>,
-    pub reward_reversal_shift: Option<f64>,
     pub util: Option<f64>,
     pub action_histogram: [f64; N_ACTIONS],
 }
@@ -54,7 +52,6 @@ pub fn compute_interval_metrics(
     deceased: &IntervalLifetimeSummary,
     living: &[OrganismState],
     action_stats: &IntervalActionStats,
-    food_energy: f32,
 ) -> IntervalMetrics {
     let brain_stats = living_brain_stats(living);
     let max_generation = living.iter().map(|organism| organism.generation).max();
@@ -79,12 +76,6 @@ pub fn compute_interval_metrics(
         None
     } else {
         Some(births as f64 / action_stats.reproduction_attempts as f64)
-    };
-    let damage_avoidance = if interval_population_exposure == 0 || food_energy <= 0.0 {
-        None
-    } else {
-        let mean_damage = action_stats.total_damage_taken / interval_population_exposure as f64;
-        Some((1.0 - (mean_damage / food_energy as f64)).clamp(0.0, 1.0))
     };
     let action_histogram = action_histogram(action_stats);
     let idle_fraction = if total_actions == 0 {
@@ -141,8 +132,6 @@ pub fn compute_interval_metrics(
         reproduction_efficiency,
         mean_gestation_ticks,
         mean_offspring_transfer_energy,
-        damage_avoidance,
-        reward_reversal_shift: None,
         util,
         action_histogram,
     }
@@ -341,32 +330,4 @@ pub fn action_baseline_probability() -> f64 {
 
 pub fn action_baseline_entropy() -> f64 {
     (N_ACTIONS as f64).log2()
-}
-
-pub fn jensen_shannon_divergence(a: &[f64; N_ACTIONS], b: &[f64; N_ACTIONS]) -> Option<f64> {
-    let sum_a: f64 = a.iter().sum();
-    let sum_b: f64 = b.iter().sum();
-    if !sum_a.is_finite() || !sum_b.is_finite() || sum_a <= 0.0 || sum_b <= 0.0 {
-        return None;
-    }
-
-    let mut m = [0.0; N_ACTIONS];
-    for idx in 0..N_ACTIONS {
-        m[idx] = 0.5 * (a[idx] + b[idx]);
-    }
-
-    Some(0.5 * kl_divergence(a, &m) + 0.5 * kl_divergence(b, &m))
-}
-
-fn kl_divergence(a: &[f64; N_ACTIONS], b: &[f64; N_ACTIONS]) -> f64 {
-    let mut kl = 0.0;
-    for idx in 0..N_ACTIONS {
-        let p = a[idx];
-        let q = b[idx];
-        if p <= 0.0 || q <= 0.0 {
-            continue;
-        }
-        kl += p * (p / q).log2();
-    }
-    kl
 }

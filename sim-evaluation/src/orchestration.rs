@@ -1,10 +1,10 @@
 use crate::{
     aggregation::{
-        average_aggregate_scores, average_reproduction_analytics, average_timeseries,
-        compute_aggregate_score, state_hash,
+        average_pillar_scores, average_reproduction_analytics, average_timeseries,
+        compute_pillar_scores, state_hash,
     },
-    ledger::{Ledger, N_ACTIONS},
-    metrics::{compute_interval_metrics, jensen_shannon_divergence},
+    ledger::Ledger,
+    metrics::compute_interval_metrics,
     output::{write_summary_json, write_timeseries_csv},
     report::{write_html_report, HtmlReportMeta, PerSeedReportRow, Reporter},
     types::{
@@ -71,7 +71,6 @@ pub(crate) fn run_evaluation_across_seeds(
                     .as_ref()
                     .map(|run_title| format!("{run_title} (seed {seed})")),
                 control,
-                reward_reversal_tick: reward_reversal_tick_for_run(ticks),
             };
             let result = run_single_seed_evaluation(config.clone(), seed_options);
             if tx.send((seed, result)).is_err() {
@@ -98,7 +97,7 @@ pub(crate) fn run_evaluation_across_seeds(
     let averaged_timeseries = average_timeseries(&seed_summaries);
     write_timeseries_csv(&options.out_dir, &averaged_timeseries)?;
 
-    let aggregate_score = average_aggregate_scores(&seed_summaries);
+    let pillars = average_pillar_scores(&seed_summaries);
     let experiment_readouts = average_reproduction_analytics(&seed_summaries);
     let total_time_seconds = run_started.elapsed().as_secs_f64();
     let generated_at_utc = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
@@ -109,7 +108,7 @@ pub(crate) fn run_evaluation_across_seeds(
             seed: summary.seed,
             out_dir: PathBuf::from(format!("seed_{}", summary.seed)),
             total_time_seconds: summary.total_time_seconds,
-            aggregate_score: summary.aggregate_score.clone(),
+            pillars: summary.pillars.clone(),
             experiment_readouts: summary.experiment_readouts.clone(),
             state_hash: summary.state_hash.clone(),
         })
@@ -122,7 +121,7 @@ pub(crate) fn run_evaluation_across_seeds(
         control: options.control,
         worker_threads,
         total_time_seconds,
-        aggregate_score: aggregate_score.clone(),
+        pillars: pillars.clone(),
         experiment_readouts,
         seed_summaries: seed_run_summaries.clone(),
         timeseries: averaged_timeseries.clone(),
@@ -131,79 +130,26 @@ pub(crate) fn run_evaluation_across_seeds(
     write_summary_json(&options.out_dir, &summary)?;
     write_html_report(
         &options.out_dir,
-        &HtmlReportMeta {
-            title: summary.title.clone(),
-            seed_count: summary.seeds.len(),
-            ticks: summary.ticks,
-            report_every: options.report_every,
-            min_lifetime: options.min_lifetime,
-            control: summary.control,
-            total_time_seconds: summary.total_time_seconds,
+        &html_report_meta(
+            &summary.pillars,
+            summary.title.clone(),
+            summary.ticks,
+            options.report_every,
+            options.min_lifetime,
+            summary.control,
+            summary.total_time_seconds,
             generated_at_utc,
-            aggregate_score: summary.aggregate_score.score,
-            aggregate_score_median: summary.aggregate_score.score_median,
-            aggregate_score_stddev: summary.aggregate_score.score_stddev,
-            aggregate_score_min: summary.aggregate_score.score_min,
-            aggregate_score_max: summary.aggregate_score.score_max,
-            aggregate_window_start_tick: summary.aggregate_score.window_start_tick,
-            aggregate_window_end_tick: summary.aggregate_score.window_end_tick,
-            aggregate_viability_pillar: summary.aggregate_score.viability_pillar,
-            aggregate_foraging_pillar: summary.aggregate_score.foraging_pillar,
-            aggregate_control_pillar: summary.aggregate_score.control_pillar,
-            aggregate_competition_pillar: summary.aggregate_score.competition_pillar,
-            aggregate_adaptation_pillar: summary.aggregate_score.adaptation_pillar,
-            aggregate_viability_life_component: summary.aggregate_score.viability_life_component,
-            aggregate_viability_reproduction_component: summary
-                .aggregate_score
-                .viability_reproduction_component,
-            aggregate_viability_damage_component: summary
-                .aggregate_score
-                .viability_damage_component,
-            aggregate_foraging_p_fwd_food_component: summary
-                .aggregate_score
-                .foraging_p_fwd_food_component,
-            aggregate_foraging_rate_component: summary.aggregate_score.foraging_rate_component,
-            aggregate_control_adult_mi_component: summary
-                .aggregate_score
-                .control_adult_mi_component,
-            aggregate_control_action_effectiveness_component: summary
-                .aggregate_score
-                .control_action_effectiveness_component,
-            aggregate_control_entropy_component: summary.aggregate_score.control_entropy_component,
-            aggregate_control_anti_idle_component: summary
-                .aggregate_score
-                .control_anti_idle_component,
-            aggregate_control_util_component: summary.aggregate_score.control_util_component,
-            aggregate_competition_predation_component: summary
-                .aggregate_score
-                .competition_predation_component,
-            aggregate_competition_attack_success_component: summary
-                .aggregate_score
-                .competition_attack_success_component,
-            aggregate_competition_attack_attempt_component: summary
-                .aggregate_score
-                .competition_attack_attempt_component,
-            aggregate_adaptation_reversal_component: summary
-                .aggregate_score
-                .adaptation_reversal_component,
-            aggregate_adaptation_juvenile_mi_component: summary
-                .aggregate_score
-                .adaptation_juvenile_mi_component,
-            aggregate_adaptation_diversity_component: summary
-                .aggregate_score
-                .adaptation_diversity_component,
-            timeseries_label: "mean across seeds".to_owned(),
-            per_seed_rows: seed_run_summaries
+            "mean across seeds".to_owned(),
+            seed_run_summaries
                 .iter()
                 .map(|seed_summary| PerSeedReportRow {
                     seed: seed_summary.seed,
-                    score: seed_summary.aggregate_score.score,
                     total_time_seconds: seed_summary.total_time_seconds,
                     state_hash: seed_summary.state_hash.clone(),
                     report_href: format!("seed_{}/report.html", seed_summary.seed),
                 })
                 .collect(),
-        },
+        ),
         &summary.timeseries,
     )?;
 
@@ -231,16 +177,9 @@ pub(crate) fn run_single_seed_evaluation(
     let mut interval_consumptions = 0_u64;
     let mut interval_predations = 0_u64;
     let mut interval_population_exposure = 0_u64;
-    let mut pre_reversal_histogram: Option<[f64; N_ACTIONS]> = None;
     let mut timeseries = Vec::new();
 
     for tick in 1..=options.ticks {
-        if options
-            .reward_reversal_tick
-            .is_some_and(|reversal_tick| tick > reversal_tick)
-        {
-            sim.set_reward_signal_multiplier(-1.0);
-        }
         interval_population_exposure =
             interval_population_exposure.saturating_add(sim.organisms().len() as u64);
         let delta = sim.tick();
@@ -282,7 +221,7 @@ pub(crate) fn run_single_seed_evaluation(
                 options.seed,
                 total = options.ticks
             );
-            let mut interval = compute_interval_metrics(
+            let interval = compute_interval_metrics(
                 tick,
                 delta.metrics.organisms,
                 interval_births,
@@ -294,17 +233,7 @@ pub(crate) fn run_single_seed_evaluation(
                 ledger.recently_deceased(),
                 sim.organisms(),
                 ledger.interval_action_stats(),
-                sim.config().food_energy,
             );
-            if options
-                .reward_reversal_tick
-                .is_some_and(|reversal_tick| tick <= reversal_tick)
-            {
-                pre_reversal_histogram = Some(interval.action_histogram);
-            } else if let Some(reference) = pre_reversal_histogram.as_ref() {
-                interval.reward_reversal_shift =
-                    jensen_shannon_divergence(&interval.action_histogram, reference);
-            }
             reporter.emit(&interval)?;
             timeseries.push(interval);
 
@@ -320,7 +249,7 @@ pub(crate) fn run_single_seed_evaluation(
     reporter.flush()?;
     let total_time_seconds = run_started.elapsed().as_secs_f64();
     let generated_at_utc = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
-    let aggregate_score = compute_aggregate_score(&timeseries, options.reward_reversal_tick);
+    let pillars = compute_pillar_scores(&timeseries);
     let experiment_readouts = ledger.reproduction_analytics();
 
     let summary = SeedEvaluationSummary {
@@ -329,7 +258,7 @@ pub(crate) fn run_single_seed_evaluation(
         ticks: options.ticks,
         control: options.control,
         total_time_seconds,
-        aggregate_score: aggregate_score.clone(),
+        pillars: pillars.clone(),
         experiment_readouts,
         state_hash: state_hash(sim.organisms()),
         timeseries,
@@ -337,81 +266,69 @@ pub(crate) fn run_single_seed_evaluation(
     write_summary_json(&options.out_dir, &summary)?;
     write_html_report(
         &options.out_dir,
-        &HtmlReportMeta {
-            title: summary.title.clone(),
-            seed_count: 1,
-            ticks: summary.ticks,
-            report_every: options.report_every,
-            min_lifetime: options.min_lifetime,
-            control: summary.control,
-            total_time_seconds: summary.total_time_seconds,
+        &html_report_meta(
+            &summary.pillars,
+            summary.title.clone(),
+            summary.ticks,
+            options.report_every,
+            options.min_lifetime,
+            summary.control,
+            summary.total_time_seconds,
             generated_at_utc,
-            aggregate_score: summary.aggregate_score.score,
-            aggregate_score_median: summary.aggregate_score.score_median,
-            aggregate_score_stddev: summary.aggregate_score.score_stddev,
-            aggregate_score_min: summary.aggregate_score.score_min,
-            aggregate_score_max: summary.aggregate_score.score_max,
-            aggregate_window_start_tick: summary.aggregate_score.window_start_tick,
-            aggregate_window_end_tick: summary.aggregate_score.window_end_tick,
-            aggregate_viability_pillar: summary.aggregate_score.viability_pillar,
-            aggregate_foraging_pillar: summary.aggregate_score.foraging_pillar,
-            aggregate_control_pillar: summary.aggregate_score.control_pillar,
-            aggregate_competition_pillar: summary.aggregate_score.competition_pillar,
-            aggregate_adaptation_pillar: summary.aggregate_score.adaptation_pillar,
-            aggregate_viability_life_component: summary.aggregate_score.viability_life_component,
-            aggregate_viability_reproduction_component: summary
-                .aggregate_score
-                .viability_reproduction_component,
-            aggregate_viability_damage_component: summary
-                .aggregate_score
-                .viability_damage_component,
-            aggregate_foraging_p_fwd_food_component: summary
-                .aggregate_score
-                .foraging_p_fwd_food_component,
-            aggregate_foraging_rate_component: summary.aggregate_score.foraging_rate_component,
-            aggregate_control_adult_mi_component: summary
-                .aggregate_score
-                .control_adult_mi_component,
-            aggregate_control_action_effectiveness_component: summary
-                .aggregate_score
-                .control_action_effectiveness_component,
-            aggregate_control_entropy_component: summary.aggregate_score.control_entropy_component,
-            aggregate_control_anti_idle_component: summary
-                .aggregate_score
-                .control_anti_idle_component,
-            aggregate_control_util_component: summary.aggregate_score.control_util_component,
-            aggregate_competition_predation_component: summary
-                .aggregate_score
-                .competition_predation_component,
-            aggregate_competition_attack_success_component: summary
-                .aggregate_score
-                .competition_attack_success_component,
-            aggregate_competition_attack_attempt_component: summary
-                .aggregate_score
-                .competition_attack_attempt_component,
-            aggregate_adaptation_reversal_component: summary
-                .aggregate_score
-                .adaptation_reversal_component,
-            aggregate_adaptation_juvenile_mi_component: summary
-                .aggregate_score
-                .adaptation_juvenile_mi_component,
-            aggregate_adaptation_diversity_component: summary
-                .aggregate_score
-                .adaptation_diversity_component,
-            timeseries_label: "per-seed timeseries".to_owned(),
-            per_seed_rows: Vec::new(),
-        },
+            "per-seed timeseries".to_owned(),
+            Vec::new(),
+        ),
         &summary.timeseries,
     )?;
 
     Ok(summary)
 }
 
-pub(crate) fn reward_reversal_tick_for_run(ticks: u64) -> Option<u64> {
-    if ticks < 2 {
-        None
-    } else {
-        Some((ticks / 2).max(1))
+#[allow(clippy::too_many_arguments)]
+fn html_report_meta(
+    pillars: &crate::types::PillarScores,
+    title: Option<String>,
+    ticks: u64,
+    report_every: u64,
+    min_lifetime: u64,
+    control: bool,
+    total_time_seconds: f64,
+    generated_at_utc: String,
+    timeseries_label: String,
+    per_seed_rows: Vec<PerSeedReportRow>,
+) -> HtmlReportMeta {
+    HtmlReportMeta {
+        title,
+        ticks,
+        report_every,
+        min_lifetime,
+        control,
+        total_time_seconds,
+        generated_at_utc,
+        pillar_window_start_tick: pillars.window_start_tick,
+        pillar_window_end_tick: pillars.window_end_tick,
+        viability_pillar: pillars.viability_pillar,
+        foraging_pillar: pillars.foraging_pillar,
+        intelligence_pillar: pillars.intelligence_pillar,
+        competition_pillar: pillars.competition_pillar,
+        adaptation_pillar: pillars.adaptation_pillar,
+        viability_life_component: pillars.viability_life_component,
+        viability_reproduction_component: pillars.viability_reproduction_component,
+        foraging_p_fwd_food_component: pillars.foraging_p_fwd_food_component,
+        foraging_rate_component: pillars.foraging_rate_component,
+        intelligence_adult_mi_component: pillars.intelligence_adult_mi_component,
+        intelligence_action_effectiveness_component: pillars
+            .intelligence_action_effectiveness_component,
+        intelligence_entropy_component: pillars.intelligence_entropy_component,
+        intelligence_anti_idle_component: pillars.intelligence_anti_idle_component,
+        intelligence_util_component: pillars.intelligence_util_component,
+        competition_predation_component: pillars.competition_predation_component,
+        competition_attack_success_component: pillars.competition_attack_success_component,
+        competition_attack_attempt_component: pillars.competition_attack_attempt_component,
+        adaptation_juvenile_mi_component: pillars.adaptation_juvenile_mi_component,
+        adaptation_diversity_component: pillars.adaptation_diversity_component,
+        timeseries_label,
+        per_seed_rows,
     }
 }
 
@@ -465,7 +382,6 @@ mod tests {
             out_dir: out_a.clone(),
             title: None,
             control: false,
-            reward_reversal_tick: reward_reversal_tick_for_run(100),
         };
         let options_b = SeedRunOptions {
             out_dir: out_b.clone(),

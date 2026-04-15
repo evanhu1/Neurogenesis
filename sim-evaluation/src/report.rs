@@ -19,7 +19,7 @@ impl Reporter {
         let mut csv = BufWriter::new(File::create(csv_path)?);
         writeln!(
             csv,
-            "tick,pop,births,deaths,food,max_generation,life_mean,predation_rate,foraging_rate,attack_attempt_rate,attack_success_rate,failed_action_count,failed_action_rate,ate_pct,cons_mean,brain_size,brain_size_stddev,brain_size_p10,brain_size_p50,brain_size_p90,lineage_diversity,p_fwd_food,mi_sa,mi_sa_juvenile,mi_sa_adult,h_action,idle_fraction,reproduction_efficiency,mean_gestation_ticks,mean_offspring_transfer_energy,damage_avoidance,reward_reversal_shift,util"
+            "tick,pop,births,deaths,food,max_generation,life_mean,predation_rate,foraging_rate,attack_attempt_rate,attack_success_rate,failed_action_count,failed_action_rate,ate_pct,cons_mean,brain_size,brain_size_stddev,brain_size_p10,brain_size_p50,brain_size_p90,lineage_diversity,p_fwd_food,mi_sa,mi_sa_juvenile,mi_sa_adult,h_action,idle_fraction,reproduction_efficiency,mean_gestation_ticks,mean_offspring_transfer_energy,util"
         )?;
         Ok(Self { csv })
     }
@@ -27,7 +27,7 @@ impl Reporter {
     pub fn emit(&mut self, metrics: &IntervalMetrics) -> Result<()> {
         writeln!(
             self.csv,
-            "{tick},{pop},{births},{deaths},{food},{max_generation},{life_mean},{predation_rate},{foraging_rate},{attack_attempt_rate},{attack_success_rate},{failed_action_count},{failed_action_rate},{ate_pct},{cons_mean},{brain_size},{brain_size_stddev},{brain_size_p10},{brain_size_p50},{brain_size_p90},{lineage_diversity},{p_fwd_food},{mi_sa},{mi_sa_juvenile},{mi_sa_adult},{h_action},{idle_fraction},{reproduction_efficiency},{mean_gestation_ticks},{mean_offspring_transfer_energy},{damage_avoidance},{reward_reversal_shift},{util}",
+            "{tick},{pop},{births},{deaths},{food},{max_generation},{life_mean},{predation_rate},{foraging_rate},{attack_attempt_rate},{attack_success_rate},{failed_action_count},{failed_action_rate},{ate_pct},{cons_mean},{brain_size},{brain_size_stddev},{brain_size_p10},{brain_size_p50},{brain_size_p90},{lineage_diversity},{p_fwd_food},{mi_sa},{mi_sa_juvenile},{mi_sa_adult},{h_action},{idle_fraction},{reproduction_efficiency},{mean_gestation_ticks},{mean_offspring_transfer_energy},{util}",
             tick = metrics.tick,
             pop = metrics.pop,
             births = metrics.births,
@@ -58,8 +58,6 @@ impl Reporter {
             reproduction_efficiency = csv_opt(metrics.reproduction_efficiency),
             mean_gestation_ticks = csv_opt(metrics.mean_gestation_ticks),
             mean_offspring_transfer_energy = csv_opt(metrics.mean_offspring_transfer_energy),
-            damage_avoidance = csv_opt(metrics.damage_avoidance),
-            reward_reversal_shift = csv_opt(metrics.reward_reversal_shift),
             util = csv_opt(metrics.util),
         )?;
 
@@ -74,41 +72,33 @@ impl Reporter {
 
 pub struct HtmlReportMeta {
     pub title: Option<String>,
-    pub seed_count: usize,
     pub ticks: u64,
     pub report_every: u64,
     pub min_lifetime: u64,
     pub control: bool,
     pub total_time_seconds: f64,
     pub generated_at_utc: String,
-    pub aggregate_score: f64,
-    pub aggregate_score_median: f64,
-    pub aggregate_score_stddev: f64,
-    pub aggregate_score_min: f64,
-    pub aggregate_score_max: f64,
-    pub aggregate_window_start_tick: u64,
-    pub aggregate_window_end_tick: u64,
-    pub aggregate_viability_pillar: f64,
-    pub aggregate_foraging_pillar: f64,
-    pub aggregate_control_pillar: f64,
-    pub aggregate_competition_pillar: f64,
-    pub aggregate_adaptation_pillar: f64,
-    pub aggregate_viability_life_component: f64,
-    pub aggregate_viability_reproduction_component: f64,
-    pub aggregate_viability_damage_component: f64,
-    pub aggregate_foraging_p_fwd_food_component: f64,
-    pub aggregate_foraging_rate_component: f64,
-    pub aggregate_control_adult_mi_component: f64,
-    pub aggregate_control_action_effectiveness_component: f64,
-    pub aggregate_control_entropy_component: f64,
-    pub aggregate_control_anti_idle_component: f64,
-    pub aggregate_control_util_component: f64,
-    pub aggregate_competition_predation_component: f64,
-    pub aggregate_competition_attack_success_component: f64,
-    pub aggregate_competition_attack_attempt_component: f64,
-    pub aggregate_adaptation_reversal_component: f64,
-    pub aggregate_adaptation_juvenile_mi_component: f64,
-    pub aggregate_adaptation_diversity_component: f64,
+    pub pillar_window_start_tick: u64,
+    pub pillar_window_end_tick: u64,
+    pub viability_pillar: f64,
+    pub foraging_pillar: f64,
+    pub intelligence_pillar: f64,
+    pub competition_pillar: f64,
+    pub adaptation_pillar: f64,
+    pub viability_life_component: f64,
+    pub viability_reproduction_component: f64,
+    pub foraging_p_fwd_food_component: f64,
+    pub foraging_rate_component: f64,
+    pub intelligence_adult_mi_component: f64,
+    pub intelligence_action_effectiveness_component: f64,
+    pub intelligence_entropy_component: f64,
+    pub intelligence_anti_idle_component: f64,
+    pub intelligence_util_component: f64,
+    pub competition_predation_component: f64,
+    pub competition_attack_success_component: f64,
+    pub competition_attack_attempt_component: f64,
+    pub adaptation_juvenile_mi_component: f64,
+    pub adaptation_diversity_component: f64,
     pub timeseries_label: String,
     pub per_seed_rows: Vec<PerSeedReportRow>,
 }
@@ -116,7 +106,6 @@ pub struct HtmlReportMeta {
 #[derive(Debug, Clone, Serialize)]
 pub struct PerSeedReportRow {
     pub seed: u64,
-    pub score: f64,
     pub total_time_seconds: f64,
     pub state_hash: String,
     pub report_href: String,
@@ -135,9 +124,6 @@ pub struct ComparisonMetricRow {
 #[derive(Debug, Clone, Serialize)]
 pub struct PerSeedComparisonRow {
     pub seed: u64,
-    pub control_score: f64,
-    pub treatment_score: f64,
-    pub diff_score: f64,
     pub control_report_href: String,
     pub treatment_report_href: String,
 }
@@ -213,112 +199,78 @@ pub fn write_html_report(
     kv(&mut html, "Generated At (UTC)", &meta.generated_at_utc);
     html.push_str("</div></div>");
 
-    html.push_str("<div class=\"panel\"><h2>Aggregate Score</h2>");
-    if meta.seed_count == 1 {
-        let _ = write!(
-            html,
-            "<p class=\"score-big\">{:.2}</p>\
-             <p class=\"score-sub\">window: ticks {}-{} | higher is better for quick run-to-run comparison</p>",
-            meta.aggregate_score, meta.aggregate_window_start_tick, meta.aggregate_window_end_tick
-        );
-    } else {
-        let _ = write!(
-            html,
-            "<p class=\"score-big\">{:.2}</p>\
-             <p class=\"score-sub\">mean across {} seeds | median {:.2} | stddev {:.2} | min {:.2} | max {:.2} | window: ticks {}-{}</p>",
-            meta.aggregate_score,
-            meta.seed_count,
-            meta.aggregate_score_median,
-            meta.aggregate_score_stddev,
-            meta.aggregate_score_min,
-            meta.aggregate_score_max,
-            meta.aggregate_window_start_tick,
-            meta.aggregate_window_end_tick
-        );
-    }
+    html.push_str("<div class=\"panel\"><h2>Pillar Scores</h2>");
+    let _ = write!(
+        html,
+        "<p class=\"score-sub\">window: ticks {}-{} | no aggregate score — each pillar stands on its own, because different niches excel at different pillars.</p>",
+        meta.pillar_window_start_tick, meta.pillar_window_end_tick
+    );
     html.push_str("<div class=\"pillar-list\">");
     pillar_card(
         &mut html,
         "Viability",
-        &format!("{:.3}", meta.aggregate_viability_pillar),
+        &format!("{:.3}", meta.viability_pillar),
         &[
-            ("Life", meta.aggregate_viability_life_component),
-            (
-                "Reproduction",
-                meta.aggregate_viability_reproduction_component,
-            ),
-            (
-                "Damage avoidance",
-                meta.aggregate_viability_damage_component,
-            ),
+            ("Life", meta.viability_life_component),
+            ("Reproduction", meta.viability_reproduction_component),
         ],
     );
     pillar_card(
         &mut html,
         "Foraging",
-        &format!("{:.3}", meta.aggregate_foraging_pillar),
+        &format!("{:.3}", meta.foraging_pillar),
         &[
-            ("P(Fwd|food)", meta.aggregate_foraging_p_fwd_food_component),
-            ("Foraging rate", meta.aggregate_foraging_rate_component),
+            ("P(Fwd|food)", meta.foraging_p_fwd_food_component),
+            ("Foraging rate", meta.foraging_rate_component),
         ],
     );
     pillar_card(
         &mut html,
-        "Behavioral Control",
-        &format!("{:.3}", meta.aggregate_control_pillar),
+        "Intelligence",
+        &format!("{:.3}", meta.intelligence_pillar),
         &[
             (
                 "Action effectiveness",
-                meta.aggregate_control_action_effectiveness_component,
+                meta.intelligence_action_effectiveness_component,
             ),
-            ("Adult MI", meta.aggregate_control_adult_mi_component),
-            ("Entropy", meta.aggregate_control_entropy_component),
-            ("Anti-idle", meta.aggregate_control_anti_idle_component),
-            ("Util", meta.aggregate_control_util_component),
+            ("Adult MI", meta.intelligence_adult_mi_component),
+            ("Entropy", meta.intelligence_entropy_component),
+            ("Anti-idle", meta.intelligence_anti_idle_component),
+            ("Util", meta.intelligence_util_component),
         ],
     );
     pillar_card(
         &mut html,
         "Competition",
-        &format!("{:.3}", meta.aggregate_competition_pillar),
+        &format!("{:.3}", meta.competition_pillar),
         &[
-            ("Predation", meta.aggregate_competition_predation_component),
-            (
-                "Attack success",
-                meta.aggregate_competition_attack_success_component,
-            ),
-            (
-                "Attack attempts",
-                meta.aggregate_competition_attack_attempt_component,
-            ),
+            ("Predation", meta.competition_predation_component),
+            ("Attack success", meta.competition_attack_success_component),
+            ("Attack attempts", meta.competition_attack_attempt_component),
         ],
     );
     pillar_card(
         &mut html,
         "Adaptation",
-        &format!("{:.3}", meta.aggregate_adaptation_pillar),
+        &format!("{:.3}", meta.adaptation_pillar),
         &[
-            ("Reversal", meta.aggregate_adaptation_reversal_component),
-            (
-                "Juvenile MI",
-                meta.aggregate_adaptation_juvenile_mi_component,
-            ),
-            ("Diversity", meta.aggregate_adaptation_diversity_component),
+            ("Juvenile MI", meta.adaptation_juvenile_mi_component),
+            ("Diversity", meta.adaptation_diversity_component),
         ],
     );
     html.push_str("</div></div>");
 
     if !meta.per_seed_rows.is_empty() {
         html.push_str("<div class=\"panel\"><h2>Per-Seed Results</h2><table><thead><tr>");
-        for header in ["seed", "score", "time_s", "state_hash", "report"] {
+        for header in ["seed", "time_s", "state_hash", "report"] {
             let _ = write!(html, "<th>{header}</th>");
         }
         html.push_str("</tr></thead><tbody>");
         for row in &meta.per_seed_rows {
             let _ = write!(
                 html,
-                "<tr><td>{}</td><td>{:.2}</td><td>{:.3}</td><td>{}</td><td><a href=\"{}\">open</a></td></tr>",
-                row.seed, row.score, row.total_time_seconds, row.state_hash, row.report_href
+                "<tr><td>{}</td><td>{:.3}</td><td>{}</td><td><a href=\"{}\">open</a></td></tr>",
+                row.seed, row.total_time_seconds, row.state_hash, row.report_href
             );
         }
         html.push_str("</tbody></table></div>");
@@ -357,8 +309,6 @@ pub fn write_html_report(
         "reproduction_efficiency",
         "mean_gestation_ticks",
         "mean_offspring_transfer_energy",
-        "damage_avoidance",
-        "reward_reversal_shift",
         "util",
     ] {
         let _ = write!(html, "<th>{header}</th>");
@@ -394,8 +344,6 @@ pub fn write_html_report(
             fmt_opt(row.reproduction_efficiency, 4),
             fmt_opt(row.mean_gestation_ticks, 4),
             fmt_opt(row.mean_offspring_transfer_energy, 2),
-            fmt_opt(row.damage_avoidance, 4),
-            fmt_opt(row.reward_reversal_shift, 4),
             fmt_opt(row.util, 4),
         ] {
             let _ = write!(html, "<td>{cell}</td>");
@@ -551,18 +499,6 @@ pub fn write_html_report(
             "#0f766e",
         ),
         (
-            "Damage Avoidance",
-            metric_series(rows, |r| r.damage_avoidance),
-            Some(1.0),
-            "#059669",
-        ),
-        (
-            "Reward Reversal Shift",
-            metric_series(rows, |r| r.reward_reversal_shift),
-            Some(0.0),
-            "#1d4ed8",
-        ),
-        (
             "Inter Utilization",
             metric_series(rows, |r| r.util),
             None,
@@ -666,28 +602,16 @@ pub fn write_comparison_html_report(out_dir: &Path, meta: &ComparisonHtmlReportM
     }
     html.push_str("</tbody></table></div>");
 
-    html.push_str("<div class=\"panel\"><h2>Per-Seed Score Diffs</h2><table><thead><tr>");
-    for header in [
-        "seed",
-        "control_score",
-        "treatment_score",
-        "diff_score",
-        "control_report",
-        "treatment_report",
-    ] {
+    html.push_str("<div class=\"panel\"><h2>Per-Seed Reports</h2><table><thead><tr>");
+    for header in ["seed", "control_report", "treatment_report"] {
         let _ = write!(html, "<th>{header}</th>");
     }
     html.push_str("</tr></thead><tbody>");
     for row in &meta.per_seed_rows {
         let _ = write!(
             html,
-            "<tr><td>{}</td><td>{:.2}</td><td>{:.2}</td><td>{:.2}</td><td><a href=\"{}\">open</a></td><td><a href=\"{}\">open</a></td></tr>",
-            row.seed,
-            row.control_score,
-            row.treatment_score,
-            row.diff_score,
-            row.control_report_href,
-            row.treatment_report_href,
+            "<tr><td>{}</td><td><a href=\"{}\">open</a></td><td><a href=\"{}\">open</a></td></tr>",
+            row.seed, row.control_report_href, row.treatment_report_href,
         );
     }
     html.push_str("</tbody></table></div>");
@@ -871,7 +795,7 @@ fn append_interpretation_guidance(html: &mut String) {
     html.push_str("<p>If this number is flat at baseline after thousands of generations, the evolutionary loop is broken. Check energy economics first (is eating actually rewarded enough to matter?), then mutation rates (can evolution explore fast enough?).</p>");
 
     html.push_str("<h3>H(action) -- \"Are they decisive?\"</h3>");
-    html.push_str("<p>Shannon entropy of the action distribution. In the aggregate score, the preferred regime is low but nonzero entropy: a small, purposeful repertoire is better than random wandering, but better than single-action collapse too.</p>");
+    html.push_str("<p>Shannon entropy of the action distribution. The preferred regime for the Intelligence pillar is low but nonzero entropy: a small, purposeful repertoire is better than random wandering, but also better than single-action collapse.</p>");
     html.push_str("<ul>");
     html.push_str("<li><code>~= 0</code>: over-collapsed. Usually a rigid fixed-action policy rather than intelligent sequencing.</li>");
     html.push_str("<li><code>~0.8-1.1</code> bits: preferred band. Typically means mostly forward movement, periodic consumes, and occasional turns when the state demands them.</li>");
@@ -894,13 +818,13 @@ fn append_interpretation_guidance(html: &mut String) {
     html.push_str("<p>The relationship between MI and P(Fwd|food): MI can be positive even when P(Fwd|food) is at baseline, if organisms are reacting to non-food stimuli (avoiding walls, turning away from other organisms). This is still interesting - it means brains are sensory-responsive, just not for the behavior you expected.</p>");
 
     html.push_str("<h3>Failed action rate -- \"Do they choose actions that actually work?\"</h3>");
-    html.push_str("<p>This measures how often contingent actions fail to produce their intended effect. The current definition counts failed <code>Forward</code>, <code>Eat</code>, <code>Attack</code>, and <code>Reproduce</code> selections, and it is the primary subscore inside Behavioral Control.</p>");
+    html.push_str("<p>This measures how often contingent actions fail to produce their intended effect. The current definition counts failed <code>Forward</code>, <code>Eat</code>, <code>Attack</code>, and <code>Reproduce</code> selections, and it is the primary subscore inside the Intelligence pillar.</p>");
     html.push_str("<ul>");
     html.push_str(
         "<li><code>0.00-0.10</code>: strong. Brains usually avoid obviously useless actions.</li>",
     );
     html.push_str("<li><code>0.20-0.40</code>: mixed. Organisms have some situational competence but still waste many actions.</li>");
-    html.push_str("<li><code>0.50+</code>: weak behavioral control. A large share of costly actions are doing nothing useful.</li>");
+    html.push_str("<li><code>0.50+</code>: weak behavioural competence. A large share of costly actions are doing nothing useful.</li>");
     html.push_str("</ul>");
     html.push_str("<p>Interpret this together with MI and P(Fwd|food). High MI with high failed-action rate usually means the brain is reacting to stimuli, but choosing the wrong motor output for the situation.</p>");
 

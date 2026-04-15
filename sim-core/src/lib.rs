@@ -62,8 +62,6 @@ pub struct Simulation {
     pending_actions: Vec<PendingActionState>,
     #[serde(skip)]
     reward_ledgers: Vec<RewardLedger>,
-    #[serde(skip)]
-    reward_signal_multiplier: f32,
     foods: Vec<FoodState>,
     occupancy: Vec<Option<Occupant>>,
     #[serde(default)]
@@ -117,7 +115,6 @@ impl Simulation {
             organisms: Vec::new(),
             pending_actions: Vec::new(),
             reward_ledgers: Vec::new(),
-            reward_signal_multiplier: 1.0,
             foods: Vec::new(),
             occupancy: vec![None; capacity],
             visual_map: Vec::new(),
@@ -144,14 +141,6 @@ impl Simulation {
 
     pub fn config(&self) -> &WorldConfig {
         &self.config
-    }
-
-    pub fn set_reward_signal_multiplier(&mut self, multiplier: f32) {
-        self.reward_signal_multiplier = if multiplier.is_finite() && multiplier != 0.0 {
-            multiplier
-        } else {
-            1.0
-        };
     }
 
     fn build_visual_map_base(&mut self) {

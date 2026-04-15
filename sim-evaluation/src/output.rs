@@ -87,65 +87,53 @@ pub(crate) fn print_evaluation_summary(out_dir: &Path, summary: &EvaluationSumma
     println!("browser_url: {}", browser_file_url(&report_path));
     println!("seeds: {}", format_seed_list(&summary.seeds));
     println!("worker_threads: {}", summary.worker_threads);
+    let pillars = &summary.pillars;
+    println!(
+        "viability_pillar: {:.3} [life={:.3} reproduction={:.3}]",
+        pillars.viability_pillar,
+        pillars.viability_life_component,
+        pillars.viability_reproduction_component,
+    );
+    println!(
+        "foraging_pillar: {:.3} [p_fwd_food={:.3} foraging_rate={:.3}]",
+        pillars.foraging_pillar,
+        pillars.foraging_p_fwd_food_component,
+        pillars.foraging_rate_component,
+    );
+    println!(
+        "intelligence_pillar: {:.3} [effectiveness={:.3} adult_mi={:.3} entropy={:.3} anti_idle={:.3} util={:.3}]",
+        pillars.intelligence_pillar,
+        pillars.intelligence_action_effectiveness_component,
+        pillars.intelligence_adult_mi_component,
+        pillars.intelligence_entropy_component,
+        pillars.intelligence_anti_idle_component,
+        pillars.intelligence_util_component,
+    );
+    println!(
+        "competition_pillar: {:.3} [predation={:.3} attack_success={:.3} attack_attempts={:.3}]",
+        pillars.competition_pillar,
+        pillars.competition_predation_component,
+        pillars.competition_attack_success_component,
+        pillars.competition_attack_attempt_component,
+    );
+    println!(
+        "adaptation_pillar: {:.3} [juvenile_mi={:.3} diversity={:.3}]",
+        pillars.adaptation_pillar,
+        pillars.adaptation_juvenile_mi_component,
+        pillars.adaptation_diversity_component,
+    );
     for seed_summary in &summary.seed_summaries {
+        let p = &seed_summary.pillars;
         println!(
-            "seed_score[{}]: {:.2}",
-            seed_summary.seed, seed_summary.aggregate_score.score
+            "seed[{}]: viability={:.3} foraging={:.3} intelligence={:.3} competition={:.3} adaptation={:.3}",
+            seed_summary.seed,
+            p.viability_pillar,
+            p.foraging_pillar,
+            p.intelligence_pillar,
+            p.competition_pillar,
+            p.adaptation_pillar,
         );
     }
-    println!("aggregate_score: {:.2}", summary.aggregate_score.score);
-    println!(
-        "aggregate_score_median: {:.2}",
-        summary.aggregate_score.score_median
-    );
-    println!(
-        "aggregate_score_stddev: {:.2}",
-        summary.aggregate_score.score_stddev
-    );
-    println!(
-        "aggregate_score_min: {:.2}",
-        summary.aggregate_score.score_min
-    );
-    println!(
-        "aggregate_score_max: {:.2}",
-        summary.aggregate_score.score_max
-    );
-    println!(
-        "aggregate_viability_pillar: {:.3} [life={:.3} reproduction={:.3} damage={:.3}]",
-        summary.aggregate_score.viability_pillar,
-        summary.aggregate_score.viability_life_component,
-        summary.aggregate_score.viability_reproduction_component,
-        summary.aggregate_score.viability_damage_component
-    );
-    println!(
-        "aggregate_foraging_pillar: {:.3} [p_fwd_food={:.3} foraging_rate={:.3}]",
-        summary.aggregate_score.foraging_pillar,
-        summary.aggregate_score.foraging_p_fwd_food_component,
-        summary.aggregate_score.foraging_rate_component
-    );
-    println!(
-        "aggregate_control_pillar: {:.3} [effectiveness={:.3} adult_mi={:.3} entropy={:.3} anti_idle={:.3} util={:.3}]",
-        summary.aggregate_score.control_pillar,
-        summary.aggregate_score.control_action_effectiveness_component,
-        summary.aggregate_score.control_adult_mi_component,
-        summary.aggregate_score.control_entropy_component,
-        summary.aggregate_score.control_anti_idle_component,
-        summary.aggregate_score.control_util_component
-    );
-    println!(
-        "aggregate_competition_pillar: {:.3} [predation={:.3} attack_success={:.3} attack_attempts={:.3}]",
-        summary.aggregate_score.competition_pillar,
-        summary.aggregate_score.competition_predation_component,
-        summary.aggregate_score.competition_attack_success_component,
-        summary.aggregate_score.competition_attack_attempt_component
-    );
-    println!(
-        "aggregate_adaptation_pillar: {:.3} [reversal={:.3} juvenile_mi={:.3} diversity={:.3}]",
-        summary.aggregate_score.adaptation_pillar,
-        summary.aggregate_score.adaptation_reversal_component,
-        summary.aggregate_score.adaptation_juvenile_mi_component,
-        summary.aggregate_score.adaptation_diversity_component
-    );
     print_experiment_readouts("aggregate", &summary.experiment_readouts);
     println!("total_time_seconds: {:.3}", summary.total_time_seconds);
 }

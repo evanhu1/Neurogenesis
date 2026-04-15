@@ -184,24 +184,14 @@ fn should_prune_synapses(age_turns: u64, age_of_maturity: u32) -> bool {
     age_turns >= maturity_ticks && age_turns.is_multiple_of(SYNAPSE_PRUNE_INTERVAL_TICKS)
 }
 
-#[cfg(test)]
 pub(crate) fn apply_runtime_weight_updates(
     organism: &mut OrganismState,
     reward_ledger: RewardLedger,
 ) {
-    apply_runtime_weight_updates_with_multiplier(organism, reward_ledger, 1.0);
-}
-
-pub(crate) fn apply_runtime_weight_updates_with_multiplier(
-    organism: &mut OrganismState,
-    reward_ledger: RewardLedger,
-    reward_signal_multiplier: f32,
-) {
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
 
-    let raw_reward = reward_ledger.weighted_reward_signal(&organism.genome.reward_weights)
-        * reward_signal_multiplier;
+    let raw_reward = reward_ledger.weighted_reward_signal(&organism.genome.reward_weights);
     let dopamine_signal = step_actor_critic(organism, raw_reward);
 
     let params = PlasticityStepParams::from_organism(organism, dopamine_signal);

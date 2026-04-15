@@ -22,7 +22,6 @@ pub(crate) struct SeedRunOptions {
     pub(crate) out_dir: PathBuf,
     pub(crate) title: Option<String>,
     pub(crate) control: bool,
-    pub(crate) reward_reversal_tick: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -32,7 +31,7 @@ pub(crate) struct SeedEvaluationSummary {
     pub(crate) ticks: u64,
     pub(crate) control: bool,
     pub(crate) total_time_seconds: f64,
-    pub(crate) aggregate_score: AggregateScore,
+    pub(crate) pillars: PillarScores,
     pub(crate) experiment_readouts: ReproductionAnalytics,
     pub(crate) state_hash: String,
     pub(crate) timeseries: Vec<IntervalMetrics>,
@@ -46,7 +45,7 @@ pub(crate) struct EvaluationSummary {
     pub(crate) control: bool,
     pub(crate) worker_threads: usize,
     pub(crate) total_time_seconds: f64,
-    pub(crate) aggregate_score: AggregateScore,
+    pub(crate) pillars: PillarScores,
     pub(crate) experiment_readouts: ReproductionAnalytics,
     pub(crate) seed_summaries: Vec<SeedRunSummary>,
     pub(crate) timeseries: Vec<IntervalMetrics>,
@@ -57,7 +56,7 @@ pub(crate) struct SeedRunSummary {
     pub(crate) seed: u64,
     pub(crate) out_dir: PathBuf,
     pub(crate) total_time_seconds: f64,
-    pub(crate) aggregate_score: AggregateScore,
+    pub(crate) pillars: PillarScores,
     pub(crate) experiment_readouts: ReproductionAnalytics,
     pub(crate) state_hash: String,
 }
@@ -75,13 +74,13 @@ pub(crate) struct ReproductionAnalytics {
     pub(crate) mean_successful_birth_interval: Option<f64>,
 }
 
+/// Per-pillar evaluation readout. There is deliberately no single aggregate
+/// score here — see PERF_LOG.md / EVALUATION_GUIDANCE.md for why. Each pillar
+/// is reported in its own right, and the intelligence pillar is composed of
+/// niche-agnostic behavioural measures so predators, foragers, and
+/// r-strategists can all be compared on the same axis.
 #[derive(Debug, Clone, Serialize)]
-pub(crate) struct AggregateScore {
-    pub(crate) score: f64,
-    pub(crate) score_median: f64,
-    pub(crate) score_stddev: f64,
-    pub(crate) score_min: f64,
-    pub(crate) score_max: f64,
+pub(crate) struct PillarScores {
     pub(crate) window_start_tick: u64,
     pub(crate) window_end_tick: u64,
     pub(crate) mean_life_mean: Option<f64>,
@@ -101,30 +100,25 @@ pub(crate) struct AggregateScore {
     pub(crate) mean_gestation_ticks: Option<f64>,
     pub(crate) mean_offspring_transfer_energy: Option<f64>,
     pub(crate) mean_lineage_diversity: Option<f64>,
-    pub(crate) mean_damage_avoidance: Option<f64>,
-    pub(crate) mean_reward_reversal_shift: Option<f64>,
     pub(crate) mean_util: Option<f64>,
     pub(crate) mean_action_histogram: [f64; N_ACTIONS],
-    pub(crate) reward_reversal_adaptation_ticks: Option<u64>,
     pub(crate) viability_life_component: f64,
     pub(crate) viability_reproduction_component: f64,
-    pub(crate) viability_damage_component: f64,
     pub(crate) foraging_p_fwd_food_component: f64,
     pub(crate) foraging_rate_component: f64,
-    pub(crate) control_adult_mi_component: f64,
-    pub(crate) control_action_effectiveness_component: f64,
-    pub(crate) control_entropy_component: f64,
-    pub(crate) control_anti_idle_component: f64,
-    pub(crate) control_util_component: f64,
+    pub(crate) intelligence_adult_mi_component: f64,
+    pub(crate) intelligence_action_effectiveness_component: f64,
+    pub(crate) intelligence_entropy_component: f64,
+    pub(crate) intelligence_anti_idle_component: f64,
+    pub(crate) intelligence_util_component: f64,
     pub(crate) competition_predation_component: f64,
     pub(crate) competition_attack_success_component: f64,
     pub(crate) competition_attack_attempt_component: f64,
-    pub(crate) adaptation_reversal_component: f64,
     pub(crate) adaptation_juvenile_mi_component: f64,
     pub(crate) adaptation_diversity_component: f64,
     pub(crate) viability_pillar: f64,
     pub(crate) foraging_pillar: f64,
-    pub(crate) control_pillar: f64,
+    pub(crate) intelligence_pillar: f64,
     pub(crate) competition_pillar: f64,
     pub(crate) adaptation_pillar: f64,
 }

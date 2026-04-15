@@ -68,9 +68,6 @@ pub(crate) fn run_comparison_evaluation(
         .zip(&treatment.seed_summaries)
         .map(|(control_seed, treatment_seed)| PerSeedComparisonRow {
             seed: control_seed.seed,
-            control_score: control_seed.aggregate_score.score,
-            treatment_score: treatment_seed.aggregate_score.score,
-            diff_score: treatment_seed.aggregate_score.score - control_seed.aggregate_score.score,
             control_report_href: format!("control/seed_{}/report.html", control_seed.seed),
             treatment_report_href: format!("treatment/seed_{}/report.html", treatment_seed.seed),
         })
@@ -109,301 +106,38 @@ fn comparison_metric_rows(
     control: &EvaluationSummary,
     treatment: &EvaluationSummary,
 ) -> Vec<ComparisonMetricRow> {
+    let paired = |label: &str, f: fn(&crate::types::PillarScores) -> Option<f64>| {
+        paired_metric_row(
+            label,
+            control.seed_summaries.iter().map(|s| f(&s.pillars)).collect(),
+            treatment
+                .seed_summaries
+                .iter()
+                .map(|s| f(&s.pillars))
+                .collect(),
+        )
+    };
     vec![
-        paired_metric_row(
-            "aggregate_score",
-            control
-                .seed_summaries
-                .iter()
-                .map(|seed| Some(seed.aggregate_score.score))
-                .collect(),
-            treatment
-                .seed_summaries
-                .iter()
-                .map(|seed| Some(seed.aggregate_score.score))
-                .collect(),
-        ),
-        paired_metric_row(
-            "viability_pillar",
-            control
-                .seed_summaries
-                .iter()
-                .map(|seed| Some(seed.aggregate_score.viability_pillar))
-                .collect(),
-            treatment
-                .seed_summaries
-                .iter()
-                .map(|seed| Some(seed.aggregate_score.viability_pillar))
-                .collect(),
-        ),
-        paired_metric_row(
-            "foraging_pillar",
-            control
-                .seed_summaries
-                .iter()
-                .map(|seed| Some(seed.aggregate_score.foraging_pillar))
-                .collect(),
-            treatment
-                .seed_summaries
-                .iter()
-                .map(|seed| Some(seed.aggregate_score.foraging_pillar))
-                .collect(),
-        ),
-        paired_metric_row(
-            "control_pillar",
-            control
-                .seed_summaries
-                .iter()
-                .map(|seed| Some(seed.aggregate_score.control_pillar))
-                .collect(),
-            treatment
-                .seed_summaries
-                .iter()
-                .map(|seed| Some(seed.aggregate_score.control_pillar))
-                .collect(),
-        ),
-        paired_metric_row(
-            "competition_pillar",
-            control
-                .seed_summaries
-                .iter()
-                .map(|seed| Some(seed.aggregate_score.competition_pillar))
-                .collect(),
-            treatment
-                .seed_summaries
-                .iter()
-                .map(|seed| Some(seed.aggregate_score.competition_pillar))
-                .collect(),
-        ),
-        paired_metric_row(
-            "adaptation_pillar",
-            control
-                .seed_summaries
-                .iter()
-                .map(|seed| Some(seed.aggregate_score.adaptation_pillar))
-                .collect(),
-            treatment
-                .seed_summaries
-                .iter()
-                .map(|seed| Some(seed.aggregate_score.adaptation_pillar))
-                .collect(),
-        ),
-        paired_metric_row(
-            "life_mean",
-            control
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_life_mean)
-                .collect(),
-            treatment
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_life_mean)
-                .collect(),
-        ),
-        paired_metric_row(
-            "idle_fraction",
-            control
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_idle_fraction)
-                .collect(),
-            treatment
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_idle_fraction)
-                .collect(),
-        ),
-        paired_metric_row(
-            "action_entropy",
-            control
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_h_action)
-                .collect(),
-            treatment
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_h_action)
-                .collect(),
-        ),
-        paired_metric_row(
-            "p_fwd_food",
-            control
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_p_fwd_food)
-                .collect(),
-            treatment
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_p_fwd_food)
-                .collect(),
-        ),
-        paired_metric_row(
-            "mi_sa",
-            control
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_mi_sa)
-                .collect(),
-            treatment
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_mi_sa)
-                .collect(),
-        ),
-        paired_metric_row(
-            "mi_sa_juvenile",
-            control
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_mi_sa_juvenile)
-                .collect(),
-            treatment
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_mi_sa_juvenile)
-                .collect(),
-        ),
-        paired_metric_row(
-            "mi_sa_adult",
-            control
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_mi_sa_adult)
-                .collect(),
-            treatment
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_mi_sa_adult)
-                .collect(),
-        ),
-        paired_metric_row(
-            "reproduction_efficiency",
-            control
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_reproduction_efficiency)
-                .collect(),
-            treatment
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_reproduction_efficiency)
-                .collect(),
-        ),
-        paired_metric_row(
-            "foraging_rate",
-            control
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_foraging_rate)
-                .collect(),
-            treatment
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_foraging_rate)
-                .collect(),
-        ),
-        paired_metric_row(
-            "attack_attempt_rate",
-            control
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_attack_attempt_rate)
-                .collect(),
-            treatment
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_attack_attempt_rate)
-                .collect(),
-        ),
-        paired_metric_row(
-            "attack_success_rate",
-            control
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_attack_success_rate)
-                .collect(),
-            treatment
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_attack_success_rate)
-                .collect(),
-        ),
-        paired_metric_row(
-            "failed_action_rate",
-            control
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_failed_action_rate)
-                .collect(),
-            treatment
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_failed_action_rate)
-                .collect(),
-        ),
-        paired_metric_row(
-            "damage_avoidance",
-            control
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_damage_avoidance)
-                .collect(),
-            treatment
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_damage_avoidance)
-                .collect(),
-        ),
-        paired_metric_row(
-            "reward_reversal_shift",
-            control
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_reward_reversal_shift)
-                .collect(),
-            treatment
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_reward_reversal_shift)
-                .collect(),
-        ),
-        paired_metric_row(
-            "util",
-            control
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_util)
-                .collect(),
-            treatment
-                .seed_summaries
-                .iter()
-                .map(|seed| seed.aggregate_score.mean_util)
-                .collect(),
-        ),
-        paired_metric_row(
-            "reward_reversal_adaptation_ticks",
-            control
-                .seed_summaries
-                .iter()
-                .map(|seed| {
-                    seed.aggregate_score
-                        .reward_reversal_adaptation_ticks
-                        .map(|v| v as f64)
-                })
-                .collect(),
-            treatment
-                .seed_summaries
-                .iter()
-                .map(|seed| {
-                    seed.aggregate_score
-                        .reward_reversal_adaptation_ticks
-                        .map(|v| v as f64)
-                })
-                .collect(),
-        ),
+        paired("viability_pillar", |p| Some(p.viability_pillar)),
+        paired("foraging_pillar", |p| Some(p.foraging_pillar)),
+        paired("intelligence_pillar", |p| Some(p.intelligence_pillar)),
+        paired("competition_pillar", |p| Some(p.competition_pillar)),
+        paired("adaptation_pillar", |p| Some(p.adaptation_pillar)),
+        paired("life_mean", |p| p.mean_life_mean),
+        paired("idle_fraction", |p| p.mean_idle_fraction),
+        paired("action_entropy", |p| p.mean_h_action),
+        paired("p_fwd_food", |p| p.mean_p_fwd_food),
+        paired("mi_sa", |p| p.mean_mi_sa),
+        paired("mi_sa_juvenile", |p| p.mean_mi_sa_juvenile),
+        paired("mi_sa_adult", |p| p.mean_mi_sa_adult),
+        paired("reproduction_efficiency", |p| {
+            p.mean_reproduction_efficiency
+        }),
+        paired("foraging_rate", |p| p.mean_foraging_rate),
+        paired("attack_attempt_rate", |p| p.mean_attack_attempt_rate),
+        paired("attack_success_rate", |p| p.mean_attack_success_rate),
+        paired("failed_action_rate", |p| p.mean_failed_action_rate),
+        paired("util", |p| p.mean_util),
     ]
 }
 
