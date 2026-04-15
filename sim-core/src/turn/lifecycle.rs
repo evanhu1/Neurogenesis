@@ -15,8 +15,6 @@ impl Simulation {
             let passive_metabolic_energy_cost =
                 organism_passive_metabolic_energy_cost(&self.config, organism);
             organism.energy -= passive_metabolic_energy_cost;
-            organism.health = (organism.health + organism_health_regeneration(organism))
-                .min(organism.max_health.max(1.0));
             if organism.energy <= 0.0
                 || organism.age_turns >= u64::from(organism.genome.lifecycle.max_organism_age)
             {

@@ -136,6 +136,10 @@ fn build_intent_for_organism(
     let selected_action_state = select_action_for_organism(organism, organism_id, context, scratch);
 
     organism.last_action_taken = selected_action_state.selected_action;
+    if selected_action_state.selected_action == ActionType::Idle {
+        organism.health = (organism.health + organism_health_regeneration(organism))
+            .min(organism.max_health.max(1.0));
+    }
     let intent = translate_action_to_intent(
         idx,
         organism_id,
