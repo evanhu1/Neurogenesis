@@ -21,8 +21,6 @@ pub(crate) struct Cli {
     pub(crate) ticks: u64,
     #[arg(long, default_value_t = 2_500, value_parser = clap::value_parser!(u64).range(1..))]
     pub(crate) report_every: u64,
-    #[arg(long, default_value_t = 30)]
-    pub(crate) min_lifetime: u64,
     #[arg(long)]
     pub(crate) out: Option<PathBuf>,
     #[arg(long)]

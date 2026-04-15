@@ -13,7 +13,8 @@ pub mod writer;
 pub use manifest::{Manifest, SCHEMA_VERSION};
 pub use reader::DatasetReader;
 pub use schema::{
-    ActionCountRow, OrganismLifetimeRow, PopulationSnapshotRow, ReproductionEventRow,
-    ReproductionOutcome, TickSummaryRow, ACTION_COUNT, JOINT_LEN, SENSORY_BIN_COUNT,
+    ActionCountRow, OrganismLifetimeRow, OrganismOrigin, PopulationSnapshotRow,
+    ReproductionEventRow, ReproductionOutcome, TickSummaryRow, ACTION_COUNT, DESCENDANT_CODE,
+    JOINT_LEN, ORIGIN_COUNT, SENSORY_BIN_COUNT,
 };
 pub use writer::{DatasetWriter, PartitionedParquetWriter};

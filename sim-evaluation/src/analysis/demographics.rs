@@ -1,11 +1,11 @@
 //! Derive `DemographicAnalytics` (aggregate lineage-tracking readouts) from
 //! the `reproduction_events` and `organism_lifetimes` tables.
 //!
-//! "Descendants" are organisms with `parent_id.is_some()` — everyone born
-//! from an observed reproduction event, i.e. not a founder or periodic
-//! injection.
+//! "Descendants" are organisms with `origin == OrganismOrigin::Descendant` —
+//! everyone born from an observed reproduction event, i.e. not a founder or
+//! periodic injection.
 
-use crate::dataset::{DatasetReader, ReproductionOutcome};
+use crate::dataset::{DatasetReader, ReproductionOutcome, DESCENDANT_CODE};
 use crate::types::DemographicAnalytics;
 use std::collections::HashMap;
 
@@ -61,8 +61,8 @@ pub fn compute_demographic_analytics(
     let mut survived_to_maturity = 0_u64;
     for row in &dataset.organism_lifetimes {
         // Only count descendants — we care about whether newly produced
-        // lineages made it past the threshold, not founders.
-        if row.parent_id.is_none() {
+        // lineages made it past the threshold, not founders or injections.
+        if row.origin != DESCENDANT_CODE {
             continue;
         }
         let lifetime = match row.death_tick {

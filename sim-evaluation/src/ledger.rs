@@ -8,8 +8,8 @@
 //! can pick the top reproducer at each flush boundary.
 
 use crate::dataset::{
-    ActionCountRow, OrganismLifetimeRow, PopulationSnapshotRow, ReproductionEventRow,
-    ReproductionOutcome, ACTION_COUNT, JOINT_LEN,
+    ActionCountRow, OrganismLifetimeRow, OrganismOrigin, PopulationSnapshotRow,
+    ReproductionEventRow, ReproductionOutcome, ACTION_COUNT, JOINT_LEN, ORIGIN_COUNT,
 };
 use sim_types::{ActionRecord, ActionType, OrganismId, OrganismState, ReproductionEvent};
 use std::collections::HashMap;
@@ -34,17 +34,24 @@ impl Hasher for IdHasher {
 
 type IdHashMap<K, V> = HashMap<K, V, BuildHasherDefault<IdHasher>>;
 
-/// Per-tick action aggregates. One row per action type will be emitted to
-/// `action_counts` on every tick.
+/// Per-tick action aggregates split by origin class. One row per
+/// `(origin, action_type)` combination is emitted each tick so the analysis
+/// layer can filter to descendants without losing the founder/injection
+/// buckets.
 #[derive(Debug, Clone)]
 pub struct TickActionAggregates {
-    pub counts: [u64; ACTION_COUNT],
-    pub failed: [u64; ACTION_COUNT],
-    pub pre_maturity: [u64; ACTION_COUNT],
-    pub post_maturity: [u64; ACTION_COUNT],
+    per_origin: [OriginBucket; ORIGIN_COUNT],
 }
 
-impl TickActionAggregates {
+#[derive(Debug, Clone)]
+struct OriginBucket {
+    counts: [u64; ACTION_COUNT],
+    failed: [u64; ACTION_COUNT],
+    pre_maturity: [u64; ACTION_COUNT],
+    post_maturity: [u64; ACTION_COUNT],
+}
+
+impl OriginBucket {
     fn new() -> Self {
         Self {
             counts: [0; ACTION_COUNT],
@@ -53,18 +60,40 @@ impl TickActionAggregates {
             post_maturity: [0; ACTION_COUNT],
         }
     }
+}
+
+impl TickActionAggregates {
+    fn new() -> Self {
+        Self {
+            per_origin: [
+                OriginBucket::new(),
+                OriginBucket::new(),
+                OriginBucket::new(),
+            ],
+        }
+    }
 
     pub fn into_rows(self, tick: u64) -> Vec<ActionCountRow> {
-        (0..ACTION_COUNT as u8)
-            .map(|action_type| ActionCountRow {
-                tick,
-                action_type,
-                count: self.counts[action_type as usize],
-                failed_count: self.failed[action_type as usize],
-                pre_maturity_count: self.pre_maturity[action_type as usize],
-                post_maturity_count: self.post_maturity[action_type as usize],
-            })
-            .collect()
+        let mut rows = Vec::with_capacity(ORIGIN_COUNT * ACTION_COUNT);
+        for (origin_idx, bucket) in self.per_origin.into_iter().enumerate() {
+            if bucket.counts == [0; ACTION_COUNT] {
+                continue;
+            }
+            let origin = origin_idx as u8;
+            for action_type in 0..ACTION_COUNT as u8 {
+                let idx = action_type as usize;
+                rows.push(ActionCountRow {
+                    tick,
+                    origin,
+                    action_type,
+                    count: bucket.counts[idx],
+                    failed_count: bucket.failed[idx],
+                    pre_maturity_count: bucket.pre_maturity[idx],
+                    post_maturity_count: bucket.post_maturity[idx],
+                });
+            }
+        }
+        rows
     }
 }
 
@@ -93,6 +122,7 @@ impl MaturityWindowSummary {
 pub struct OrganismEntry {
     pub id: u64,
     pub parent_id: Option<u64>,
+    pub origin: OrganismOrigin,
     pub species_id: u64,
     pub generation: u64,
     pub birth_tick: u64,
@@ -119,6 +149,7 @@ impl OrganismEntry {
     fn new(
         id: u64,
         parent_id: Option<u64>,
+        origin: OrganismOrigin,
         species_id: u64,
         generation: u64,
         birth_tick: u64,
@@ -127,6 +158,7 @@ impl OrganismEntry {
         Self {
             id,
             parent_id,
+            origin,
             species_id,
             generation,
             birth_tick,
@@ -149,6 +181,7 @@ impl OrganismEntry {
         OrganismLifetimeRow {
             id: self.id,
             parent_id: self.parent_id,
+            origin: self.origin.code(),
             species_id: self.species_id,
             birth_tick: self.birth_tick,
             death_tick,
@@ -187,6 +220,7 @@ pub struct Ledger {
     /// `None` — that's the signal used downstream to distinguish descendants
     /// from seeded organisms when computing lineage-survival metrics.
     pending_parents: IdHashMap<OrganismId, OrganismId>,
+    descendant_population: u32,
 }
 
 impl Ledger {
@@ -195,6 +229,7 @@ impl Ledger {
             sidecar: IdHashMap::default(),
             tick_aggregates: TickActionAggregates::new(),
             pending_parents: IdHashMap::default(),
+            descendant_population: 0,
         }
     }
 
@@ -207,11 +242,22 @@ impl Ledger {
         age_of_maturity: u32,
     ) {
         let parent_id = self.pending_parents.remove(&id).map(|p| p.0);
+        let origin = if parent_id.is_some() {
+            OrganismOrigin::Descendant
+        } else if birth_tick == 0 {
+            OrganismOrigin::InitialFounder
+        } else {
+            OrganismOrigin::PeriodicInjection
+        };
+        if origin == OrganismOrigin::Descendant {
+            self.descendant_population = self.descendant_population.saturating_add(1);
+        }
         self.sidecar.insert(
             id,
             OrganismEntry::new(
                 id.0,
                 parent_id,
+                origin,
                 species_id,
                 generation,
                 birth_tick,
@@ -225,29 +271,24 @@ impl Ledger {
     pub fn record_action(&mut self, record: &ActionRecord) {
         let action_idx = action_index(record.selected_action);
         let sensory_bin = sensory_bin(record);
-        let is_pre_maturity_record = self
-            .sidecar
-            .get(&record.organism_id)
-            .map(|entry| record.age_turns < u64::from(entry.age_of_maturity))
-            .unwrap_or(false);
-
-        self.tick_aggregates.counts[action_idx] =
-            self.tick_aggregates.counts[action_idx].saturating_add(1);
-        if action_can_fail(record.selected_action) && record.action_failed {
-            self.tick_aggregates.failed[action_idx] =
-                self.tick_aggregates.failed[action_idx].saturating_add(1);
-        }
-        if is_pre_maturity_record {
-            self.tick_aggregates.pre_maturity[action_idx] =
-                self.tick_aggregates.pre_maturity[action_idx].saturating_add(1);
-        } else {
-            self.tick_aggregates.post_maturity[action_idx] =
-                self.tick_aggregates.post_maturity[action_idx].saturating_add(1);
-        }
-
+        // Absent sidecar entry means we never saw this organism's birth —
+        // skip so origin-bucketed aggregates stay consistent.
         let Some(entry) = self.sidecar.get_mut(&record.organism_id) else {
             return;
         };
+        let origin_idx = entry.origin as usize;
+        let is_pre_maturity_record = record.age_turns < u64::from(entry.age_of_maturity);
+        let bucket = &mut self.tick_aggregates.per_origin[origin_idx];
+
+        bucket.counts[action_idx] = bucket.counts[action_idx].saturating_add(1);
+        if action_can_fail(record.selected_action) && record.action_failed {
+            bucket.failed[action_idx] = bucket.failed[action_idx].saturating_add(1);
+        }
+        if is_pre_maturity_record {
+            bucket.pre_maturity[action_idx] = bucket.pre_maturity[action_idx].saturating_add(1);
+        } else {
+            bucket.post_maturity[action_idx] = bucket.post_maturity[action_idx].saturating_add(1);
+        }
 
         let consumption_delta = record
             .consumptions_count
@@ -315,19 +356,30 @@ impl Ledger {
     }
 
     pub fn death(&mut self, id: OrganismId, tick: u64) -> Option<OrganismLifetimeRow> {
-        self.sidecar
-            .remove(&id)
-            .map(|entry| entry.into_lifetime_row(Some(tick)))
+        let entry = self.sidecar.remove(&id)?;
+        if entry.origin == OrganismOrigin::Descendant {
+            debug_assert!(
+                self.descendant_population > 0,
+                "descendant_population underflow: death of {id:?} with zero running count"
+            );
+            self.descendant_population = self.descendant_population.saturating_sub(1);
+        }
+        Some(entry.into_lifetime_row(Some(tick)))
     }
 
     /// Drain remaining live entries at run end. Called once after the last
     /// tick completes so every organism contributes a lifetime row.
     pub fn drain_survivors(&mut self) -> Vec<OrganismLifetimeRow> {
         let survivors = std::mem::take(&mut self.sidecar);
+        self.descendant_population = 0;
         survivors
             .into_values()
             .map(|entry| entry.into_lifetime_row(None))
             .collect()
+    }
+
+    pub fn descendant_population(&self) -> u32 {
+        self.descendant_population
     }
 
     pub fn population_snapshot_rows(
@@ -343,6 +395,7 @@ impl Ledger {
                     tick,
                     organism_id: organism.id.0,
                     parent_id: entry.parent_id,
+                    origin: entry.origin.code(),
                     species_id: organism.species_id.0,
                     generation: organism.generation,
                     birth_tick: entry.birth_tick,
@@ -461,10 +514,11 @@ mod tests {
         });
 
         let aggregates = ledger.take_tick_aggregates();
-        assert_eq!(aggregates.counts[action_index(ActionType::TurnLeft)], 1);
-        assert_eq!(aggregates.failed[action_index(ActionType::TurnLeft)], 0);
-        assert_eq!(aggregates.failed[action_index(ActionType::Eat)], 1);
-        assert_eq!(aggregates.failed[action_index(ActionType::Attack)], 0);
+        let founder = &aggregates.per_origin[OrganismOrigin::InitialFounder as usize];
+        assert_eq!(founder.counts[action_index(ActionType::TurnLeft)], 1);
+        assert_eq!(founder.failed[action_index(ActionType::TurnLeft)], 0);
+        assert_eq!(founder.failed[action_index(ActionType::Eat)], 1);
+        assert_eq!(founder.failed[action_index(ActionType::Attack)], 0);
     }
 
     #[test]

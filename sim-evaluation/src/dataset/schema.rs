@@ -11,6 +11,32 @@ use sim_types::SensoryReceptor;
 /// this constant.
 pub const ACTION_COUNT: usize = 7;
 
+/// How an organism first appeared in the world. The analysis layer filters to
+/// `Descendant` so that founder behaviour and periodic-injection bursts don't
+/// contaminate evolution metrics; the other two variants remain in the dataset
+/// for completeness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum OrganismOrigin {
+    /// Part of the population spawned at tick 0.
+    InitialFounder = 0,
+    /// Spawned by the periodic seed-genome injection mechanism after tick 0.
+    PeriodicInjection = 1,
+    /// Born via a successful in-world reproduction event.
+    Descendant = 2,
+}
+
+/// Number of origin classes; used to size per-origin tick aggregates.
+pub const ORIGIN_COUNT: usize = 3;
+
+impl OrganismOrigin {
+    pub const fn code(self) -> u8 {
+        self as u8
+    }
+}
+
+pub const DESCENDANT_CODE: u8 = OrganismOrigin::Descendant.code();
+
 /// Number of sensory context bins used by the joint histograms. One bin for
 /// "no food visible" plus one bin per vision ray.
 pub const SENSORY_BIN_COUNT: usize = 1 + SensoryReceptor::VISION_RAY_OFFSETS.len();
@@ -18,16 +44,23 @@ pub const SENSORY_BIN_COUNT: usize = 1 + SensoryReceptor::VISION_RAY_OFFSETS.len
 /// Length of the flattened joint-sensory-action histogram.
 pub const JOINT_LEN: usize = SENSORY_BIN_COUNT * ACTION_COUNT;
 
-/// One row per tick. All fields are cheap scalars. More expensive living
-/// population facts that require iterating organisms at flush boundaries live
-/// in `population_snapshots`.
+/// One row per tick. Most fields are whole-world totals; the `descendant_*`
+/// fields carry the descendants-only slice the analysis layer uses so pillars
+/// and the timeseries ignore founder/injection contributions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TickSummaryRow {
     pub tick: u64,
     pub population: u32,
+    /// Subset of `population` whose origin is `Descendant`.
+    pub descendant_population: u32,
     pub max_generation: Option<u64>,
     pub births: u32,
+    /// Successful reproduction events this tick. Excludes periodic-injection
+    /// spawns, which are counted in `births` but not in this field.
+    pub descendant_births: u32,
     pub deaths: u32,
+    /// Deaths restricted to organisms whose origin is `Descendant`.
+    pub descendant_deaths: u32,
     pub food_count: u32,
     pub consumptions: u32,
     pub predations: u32,
@@ -42,6 +75,8 @@ pub struct PopulationSnapshotRow {
     pub tick: u64,
     pub organism_id: u64,
     pub parent_id: Option<u64>,
+    /// `OrganismOrigin` discriminant.
+    pub origin: u8,
     pub species_id: u64,
     pub generation: u64,
     pub birth_tick: u64,
@@ -51,11 +86,15 @@ pub struct PopulationSnapshotRow {
     pub synapse_count: u32,
 }
 
-/// Long-format action counters: one row per (tick, action_type). Adding new
-/// action types doesn't reshape the schema.
+/// Long-format action counters: one row per (tick, origin, action_type).
+/// Adding new action types doesn't reshape the schema. The `origin` column
+/// lets the analysis layer drop founder/injection buckets.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ActionCountRow {
     pub tick: u64,
+    /// `OrganismOrigin` discriminant. Pairs with `action_type` to form the
+    /// row key.
+    pub origin: u8,
     /// `ActionType` encoded as its discriminant index. Kept as u8 for compact
     /// storage; reverse map lives in `sim_types::ActionType::ALL`.
     pub action_type: u8,
@@ -73,6 +112,9 @@ pub struct ActionCountRow {
 pub struct OrganismLifetimeRow {
     pub id: u64,
     pub parent_id: Option<u64>,
+    /// `OrganismOrigin` discriminant. Descendants alone feed pillars and
+    /// timeseries; founder/injection rows are retained for completeness.
+    pub origin: u8,
     pub species_id: u64,
     pub birth_tick: u64,
     pub death_tick: Option<u64>,

@@ -5,7 +5,7 @@
 //! interval may be shorter than `report_every` if `total_ticks` isn't an
 //! exact multiple.
 
-use crate::dataset::{DatasetReader, ACTION_COUNT, JOINT_LEN, SENSORY_BIN_COUNT};
+use crate::dataset::{DatasetReader, ACTION_COUNT, DESCENDANT_CODE, JOINT_LEN, SENSORY_BIN_COUNT};
 use crate::types::IntervalMetrics;
 use std::collections::BTreeMap;
 
@@ -31,7 +31,6 @@ pub fn derive_interval_metrics(
     dataset: &DatasetReader,
     report_every: u64,
     total_ticks: u64,
-    min_lifetime: u64,
 ) -> Vec<IntervalMetrics> {
     if report_every == 0 || total_ticks == 0 {
         return Vec::new();
@@ -63,28 +62,36 @@ pub fn derive_interval_metrics(
         }
     }
     for row in &dataset.action_counts {
+        // Drop founder/injection buckets — pillars and timeseries are
+        // evolution readouts and should ignore seeded organisms.
+        if row.origin != DESCENDANT_CODE {
+            continue;
+        }
         if let Some(idx) = interval_index(&boundaries, row.tick) {
             accs[idx].add_action_count(row);
         }
     }
     for row in &dataset.organism_lifetimes {
+        if row.origin != DESCENDANT_CODE {
+            continue;
+        }
         let Some(death_tick) = row.death_tick else {
             continue;
         };
-        let lifetime = death_tick.saturating_sub(row.birth_tick);
-        if lifetime < min_lifetime {
-            continue;
-        }
         if let Some(idx) = interval_index(&boundaries, death_tick) {
             accs[idx].add_lifetime(row);
         }
     }
     // Population snapshots are sparse (one flush boundary per interval). Use
-    // the most recent raw organism snapshot rows at or before the interval end
-    // and derive population-level readouts from them here in analysis.
+    // the most recent raw descendant-only organism snapshot rows at or before
+    // the interval end and derive population-level readouts from them here in
+    // analysis.
     let mut snapshot_rows_by_tick: BTreeMap<u64, Vec<&crate::dataset::PopulationSnapshotRow>> =
         BTreeMap::new();
     for row in &dataset.population_snapshots {
+        if row.origin != DESCENDANT_CODE {
+            continue;
+        }
         snapshot_rows_by_tick.entry(row.tick).or_default().push(row);
     }
     accs.iter_mut().for_each(|acc| {
@@ -150,12 +157,12 @@ impl IntervalAccumulator {
     }
 
     fn add_tick_summary(&mut self, row: &crate::dataset::TickSummaryRow) {
-        self.births = self.births.saturating_add(u64::from(row.births));
-        self.deaths = self.deaths.saturating_add(u64::from(row.deaths));
+        self.births = self.births.saturating_add(u64::from(row.descendant_births));
+        self.deaths = self.deaths.saturating_add(u64::from(row.descendant_deaths));
         self.population_exposure = self
             .population_exposure
-            .saturating_add(u64::from(row.population));
-        self.last_pop = row.population;
+            .saturating_add(u64::from(row.descendant_population));
+        self.last_pop = row.descendant_population;
         self.last_food = row.food_count;
         self.last_max_generation = row.max_generation.or(self.last_max_generation);
     }

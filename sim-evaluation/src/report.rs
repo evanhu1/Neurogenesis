@@ -63,7 +63,6 @@ pub struct HtmlReportMeta {
     pub title: Option<String>,
     pub ticks: u64,
     pub report_every: u64,
-    pub min_lifetime: u64,
     pub control: bool,
     pub total_time_seconds: f64,
     pub generated_at_utc: String,
@@ -87,7 +86,6 @@ pub struct HtmlReportContext {
     pub title: Option<String>,
     pub ticks: u64,
     pub report_every: u64,
-    pub min_lifetime: u64,
     pub control: bool,
     pub total_time_seconds: f64,
     pub generated_at_utc: String,
@@ -101,7 +99,6 @@ impl HtmlReportMeta {
             title: ctx.title,
             ticks: ctx.ticks,
             report_every: ctx.report_every,
-            min_lifetime: ctx.min_lifetime,
             control: ctx.control,
             total_time_seconds: ctx.total_time_seconds,
             generated_at_utc: ctx.generated_at_utc,
@@ -210,7 +207,6 @@ pub fn write_html_report(
     }
     kv(&mut html, "Ticks", &meta.ticks.to_string());
     kv(&mut html, "Report Every", &meta.report_every.to_string());
-    kv(&mut html, "Min Lifetime", &meta.min_lifetime.to_string());
     kv(
         &mut html,
         "Random-action control",
@@ -319,11 +315,11 @@ pub fn write_html_report(
         ),
         (
             "ate_pct",
-            "Percent of sampled organisms in this interval's lifetime cohort that consumed food at least once. Uses organisms that died in the interval and passed the minimum-lifetime filter.".to_owned(),
+            "Percent of sampled organisms in this interval's lifetime cohort that consumed food at least once. Uses organisms that died in the interval.".to_owned(),
         ),
         (
             "cons_mean",
-            "Mean lifetime food consumptions for the interval's deceased-organism cohort after the minimum-lifetime filter.".to_owned(),
+            "Mean lifetime food consumptions for the interval's deceased-organism cohort.".to_owned(),
         ),
         (
             "brain_size",
@@ -337,7 +333,7 @@ pub fn write_html_report(
         ),
         (
             "mi_sa",
-            "Miller-Madow-corrected mutual information between coarse food-visibility context and selected action, pooled from qualifying lifetime histograms.".to_owned(),
+            "Miller-Madow-corrected mutual information between coarse food-visibility context and selected action, pooled from deceased-organism lifetime histograms.".to_owned(),
         ),
         (
             "idle_fraction",

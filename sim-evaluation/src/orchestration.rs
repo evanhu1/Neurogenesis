@@ -10,7 +10,7 @@ use crate::analysis::{
 };
 use crate::dataset::{
     DatasetReader, DatasetWriter as DatasetWriterTrait, Manifest, PartitionedParquetWriter,
-    TickSummaryRow, SCHEMA_VERSION,
+    TickSummaryRow, DESCENDANT_CODE, SCHEMA_VERSION,
 };
 use crate::ledger::Ledger;
 use crate::output::{write_summary_json, write_timeseries_csv};
@@ -79,7 +79,6 @@ pub(crate) fn run_evaluation_across_seeds(
         let title = options.title.clone();
         let ticks = options.ticks;
         let report_every = options.report_every;
-        let min_lifetime = options.min_lifetime;
         let control = options.control;
 
         handles.push(thread::spawn(move || loop {
@@ -94,7 +93,6 @@ pub(crate) fn run_evaluation_across_seeds(
                 seed,
                 ticks,
                 report_every,
-                min_lifetime,
                 out_dir: out_dir.join(format!("seed_{seed}")),
                 title: title
                     .as_ref()
@@ -208,7 +206,6 @@ pub(crate) fn run_evaluation_across_seeds(
                 title: summary.title.clone(),
                 ticks: summary.ticks,
                 report_every: options.report_every,
-                min_lifetime: options.min_lifetime,
                 control: summary.control,
                 total_time_seconds: summary.total_time_seconds,
                 generated_at_utc,
@@ -262,7 +259,11 @@ fn run_single_seed_evaluation(
         for record in sim.action_records().iter().flatten() {
             ledger.record_action(record);
         }
+        let mut descendant_births = 0_u32;
         for event in delta.reproduction_events.iter().copied() {
+            if event.failure_cause.is_none() && event.child_id.is_some() {
+                descendant_births = descendant_births.saturating_add(1);
+            }
             let row = ledger.record_reproduction(tick, event);
             writer.emit_reproduction_event(row);
         }
@@ -280,11 +281,15 @@ fn run_single_seed_evaluation(
         }
 
         let mut deaths = 0_u32;
+        let mut descendant_deaths = 0_u32;
         for removed in &delta.removed_positions {
             match removed.entity_id {
                 EntityId::Organism(id) => {
                     deaths = deaths.saturating_add(1);
                     if let Some(row) = ledger.death(id, tick) {
+                        if row.origin == DESCENDANT_CODE {
+                            descendant_deaths = descendant_deaths.saturating_add(1);
+                        }
                         writer.emit_organism_lifetime(row);
                     }
                 }
@@ -297,17 +302,21 @@ fn run_single_seed_evaluation(
         current_food_count = current_food_count.saturating_add(u64::from(food_spawned));
 
         let population = delta.metrics.organisms;
+        let descendant_population = ledger.descendant_population();
 
         writer.emit_tick(TickSummaryRow {
             tick,
             population,
+            descendant_population,
             max_generation: if population > 0 {
                 Some(max_generation)
             } else {
                 None
             },
             births,
+            descendant_births,
             deaths,
+            descendant_deaths,
             food_count: current_food_count as u32,
             consumptions: delta.metrics.consumptions_last_turn as u32,
             predations: delta.metrics.predations_last_turn as u32,
@@ -377,7 +386,6 @@ fn run_single_seed_evaluation(
         &AnalysisOptions {
             report_every: options.report_every,
             total_ticks: options.ticks,
-            min_lifetime: options.min_lifetime,
             scoring_window: ScoringWindow::default(),
         },
     );
@@ -399,7 +407,6 @@ fn run_single_seed_evaluation(
         &options.out_dir,
         &summary,
         options.report_every,
-        options.min_lifetime,
         "per-seed timeseries",
     )?;
 
@@ -546,7 +553,6 @@ mod tests {
             seed: 2026,
             ticks: 100,
             report_every: 50,
-            min_lifetime: 10,
             out_dir: out_a.clone(),
             title: None,
             control: false,

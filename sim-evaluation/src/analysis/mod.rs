@@ -25,7 +25,6 @@ use std::path::Path;
 pub struct AnalysisOptions {
     pub report_every: u64,
     pub total_ticks: u64,
-    pub min_lifetime: u64,
     pub scoring_window: ScoringWindow,
 }
 
@@ -36,12 +35,7 @@ pub struct AnalysisOutput {
 }
 
 pub fn analyze(dataset: &DatasetReader, options: &AnalysisOptions) -> AnalysisOutput {
-    let timeseries = derive_interval_metrics(
-        dataset,
-        options.report_every,
-        options.total_ticks,
-        options.min_lifetime,
-    );
+    let timeseries = derive_interval_metrics(dataset, options.report_every, options.total_ticks);
     let pillars = compute_pillar_scores(&timeseries, options.scoring_window);
     let demographics = compute_demographic_analytics(dataset, options.total_ticks);
     AnalysisOutput {
@@ -58,7 +52,6 @@ pub fn write_per_seed_artifacts(
     out_dir: &Path,
     summary: &SeedEvaluationSummary,
     report_every: u64,
-    min_lifetime: u64,
     timeseries_label: &str,
 ) -> Result<()> {
     write_summary_json(out_dir, summary)?;
@@ -71,7 +64,6 @@ pub fn write_per_seed_artifacts(
                 title: summary.title.clone(),
                 ticks: summary.ticks,
                 report_every,
-                min_lifetime,
                 control: summary.control,
                 total_time_seconds: summary.total_time_seconds,
                 generated_at_utc: Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),

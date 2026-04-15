@@ -51,7 +51,6 @@ fn run(cli: Cli) -> Result<()> {
         seeds: seeds.clone(),
         ticks: cli.ticks,
         report_every: cli.report_every,
-        min_lifetime: cli.min_lifetime,
         out_dir: cli.out.unwrap_or_else(|| default_output_dir(&seeds)),
         title: cli.title,
         control: cli.control,
