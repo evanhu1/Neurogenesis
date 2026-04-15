@@ -41,6 +41,7 @@ pub struct FlagsDefaults {
     pub meta_mutation_enabled: bool,
     pub runtime_plasticity_enabled: bool,
     pub force_random_actions: bool,
+    pub wasted_action_reward_enabled: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
@@ -105,6 +106,7 @@ pub fn world_config_defaults() -> WorldConfigDefaults {
             meta_mutation_enabled: true,
             runtime_plasticity_enabled: true,
             force_random_actions: false,
+            wasted_action_reward_enabled: false,
         },
     }
 }
@@ -217,6 +219,8 @@ pub struct WorldConfig {
     pub runtime_plasticity_enabled: bool,
     #[serde(default = "default_force_random_actions")]
     pub force_random_actions: bool,
+    #[serde(default = "default_wasted_action_reward_enabled")]
+    pub wasted_action_reward_enabled: bool,
     pub seed_genome_config: SeedGenomeConfig,
 }
 
@@ -245,6 +249,7 @@ impl WorldConfig {
             meta_mutation_enabled: true,
             runtime_plasticity_enabled: true,
             force_random_actions: false,
+            wasted_action_reward_enabled: false,
             seed_genome_config: SeedGenomeConfig {
                 num_neurons: 20,
                 num_synapses: 80,
@@ -301,6 +306,7 @@ impl WorldConfig {
             meta_mutation_enabled: true,
             runtime_plasticity_enabled: true,
             force_random_actions: false,
+            wasted_action_reward_enabled: false,
             seed_genome_config: SeedGenomeConfig {
                 num_neurons: 1,
                 num_synapses: 0,
@@ -408,6 +414,8 @@ struct WorldFlagsToml {
     runtime_plasticity_enabled: bool,
     #[serde(default = "default_force_random_actions")]
     force_random_actions: bool,
+    #[serde(default = "default_wasted_action_reward_enabled")]
+    wasted_action_reward_enabled: bool,
 }
 
 impl WorldConfigToml {
@@ -433,6 +441,7 @@ impl WorldConfigToml {
             meta_mutation_enabled: self.flags.meta_mutation_enabled,
             runtime_plasticity_enabled: self.flags.runtime_plasticity_enabled,
             force_random_actions: self.flags.force_random_actions,
+            wasted_action_reward_enabled: self.flags.wasted_action_reward_enabled,
             seed_genome_config,
         }
     }
@@ -645,4 +654,8 @@ fn default_runtime_plasticity_enabled() -> bool {
 
 fn default_force_random_actions() -> bool {
     world_config_defaults().flags.force_random_actions
+}
+
+fn default_wasted_action_reward_enabled() -> bool {
+    world_config_defaults().flags.wasted_action_reward_enabled
 }

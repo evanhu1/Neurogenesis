@@ -610,6 +610,8 @@ pub struct OrganismState {
     #[serde(default)]
     pub damage_taken_last_turn: f32,
     #[serde(default)]
+    pub contingent_action_wasted_last_turn: bool,
+    #[serde(default)]
     pub is_gestating: bool,
     #[serde(default)]
     pub consumptions_count: u64,
@@ -671,6 +673,7 @@ impl OrganismState {
             value_prev: 0.0,
             value_prev_inter_activations: Vec::new(),
             damage_taken_last_turn,
+            contingent_action_wasted_last_turn: false,
             is_gestating,
             consumptions_count,
             plant_consumptions_count,

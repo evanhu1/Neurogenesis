@@ -128,6 +128,7 @@ mod tests {
             value_prev: 0.0,
             value_prev_inter_activations: Vec::new(),
             damage_taken_last_turn: 0.0,
+            contingent_action_wasted_last_turn: false,
             is_gestating: false,
             consumptions_count: 0,
             plant_consumptions_count: 0,

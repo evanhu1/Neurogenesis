@@ -8,6 +8,7 @@ struct CommitPhaseContext<'a> {
     world_width_usize: usize,
     removed_food: Vec<bool>,
     dead_organisms: Vec<bool>,
+    contingent_succeeded: Vec<bool>,
     result: CommitResult,
 }
 
@@ -40,6 +41,7 @@ impl<'a> CommitPhaseContext<'a> {
             world_width_usize: world_width as usize,
             removed_food: vec![false; food_count],
             dead_organisms: vec![false; org_count],
+            contingent_succeeded: vec![false; org_count],
             result: CommitResult::default(),
         }
     }
@@ -49,8 +51,24 @@ impl<'a> CommitPhaseContext<'a> {
         self.apply_moves();
         self.apply_spike_hazards();
         self.resolve_interactions();
+        self.mark_wasted_contingent_actions();
         self.finalize(gestation_started_this_tick);
         self.result
+    }
+
+    fn mark_wasted_contingent_actions(&mut self) {
+        if !self.sim.config.wasted_action_reward_enabled {
+            return;
+        }
+        for (idx, intent) in self.intents.iter().enumerate() {
+            if self.dead_organisms[idx] {
+                continue;
+            }
+            let attempted_contingent = intent.wants_eat || intent.wants_attack;
+            if attempted_contingent && !self.contingent_succeeded[idx] {
+                self.sim.organisms[idx].contingent_action_wasted_last_turn = true;
+            }
+        }
     }
 
     fn apply_facing_and_action_costs(&mut self) {
@@ -95,6 +113,7 @@ impl<'a> CommitPhaseContext<'a> {
             let organism = &mut self.sim.organisms[resolution.actor_idx];
             organism.q = resolution.to.0;
             organism.r = resolution.to.1;
+            self.contingent_succeeded[resolution.actor_idx] = true;
             #[cfg(feature = "instrumentation")]
             self.sim.mark_action_succeeded(resolution.actor_idx);
         }
@@ -177,6 +196,7 @@ impl<'a> CommitPhaseContext<'a> {
         let predator = &mut self.sim.organisms[predator_idx];
         predator.energy += gained_energy;
         predator.consumptions_count = predator.consumptions_count.saturating_add(1);
+        self.contingent_succeeded[predator_idx] = true;
         match food.kind {
             FoodKind::Plant => {
                 predator.plant_consumptions_count =
@@ -226,6 +246,7 @@ impl<'a> CommitPhaseContext<'a> {
         let prey_r = prey.r;
         let prey_energy = prey.energy.max(0.0);
 
+        self.contingent_succeeded[predator_idx] = true;
         #[cfg(feature = "instrumentation")]
         self.sim.mark_action_succeeded(predator_idx);
 

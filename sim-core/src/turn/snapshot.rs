@@ -18,6 +18,7 @@ impl Simulation {
     pub(super) fn clear_turn_transient_state(&mut self) {
         for organism in self.organisms.iter_mut() {
             organism.damage_taken_last_turn = 0.0;
+            organism.contingent_action_wasted_last_turn = false;
         }
     }
 
