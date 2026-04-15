@@ -296,14 +296,17 @@ fn compute_pending_edge_coactivations(
     // non-zero baseline from hoarding eligibility on every tick — the signal
     // is the deviation from recent average, not the raw activation.
     let pre_dev = inter_pre_signal - inter_pre_mean;
+    let inter_len = inter_activations.len();
+    let inter_means_slice = inter_means;
     for edge in inter_edges {
-        let Some(idx) = inter_index(edge.post_neuron_id, inter_activations.len()) else {
+        let Some(idx) = inter_index(edge.post_neuron_id, inter_len) else {
             continue;
         };
-        let Some(post_activation) = inter_activations.get(idx).copied() else {
-            continue;
-        };
-        let post_mean = inter_means.get(idx).copied().unwrap_or(0.0);
+        // Safety: `inter_index` already proved `idx < inter_len`, and
+        // `inter_means_slice` is the same logical buffer (same length when in
+        // sync; falls back to 0 when shorter, matching the unwrap_or below).
+        let post_activation = unsafe { *inter_activations.get_unchecked(idx) };
+        let post_mean = inter_means_slice.get(idx).copied().unwrap_or(0.0);
         edge.pending_coactivation = pre_dev * (post_activation - post_mean);
     }
 
