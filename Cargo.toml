@@ -13,6 +13,10 @@ edition = "2021"
 version = "0.1.0"
 license = "MIT"
 
+[profile.release]
+lto = "fat"
+codegen-units = 1
+
 [workspace.dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["ws", "macros", "json"] }
