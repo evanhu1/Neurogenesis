@@ -80,7 +80,8 @@ impl ReproductionPhaseState {
                 continue;
             }
 
-            let transfer_energy = offspring_transfer_energy(organism.genome.lifecycle.gestation_ticks);
+            let transfer_energy =
+                offspring_transfer_energy(organism.genome.lifecycle.gestation_ticks);
             let parent_energy = organism.energy;
             if parent_energy < transfer_energy {
                 continue;
@@ -105,7 +106,8 @@ impl ReproductionPhaseState {
                 turns_remaining: organism.genome.lifecycle.gestation_ticks,
                 reproduction_energy_bits: transfer_energy.to_bits(),
             };
-            self.gestation_started_this_tick[org_idx] = organism.genome.lifecycle.gestation_ticks > 0;
+            self.gestation_started_this_tick[org_idx] =
+                organism.genome.lifecycle.gestation_ticks > 0;
             #[cfg(feature = "instrumentation")]
             {
                 if let Some(Some(record)) = action_records.get_mut(org_idx) {

@@ -90,7 +90,6 @@ pub struct Simulation {
     metrics: MetricsSnapshot,
 }
 
-
 impl Simulation {
     pub fn new(config: WorldConfig, seed: u64) -> Result<Self, SimError> {
         Self::new_with_champion_pool(config, seed, Vec::new())

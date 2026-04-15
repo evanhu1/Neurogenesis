@@ -1,6 +1,7 @@
 use crate::{
-    ledger::N_ACTIONS,
-    metrics::{action_baseline_probability, IntervalMetrics},
+    analysis::intervals::action_baseline_probability,
+    dataset::ACTION_COUNT as N_ACTIONS,
+    types::{IntervalMetrics, PillarScores},
 };
 use anyhow::Result;
 use serde::Serialize;
@@ -96,6 +97,55 @@ pub struct HtmlReportMeta {
     pub adaptation_diversity_component: f64,
     pub timeseries_label: String,
     pub per_seed_rows: Vec<PerSeedReportRow>,
+}
+
+pub struct HtmlReportContext {
+    pub title: Option<String>,
+    pub ticks: u64,
+    pub report_every: u64,
+    pub min_lifetime: u64,
+    pub control: bool,
+    pub total_time_seconds: f64,
+    pub generated_at_utc: String,
+    pub timeseries_label: String,
+    pub per_seed_rows: Vec<PerSeedReportRow>,
+}
+
+impl HtmlReportMeta {
+    pub fn from_pillars(pillars: &PillarScores, ctx: HtmlReportContext) -> Self {
+        Self {
+            title: ctx.title,
+            ticks: ctx.ticks,
+            report_every: ctx.report_every,
+            min_lifetime: ctx.min_lifetime,
+            control: ctx.control,
+            total_time_seconds: ctx.total_time_seconds,
+            generated_at_utc: ctx.generated_at_utc,
+            pillar_window_start_tick: pillars.window_start_tick,
+            pillar_window_end_tick: pillars.window_end_tick,
+            viability_pillar: pillars.viability_pillar,
+            foraging_pillar: pillars.foraging_pillar,
+            intelligence_pillar: pillars.intelligence_pillar,
+            competition_pillar: pillars.competition_pillar,
+            adaptation_pillar: pillars.adaptation_pillar,
+            viability_life_component: pillars.viability_life_component,
+            viability_reproduction_component: pillars.viability_reproduction_component,
+            foraging_p_fwd_food_component: pillars.foraging_p_fwd_food_component,
+            foraging_rate_component: pillars.foraging_rate_component,
+            intelligence_adult_mi_component: pillars.intelligence_adult_mi_component,
+            intelligence_action_effectiveness_component: pillars
+                .intelligence_action_effectiveness_component,
+            intelligence_anti_idle_component: pillars.intelligence_anti_idle_component,
+            intelligence_util_component: pillars.intelligence_util_component,
+            competition_predation_component: pillars.competition_predation_component,
+            competition_attack_success_component: pillars.competition_attack_success_component,
+            competition_attack_attempt_component: pillars.competition_attack_attempt_component,
+            adaptation_juvenile_mi_component: pillars.adaptation_juvenile_mi_component,
+            adaptation_diversity_component: pillars.adaptation_diversity_component,
+            timeseries_label: ctx.timeseries_label,
+            per_seed_rows: ctx.per_seed_rows,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

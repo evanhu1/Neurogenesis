@@ -304,4 +304,3 @@ fn pct(part: u64, whole: u64) -> f64 {
 fn duration_to_ns(duration: Duration) -> u64 {
     duration.as_nanos().min(u128::from(u64::MAX)) as u64
 }
-

@@ -1,22 +1,31 @@
-use crate::{
-    aggregation::{
-        average_pillar_scores, average_reproduction_analytics, average_timeseries,
-        compute_pillar_scores, state_hash,
-    },
-    ledger::Ledger,
-    metrics::compute_interval_metrics,
-    output::{write_summary_json, write_timeseries_csv},
-    report::{write_html_report, HtmlReportMeta, PerSeedReportRow, Reporter},
-    types::{
-        EvaluationSummary, HarnessRunOptions, SeedEvaluationSummary, SeedRunOptions, SeedRunSummary,
-    },
+//! Drives the simulation and funnels everything it emits into the on-disk
+//! dataset. Every per-tick row, per-action count, per-death lifetime, and
+//! per-reproduction event is written as raw data. Pillars, comparisons and
+//! reports are produced afterwards by the analysis layer reading the same
+//! dataset.
+
+use crate::analysis::{
+    analyze, average_pillar_scores, average_reproduction_analytics, average_timeseries,
+    AnalysisOptions, ScoringWindow,
+};
+use crate::dataset::{
+    DatasetReader, DatasetWriter as DatasetWriterTrait, Manifest, PartitionedParquetWriter,
+    PopulationSnapshotRow, TickSummaryRow, SCHEMA_VERSION,
+};
+use crate::ledger::Ledger;
+use crate::output::{write_summary_json, write_timeseries_csv};
+use crate::report::{write_html_report, HtmlReportContext, HtmlReportMeta, PerSeedReportRow};
+use crate::types::{
+    EvaluationSummary, HarnessRunOptions, SeedEvaluationSummary, SeedRunOptions, SeedRunSummary,
 };
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use sim_core::Simulation;
-use sim_types::{EntityId, WorldConfig};
+use sim_types::{EntityId, OrganismState, WorldConfig};
+use std::collections::hash_map::DefaultHasher;
 use std::collections::VecDeque;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
@@ -35,9 +44,7 @@ pub(crate) fn run_evaluation_across_seeds(
 
     // When multiple seed workers share the machine, split the available cores
     // across them so each seed's simulation gets a dedicated slice of threads
-    // rather than fighting over a single shared rayon pool. Without this each
-    // sim was requesting 8 workers concurrently, oversubscribing the cores
-    // and serializing par_iter_mut work through a contended pool.
+    // rather than fighting over a single shared rayon pool.
     let mut config = config;
     config.intent_parallel_threads = per_seed_intent_threads(worker_threads);
 
@@ -60,7 +67,6 @@ pub(crate) fn run_evaluation_across_seeds(
             let Some(seed) = seed else {
                 break;
             };
-
             let seed_options = SeedRunOptions {
                 seed,
                 ticks,
@@ -128,27 +134,30 @@ pub(crate) fn run_evaluation_across_seeds(
     };
 
     write_summary_json(&options.out_dir, &summary)?;
+    let per_seed_rows = seed_run_summaries
+        .iter()
+        .map(|seed_summary| PerSeedReportRow {
+            seed: seed_summary.seed,
+            total_time_seconds: seed_summary.total_time_seconds,
+            state_hash: seed_summary.state_hash.clone(),
+            report_href: format!("seed_{}/report.html", seed_summary.seed),
+        })
+        .collect();
     write_html_report(
         &options.out_dir,
-        &html_report_meta(
+        &HtmlReportMeta::from_pillars(
             &summary.pillars,
-            summary.title.clone(),
-            summary.ticks,
-            options.report_every,
-            options.min_lifetime,
-            summary.control,
-            summary.total_time_seconds,
-            generated_at_utc,
-            "mean across seeds".to_owned(),
-            seed_run_summaries
-                .iter()
-                .map(|seed_summary| PerSeedReportRow {
-                    seed: seed_summary.seed,
-                    total_time_seconds: seed_summary.total_time_seconds,
-                    state_hash: seed_summary.state_hash.clone(),
-                    report_href: format!("seed_{}/report.html", seed_summary.seed),
-                })
-                .collect(),
+            HtmlReportContext {
+                title: summary.title.clone(),
+                ticks: summary.ticks,
+                report_every: options.report_every,
+                min_lifetime: options.min_lifetime,
+                control: summary.control,
+                total_time_seconds: summary.total_time_seconds,
+                generated_at_utc,
+                timeseries_label: "mean across seeds".to_owned(),
+                per_seed_rows,
+            },
         ),
         &summary.timeseries,
     )?;
@@ -163,95 +172,156 @@ pub(crate) fn run_single_seed_evaluation(
     let run_started = Instant::now();
     fs::create_dir_all(&options.out_dir)?;
 
-    let mut reporter = Reporter::new(&options.out_dir)?;
-    let mut sim = Simulation::new(config, options.seed)?;
-    let mut ledger = Ledger::new(options.min_lifetime);
+    let mut sim = Simulation::new(config.clone(), options.seed)?;
+    let mut ledger = Ledger::new();
+    let mut writer = PartitionedParquetWriter::new(&options.out_dir)?;
 
     for organism in sim.organisms() {
-        ledger.birth(organism.id, 0, organism.genome.lifecycle.age_of_maturity);
+        ledger.birth(
+            organism.id,
+            organism.species_id.0,
+            organism.generation,
+            0,
+            organism.genome.lifecycle.age_of_maturity,
+        );
     }
 
     let mut current_food_count = sim.snapshot().foods.len() as u64;
-    let mut interval_births = 0_u64;
-    let mut interval_deaths = 0_u64;
-    let mut interval_consumptions = 0_u64;
-    let mut interval_predations = 0_u64;
-    let mut interval_population_exposure = 0_u64;
-    let mut timeseries = Vec::new();
+    // Running max across all organisms ever observed. Generation is monotonic
+    // in reproduction order, so folding over `delta.spawned` is sufficient —
+    // iterating every living organism each tick would be O(population) for
+    // the same answer.
+    let mut max_generation = sim
+        .organisms()
+        .iter()
+        .map(|o| o.generation)
+        .max()
+        .unwrap_or(0);
 
     for tick in 1..=options.ticks {
-        interval_population_exposure =
-            interval_population_exposure.saturating_add(sim.organisms().len() as u64);
         let delta = sim.tick();
-        interval_consumptions =
-            interval_consumptions.saturating_add(delta.metrics.consumptions_last_turn);
-        interval_predations =
-            interval_predations.saturating_add(delta.metrics.predations_last_turn);
 
         for record in sim.action_records().iter().flatten() {
-            ledger.update(record);
+            ledger.record_action(record);
         }
         for event in delta.reproduction_events.iter().copied() {
-            ledger.handle_reproduction_event(tick, event);
+            let row = ledger.record_reproduction(tick, event);
+            writer.emit_reproduction_event(row);
         }
 
-        interval_births = interval_births.saturating_add(delta.spawned.len() as u64);
+        let births = delta.spawned.len() as u32;
         for spawned in &delta.spawned {
-            ledger.birth(spawned.id, tick, spawned.genome.lifecycle.age_of_maturity);
+            max_generation = max_generation.max(spawned.generation);
+            ledger.birth(
+                spawned.id,
+                spawned.species_id.0,
+                spawned.generation,
+                tick,
+                spawned.genome.lifecycle.age_of_maturity,
+            );
         }
-        ledger.update_survival_thresholds(sim.organisms());
 
+        let mut deaths = 0_u32;
         for removed in &delta.removed_positions {
             match removed.entity_id {
                 EntityId::Organism(id) => {
-                    interval_deaths = interval_deaths.saturating_add(1);
-                    ledger.death(id, tick);
+                    deaths = deaths.saturating_add(1);
+                    if let Some(row) = ledger.death(id, tick) {
+                        writer.emit_organism_lifetime(row);
+                    }
                 }
                 EntityId::Food(_) => {
                     current_food_count = current_food_count.saturating_sub(1);
                 }
             }
         }
-        current_food_count = current_food_count.saturating_add(delta.food_spawned.len() as u64);
+        let food_spawned = delta.food_spawned.len() as u32;
+        current_food_count = current_food_count.saturating_add(u64::from(food_spawned));
 
-        if tick % options.report_every == 0 || tick == options.ticks {
+        let population = delta.metrics.organisms;
+
+        writer.emit_tick(TickSummaryRow {
+            tick,
+            population,
+            max_generation: if population > 0 { Some(max_generation) } else { None },
+            births,
+            deaths,
+            food_count: current_food_count as u32,
+            consumptions: delta.metrics.consumptions_last_turn as u32,
+            predations: delta.metrics.predations_last_turn as u32,
+            food_spawned,
+        });
+
+        for row in ledger.take_tick_aggregates().into_rows(tick) {
+            writer.emit_action_count(row);
+        }
+
+        let flush_tick = tick % options.report_every == 0 || tick == options.ticks;
+        if flush_tick {
+            // Population-wide snapshot (brain stats, lineage diversity) only at
+            // flush boundaries — iterating every organism is expensive.
+            let snapshot = compute_population_snapshot(tick, sim.organisms());
+            writer.emit_population_snapshot(snapshot);
+
+            if let Some(top) = ledger.top_reproducer() {
+                if let Ok(idx) = sim
+                    .organisms()
+                    .binary_search_by_key(&sim_types::OrganismId(top.id), |o| o.id)
+                {
+                    let organism = &sim.organisms()[idx];
+                    writer.emit_genome_snapshot(
+                        tick,
+                        organism.id.0,
+                        organism.species_id.0,
+                        organism.generation,
+                        top.num_offspring,
+                        &organism.genome,
+                    )?;
+                }
+            }
+
             let fraction = tick as f64 / options.ticks as f64;
             println!(
                 "progress[seed={}]: {tick}/{total} ({fraction:.3})",
                 options.seed,
                 total = options.ticks
             );
-            let interval = compute_interval_metrics(
-                tick,
-                delta.metrics.organisms,
-                interval_births,
-                interval_deaths,
-                current_food_count,
-                interval_consumptions,
-                interval_predations,
-                interval_population_exposure,
-                ledger.recently_deceased(),
-                sim.organisms(),
-                ledger.interval_action_stats(),
-                ledger.interval_generation_time(),
-            );
-            reporter.emit(&interval)?;
-            timeseries.push(interval);
-
-            interval_births = 0;
-            interval_deaths = 0;
-            interval_consumptions = 0;
-            interval_predations = 0;
-            interval_population_exposure = 0;
-            ledger.clear_interval();
+            writer.flush()?;
         }
     }
 
-    reporter.flush()?;
+    // Drain remaining live organisms to `organism_lifetimes` with death_tick = None.
+    for row in ledger.drain_survivors() {
+        writer.emit_organism_lifetime(row);
+    }
+    let state_hash = state_hash(sim.organisms());
+    let manifest = Manifest {
+        schema_version: SCHEMA_VERSION,
+        seed: options.seed,
+        total_ticks: options.ticks,
+        report_every: options.report_every,
+        snapshot_interval: options.report_every,
+        created_at_utc: Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+        sim_version: None,
+        world_config: config.clone(),
+    };
+    manifest.write(&options.out_dir)?;
+    Box::new(writer).finalize()?;
+
+    // Analysis phase — derive metrics/pillars from the dataset we just wrote.
+    let dataset = DatasetReader::load(&options.out_dir)?;
+    let analysis = analyze(
+        &dataset,
+        &AnalysisOptions {
+            report_every: options.report_every,
+            total_ticks: options.ticks,
+            min_lifetime: options.min_lifetime,
+            scoring_window: ScoringWindow::default(),
+        },
+    );
+
     let total_time_seconds = run_started.elapsed().as_secs_f64();
     let generated_at_utc = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
-    let pillars = compute_pillar_scores(&timeseries);
-    let experiment_readouts = ledger.reproduction_analytics();
 
     let summary = SeedEvaluationSummary {
         title: options.title.clone(),
@@ -259,25 +329,28 @@ pub(crate) fn run_single_seed_evaluation(
         ticks: options.ticks,
         control: options.control,
         total_time_seconds,
-        pillars: pillars.clone(),
-        experiment_readouts,
-        state_hash: state_hash(sim.organisms()),
-        timeseries,
+        pillars: analysis.pillars.clone(),
+        experiment_readouts: analysis.reproduction.clone(),
+        state_hash,
+        timeseries: analysis.timeseries.clone(),
     };
     write_summary_json(&options.out_dir, &summary)?;
+    write_timeseries_csv(&options.out_dir, &summary.timeseries)?;
     write_html_report(
         &options.out_dir,
-        &html_report_meta(
+        &HtmlReportMeta::from_pillars(
             &summary.pillars,
-            summary.title.clone(),
-            summary.ticks,
-            options.report_every,
-            options.min_lifetime,
-            summary.control,
-            summary.total_time_seconds,
-            generated_at_utc,
-            "per-seed timeseries".to_owned(),
-            Vec::new(),
+            HtmlReportContext {
+                title: summary.title.clone(),
+                ticks: summary.ticks,
+                report_every: options.report_every,
+                min_lifetime: options.min_lifetime,
+                control: summary.control,
+                total_time_seconds: summary.total_time_seconds,
+                generated_at_utc,
+                timeseries_label: "per-seed timeseries".to_owned(),
+                per_seed_rows: Vec::new(),
+            },
         ),
         &summary.timeseries,
     )?;
@@ -285,51 +358,75 @@ pub(crate) fn run_single_seed_evaluation(
     Ok(summary)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn html_report_meta(
-    pillars: &crate::types::PillarScores,
-    title: Option<String>,
-    ticks: u64,
-    report_every: u64,
-    min_lifetime: u64,
-    control: bool,
-    total_time_seconds: f64,
-    generated_at_utc: String,
-    timeseries_label: String,
-    per_seed_rows: Vec<PerSeedReportRow>,
-) -> HtmlReportMeta {
-    HtmlReportMeta {
-        title,
-        ticks,
-        report_every,
-        min_lifetime,
-        control,
-        total_time_seconds,
-        generated_at_utc,
-        pillar_window_start_tick: pillars.window_start_tick,
-        pillar_window_end_tick: pillars.window_end_tick,
-        viability_pillar: pillars.viability_pillar,
-        foraging_pillar: pillars.foraging_pillar,
-        intelligence_pillar: pillars.intelligence_pillar,
-        competition_pillar: pillars.competition_pillar,
-        adaptation_pillar: pillars.adaptation_pillar,
-        viability_life_component: pillars.viability_life_component,
-        viability_reproduction_component: pillars.viability_reproduction_component,
-        foraging_p_fwd_food_component: pillars.foraging_p_fwd_food_component,
-        foraging_rate_component: pillars.foraging_rate_component,
-        intelligence_adult_mi_component: pillars.intelligence_adult_mi_component,
-        intelligence_action_effectiveness_component: pillars
-            .intelligence_action_effectiveness_component,
-        intelligence_anti_idle_component: pillars.intelligence_anti_idle_component,
-        intelligence_util_component: pillars.intelligence_util_component,
-        competition_predation_component: pillars.competition_predation_component,
-        competition_attack_success_component: pillars.competition_attack_success_component,
-        competition_attack_attempt_component: pillars.competition_attack_attempt_component,
-        adaptation_juvenile_mi_component: pillars.adaptation_juvenile_mi_component,
-        adaptation_diversity_component: pillars.adaptation_diversity_component,
-        timeseries_label,
-        per_seed_rows,
+fn compute_population_snapshot(tick: u64, organisms: &[OrganismState]) -> PopulationSnapshotRow {
+    if organisms.is_empty() {
+        return PopulationSnapshotRow {
+            tick,
+            brain_size_mean: None,
+            brain_size_stddev: None,
+            brain_size_p10: None,
+            brain_size_p50: None,
+            brain_size_p90: None,
+            lineage_diversity: None,
+        };
     }
+
+    let mut sizes: Vec<f64> = organisms
+        .iter()
+        .map(|o| (o.genome.topology.num_neurons + o.brain.synapse_count) as f64)
+        .collect();
+    sizes.sort_by(|a, b| a.total_cmp(b));
+    let len = sizes.len() as f64;
+    let mean = sizes.iter().sum::<f64>() / len;
+    let variance = sizes
+        .iter()
+        .map(|v| {
+            let d = *v - mean;
+            d * d
+        })
+        .sum::<f64>()
+        / len;
+
+    let percentile = |fraction: f64| -> Option<f64> {
+        let idx = ((sizes.len() - 1) as f64 * fraction.clamp(0.0, 1.0)).round() as usize;
+        sizes.get(idx).copied()
+    };
+
+    let mut counts = std::collections::HashMap::new();
+    for organism in organisms {
+        *counts.entry(organism.species_id).or_insert(0_u64) += 1;
+    }
+    let total = organisms.len() as f64;
+    let mut shannon = 0.0;
+    for count in counts.values() {
+        let p = *count as f64 / total;
+        shannon -= p * p.log2();
+    }
+
+    PopulationSnapshotRow {
+        tick,
+        brain_size_mean: Some(mean),
+        brain_size_stddev: Some(variance.sqrt()),
+        brain_size_p10: percentile(0.10),
+        brain_size_p50: percentile(0.50),
+        brain_size_p90: percentile(0.90),
+        lineage_diversity: Some(shannon),
+    }
+}
+
+pub(crate) fn state_hash(organisms: &[OrganismState]) -> String {
+    let population_count = organisms.len() as u64;
+    let sum_ids = organisms
+        .iter()
+        .map(|o| o.id.0)
+        .fold(0_u64, |acc, value| acc.wrapping_add(value));
+    let total_energy = organisms.iter().map(|o| o.energy as f64).sum::<f64>();
+
+    let mut hasher = DefaultHasher::new();
+    population_count.hash(&mut hasher);
+    sum_ids.hash(&mut hasher);
+    total_energy.to_bits().hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 fn default_worker_threads(seed_count: usize) -> usize {
@@ -345,8 +442,8 @@ fn default_worker_threads(seed_count: usize) -> usize {
 /// Target = cores / worker_threads (rounded up), so all physical parallelism
 /// is used but no seed's rayon pool competes with another seed's pool for the
 /// same core. Capped at 4 to avoid over-splitting the per-tick work for small
-/// runs — empirically, throughput plateaus around 4 threads for a single 5000-
-/// organism simulation and excess workers add rayon scheduling overhead.
+/// runs — empirically, throughput plateaus around 4 threads for a single
+/// 5000-organism simulation and excess workers add rayon scheduling overhead.
 fn per_seed_intent_threads(worker_threads: usize) -> u32 {
     const PER_SEED_CAP: usize = 4;
     let cores = thread::available_parallelism()

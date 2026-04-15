@@ -109,7 +109,11 @@ fn comparison_metric_rows(
     let paired = |label: &str, f: fn(&crate::types::PillarScores) -> Option<f64>| {
         paired_metric_row(
             label,
-            control.seed_summaries.iter().map(|s| f(&s.pillars)).collect(),
+            control
+                .seed_summaries
+                .iter()
+                .map(|s| f(&s.pillars))
+                .collect(),
             treatment
                 .seed_summaries
                 .iter()

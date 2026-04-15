@@ -61,7 +61,9 @@ pub(crate) fn compute_pending_coactivations(
         .inter_activations
         .extend(brain.inter.iter().map(|inter| inter.neuron.activation));
     scratch.inter_means.clear();
-    scratch.inter_means.extend_from_slice(&brain.inter_mean_activation);
+    scratch
+        .inter_means
+        .extend_from_slice(&brain.inter_mean_activation);
     scratch.sensory_means.clear();
     scratch
         .sensory_means
@@ -125,7 +127,9 @@ pub(crate) fn compute_pending_coactivations(
 
 fn sync_mean_buffers(brain: &mut BrainState) {
     if brain.sensory_mean_activation.len() != brain.sensory.len() {
-        brain.sensory_mean_activation.resize(brain.sensory.len(), 0.0);
+        brain
+            .sensory_mean_activation
+            .resize(brain.sensory.len(), 0.0);
     }
     if brain.sensory_mean_initialized.len() != brain.sensory.len() {
         brain
@@ -136,7 +140,9 @@ fn sync_mean_buffers(brain: &mut BrainState) {
         brain.inter_mean_activation.resize(brain.inter.len(), 0.0);
     }
     if brain.inter_mean_initialized.len() != brain.inter.len() {
-        brain.inter_mean_initialized.resize(brain.inter.len(), false);
+        brain
+            .inter_mean_initialized
+            .resize(brain.inter.len(), false);
     }
 }
 
@@ -174,7 +180,11 @@ fn update_activation_means(brain: &mut BrainState) {
     {
         *mean = retention * *mean + ACTIVATION_MEAN_ALPHA * sensory.neuron.activation;
     }
-    for (mean, inter) in brain.inter_mean_activation.iter_mut().zip(brain.inter.iter()) {
+    for (mean, inter) in brain
+        .inter_mean_activation
+        .iter_mut()
+        .zip(brain.inter.iter())
+    {
         *mean = retention * *mean + ACTIVATION_MEAN_ALPHA * inter.neuron.activation;
     }
 }

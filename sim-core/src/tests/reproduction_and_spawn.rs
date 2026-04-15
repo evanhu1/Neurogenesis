@@ -77,8 +77,10 @@ fn reproduction_offspring_behavior_starts_from_genome_not_parent_runtime_state()
     }
     configure_sim(&mut sim, vec![parent]);
 
-    let spawned =
-        sim.resolve_spawn_requests(&mut vec![reproduction_request_from_parent(&sim, OrganismId(0))]);
+    let spawned = sim.resolve_spawn_requests(&mut vec![reproduction_request_from_parent(
+        &sim,
+        OrganismId(0),
+    )]);
 
     assert_eq!(spawned.len(), 1);
     let child_id = spawned[0].id;

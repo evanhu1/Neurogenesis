@@ -65,7 +65,10 @@ pub(crate) fn hex_neighbor(
         FacingDirection::SouthWest => (q - 1, r + 1),
         FacingDirection::SouthEast => (q, r + 1),
     };
-    (wrap_neighbor(nq, world_width), wrap_neighbor(nr, world_width))
+    (
+        wrap_neighbor(nq, world_width),
+        wrap_neighbor(nr, world_width),
+    )
 }
 
 /// Fast wraparound for coordinates known to be in `[-1, world_width]`.

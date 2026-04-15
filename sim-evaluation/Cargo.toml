@@ -13,3 +13,7 @@ serde_json.workspace = true
 sim-config = { path = "../sim-config" }
 sim-core = { path = "../sim-core", features = ["instrumentation"] }
 sim-types = { path = "../sim-types", features = ["instrumentation"] }
+arrow.workspace = true
+parquet.workspace = true
+serde_arrow.workspace = true
+bincode.workspace = true

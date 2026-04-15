@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 const DEFAULT_CONFIG_PATH: &str = "sim-evaluation/config.toml";
@@ -35,6 +35,24 @@ pub(crate) struct Cli {
     pub(crate) compare: bool,
     #[arg(long, default_value_t = false)]
     pub(crate) disable_plasticity: bool,
+
+    #[command(subcommand)]
+    pub(crate) command: Option<Command>,
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub(crate) enum Command {
+    /// Run a fresh evaluation — sim + dataset emit + analysis + reports.
+    /// This is the default when no subcommand is given.
+    Run,
+    /// Re-run analysis against an existing per-seed dataset directory and
+    /// rewrite `summary.json`, `timeseries.csv`, and `report.html`. Does not
+    /// re-run the simulation.
+    Analyze {
+        /// Path to a seed dataset directory (one that contains
+        /// `manifest.json` and the `tick_summary/` etc. subdirs).
+        dataset_dir: PathBuf,
+    },
 }
 
 #[derive(Debug, Clone, Default)]

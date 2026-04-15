@@ -224,7 +224,11 @@ pub(super) fn inter_log_time_constant_for_neuron(
         return None;
     }
     let inter_idx = inter_index(neuron_id, genome.topology.num_neurons as usize)?;
-    genome.brain.inter_log_time_constants.get(inter_idx).copied()
+    genome
+        .brain
+        .inter_log_time_constants
+        .get(inter_idx)
+        .copied()
 }
 
 pub(super) fn location_for_neuron(neuron_id: NeuronId, genome: &OrganismGenome) -> BrainLocation {

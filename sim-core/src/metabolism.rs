@@ -185,9 +185,11 @@ mod tests {
             genome: {
                 let mut genome = OrganismGenome::test_fixture();
                 genome.topology.vision_distance = 3;
-                genome.brain.sensory_locations = vec![BrainLocation { x: 0.0, y: 0.0 }; genome.brain.sensory_locations.len()];
+                genome.brain.sensory_locations =
+                    vec![BrainLocation { x: 0.0, y: 0.0 }; genome.brain.sensory_locations.len()];
                 genome.brain.inter_locations = vec![BrainLocation { x: 1.0, y: 1.0 }];
-                genome.brain.action_locations = vec![BrainLocation { x: 1.0, y: 1.0 }; genome.brain.action_locations.len()];
+                genome.brain.action_locations =
+                    vec![BrainLocation { x: 1.0, y: 1.0 }; genome.brain.action_locations.len()];
                 genome
             },
         };

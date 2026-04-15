@@ -1,5 +1,6 @@
-use crate::{ledger::N_ACTIONS, metrics::IntervalMetrics, report::ComparisonMetricRow};
-use serde::Serialize;
+use crate::dataset::ACTION_COUNT;
+use crate::report::ComparisonMetricRow;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
@@ -74,12 +75,48 @@ pub(crate) struct ReproductionAnalytics {
     pub(crate) mean_successful_birth_interval: Option<f64>,
 }
 
+/// One row per reporting interval — the primary timeseries format consumed by
+/// reports, comparisons, and the CSV export. Derived by `analysis::intervals`
+/// from the raw dataset.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub(crate) struct IntervalMetrics {
+    pub tick: u64,
+    pub pop: u32,
+    pub births: u64,
+    pub deaths: u64,
+    pub food: u64,
+    pub max_generation: Option<u64>,
+    pub life_mean: Option<f64>,
+    pub predation_rate: Option<f64>,
+    pub foraging_rate: Option<f64>,
+    pub attack_attempt_rate: Option<f64>,
+    pub attack_success_rate: Option<f64>,
+    pub failed_action_rate: Option<f64>,
+    pub ate_pct: Option<f64>,
+    pub cons_mean: Option<f64>,
+    pub brain_size: Option<f64>,
+    pub brain_size_stddev: Option<f64>,
+    pub brain_size_p10: Option<f64>,
+    pub brain_size_p50: Option<f64>,
+    pub brain_size_p90: Option<f64>,
+    pub lineage_diversity: Option<f64>,
+    pub p_fwd_food: Option<f64>,
+    pub mi_sa: Option<f64>,
+    pub mi_sa_juvenile: Option<f64>,
+    pub mi_sa_adult: Option<f64>,
+    pub idle_fraction: Option<f64>,
+    /// Mean parent age across every successful reproduction event in the
+    /// interval. None when no successful births happened.
+    pub generation_time: Option<f64>,
+    pub util: Option<f64>,
+    pub action_histogram: [f64; ACTION_COUNT],
+}
+
 /// Per-pillar evaluation readout. There is deliberately no single aggregate
-/// score here — see PERF_LOG.md / EVALUATION_GUIDANCE.md for why. Each pillar
-/// is reported in its own right, and the intelligence pillar is composed of
-/// niche-agnostic behavioural measures so predators, foragers, and
-/// r-strategists can all be compared on the same axis.
-#[derive(Debug, Clone, Serialize)]
+/// score here — each pillar stands on its own. The intelligence pillar is
+/// composed of niche-agnostic behavioural measures so predators, foragers,
+/// and r-strategists can all be compared on the same axis.
+#[derive(Debug, Clone, Serialize, Default)]
 pub(crate) struct PillarScores {
     pub(crate) window_start_tick: u64,
     pub(crate) window_end_tick: u64,
@@ -99,7 +136,7 @@ pub(crate) struct PillarScores {
     pub(crate) mean_generation_time: Option<f64>,
     pub(crate) mean_lineage_diversity: Option<f64>,
     pub(crate) mean_util: Option<f64>,
-    pub(crate) mean_action_histogram: [f64; N_ACTIONS],
+    pub(crate) mean_action_histogram: [f64; ACTION_COUNT],
     pub(crate) viability_life_component: f64,
     pub(crate) viability_reproduction_component: f64,
     pub(crate) foraging_p_fwd_food_component: f64,

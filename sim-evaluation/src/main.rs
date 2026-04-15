@@ -1,8 +1,8 @@
-mod aggregation;
+mod analysis;
 mod cli;
 mod comparison;
+mod dataset;
 mod ledger;
-mod metrics;
 mod orchestration;
 mod output;
 mod report;
@@ -10,7 +10,7 @@ mod types;
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
-use cli::{Cli, FeatureOverrides};
+use cli::{Cli, Command, FeatureOverrides};
 use comparison::{apply_feature_overrides, run_comparison_evaluation};
 use orchestration::run_evaluation_across_seeds;
 use output::{
@@ -27,6 +27,13 @@ fn main() -> Result<()> {
         );
     }
 
+    match cli.command.clone().unwrap_or(Command::Run) {
+        Command::Run => run(cli),
+        Command::Analyze { dataset_dir } => analysis::cli::analyze_dataset_dir(&dataset_dir),
+    }
+}
+
+fn run(cli: Cli) -> Result<()> {
     let mut control_config = load_world_config_from_path(&cli.config)?;
     if cli.control {
         control_config.force_random_actions = true;

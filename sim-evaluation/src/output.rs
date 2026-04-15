@@ -1,8 +1,7 @@
 use crate::{
-    ledger::N_ACTIONS,
-    metrics::IntervalMetrics,
+    dataset::ACTION_COUNT,
     report::Reporter,
-    types::{ComparisonSummary, EvaluationSummary, ReproductionAnalytics},
+    types::{ComparisonSummary, EvaluationSummary, IntervalMetrics, ReproductionAnalytics},
 };
 use anyhow::Result;
 use serde::Serialize;
@@ -137,11 +136,13 @@ pub(crate) fn print_evaluation_summary(out_dir: &Path, summary: &EvaluationSumma
     println!("total_time_seconds: {:.3}", summary.total_time_seconds);
 }
 
-pub(crate) fn mean_histogram(values: impl Iterator<Item = [f64; N_ACTIONS]>) -> [f64; N_ACTIONS] {
-    let mut sums = [0.0; N_ACTIONS];
+pub(crate) fn mean_histogram(
+    values: impl Iterator<Item = [f64; ACTION_COUNT]>,
+) -> [f64; ACTION_COUNT] {
+    let mut sums = [0.0; ACTION_COUNT];
     let mut count = 0.0;
     for value in values {
-        for idx in 0..N_ACTIONS {
+        for idx in 0..ACTION_COUNT {
             if value[idx].is_finite() {
                 sums[idx] += value[idx];
             }
@@ -149,7 +150,7 @@ pub(crate) fn mean_histogram(values: impl Iterator<Item = [f64; N_ACTIONS]>) -> 
         count += 1.0;
     }
     if count == 0.0 {
-        return [0.0; N_ACTIONS];
+        return [0.0; ACTION_COUNT];
     }
     for sum in &mut sums {
         *sum /= count;

@@ -1,7 +1,17 @@
-use crate::types::ReproductionAnalytics;
-use sim_types::{
-    ActionRecord, ActionType, OrganismId, OrganismState, ReproductionEvent, SensoryReceptor,
+//! Per-organism sidecar maintained during a sim run. Produces
+//! [`OrganismLifetimeRow`]s at death (or at end-of-run for survivors), and
+//! per-tick action aggregates for the `action_counts` table. Interval- and
+//! pillar-level metrics are NOT computed here — they live in the analysis
+//! layer which reads the persisted dataset.
+//!
+//! The sidecar also tracks `num_offspring` per organism so genome snapshots
+//! can pick the top reproducer at each flush boundary.
+
+use crate::dataset::{
+    ActionCountRow, OrganismLifetimeRow, ReproductionEventRow, ReproductionOutcome, ACTION_COUNT,
+    JOINT_LEN,
 };
+use sim_types::{ActionRecord, ActionType, OrganismId, ReproductionEvent};
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 
@@ -24,94 +34,110 @@ impl Hasher for IdHasher {
 
 type IdHashMap<K, V> = HashMap<K, V, BuildHasherDefault<IdHasher>>;
 
-pub const N_ACTIONS: usize = 7;
-pub const SENSORY_BIN_COUNT: usize = 1 + SensoryReceptor::VISION_RAY_OFFSETS.len();
-const SURVIVAL_AGE_30: u64 = 30;
-
-#[derive(Debug, Clone, Default)]
-pub struct IntervalLifetimeSummary {
-    pub count: u64,
-    pub lifetime_sum: u64,
-    pub ate_count: u64,
-    pub consumptions_sum: u64,
-    pub joint: [[u64; N_ACTIONS]; SENSORY_BIN_COUNT],
-    pub food_ahead_ticks_sum: u64,
-    pub fwd_when_food_ahead_sum: u64,
-    pub utilization_sum: f64,
+/// Per-tick action aggregates. One row per action type will be emitted to
+/// `action_counts` on every tick.
+#[derive(Debug, Clone)]
+pub struct TickActionAggregates {
+    pub counts: [u64; ACTION_COUNT],
+    pub failed: [u64; ACTION_COUNT],
+    pub juvenile: [u64; ACTION_COUNT],
+    pub adult: [u64; ACTION_COUNT],
 }
 
-impl IntervalLifetimeSummary {
-    fn record(&mut self, entry: &OrganismEntry, lifetime: u64) {
-        self.count = self.count.saturating_add(1);
-        self.lifetime_sum = self.lifetime_sum.saturating_add(lifetime);
-        self.ate_count = self
-            .ate_count
-            .saturating_add(u64::from(entry.last_consumptions > 0));
-        self.consumptions_sum = self
-            .consumptions_sum
-            .saturating_add(entry.last_consumptions);
-        self.food_ahead_ticks_sum = self
-            .food_ahead_ticks_sum
-            .saturating_add(u64::from(entry.food_ahead_ticks));
-        self.fwd_when_food_ahead_sum = self
-            .fwd_when_food_ahead_sum
-            .saturating_add(u64::from(entry.fwd_when_food_ahead));
-        self.utilization_sum += f64::from(entry.utilization.clamp(0.0, 1.0));
-        for (sensory_idx, row) in entry.joint.iter().enumerate() {
-            for (action_idx, count) in row.iter().enumerate() {
-                self.joint[sensory_idx][action_idx] =
-                    self.joint[sensory_idx][action_idx].saturating_add(u64::from(*count));
-            }
+impl TickActionAggregates {
+    fn new() -> Self {
+        Self {
+            counts: [0; ACTION_COUNT],
+            failed: [0; ACTION_COUNT],
+            juvenile: [0; ACTION_COUNT],
+            adult: [0; ACTION_COUNT],
         }
     }
-}
 
-#[derive(Debug, Clone, Default)]
-pub struct IntervalActionStats {
-    pub action_counts: [u64; N_ACTIONS],
-    pub joint: [[u64; N_ACTIONS]; SENSORY_BIN_COUNT],
-    pub juvenile_joint: [[u64; N_ACTIONS]; SENSORY_BIN_COUNT],
-    pub adult_joint: [[u64; N_ACTIONS]; SENSORY_BIN_COUNT],
-    pub failed_action_count: u64,
-    pub failure_candidate_count: u64,
-}
-
-impl IntervalActionStats {
-    pub fn total_actions(&self) -> u64 {
-        self.action_counts.iter().sum()
+    pub fn into_rows(self, tick: u64) -> Vec<ActionCountRow> {
+        (0..ACTION_COUNT as u8)
+            .map(|action_type| ActionCountRow {
+                tick,
+                action_type,
+                count: self.counts[action_type as usize],
+                failed_count: self.failed[action_type as usize],
+                juvenile_count: self.juvenile[action_type as usize],
+                adult_count: self.adult[action_type as usize],
+            })
+            .collect()
     }
 }
 
 #[derive(Debug)]
-struct OrganismEntry {
-    birth_tick: u64,
-    age_of_maturity: u32,
-    #[allow(dead_code)]
-    tracked_reproduction_birth: bool,
-    survived_to_30_recorded: bool,
-    survived_to_maturity_recorded: bool,
-    last_successful_birth_tick: Option<u64>,
-    last_consumptions: u64,
-    joint: [[u32; N_ACTIONS]; SENSORY_BIN_COUNT],
-    food_ahead_ticks: u32,
-    fwd_when_food_ahead: u32,
-    utilization: f32,
+pub struct OrganismEntry {
+    pub id: u64,
+    pub parent_id: Option<u64>,
+    pub species_id: u64,
+    pub generation: u64,
+    pub birth_tick: u64,
+    pub age_of_maturity: u32,
+    pub num_offspring: u32,
+    pub total_actions: u64,
+    /// Lifetime count of consumptions. Tracked from `ActionRecord::consumptions_count`
+    /// (a cumulative counter produced by the sim), so `record_action` replaces
+    /// the stored value each tick.
+    pub total_consumptions: u64,
+    pub action_histogram: [u64; ACTION_COUNT],
+    pub utilization: f32,
+    pub food_ahead_ticks: u32,
+    pub fwd_when_food_ahead: u32,
+    /// Row-major `[SENSORY_BIN_COUNT][ACTION_COUNT]` flattened, juvenile-only.
+    pub joint_juvenile: Vec<u64>,
+    /// Row-major `[SENSORY_BIN_COUNT][ACTION_COUNT]` flattened, adult-only.
+    pub joint_adult: Vec<u64>,
 }
 
 impl OrganismEntry {
-    fn new(birth_tick: u64, age_of_maturity: u32, tracked_reproduction_birth: bool) -> Self {
+    fn new(
+        id: u64,
+        parent_id: Option<u64>,
+        species_id: u64,
+        generation: u64,
+        birth_tick: u64,
+        age_of_maturity: u32,
+    ) -> Self {
         Self {
+            id,
+            parent_id,
+            species_id,
+            generation,
             birth_tick,
             age_of_maturity,
-            tracked_reproduction_birth,
-            survived_to_30_recorded: false,
-            survived_to_maturity_recorded: false,
-            last_successful_birth_tick: None,
-            last_consumptions: 0,
-            joint: [[0; N_ACTIONS]; SENSORY_BIN_COUNT],
+            num_offspring: 0,
+            total_actions: 0,
+            total_consumptions: 0,
+            action_histogram: [0; ACTION_COUNT],
+            utilization: 0.0,
             food_ahead_ticks: 0,
             fwd_when_food_ahead: 0,
-            utilization: 0.0,
+            joint_juvenile: vec![0; JOINT_LEN],
+            joint_adult: vec![0; JOINT_LEN],
+        }
+    }
+
+    fn into_lifetime_row(self, death_tick: Option<u64>) -> OrganismLifetimeRow {
+        OrganismLifetimeRow {
+            id: self.id,
+            parent_id: self.parent_id,
+            species_id: self.species_id,
+            birth_tick: self.birth_tick,
+            death_tick,
+            generation: self.generation,
+            age_of_maturity: self.age_of_maturity,
+            num_offspring: self.num_offspring,
+            total_consumptions: self.total_consumptions,
+            total_actions: self.total_actions,
+            action_histogram: self.action_histogram.to_vec(),
+            utilization: self.utilization,
+            food_ahead_ticks: self.food_ahead_ticks,
+            fwd_when_food_ahead: self.fwd_when_food_ahead,
+            joint_juvenile: self.joint_juvenile,
+            joint_adult: self.joint_adult,
         }
     }
 }
@@ -119,105 +145,85 @@ impl OrganismEntry {
 #[derive(Debug)]
 pub struct Ledger {
     sidecar: IdHashMap<OrganismId, OrganismEntry>,
-    recently_deceased: IntervalLifetimeSummary,
-    interval_action_stats: IntervalActionStats,
-    births: u64,
-    successful_births: u64,
-    blocked_births: u64,
-    parent_died_during_reproduction: u64,
-    survived_to_30: u64,
-    survived_to_maturity: u64,
-    pending_tracked_births: IdHashMap<OrganismId, ()>,
-    pending_threshold_checks: Vec<OrganismId>,
-    parent_energy_after_successful_birth_sum: f64,
-    parent_energy_after_successful_birth_count: u64,
-    age_at_first_successful_reproduction_sum: f64,
-    age_at_first_successful_reproduction_count: u64,
-    successful_birth_interval_sum: f64,
-    successful_birth_interval_count: u64,
-    /// Sum of parent ages at every successful reproduction event in the current
-    /// reporting interval. Divided by `interval_generation_count` to produce
-    /// `generation_time`, the average age at which individuals reproduce.
-    interval_generation_time_sum: f64,
-    interval_generation_time_count: u64,
-    pub neonatal_deaths: u64,
-    min_lifetime: u64,
+    tick_aggregates: TickActionAggregates,
+    /// Child id → parent id, captured when a successful `ReproductionEvent`
+    /// is observed and consumed on the corresponding `birth()` call. Founders
+    /// and periodic injections never appear here, so their `parent_id` stays
+    /// `None` — that's the signal used downstream to distinguish descendants
+    /// from seeded organisms when computing lineage-survival metrics.
+    pending_parents: IdHashMap<OrganismId, OrganismId>,
 }
 
 impl Ledger {
-    pub fn new(min_lifetime: u64) -> Self {
+    pub fn new() -> Self {
         Self {
             sidecar: IdHashMap::default(),
-            recently_deceased: IntervalLifetimeSummary::default(),
-            interval_action_stats: IntervalActionStats::default(),
-            births: 0,
-            successful_births: 0,
-            blocked_births: 0,
-            parent_died_during_reproduction: 0,
-            survived_to_30: 0,
-            survived_to_maturity: 0,
-            pending_tracked_births: IdHashMap::default(),
-            pending_threshold_checks: Vec::new(),
-            parent_energy_after_successful_birth_sum: 0.0,
-            parent_energy_after_successful_birth_count: 0,
-            age_at_first_successful_reproduction_sum: 0.0,
-            age_at_first_successful_reproduction_count: 0,
-            successful_birth_interval_sum: 0.0,
-            successful_birth_interval_count: 0,
-            interval_generation_time_sum: 0.0,
-            interval_generation_time_count: 0,
-            neonatal_deaths: 0,
-            min_lifetime,
+            tick_aggregates: TickActionAggregates::new(),
+            pending_parents: IdHashMap::default(),
         }
     }
 
-    pub fn birth(&mut self, id: OrganismId, tick: u64, age_of_maturity: u32) {
-        let tracked_reproduction_birth = self.pending_tracked_births.remove(&id).is_some();
-        if tracked_reproduction_birth {
-            self.births = self.births.saturating_add(1);
-            self.pending_threshold_checks.push(id);
-        }
+    pub fn birth(
+        &mut self,
+        id: OrganismId,
+        species_id: u64,
+        generation: u64,
+        birth_tick: u64,
+        age_of_maturity: u32,
+    ) {
+        let parent_id = self.pending_parents.remove(&id).map(|p| p.0);
         self.sidecar.insert(
             id,
-            OrganismEntry::new(tick, age_of_maturity, tracked_reproduction_birth),
+            OrganismEntry::new(
+                id.0,
+                parent_id,
+                species_id,
+                generation,
+                birth_tick,
+                age_of_maturity,
+            ),
         );
     }
 
-    pub fn update(&mut self, record: &ActionRecord) {
+    /// Ingest one tick's worth of per-organism action records. Updates the
+    /// per-organism sidecar and the per-tick action aggregates.
+    pub fn record_action(&mut self, record: &ActionRecord) {
         let action_idx = action_index(record.selected_action);
         let sensory_bin = sensory_bin(record);
-        self.interval_action_stats.action_counts[action_idx] =
-            self.interval_action_stats.action_counts[action_idx].saturating_add(1);
-        self.interval_action_stats.joint[sensory_bin][action_idx] =
-            self.interval_action_stats.joint[sensory_bin][action_idx].saturating_add(1);
-        if action_can_fail(record.selected_action) {
-            self.interval_action_stats.failure_candidate_count = self
-                .interval_action_stats
-                .failure_candidate_count
-                .saturating_add(1);
-            self.interval_action_stats.failed_action_count = self
-                .interval_action_stats
-                .failed_action_count
-                .saturating_add(u64::from(record.action_failed));
+        let is_juvenile_record = self
+            .sidecar
+            .get(&record.organism_id)
+            .map(|entry| record.age_turns < u64::from(entry.age_of_maturity))
+            .unwrap_or(false);
+
+        self.tick_aggregates.counts[action_idx] =
+            self.tick_aggregates.counts[action_idx].saturating_add(1);
+        if action_can_fail(record.selected_action) && record.action_failed {
+            self.tick_aggregates.failed[action_idx] =
+                self.tick_aggregates.failed[action_idx].saturating_add(1);
+        }
+        if is_juvenile_record {
+            self.tick_aggregates.juvenile[action_idx] =
+                self.tick_aggregates.juvenile[action_idx].saturating_add(1);
+        } else {
+            self.tick_aggregates.adult[action_idx] =
+                self.tick_aggregates.adult[action_idx].saturating_add(1);
         }
 
         let Some(entry) = self.sidecar.get_mut(&record.organism_id) else {
             return;
         };
 
-        if record.age_turns < u64::from(entry.age_of_maturity) {
-            self.interval_action_stats.juvenile_joint[sensory_bin][action_idx] =
-                self.interval_action_stats.juvenile_joint[sensory_bin][action_idx]
-                    .saturating_add(1);
-        } else {
-            self.interval_action_stats.adult_joint[sensory_bin][action_idx] =
-                self.interval_action_stats.adult_joint[sensory_bin][action_idx].saturating_add(1);
-        }
-        entry.last_consumptions = record.consumptions_count;
-        entry.joint[sensory_bin][action_idx] =
-            entry.joint[sensory_bin][action_idx].saturating_add(1);
+        entry.total_actions = entry.total_actions.saturating_add(1);
+        entry.total_consumptions = record.consumptions_count;
+        entry.action_histogram[action_idx] = entry.action_histogram[action_idx].saturating_add(1);
         entry.utilization = record.utilization.clamp(0.0, 1.0);
-
+        let joint_idx = sensory_bin * ACTION_COUNT + action_idx;
+        if is_juvenile_record {
+            entry.joint_juvenile[joint_idx] = entry.joint_juvenile[joint_idx].saturating_add(1);
+        } else {
+            entry.joint_adult[joint_idx] = entry.joint_adult[joint_idx].saturating_add(1);
+        }
         if record.food_visible_at_offset(0) {
             entry.food_ahead_ticks = entry.food_ahead_ticks.saturating_add(1);
             if record.selected_action == ActionType::Forward {
@@ -226,139 +232,91 @@ impl Ledger {
         }
     }
 
-    pub fn death(&mut self, id: OrganismId, tick: u64) {
-        let Some(entry) = self.sidecar.remove(&id) else {
-            return;
-        };
-
-        let lifetime = tick.saturating_sub(entry.birth_tick);
-        if lifetime < self.min_lifetime {
-            self.neonatal_deaths = self.neonatal_deaths.saturating_add(1);
-            return;
-        }
-
-        self.recently_deceased.record(&entry, lifetime);
-    }
-
-    pub fn recently_deceased(&self) -> &IntervalLifetimeSummary {
-        &self.recently_deceased
-    }
-
-    pub fn handle_reproduction_event(&mut self, tick: u64, event: ReproductionEvent) {
-        match event.failure_cause {
+    pub fn record_reproduction(
+        &mut self,
+        tick: u64,
+        event: ReproductionEvent,
+    ) -> ReproductionEventRow {
+        let outcome = match event.failure_cause {
             None => {
-                self.successful_births = self.successful_births.saturating_add(1);
-                self.parent_energy_after_successful_birth_sum +=
-                    f64::from(event.parent_energy_after_event);
-                self.parent_energy_after_successful_birth_count = self
-                    .parent_energy_after_successful_birth_count
-                    .saturating_add(1);
-                self.interval_generation_time_sum += event.parent_age_turns as f64;
-                self.interval_generation_time_count =
-                    self.interval_generation_time_count.saturating_add(1);
                 if let Some(entry) = self.sidecar.get_mut(&event.parent_id) {
-                    if entry.last_successful_birth_tick.is_none() {
-                        self.age_at_first_successful_reproduction_sum +=
-                            event.parent_age_turns as f64;
-                        self.age_at_first_successful_reproduction_count = self
-                            .age_at_first_successful_reproduction_count
-                            .saturating_add(1);
-                    } else if let Some(last_tick) = entry.last_successful_birth_tick {
-                        self.successful_birth_interval_sum += tick.saturating_sub(last_tick) as f64;
-                        self.successful_birth_interval_count =
-                            self.successful_birth_interval_count.saturating_add(1);
-                    }
-                    entry.last_successful_birth_tick = Some(tick);
+                    entry.num_offspring = entry.num_offspring.saturating_add(1);
                 }
                 if let Some(child_id) = event.child_id {
-                    self.pending_tracked_births.insert(child_id, ());
+                    self.pending_parents.insert(child_id, event.parent_id);
                 }
+                ReproductionOutcome::Success
             }
             Some(sim_types::ReproductionFailureCause::BlockedBirth) => {
-                self.blocked_births = self.blocked_births.saturating_add(1);
+                ReproductionOutcome::BlockedBirth
             }
             Some(sim_types::ReproductionFailureCause::ParentDied) => {
-                self.parent_died_during_reproduction =
-                    self.parent_died_during_reproduction.saturating_add(1);
+                ReproductionOutcome::ParentDied
             }
+        };
+        ReproductionEventRow {
+            tick,
+            parent_id: event.parent_id.0,
+            parent_species_id: event.parent_species_id.0,
+            parent_generation: event.parent_generation,
+            parent_age_turns: event.parent_age_turns,
+            child_id: event.child_id.map(|c| c.0),
+            investment_energy: event.investment_energy,
+            parent_energy_after: event.parent_energy_after_event,
+            outcome: outcome.code(),
         }
     }
 
-    pub fn update_survival_thresholds(&mut self, organisms: &[OrganismState]) {
-        if self.pending_threshold_checks.is_empty() {
-            return;
-        }
-        self.pending_threshold_checks.retain(|id| {
-            let Ok(idx) = organisms.binary_search_by_key(id, |o| o.id) else {
-                return false;
-            };
-            let organism = &organisms[idx];
-            let Some(entry) = self.sidecar.get_mut(id) else {
-                return false;
-            };
-            if !entry.survived_to_30_recorded && organism.age_turns >= SURVIVAL_AGE_30 {
-                self.survived_to_30 = self.survived_to_30.saturating_add(1);
-                entry.survived_to_30_recorded = true;
+    pub fn death(&mut self, id: OrganismId, tick: u64) -> Option<OrganismLifetimeRow> {
+        self.sidecar
+            .remove(&id)
+            .map(|entry| entry.into_lifetime_row(Some(tick)))
+    }
+
+    /// Drain remaining live entries at run end. Called once after the last
+    /// tick completes so every organism contributes a lifetime row.
+    pub fn drain_survivors(&mut self) -> Vec<OrganismLifetimeRow> {
+        let survivors = std::mem::take(&mut self.sidecar);
+        survivors
+            .into_values()
+            .map(|entry| entry.into_lifetime_row(None))
+            .collect()
+    }
+
+    /// Take ownership of the buffered tick aggregates and reset the buffer
+    /// for the next tick. Called exactly once per tick.
+    pub fn take_tick_aggregates(&mut self) -> TickActionAggregates {
+        std::mem::replace(&mut self.tick_aggregates, TickActionAggregates::new())
+    }
+
+    /// Select the living organism with the most offspring. Ties are broken by
+    /// lowest id to keep snapshot selection deterministic. Returns `None` when
+    /// no living organism has reproduced yet.
+    pub fn top_reproducer(&self) -> Option<&OrganismEntry> {
+        let mut best: Option<&OrganismEntry> = None;
+        for entry in self.sidecar.values() {
+            if entry.num_offspring == 0 {
+                continue;
             }
-            if !entry.survived_to_maturity_recorded
-                && organism.age_turns >= u64::from(entry.age_of_maturity)
-            {
-                self.survived_to_maturity = self.survived_to_maturity.saturating_add(1);
-                entry.survived_to_maturity_recorded = true;
+            match best {
+                None => best = Some(entry),
+                Some(current)
+                    if entry.num_offspring > current.num_offspring
+                        || (entry.num_offspring == current.num_offspring
+                            && entry.id < current.id) =>
+                {
+                    best = Some(entry)
+                }
+                _ => {}
             }
-            // Keep in set if still has pending thresholds to check
-            !entry.survived_to_30_recorded || !entry.survived_to_maturity_recorded
-        });
-    }
-
-    pub fn reproduction_analytics(&self) -> ReproductionAnalytics {
-        ReproductionAnalytics {
-            births: self.births,
-            successful_births: self.successful_births,
-            blocked_births: self.blocked_births,
-            parent_died_during_reproduction: self.parent_died_during_reproduction,
-            survived_to_30: self.survived_to_30,
-            survived_to_maturity: self.survived_to_maturity,
-            mean_parent_energy_after_successful_birth: mean_or_none(
-                self.parent_energy_after_successful_birth_sum,
-                self.parent_energy_after_successful_birth_count,
-            ),
-            mean_age_at_first_successful_reproduction: mean_or_none(
-                self.age_at_first_successful_reproduction_sum,
-                self.age_at_first_successful_reproduction_count,
-            ),
-            mean_successful_birth_interval: mean_or_none(
-                self.successful_birth_interval_sum,
-                self.successful_birth_interval_count,
-            ),
         }
-    }
-
-    pub fn interval_action_stats(&self) -> &IntervalActionStats {
-        &self.interval_action_stats
-    }
-
-    pub fn interval_generation_time(&self) -> Option<f64> {
-        mean_or_none(
-            self.interval_generation_time_sum,
-            self.interval_generation_time_count,
-        )
-    }
-
-    pub fn clear_interval(&mut self) {
-        self.recently_deceased = IntervalLifetimeSummary::default();
-        self.interval_action_stats = IntervalActionStats::default();
-        self.interval_generation_time_sum = 0.0;
-        self.interval_generation_time_count = 0;
-        self.neonatal_deaths = 0;
+        best
     }
 }
 
-fn mean_or_none(sum: f64, count: u64) -> Option<f64> {
-    if count == 0 {
-        None
-    } else {
-        Some(sum / count as f64)
+impl Default for Ledger {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -393,12 +351,13 @@ fn action_can_fail(action: ActionType) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sim_types::{OrganismId, SensoryReceptor, SpeciesId};
 
     #[test]
-    fn interval_failure_counts_only_contingent_actions() {
-        let mut ledger = Ledger::new(0);
-
-        ledger.update(&ActionRecord {
+    fn tick_aggregates_count_only_contingent_action_failures() {
+        let mut ledger = Ledger::new();
+        ledger.birth(OrganismId(1), SpeciesId(0).0, 0, 0, 10);
+        ledger.record_action(&ActionRecord {
             organism_id: OrganismId(1),
             selected_action: ActionType::TurnLeft,
             action_failed: true,
@@ -408,7 +367,7 @@ mod tests {
             utilization: 0.0,
             consumptions_count: 0,
         });
-        ledger.update(&ActionRecord {
+        ledger.record_action(&ActionRecord {
             organism_id: OrganismId(1),
             selected_action: ActionType::Eat,
             action_failed: true,
@@ -418,7 +377,7 @@ mod tests {
             utilization: 0.0,
             consumptions_count: 0,
         });
-        ledger.update(&ActionRecord {
+        ledger.record_action(&ActionRecord {
             organism_id: OrganismId(1),
             selected_action: ActionType::Attack,
             action_failed: false,
@@ -429,8 +388,44 @@ mod tests {
             consumptions_count: 0,
         });
 
-        let stats = ledger.interval_action_stats();
-        assert_eq!(stats.failure_candidate_count, 2);
-        assert_eq!(stats.failed_action_count, 1);
+        let aggregates = ledger.take_tick_aggregates();
+        assert_eq!(aggregates.counts[action_index(ActionType::TurnLeft)], 1);
+        assert_eq!(aggregates.failed[action_index(ActionType::TurnLeft)], 0);
+        assert_eq!(aggregates.failed[action_index(ActionType::Eat)], 1);
+        assert_eq!(aggregates.failed[action_index(ActionType::Attack)], 0);
+    }
+
+    #[test]
+    fn top_reproducer_picks_max_offspring_breaking_ties_low_id() {
+        let mut ledger = Ledger::new();
+        ledger.birth(OrganismId(1), 0, 0, 0, 10);
+        ledger.birth(OrganismId(2), 0, 0, 0, 10);
+        ledger.birth(OrganismId(3), 0, 0, 0, 10);
+
+        ledger
+            .sidecar
+            .get_mut(&OrganismId(1))
+            .unwrap()
+            .num_offspring = 3;
+        ledger
+            .sidecar
+            .get_mut(&OrganismId(2))
+            .unwrap()
+            .num_offspring = 5;
+        ledger
+            .sidecar
+            .get_mut(&OrganismId(3))
+            .unwrap()
+            .num_offspring = 5;
+
+        let top = ledger.top_reproducer().unwrap();
+        assert_eq!(top.id, 2);
+    }
+
+    #[test]
+    fn top_reproducer_none_when_nothing_has_reproduced() {
+        let mut ledger = Ledger::new();
+        ledger.birth(OrganismId(1), 0, 0, 0, 10);
+        assert!(ledger.top_reproducer().is_none());
     }
 }
