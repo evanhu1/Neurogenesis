@@ -33,6 +33,14 @@ pub(crate) fn run_evaluation_across_seeds(
     let (tx, rx) = mpsc::channel();
     let mut handles = Vec::with_capacity(worker_threads);
 
+    // When multiple seed workers share the machine, split the available cores
+    // across them so each seed's simulation gets a dedicated slice of threads
+    // rather than fighting over a single shared rayon pool. Without this each
+    // sim was requesting 8 workers concurrently, oversubscribing the cores
+    // and serializing par_iter_mut work through a contended pool.
+    let mut config = config;
+    config.intent_parallel_threads = per_seed_intent_threads(worker_threads);
+
     for _ in 0..worker_threads {
         let config = config.clone();
         let seed_queue = Arc::clone(&seed_queue);
@@ -412,6 +420,23 @@ fn default_worker_threads(seed_count: usize) -> usize {
         .map(|count| count.get())
         .unwrap_or(1)
         .clamp(1, seed_count.max(1))
+}
+
+/// Choose how many intent threads each sim should use given that
+/// `worker_threads` sims will be running concurrently on this machine.
+///
+/// Target = cores / worker_threads (rounded up), so all physical parallelism
+/// is used but no seed's rayon pool competes with another seed's pool for the
+/// same core. Capped at 4 to avoid over-splitting the per-tick work for small
+/// runs — empirically, throughput plateaus around 4 threads for a single 5000-
+/// organism simulation and excess workers add rayon scheduling overhead.
+fn per_seed_intent_threads(worker_threads: usize) -> u32 {
+    const PER_SEED_CAP: usize = 4;
+    let cores = thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1);
+    let per_seed = cores.div_ceil(worker_threads.max(1));
+    per_seed.clamp(1, PER_SEED_CAP) as u32
 }
 
 #[cfg(test)]

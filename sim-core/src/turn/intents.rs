@@ -53,7 +53,7 @@ impl Simulation {
             sim_seed: self.seed,
             tick: self.turn,
         };
-        let thread_pool = sim_parallel_pool(self.config.intent_parallel_threads);
+        let thread_pool = self.parallel_pool();
         #[cfg(feature = "profiling")]
         let brain_eval_started = Instant::now();
 

@@ -83,6 +83,12 @@ pub struct Simulation {
     #[cfg(feature = "instrumentation")]
     #[serde(skip)]
     action_records: Vec<Option<ActionRecord>>,
+    /// Per-simulation rayon pool. Using a dedicated pool avoids the shared-pool
+    /// bottleneck when many seed simulations run concurrently in the evaluation
+    /// harness — each sim's `par_iter_mut` work actually runs in parallel on
+    /// its own workers instead of serializing through one global pool.
+    #[serde(skip)]
+    pub(crate) cached_thread_pool: std::sync::OnceLock<std::sync::Arc<rayon::ThreadPool>>,
     metrics: MetricsSnapshot,
 }
 
@@ -123,6 +129,7 @@ impl Simulation {
             food_regrowth_schedule: BTreeMap::new(),
             #[cfg(feature = "instrumentation")]
             action_records: Vec::new(),
+            cached_thread_pool: std::sync::OnceLock::new(),
             metrics: MetricsSnapshot::default(),
         };
 

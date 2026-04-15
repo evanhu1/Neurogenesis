@@ -25,9 +25,8 @@ use sim_types::{
     ActionType, EntityId, FacingDirection, FoodKind, FoodState, Occupant, OrganismFacing,
     OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, TickDelta, VisualProperties,
 };
-use std::collections::HashMap;
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
 #[cfg(feature = "profiling")]
 use std::time::Instant;
 
@@ -114,28 +113,25 @@ macro_rules! profile_turn_phase {
     }};
 }
 
-fn sim_parallel_pool(thread_count: u32) -> Arc<ThreadPool> {
-    static POOLS: OnceLock<Mutex<HashMap<usize, Arc<ThreadPool>>>> = OnceLock::new();
+fn build_sim_parallel_pool(thread_count: u32) -> Arc<ThreadPool> {
     let requested_threads = thread_count.max(1) as usize;
-    let mut pools = POOLS
-        .get_or_init(|| Mutex::new(HashMap::new()))
-        .lock()
-        .expect("sim-core thread pool cache lock poisoned");
-    pools
-        .entry(requested_threads)
-        .or_insert_with(|| {
-            Arc::new(
-                ThreadPoolBuilder::new()
-                    .num_threads(requested_threads)
-                    .thread_name(|idx| format!("sim-core-worker-{idx}"))
-                    .build()
-                    .expect("failed to build sim-core rayon thread pool"),
-            )
-        })
-        .clone()
+    Arc::new(
+        ThreadPoolBuilder::new()
+            .num_threads(requested_threads)
+            .thread_name(|idx| format!("sim-core-worker-{idx}"))
+            .build()
+            .expect("failed to build sim-core rayon thread pool"),
+    )
 }
 
 impl Simulation {
+    pub(crate) fn parallel_pool(&self) -> Arc<ThreadPool> {
+        let threads = self.config.intent_parallel_threads;
+        self.cached_thread_pool
+            .get_or_init(|| build_sim_parallel_pool(threads))
+            .clone()
+    }
+
     pub fn tick(&mut self) -> TickDelta {
         self.reconcile_pending_actions();
         self.reconcile_reward_ledgers();
@@ -255,7 +251,7 @@ impl Simulation {
         let plasticity_started = Instant::now();
 
         if any_learners {
-            let thread_pool = sim_parallel_pool(self.config.intent_parallel_threads);
+            let thread_pool = self.parallel_pool();
             thread_pool.install(|| {
                 self.organisms
                     .par_iter_mut()
