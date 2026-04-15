@@ -87,19 +87,72 @@ Adds workspace-level [profile.release] section. Re-built `sim-evaluation`.
 
 Modest but free, kept.
 
-### Conclusion so far
+### 2. Hoist hex step deltas out of `scan_ray` (committed as 619f171)
+
+`scan_ray` was calling `hex_neighbor` every step, which match'd on the
+`FacingDirection` each iteration. Replaced with a single `facing_delta()`
+lookup that's hoisted before the loop, plus inlined the wraparound check.
+
+Per-call cost dropped 0.130 → 0.120 µs (≈8% on `scan_ahead`). Wall-time
+impact tiny because `scan_ahead` is only ~28% of brain time.
+
+| Bench | Before | After | Δ |
+| --- | --- | --- | --- |
+| single seed, 10k ticks | 2.136 s | 2.130 s | -0.3% |
+| 8 seeds, 5k ticks | 2.820 s | 2.790 s | -1.1% |
+
+Determinism preserved: `cargo test -p sim-evaluation` and `-p sim-core` pass.
+
+### Conclusion
+
+Combined wins of changes 1 + 2: roughly **4–5% wall-time** on both single-seed
+and multi-seed benchmarks. Far short of the requested 5x.
 
 Most of the wall time is genuinely inside `sim.tick()` and not in the
-evaluation harness's instrumentation. The harness cost is small compared to
-the simulation kernel. Achieving 5x in this codebase would require either:
+evaluation harness's instrumentation. Reproduced with a `RAW_TICK_ONLY`
+experiment that stripped the harness's per-tick work to a single `sim.tick()`
+call: throughput barely moved (~6% improvement). The user's premise that
+"heavy instrumentation is massively slowing down the simulation" doesn't
+match the data — the instrumentation hot path adds only ~6% over the
+non-instrumented build (337 vs 319 µs/tick in `profile_turn_path`).
+
+The actual bottleneck breakdown (post-warmup, with instrumentation):
+
+- Intents 53% (mostly `evaluate_brain` + pending coactivations)
+- Spawn 34% (mostly `apply_post_commit_runtime_weight_updates`)
+- Commit 11%
+- Other phases together <2%
+
+Plasticity (pending coactivations + weight updates + prune) is
+**~50% of total tick time**. Brain evaluation forward pass is another ~25%.
+At 5000 organisms × ~10–30 synapses × per-edge plasticity work, the kernel
+is already at SIMD-able simple-arithmetic levels — no obvious structural
+slack.
+
+Achieving 5x in this codebase would require either:
 
 - Algorithmic rework of brain evaluation / plasticity (e.g. SIMD batching
-  multiple organisms at once, or a fundamentally cheaper representation).
-- Skipping a pillar of work, e.g. shipping a "reduced instrumentation" path
-  that drops `food_visible`, `utilization`, etc. — but the harness consumes
-  all of those today.
-- Better cross-seed work scheduling so the 8 cores don't contend on rayon.
+  multiple organisms at once, or a packed contiguous synapse representation
+  per layer to enable wide SIMD across organisms).
+- Dropping or sampling per-organism instrumentation. E.g. compute
+  `utilization` only on the report tick rather than every tick, accept the
+  EMA-decay drift, and special-case the food_visible array. Estimated 5–10%
+  additional gain.
+- A fundamentally cheaper rule (e.g. plasticity weight updates only every
+  N ticks instead of every tick) — would change experimental semantics and
+  require sign-off.
 
 These are large refactors well beyond surgical changes; LTO + codegen-units
-captures the easy free win without changing semantics or risking determinism.
++ scan_ray hoist captures the easy free wins without changing semantics or
+risking determinism. Determinism verified after each commit.
+
+If 5x is mandatory, the highest-leverage next step is a contiguous-buffer
+brain layout: store all organisms' inter activations as one big f32 vec
+indexed by `(organism_idx, neuron_idx)` so the inter accumulation, plasticity
+sensory tuning, and weight updates all become flat SIMD loops over a single
+buffer instead of pointer-chasing per organism. That would touch
+`brain/expression.rs`, `brain/evaluation.rs`, `brain/plasticity.rs`, the
+genome → brain expression code, and any place reading `brain.inter`
+(`turn/intents.rs`, `actor_critic.rs`). Estimated 2–4x kernel speedup if
+done well, but a multi-day refactor with high blast radius.
 
