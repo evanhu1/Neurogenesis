@@ -1,6 +1,6 @@
 # Topology
-num_neurons = 3 # Number of inter neurons in the initial seed genome.
-num_synapses = 20 # Number of synaptic connections in the initial seed genome.
+num_neurons = 0 # Number of inter neurons in the initial seed genome.
+num_synapses = 10 # Number of synaptic connections in the initial seed genome.
 spatial_prior_sigma = 3.0 # Spatial prior width used when biasing new synapses toward nearby neurons.
 vision_distance = 5 # Maximum ray-sensing distance for RGB `VisionRay` sensory neurons. Clamped to 10.
 

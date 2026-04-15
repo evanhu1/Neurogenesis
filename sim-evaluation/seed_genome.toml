@@ -1,6 +1,6 @@
 # Topology
-num_neurons = 3
-num_synapses = 20
+num_neurons = 0
+num_synapses = 10
 spatial_prior_sigma = 3.0
 vision_distance = 5
 
