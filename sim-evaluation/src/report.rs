@@ -182,7 +182,7 @@ pub fn write_html_report(
         .table-scroll{max-width:100%;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}\
         .table-scroll table{min-width:1280px}\
         .th-tip{position:relative;display:inline-block;cursor:help;border-bottom:1px dotted var(--muted);padding-bottom:1px}\
-        .th-tip .tip{position:absolute;left:50%;bottom:calc(100% + 10px);transform:translateX(-50%);width:min(320px,70vw);padding:10px 12px;border-radius:10px;background:#0f172a;color:#f8fafc;font-size:12px;font-weight:500;line-height:1.45;text-align:left;box-shadow:0 12px 30px rgba(15,23,42,.22);opacity:0;visibility:hidden;pointer-events:none;z-index:20}\
+        .th-tip .tip{position:fixed;left:0;top:0;transform:translate(-50%,-100%);width:min(320px,70vw);padding:10px 12px;border-radius:10px;background:#0f172a;color:#f8fafc;font-size:12px;font-weight:500;line-height:1.45;text-align:left;box-shadow:0 12px 30px rgba(15,23,42,.22);opacity:0;visibility:hidden;pointer-events:none;z-index:1000}\
         .th-tip .tip::after{content:\"\";position:absolute;left:50%;top:100%;transform:translateX(-50%);border:6px solid transparent;border-top-color:#0f172a}\
         .th-tip:hover .tip,.th-tip:focus-visible .tip{opacity:1;visibility:visible}\
         .chart{margin:8px 0 20px 0}svg{width:100%;height:auto;border:1px solid var(--line);border-radius:8px;background:#fff}\
@@ -476,6 +476,20 @@ pub fn write_html_report(
     }
     html.push_str("</div>");
 
+    html.push_str(
+        "<script>(function(){\
+        function place(el){\
+          var tip=el.querySelector('.tip');if(!tip)return;\
+          var r=el.getBoundingClientRect();\
+          tip.style.left=(r.left+r.width/2)+'px';\
+          tip.style.top=(r.top-10)+'px';\
+        }\
+        document.querySelectorAll('.th-tip').forEach(function(el){\
+          el.addEventListener('mouseenter',function(){place(el);});\
+          el.addEventListener('focus',function(){place(el);});\
+        });\
+        })();</script>",
+    );
     html.push_str("</div></body></html>");
     std::fs::write(report_path, html)?;
     Ok(())
