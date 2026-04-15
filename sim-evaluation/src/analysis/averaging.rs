@@ -94,51 +94,51 @@ pub fn average_reproduction_analytics(
         births: mean_round_u64(
             seed_summaries
                 .iter()
-                .map(|summary| summary.experiment_readouts.births),
+                .map(|summary| summary.reproduction.births),
         ),
         successful_births: mean_round_u64(
             seed_summaries
                 .iter()
-                .map(|summary| summary.experiment_readouts.successful_births),
+                .map(|summary| summary.reproduction.successful_births),
         ),
         blocked_births: mean_round_u64(
             seed_summaries
                 .iter()
-                .map(|summary| summary.experiment_readouts.blocked_births),
+                .map(|summary| summary.reproduction.blocked_births),
         ),
         parent_died_during_reproduction: mean_round_u64(
             seed_summaries
                 .iter()
-                .map(|summary| summary.experiment_readouts.parent_died_during_reproduction),
+                .map(|summary| summary.reproduction.parent_died_during_reproduction),
         ),
         survived_to_30: mean_round_u64(
             seed_summaries
                 .iter()
-                .map(|summary| summary.experiment_readouts.survived_to_30),
+                .map(|summary| summary.reproduction.survived_to_30),
         ),
         survived_to_maturity: mean_round_u64(
             seed_summaries
                 .iter()
-                .map(|summary| summary.experiment_readouts.survived_to_maturity),
+                .map(|summary| summary.reproduction.survived_to_maturity),
         ),
         mean_parent_energy_after_successful_birth: mean_option(seed_summaries.iter().map(
             |summary| {
                 summary
-                    .experiment_readouts
+                    .reproduction
                     .mean_parent_energy_after_successful_birth
             },
         )),
         mean_age_at_first_successful_reproduction: mean_option(seed_summaries.iter().map(
             |summary| {
                 summary
-                    .experiment_readouts
+                    .reproduction
                     .mean_age_at_first_successful_reproduction
             },
         )),
         mean_successful_birth_interval: mean_option(
             seed_summaries
                 .iter()
-                .map(|summary| summary.experiment_readouts.mean_successful_birth_interval),
+                .map(|summary| summary.reproduction.mean_successful_birth_interval),
         ),
     }
 }

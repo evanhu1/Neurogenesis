@@ -3,13 +3,10 @@
 //! rewrites the human-readable artifacts (`summary.json`, `timeseries.csv`,
 //! `report.html`) without re-running the simulation.
 
-use super::{analyze, AnalysisOptions, ScoringWindow};
+use super::{analyze, write_per_seed_artifacts, AnalysisOptions, ScoringWindow};
 use crate::dataset::{DatasetReader, Manifest};
-use crate::output::{write_summary_json, write_timeseries_csv};
-use crate::report::{write_html_report, HtmlReportContext, HtmlReportMeta};
 use crate::types::SeedEvaluationSummary;
 use anyhow::Result;
-use chrono::Utc;
 use std::path::Path;
 
 const DEFAULT_MIN_LIFETIME: u64 = 30;
@@ -34,29 +31,16 @@ pub fn analyze_dataset_dir(dataset_dir: &Path) -> Result<()> {
         control: false,
         total_time_seconds: 0.0,
         pillars: analysis.pillars.clone(),
-        experiment_readouts: analysis.reproduction.clone(),
+        reproduction: analysis.reproduction.clone(),
         state_hash: String::new(),
         timeseries: analysis.timeseries.clone(),
     };
-    write_summary_json(dataset_dir, &summary)?;
-    write_timeseries_csv(dataset_dir, &summary.timeseries)?;
-    write_html_report(
+    write_per_seed_artifacts(
         dataset_dir,
-        &HtmlReportMeta::from_pillars(
-            &analysis.pillars,
-            HtmlReportContext {
-                title: None,
-                ticks: manifest.total_ticks,
-                report_every: manifest.report_every,
-                min_lifetime: DEFAULT_MIN_LIFETIME,
-                control: false,
-                total_time_seconds: 0.0,
-                generated_at_utc: Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
-                timeseries_label: "re-analyzed from dataset".to_owned(),
-                per_seed_rows: Vec::new(),
-            },
-        ),
-        &summary.timeseries,
+        &summary,
+        manifest.report_every,
+        DEFAULT_MIN_LIFETIME,
+        "re-analyzed from dataset",
     )?;
     println!("re-analyzed dataset: {}", dataset_dir.display());
     Ok(())

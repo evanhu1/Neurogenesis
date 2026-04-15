@@ -33,7 +33,7 @@ pub(crate) struct SeedEvaluationSummary {
     pub(crate) control: bool,
     pub(crate) total_time_seconds: f64,
     pub(crate) pillars: PillarScores,
-    pub(crate) experiment_readouts: ReproductionAnalytics,
+    pub(crate) reproduction: ReproductionAnalytics,
     pub(crate) state_hash: String,
     pub(crate) timeseries: Vec<IntervalMetrics>,
 }
@@ -47,7 +47,7 @@ pub(crate) struct EvaluationSummary {
     pub(crate) worker_threads: usize,
     pub(crate) total_time_seconds: f64,
     pub(crate) pillars: PillarScores,
-    pub(crate) experiment_readouts: ReproductionAnalytics,
+    pub(crate) reproduction: ReproductionAnalytics,
     pub(crate) seed_summaries: Vec<SeedRunSummary>,
     pub(crate) timeseries: Vec<IntervalMetrics>,
 }
@@ -58,7 +58,7 @@ pub(crate) struct SeedRunSummary {
     pub(crate) out_dir: PathBuf,
     pub(crate) total_time_seconds: f64,
     pub(crate) pillars: PillarScores,
-    pub(crate) experiment_readouts: ReproductionAnalytics,
+    pub(crate) reproduction: ReproductionAnalytics,
     pub(crate) state_hash: String,
 }
 

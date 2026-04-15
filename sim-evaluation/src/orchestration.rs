@@ -6,7 +6,7 @@
 
 use crate::analysis::{
     analyze, average_pillar_scores, average_reproduction_analytics, average_timeseries,
-    AnalysisOptions, ScoringWindow,
+    write_per_seed_artifacts, AnalysisOptions, ScoringWindow,
 };
 use crate::dataset::{
     DatasetReader, DatasetWriter as DatasetWriterTrait, Manifest, PartitionedParquetWriter,
@@ -104,7 +104,7 @@ pub(crate) fn run_evaluation_across_seeds(
     write_timeseries_csv(&options.out_dir, &averaged_timeseries)?;
 
     let pillars = average_pillar_scores(&seed_summaries);
-    let experiment_readouts = average_reproduction_analytics(&seed_summaries);
+    let reproduction = average_reproduction_analytics(&seed_summaries);
     let total_time_seconds = run_started.elapsed().as_secs_f64();
     let generated_at_utc = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
 
@@ -115,7 +115,7 @@ pub(crate) fn run_evaluation_across_seeds(
             out_dir: PathBuf::from(format!("seed_{}", summary.seed)),
             total_time_seconds: summary.total_time_seconds,
             pillars: summary.pillars.clone(),
-            experiment_readouts: summary.experiment_readouts.clone(),
+            reproduction: summary.reproduction.clone(),
             state_hash: summary.state_hash.clone(),
         })
         .collect::<Vec<_>>();
@@ -128,7 +128,7 @@ pub(crate) fn run_evaluation_across_seeds(
         worker_threads,
         total_time_seconds,
         pillars: pillars.clone(),
-        experiment_readouts,
+        reproduction,
         seed_summaries: seed_run_summaries.clone(),
         timeseries: averaged_timeseries.clone(),
     };
@@ -302,7 +302,6 @@ pub(crate) fn run_single_seed_evaluation(
         report_every: options.report_every,
         snapshot_interval: options.report_every,
         created_at_utc: Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
-        sim_version: None,
         world_config: config.clone(),
     };
     manifest.write(&options.out_dir)?;
@@ -321,7 +320,6 @@ pub(crate) fn run_single_seed_evaluation(
     );
 
     let total_time_seconds = run_started.elapsed().as_secs_f64();
-    let generated_at_utc = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
 
     let summary = SeedEvaluationSummary {
         title: options.title.clone(),
@@ -330,29 +328,16 @@ pub(crate) fn run_single_seed_evaluation(
         control: options.control,
         total_time_seconds,
         pillars: analysis.pillars.clone(),
-        experiment_readouts: analysis.reproduction.clone(),
+        reproduction: analysis.reproduction.clone(),
         state_hash,
         timeseries: analysis.timeseries.clone(),
     };
-    write_summary_json(&options.out_dir, &summary)?;
-    write_timeseries_csv(&options.out_dir, &summary.timeseries)?;
-    write_html_report(
+    write_per_seed_artifacts(
         &options.out_dir,
-        &HtmlReportMeta::from_pillars(
-            &summary.pillars,
-            HtmlReportContext {
-                title: summary.title.clone(),
-                ticks: summary.ticks,
-                report_every: options.report_every,
-                min_lifetime: options.min_lifetime,
-                control: summary.control,
-                total_time_seconds: summary.total_time_seconds,
-                generated_at_utc,
-                timeseries_label: "per-seed timeseries".to_owned(),
-                per_seed_rows: Vec::new(),
-            },
-        ),
-        &summary.timeseries,
+        &summary,
+        options.report_every,
+        options.min_lifetime,
+        "per-seed timeseries",
     )?;
 
     Ok(summary)

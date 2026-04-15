@@ -15,7 +15,12 @@ pub use pillars::{compute_pillar_scores, ScoringWindow};
 pub use reproduction::compute_reproduction_analytics;
 
 use crate::dataset::DatasetReader;
-use crate::types::{IntervalMetrics, PillarScores, ReproductionAnalytics};
+use crate::output::{write_summary_json, write_timeseries_csv};
+use crate::report::{write_html_report, HtmlReportContext, HtmlReportMeta};
+use crate::types::{IntervalMetrics, PillarScores, ReproductionAnalytics, SeedEvaluationSummary};
+use anyhow::Result;
+use chrono::Utc;
+use std::path::Path;
 
 pub struct AnalysisOptions {
     pub report_every: u64,
@@ -44,4 +49,36 @@ pub fn analyze(dataset: &DatasetReader, options: &AnalysisOptions) -> AnalysisOu
         pillars,
         reproduction,
     }
+}
+
+/// Write the three per-seed artifacts (`summary.json`, `timeseries.csv`,
+/// `report.html`) that the evaluation CLI and the `analyze` subcommand both
+/// produce. `timeseries_label` is the human label shown above the table.
+pub fn write_per_seed_artifacts(
+    out_dir: &Path,
+    summary: &SeedEvaluationSummary,
+    report_every: u64,
+    min_lifetime: u64,
+    timeseries_label: &str,
+) -> Result<()> {
+    write_summary_json(out_dir, summary)?;
+    write_timeseries_csv(out_dir, &summary.timeseries)?;
+    write_html_report(
+        out_dir,
+        &HtmlReportMeta::from_pillars(
+            &summary.pillars,
+            HtmlReportContext {
+                title: summary.title.clone(),
+                ticks: summary.ticks,
+                report_every,
+                min_lifetime,
+                control: summary.control,
+                total_time_seconds: summary.total_time_seconds,
+                generated_at_utc: Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+                timeseries_label: timeseries_label.to_owned(),
+                per_seed_rows: Vec::new(),
+            },
+        ),
+        &summary.timeseries,
+    )
 }

@@ -132,7 +132,7 @@ pub(crate) fn print_evaluation_summary(out_dir: &Path, summary: &EvaluationSumma
             p.adaptation_pillar,
         );
     }
-    print_experiment_readouts("aggregate", &summary.experiment_readouts);
+    print_reproduction("aggregate", &summary.reproduction);
     println!("total_time_seconds: {:.3}", summary.total_time_seconds);
 }
 
@@ -224,7 +224,7 @@ fn fmt_option(value: Option<f64>, decimals: usize) -> String {
         .unwrap_or_else(|| "NA".to_owned())
 }
 
-fn print_experiment_readouts(label: &str, readouts: &ReproductionAnalytics) {
+fn print_reproduction(label: &str, readouts: &ReproductionAnalytics) {
     println!("{label}_tracked_births: {}", readouts.births);
     println!("{label}_successful_births: {}", readouts.successful_births);
     println!("{label}_blocked_births: {}", readouts.blocked_births);

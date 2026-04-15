@@ -17,7 +17,6 @@ pub struct Manifest {
     pub report_every: u64,
     pub snapshot_interval: u64,
     pub created_at_utc: String,
-    pub sim_version: Option<String>,
     pub world_config: WorldConfig,
 }
 
