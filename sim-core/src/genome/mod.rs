@@ -40,9 +40,13 @@ const MIN_MUTATED_GESTATION_TICKS: u8 = 0;
 const MAX_MUTATED_GESTATION_TICKS: u8 = 4;
 const MIN_MUTATED_MAX_ORGANISM_AGE: u32 = 1;
 const MAX_MUTATED_MAX_ORGANISM_AGE: u32 = 100_000;
-const MAX_ORGANISM_AGE_MUTATION_STEP: u32 = 100;
 const MIN_MUTATED_MAX_HEALTH: f32 = 1.0;
 const MAX_MUTATED_MAX_HEALTH: f32 = 1_000_000_000.0;
+/// Log-space stddev for multiplicative mutation of strictly-positive
+/// unbounded traits (e.g. `max_health`, `max_organism_age`,
+/// `age_of_maturity`). `σ = 0.1` corresponds to roughly ±10% per mutation,
+/// scale-invariant across orders of magnitude.
+const LARGE_UNBOUNDED_LOG_STDDEV: f32 = 0.1;
 pub(crate) const SYNAPSE_STRENGTH_MAX: f32 = 1.5;
 pub(crate) const SYNAPSE_STRENGTH_MIN: f32 = 0.001;
 const BIAS_MAX: f32 = 1.0;
@@ -55,7 +59,6 @@ const BIAS_PERTURBATION_STDDEV: f32 = 0.15;
 const INTER_LOG_TIME_CONSTANT_PERTURBATION_STDDEV: f32 = 0.05;
 const ELIGIBILITY_RETENTION_PERTURBATION_STDDEV: f32 = 0.05;
 const SYNAPSE_PRUNE_THRESHOLD_PERTURBATION_STDDEV: f32 = 0.02;
-const MAX_HEALTH_PERTURBATION_STDDEV: f32 = 25.0;
 const INTER_BIAS_PERTURB_NEURON_RATE: f32 = 0.8;
 const INTER_UPDATE_RATE_PERTURB_NEURON_RATE: f32 = 0.8;
 /// Per-coefficient rate for the reward-weight mutator. Lower than the bias
@@ -102,8 +105,9 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
     let inherited_rates = effective_mutation_rates(genome, global_mutation_rate_modifier);
 
     if rng.random::<f32>() < inherited_rates.age_of_maturity {
-        genome.lifecycle.age_of_maturity = step_u32(
+        genome.lifecycle.age_of_maturity = perturb_multiplicative_u32(
             genome.lifecycle.age_of_maturity,
+            LARGE_UNBOUNDED_LOG_STDDEV,
             MIN_MUTATED_AGE_OF_MATURITY,
             MAX_MUTATED_AGE_OF_MATURITY,
             rng,
@@ -118,11 +122,11 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
         );
     }
     if rng.random::<f32>() < inherited_rates.max_organism_age {
-        genome.lifecycle.max_organism_age = step_u32_by(
+        genome.lifecycle.max_organism_age = perturb_multiplicative_u32(
             genome.lifecycle.max_organism_age,
+            LARGE_UNBOUNDED_LOG_STDDEV,
             MIN_MUTATED_MAX_ORGANISM_AGE,
             MAX_MUTATED_MAX_ORGANISM_AGE,
-            MAX_ORGANISM_AGE_MUTATION_STEP,
             rng,
         );
     }
@@ -136,9 +140,9 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
     }
     genome.lifecycle.body_color = mutate_body_color(genome.lifecycle.body_color, rng);
     if rng.random::<f32>() < inherited_rates.max_health {
-        genome.lifecycle.max_health = perturb_clamped(
+        genome.lifecycle.max_health = perturb_multiplicative_f32(
             genome.lifecycle.max_health,
-            MAX_HEALTH_PERTURBATION_STDDEV,
+            LARGE_UNBOUNDED_LOG_STDDEV,
             MIN_MUTATED_MAX_HEALTH,
             MAX_MUTATED_MAX_HEALTH,
             rng,
@@ -237,24 +241,54 @@ fn mutate_many_or_one<T, R: Rng + ?Sized>(
 }
 
 fn step_u32<R: Rng + ?Sized>(value: u32, min: u32, max: u32, rng: &mut R) -> u32 {
-    step_u32_by(value, min, max, 1, rng)
-}
-
-fn step_u32_by<R: Rng + ?Sized>(value: u32, min: u32, max: u32, step: u32, rng: &mut R) -> u32 {
     if min >= max {
         return min;
     }
-    let step = step.max(1);
     if value <= min {
-        return min.saturating_add(step).min(max);
+        return min.saturating_add(1).min(max);
     }
     if value >= max {
-        return max.saturating_sub(step).max(min);
+        return max.saturating_sub(1).max(min);
     }
     if rng.random::<bool>() {
-        value.saturating_add(step).min(max)
+        value.saturating_add(1).min(max)
     } else {
-        value.saturating_sub(step).max(min)
+        value.saturating_sub(1).max(min)
+    }
+}
+
+fn perturb_multiplicative_f32<R: Rng + ?Sized>(
+    value: f32,
+    log_stddev: f32,
+    min: f32,
+    max: f32,
+    rng: &mut R,
+) -> f32 {
+    let scale = (log_stddev * standard_normal(rng)).exp();
+    (value * scale).clamp(min, max)
+}
+
+fn perturb_multiplicative_u32<R: Rng + ?Sized>(
+    value: u32,
+    log_stddev: f32,
+    min: u32,
+    max: u32,
+    rng: &mut R,
+) -> u32 {
+    if min >= max {
+        return min;
+    }
+    let scale = (log_stddev * standard_normal(rng)).exp();
+    let scaled = ((value as f32) * scale).round().clamp(min as f32, max as f32) as u32;
+    if scaled != value {
+        return scaled;
+    }
+    // Rounding collapsed the mutation (common for small values or when
+    // `value == 0`). Fall back to ±1 so the operator never silently no-ops.
+    if rng.random::<bool>() {
+        value.saturating_add(1).min(max)
+    } else {
+        value.saturating_sub(1).max(min)
     }
 }
 
