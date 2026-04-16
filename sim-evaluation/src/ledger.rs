@@ -134,6 +134,8 @@ pub struct OrganismEntry {
     /// (a cumulative counter produced by the sim), so `record_action` replaces
     /// the stored value each tick.
     pub total_consumptions: u64,
+    pub contingent_actions: u64,
+    pub failed_actions: u64,
     pub action_histogram: [u64; ACTION_COUNT],
     pub utilization: f32,
     pub food_ahead_ticks: u32,
@@ -167,6 +169,8 @@ impl OrganismEntry {
             num_offspring: 0,
             total_actions: 0,
             total_consumptions: 0,
+            contingent_actions: 0,
+            failed_actions: 0,
             action_histogram: [0; ACTION_COUNT],
             utilization: 0.0,
             food_ahead_ticks: 0,
@@ -281,8 +285,12 @@ impl Ledger {
         let bucket = &mut self.tick_aggregates.per_origin[origin_idx];
 
         bucket.counts[action_idx] = bucket.counts[action_idx].saturating_add(1);
-        if action_can_fail(record.selected_action) && record.action_failed {
-            bucket.failed[action_idx] = bucket.failed[action_idx].saturating_add(1);
+        if action_can_fail(record.selected_action) {
+            entry.contingent_actions = entry.contingent_actions.saturating_add(1);
+            if record.action_failed {
+                bucket.failed[action_idx] = bucket.failed[action_idx].saturating_add(1);
+                entry.failed_actions = entry.failed_actions.saturating_add(1);
+            }
         }
         if is_pre_maturity_record {
             bucket.pre_maturity[action_idx] = bucket.pre_maturity[action_idx].saturating_add(1);
@@ -382,6 +390,20 @@ impl Ledger {
         self.descendant_population
     }
 
+    pub fn descendant_abs_dopamine(&self, organisms: &[OrganismState]) -> (f64, u32) {
+        let mut sum = 0.0_f64;
+        let mut count = 0_u32;
+        for organism in organisms {
+            if let Some(entry) = self.sidecar.get(&organism.id) {
+                if entry.origin == OrganismOrigin::Descendant {
+                    sum += f64::from(organism.dopamine.abs());
+                    count += 1;
+                }
+            }
+        }
+        (sum, count)
+    }
+
     pub fn population_snapshot_rows(
         &self,
         tick: u64,
@@ -401,8 +423,11 @@ impl Ledger {
                     birth_tick: entry.birth_tick,
                     age_turns: organism.age_turns,
                     age_of_maturity: entry.age_of_maturity,
+                    max_organism_age: organism.genome.lifecycle.max_organism_age,
                     num_neurons: organism.genome.topology.num_neurons,
                     synapse_count: organism.brain.synapse_count,
+                    contingent_action_count: entry.contingent_actions,
+                    failed_action_count: entry.failed_actions,
                 })
             })
             .collect()

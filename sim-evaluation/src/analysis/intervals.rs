@@ -25,6 +25,7 @@ const CONTINGENT_ACTIONS: [usize; 4] = [FORWARD, EAT, ATTACK, REPRODUCE];
 struct PopulationSnapshotSummary {
     neurons: Option<f64>,
     synapses: Option<f64>,
+    age_correlated_competence: Option<f64>,
 }
 
 pub fn derive_interval_metrics(
@@ -137,6 +138,9 @@ struct IntervalAccumulator {
     food_ahead_ticks_sum: u64,
     fwd_when_food_ahead_sum: u64,
     pooled_joint: [u64; JOINT_LEN],
+    // dopamine
+    abs_dopamine_sum: f64,
+    abs_dopamine_count: u64,
     // reproduction_events (successful only)
     successful_reproductions: u64,
     parent_age_sum: u64,
@@ -163,6 +167,8 @@ impl IntervalAccumulator {
             food_ahead_ticks_sum: 0,
             fwd_when_food_ahead_sum: 0,
             pooled_joint: [0; JOINT_LEN],
+            abs_dopamine_sum: 0.0,
+            abs_dopamine_count: 0,
             successful_reproductions: 0,
             parent_age_sum: 0,
             population_snapshot: None,
@@ -178,6 +184,10 @@ impl IntervalAccumulator {
         self.last_pop = row.descendant_population;
         self.last_food = row.food_count;
         self.last_max_generation = row.max_generation.or(self.last_max_generation);
+        self.abs_dopamine_sum += row.descendant_abs_dopamine_sum;
+        self.abs_dopamine_count = self
+            .abs_dopamine_count
+            .saturating_add(u64::from(row.descendant_abs_dopamine_count));
     }
 
     fn add_action_count(&mut self, row: &crate::dataset::ActionCountRow) {
@@ -269,6 +279,12 @@ impl IntervalAccumulator {
 
         let snapshot = self.population_snapshot.as_ref();
 
+        let mean_absolute_td_error = if self.abs_dopamine_count == 0 {
+            None
+        } else {
+            Some(self.abs_dopamine_sum / self.abs_dopamine_count as f64)
+        };
+
         IntervalMetrics {
             tick: self.end_tick,
             pop: self.last_pop,
@@ -288,6 +304,8 @@ impl IntervalAccumulator {
             idle_fraction,
             util,
             generation_time,
+            mean_absolute_td_error,
+            age_correlated_competence: snapshot.and_then(|r| r.age_correlated_competence),
             action_histogram,
         }
     }
@@ -306,6 +324,7 @@ fn summarize_population_snapshot(
         return PopulationSnapshotSummary {
             neurons: None,
             synapses: None,
+            age_correlated_competence: None,
         };
     }
 
@@ -316,7 +335,43 @@ fn summarize_population_snapshot(
     PopulationSnapshotSummary {
         neurons: Some(neurons_sum as f64 / count),
         synapses: Some(synapses_sum as f64 / count),
+        age_correlated_competence: compute_age_correlated_competence(rows),
     }
+}
+
+fn compute_age_correlated_competence(
+    rows: &[&crate::dataset::PopulationSnapshotRow],
+) -> Option<f64> {
+    let mut junior_contingent = 0_u64;
+    let mut junior_failed = 0_u64;
+    let mut senior_contingent = 0_u64;
+    let mut senior_failed = 0_u64;
+
+    for row in rows {
+        let max_age = row.max_organism_age.max(1) as f64;
+        let life_fraction = row.age_turns as f64 / max_age;
+
+        if life_fraction < 0.25 {
+            junior_contingent += row.contingent_action_count;
+            junior_failed += row.failed_action_count;
+        } else if life_fraction >= 0.75 {
+            senior_contingent += row.contingent_action_count;
+            senior_failed += row.failed_action_count;
+        }
+    }
+
+    if junior_contingent == 0 || senior_contingent == 0 {
+        return None;
+    }
+
+    let junior_rate = junior_failed as f64 / junior_contingent as f64;
+    let senior_rate = senior_failed as f64 / senior_contingent as f64;
+
+    if senior_rate < f64::EPSILON {
+        return None;
+    }
+
+    Some(junior_rate / senior_rate)
 }
 
 /// Miller-Madow-corrected mutual information I(S;A) from a pooled joint

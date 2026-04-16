@@ -31,6 +31,12 @@ pub fn average_pillar_scores(seed_summaries: &[SeedEvaluationSummary]) -> Pillar
         mean_action_histogram: mean_histogram(
             pillars(|s| &s.pillars).map(|p| p.mean_action_histogram),
         ),
+        mean_mean_absolute_td_error: mean_option(
+            pillars(|s| &s.pillars).map(|p| p.mean_mean_absolute_td_error),
+        ),
+        mean_age_correlated_competence: mean_option(
+            pillars(|s| &s.pillars).map(|p| p.mean_age_correlated_competence),
+        ),
         foraging_p_fwd_food_component: mean_f64(
             pillars(|s| &s.pillars).map(|p| p.foraging_p_fwd_food_component),
         ),
@@ -213,6 +219,16 @@ pub fn average_timeseries(seed_summaries: &[SeedEvaluationSummary]) -> Vec<Inter
                 seed_summaries
                     .iter()
                     .map(|summary| summary.timeseries[row_idx].generation_time),
+            ),
+            mean_absolute_td_error: mean_option(
+                seed_summaries
+                    .iter()
+                    .map(|summary| summary.timeseries[row_idx].mean_absolute_td_error),
+            ),
+            age_correlated_competence: mean_option(
+                seed_summaries
+                    .iter()
+                    .map(|summary| summary.timeseries[row_idx].age_correlated_competence),
             ),
             action_histogram: mean_histogram(
                 seed_summaries

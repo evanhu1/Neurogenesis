@@ -7,7 +7,7 @@ use std::path::Path;
 
 /// Bump when the on-disk dataset schema changes in a way that older readers
 /// can't tolerate. The reader refuses datasets with a different version.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {

@@ -65,6 +65,8 @@ pub struct TickSummaryRow {
     pub consumptions: u32,
     pub predations: u32,
     pub food_spawned: u32,
+    pub descendant_abs_dopamine_sum: f64,
+    pub descendant_abs_dopamine_count: u32,
 }
 
 /// One row per living organism at a flush boundary. This is raw snapshot data;
@@ -82,8 +84,11 @@ pub struct PopulationSnapshotRow {
     pub birth_tick: u64,
     pub age_turns: u64,
     pub age_of_maturity: u32,
+    pub max_organism_age: u32,
     pub num_neurons: u32,
     pub synapse_count: u32,
+    pub contingent_action_count: u64,
+    pub failed_action_count: u64,
 }
 
 /// Long-format action counters: one row per (tick, origin, action_type).

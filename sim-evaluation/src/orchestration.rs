@@ -278,6 +278,8 @@ fn run_single_seed_evaluation(
 
         let population = delta.metrics.organisms;
         let descendant_population = ledger.descendant_population();
+        let (descendant_abs_dopamine_sum, descendant_abs_dopamine_count) =
+            ledger.descendant_abs_dopamine(sim.organisms());
 
         writer.emit_tick(TickSummaryRow {
             tick,
@@ -296,6 +298,8 @@ fn run_single_seed_evaluation(
             consumptions: delta.metrics.consumptions_last_turn as u32,
             predations: delta.metrics.predations_last_turn as u32,
             food_spawned,
+            descendant_abs_dopamine_sum,
+            descendant_abs_dopamine_count,
         });
 
         for row in ledger.take_tick_aggregates().into_rows(tick) {

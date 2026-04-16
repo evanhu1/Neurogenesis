@@ -54,6 +54,10 @@ pub fn compute_pillar_scores(
     let mean_idle_fraction = mean_option(slice.iter().map(|row| row.idle_fraction));
     let mean_util = mean_option(slice.iter().map(|row| row.util));
     let mean_action_histogram = mean_histogram(slice.iter().map(|row| row.action_histogram));
+    let mean_mean_absolute_td_error =
+        mean_option(slice.iter().map(|row| row.mean_absolute_td_error));
+    let mean_age_correlated_competence =
+        mean_option(slice.iter().map(|row| row.age_correlated_competence));
 
     let p_baseline = super::intervals::action_baseline_probability();
     let p_fwd_food_component = mean_p_fwd_food
@@ -99,6 +103,8 @@ pub fn compute_pillar_scores(
         mean_idle_fraction,
         mean_util,
         mean_action_histogram,
+        mean_mean_absolute_td_error,
+        mean_age_correlated_competence,
         foraging_p_fwd_food_component: p_fwd_food_component,
         intelligence_mi_component: mean_mi_component,
         intelligence_action_effectiveness_component: action_effectiveness_component,

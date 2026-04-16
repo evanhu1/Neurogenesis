@@ -19,7 +19,7 @@ impl Reporter {
         let mut csv = BufWriter::new(File::create(csv_path)?);
         writeln!(
             csv,
-            "tick,pop,births,deaths,food,max_generation,attack_attempt_rate,attack_success_rate,failed_action_rate,ate_pct,cons_mean,neurons,synapses,p_fwd_food,mi_sa,idle_fraction,util,generation_time"
+            "tick,pop,births,deaths,food,max_generation,attack_attempt_rate,attack_success_rate,failed_action_rate,ate_pct,cons_mean,neurons,synapses,p_fwd_food,mi_sa,idle_fraction,util,generation_time,mean_absolute_td_error,age_correlated_competence"
         )?;
         Ok(Self { csv })
     }
@@ -27,7 +27,7 @@ impl Reporter {
     pub fn emit(&mut self, metrics: &IntervalMetrics) -> Result<()> {
         writeln!(
             self.csv,
-            "{tick},{pop},{births},{deaths},{food},{max_generation},{attack_attempt_rate},{attack_success_rate},{failed_action_rate},{ate_pct},{cons_mean},{neurons},{synapses},{p_fwd_food},{mi_sa},{idle_fraction},{util},{generation_time}",
+            "{tick},{pop},{births},{deaths},{food},{max_generation},{attack_attempt_rate},{attack_success_rate},{failed_action_rate},{ate_pct},{cons_mean},{neurons},{synapses},{p_fwd_food},{mi_sa},{idle_fraction},{util},{generation_time},{mean_absolute_td_error},{age_correlated_competence}",
             tick = metrics.tick,
             pop = metrics.pop,
             births = metrics.births,
@@ -46,6 +46,8 @@ impl Reporter {
             idle_fraction = csv_opt(metrics.idle_fraction),
             util = csv_opt(metrics.util),
             generation_time = csv_opt(metrics.generation_time),
+            mean_absolute_td_error = csv_opt(metrics.mean_absolute_td_error),
+            age_correlated_competence = csv_opt(metrics.age_correlated_competence),
         )?;
 
         Ok(())
@@ -363,6 +365,14 @@ pub fn write_html_report(
             "generation_time",
             "Mean parent age (in ticks) across every successful reproduction event in the interval. Shorter = faster generational turnover. Interpret alongside lifetime — generation_time ~ life_mean is a knife-edge regime where each parent reproduces roughly once before dying.".to_owned(),
         ),
+        (
+            "mean_abs_td_error",
+            "Mean |tanh(TD_error)| (absolute dopamine signal) across the descendant population per tick, averaged over the interval. Higher values indicate stronger reward/punishment signals driving plasticity.".to_owned(),
+        ),
+        (
+            "age_corr_competence",
+            "Junior failure rate / Senior failure rate. Juniors = organisms in the bottom 25% of their lifespan, Seniors = top 25%. Values > 1 indicate seniors fail less often than juniors — evidence of within-lifetime learning via plasticity.".to_owned(),
+        ),
     ];
     for (header, tooltip) in timeseries_headers {
         tooltip_th(&mut html, header, &tooltip);
@@ -388,6 +398,8 @@ pub fn write_html_report(
             fmt_opt(row.idle_fraction, 4),
             fmt_opt(row.util, 4),
             fmt_opt(row.generation_time, 2),
+            fmt_opt(row.mean_absolute_td_error, 4),
+            fmt_opt(row.age_correlated_competence, 4),
         ] {
             let _ = write!(html, "<td>{cell}</td>");
         }
@@ -492,6 +504,18 @@ pub fn write_html_report(
             metric_series(rows, |r| r.generation_time),
             None,
             "#be185d",
+        ),
+        (
+            "Mean Absolute TD Error",
+            metric_series(rows, |r| r.mean_absolute_td_error),
+            Some(0.0),
+            "#ea580c",
+        ),
+        (
+            "Age-Correlated Competence",
+            metric_series(rows, |r| r.age_correlated_competence),
+            Some(1.0),
+            "#4f46e5",
         ),
     ];
 

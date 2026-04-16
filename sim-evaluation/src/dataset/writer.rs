@@ -282,6 +282,8 @@ mod tests {
                 consumptions: 5,
                 predations: 0,
                 food_spawned: 6,
+                descendant_abs_dopamine_sum: 0.0,
+                descendant_abs_dopamine_count: 0,
             },
             TickSummaryRow {
                 tick: 2,
@@ -296,6 +298,8 @@ mod tests {
                 consumptions: 3,
                 predations: 0,
                 food_spawned: 4,
+                descendant_abs_dopamine_sum: 0.0,
+                descendant_abs_dopamine_count: 0,
             },
         ];
         let batch_two = vec![TickSummaryRow {
@@ -311,6 +315,8 @@ mod tests {
             consumptions: 4,
             predations: 1,
             food_spawned: 2,
+            descendant_abs_dopamine_sum: 0.0,
+            descendant_abs_dopamine_count: 0,
         }];
 
         for row in &batch_one {
@@ -346,6 +352,8 @@ mod tests {
             consumptions: 0,
             predations: 0,
             food_spawned: 0,
+            descendant_abs_dopamine_sum: 0.0,
+            descendant_abs_dopamine_count: 0,
         });
         writer.emit_population_snapshot(PopulationSnapshotRow {
             tick: 1,
@@ -357,8 +365,11 @@ mod tests {
             birth_tick: 0,
             age_turns: 15,
             age_of_maturity: 15,
+            max_organism_age: 500,
             num_neurons: 10,
             synapse_count: 14,
+            contingent_action_count: 0,
+            failed_action_count: 0,
         });
         writer.emit_action_count(ActionCountRow {
             tick: 1,
