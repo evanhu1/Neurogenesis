@@ -224,6 +224,11 @@ pub fn average_timeseries(seed_summaries: &[SeedEvaluationSummary]) -> Vec<Inter
                     .iter()
                     .map(|summary| summary.timeseries[row_idx].util),
             ),
+            generation_time: mean_option(
+                seed_summaries
+                    .iter()
+                    .map(|summary| summary.timeseries[row_idx].generation_time),
+            ),
             action_histogram: mean_histogram(
                 seed_summaries
                     .iter()

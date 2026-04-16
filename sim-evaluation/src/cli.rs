@@ -43,13 +43,16 @@ pub(crate) enum Command {
     /// Run a fresh evaluation — sim + dataset emit + analysis + reports.
     /// This is the default when no subcommand is given.
     Run,
-    /// Re-run analysis against an existing per-seed dataset directory and
-    /// rewrite `summary.json`, `timeseries.csv`, and `report.html`. Does not
+    /// Re-run analysis against an existing evaluation dataset and rewrite the
+    /// `summary.json`, `timeseries.csv`, and `report.html` artifacts. Does not
     /// re-run the simulation.
+    ///
+    /// The argument can be: a path to a run root (with `seed_*` subdirs), a
+    /// path to a single seed dataset, a timestamp prefix resolved under
+    /// `artifacts/evaluation/`, or the literal `latest`.
     Analyze {
-        /// Path to a seed dataset directory (one that contains
-        /// `manifest.json` and the `tick_summary/` etc. subdirs).
-        dataset_dir: PathBuf,
+        /// Run identifier — path, timestamp prefix, or `latest`.
+        run: String,
     },
 }
 

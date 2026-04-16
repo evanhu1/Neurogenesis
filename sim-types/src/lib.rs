@@ -493,7 +493,7 @@ pub struct SynapseEdge {
     pub weight: f32,
     #[serde(default)]
     pub eligibility: f32,
-    #[serde(default, skip_serializing)]
+    #[serde(skip)]
     pub pending_coactivation: f32,
 }
 

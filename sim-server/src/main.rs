@@ -4,6 +4,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
+use clap::Parser;
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use sim_core::{derive_active_action_neuron_id, SimError, Simulation};
@@ -73,7 +74,10 @@ struct ChampionGenomeRecord {
 }
 
 struct ChampionPoolStore {
-    pool_path: PathBuf,
+    /// `None` for ephemeral stores (e.g. `--seed-genome-snapshot` mode); in
+    /// that case any attempt to persist silently no-ops so the session stays
+    /// a read-only scratch space.
+    pool_path: Option<PathBuf>,
     entries: StdRwLock<Vec<ChampionGenomeRecord>>,
 }
 
@@ -268,8 +272,40 @@ impl ChampionPoolStore {
         };
 
         Ok(Self {
-            pool_path,
+            pool_path: Some(pool_path),
             entries: StdRwLock::new(entries),
+        })
+    }
+
+    /// Build a read-only pool containing a single genome loaded from a
+    /// bincode-encoded evaluation snapshot. Every initial organism will start
+    /// with this genome; champion-save endpoints no-op against disk.
+    fn from_snapshot_file(snapshot_path: &std::path::Path) -> Result<Self, AppError> {
+        let bytes = fs::read(snapshot_path).map_err(|err| {
+            AppError::Internal(format!(
+                "failed to read seed genome snapshot {}: {err}",
+                snapshot_path.display()
+            ))
+        })?;
+        let genome: OrganismGenome = bincode::deserialize(&bytes).map_err(|err| {
+            AppError::Internal(format!(
+                "failed to decode seed genome snapshot {}: {err}",
+                snapshot_path.display()
+            ))
+        })?;
+        let record = ChampionGenomeRecord {
+            genome,
+            source_turn: snapshot_tick_from_filename(snapshot_path).unwrap_or(0),
+            source_created_at_unix_ms: now_unix_ms().unwrap_or(0),
+            generation: 0,
+            age_turns: 0,
+            reproductions_count: 0,
+            consumptions_count: 0,
+            energy: 0.0,
+        };
+        Ok(Self {
+            pool_path: None,
+            entries: StdRwLock::new(vec![record]),
         })
     }
 
@@ -336,6 +372,9 @@ impl ChampionPoolStore {
     }
 
     fn persist_entries(&self, entries: &[ChampionGenomeRecord]) -> Result<(), AppError> {
+        let Some(pool_path) = self.pool_path.as_ref() else {
+            return Ok(());
+        };
         let file = ChampionPoolFile {
             schema_version: CHAMPION_POOL_SCHEMA_VERSION,
             updated_at_unix_ms: now_unix_ms()?,
@@ -344,25 +383,31 @@ impl ChampionPoolStore {
         let encoded = serde_json::to_vec_pretty(&file).map_err(|err| {
             AppError::Internal(format!(
                 "failed to encode champion pool {}: {err}",
-                self.pool_path.display()
+                pool_path.display()
             ))
         })?;
 
-        let temp_path = self.pool_path.with_extension("json.tmp");
+        let temp_path = pool_path.with_extension("json.tmp");
         fs::write(&temp_path, encoded).map_err(|err| {
             AppError::Internal(format!(
                 "failed to write champion pool temp file {}: {err}",
                 temp_path.display()
             ))
         })?;
-        fs::rename(&temp_path, &self.pool_path).map_err(|err| {
+        fs::rename(&temp_path, pool_path).map_err(|err| {
             AppError::Internal(format!(
                 "failed to finalize champion pool {}: {err}",
-                self.pool_path.display()
+                pool_path.display()
             ))
         })?;
         Ok(())
     }
+}
+
+fn snapshot_tick_from_filename(path: &std::path::Path) -> Option<u64> {
+    let stem = path.file_stem()?.to_str()?;
+    let digits = stem.strip_prefix('t')?;
+    digits.parse().ok()
 }
 
 #[derive(Serialize)]
@@ -432,8 +477,24 @@ impl From<SimError> for AppError {
     }
 }
 
+#[derive(Debug, Parser)]
+#[command(name = "sim-server")]
+#[command(about = "Simulation server with optional evaluation-snapshot seeding")]
+struct Cli {
+    /// Override the default champion pool JSON path.
+    #[arg(long)]
+    champion_pool_path: Option<PathBuf>,
+    /// Bincode-encoded `OrganismGenome` from an evaluation snapshot
+    /// (`artifacts/evaluation/.../seed_<seed>/genomes/tNNNNNN.bin`). When set,
+    /// every initial organism spawns with this genome and champion-save
+    /// endpoints do not touch disk.
+    #[arg(long)]
+    seed_genome_snapshot: Option<PathBuf>,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
     tracing_subscriber::fmt()
         .with_env_filter(
             std::env::var("RUST_LOG")
@@ -441,7 +502,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let app = build_app(new_state()?);
+    let app = build_app(new_state(&cli)?);
 
     let addr = std::env::var("SIM_SERVER_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".to_owned());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -450,11 +511,23 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn new_state() -> Result<AppState, AppError> {
-    let champion_pool = Arc::new(ChampionPoolStore::bootstrap(champion_pool_path())?);
+fn new_state(cli: &Cli) -> Result<AppState, AppError> {
+    let champion_pool = if let Some(snapshot_path) = &cli.seed_genome_snapshot {
+        info!(
+            "seeding champion pool from snapshot {} (persistence disabled)",
+            snapshot_path.display()
+        );
+        ChampionPoolStore::from_snapshot_file(snapshot_path)?
+    } else {
+        let pool_path = cli
+            .champion_pool_path
+            .clone()
+            .unwrap_or_else(champion_pool_path);
+        ChampionPoolStore::bootstrap(pool_path)?
+    };
     Ok(AppState {
         sessions: Arc::new(RwLock::new(HashMap::new())),
-        champion_pool,
+        champion_pool: Arc::new(champion_pool),
     })
 }
 

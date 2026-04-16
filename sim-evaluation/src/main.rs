@@ -29,7 +29,7 @@ fn main() -> Result<()> {
 
     match cli.command.clone().unwrap_or(Command::Run) {
         Command::Run => run(cli),
-        Command::Analyze { dataset_dir } => analysis::cli::analyze_dataset_dir(&dataset_dir),
+        Command::Analyze { run } => analysis::cli::analyze_run(&run),
     }
 }
 

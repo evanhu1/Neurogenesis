@@ -60,6 +60,15 @@ with `--seed` and a comma-separated list such as `--seed 42,123,7`.
 Each run writes artifacts under `artifacts/evaluation/...` including
 `timeseries.csv`, `summary.json`, and `report.html`.
 
+To re-derive those artifacts from a persisted dataset without re-running the
+simulation:
+
+- `cargo run -p sim-evaluation --release -- analyze latest` — newest run
+- `cargo run -p sim-evaluation --release -- analyze 20260416T002137Z` —
+  timestamp prefix resolved under `artifacts/evaluation/`
+- `cargo run -p sim-evaluation --release -- analyze <path>` — run root
+  (with `seed_*` subdirs) or a single seed directory
+
 ## Layout
 
 - `sim-types/` — shared domain types used across all Rust crates.

@@ -19,7 +19,7 @@ impl Reporter {
         let mut csv = BufWriter::new(File::create(csv_path)?);
         writeln!(
             csv,
-            "tick,pop,births,deaths,food,max_generation,attack_attempt_rate,attack_success_rate,failed_action_rate,ate_pct,cons_mean,brain_size,brain_size_stddev,brain_size_p10,brain_size_p50,brain_size_p90,p_fwd_food,mi_sa,idle_fraction,util"
+            "tick,pop,births,deaths,food,max_generation,attack_attempt_rate,attack_success_rate,failed_action_rate,ate_pct,cons_mean,brain_size,brain_size_stddev,brain_size_p10,brain_size_p50,brain_size_p90,p_fwd_food,mi_sa,idle_fraction,util,generation_time"
         )?;
         Ok(Self { csv })
     }
@@ -27,7 +27,7 @@ impl Reporter {
     pub fn emit(&mut self, metrics: &IntervalMetrics) -> Result<()> {
         writeln!(
             self.csv,
-            "{tick},{pop},{births},{deaths},{food},{max_generation},{attack_attempt_rate},{attack_success_rate},{failed_action_rate},{ate_pct},{cons_mean},{brain_size},{brain_size_stddev},{brain_size_p10},{brain_size_p50},{brain_size_p90},{p_fwd_food},{mi_sa},{idle_fraction},{util}",
+            "{tick},{pop},{births},{deaths},{food},{max_generation},{attack_attempt_rate},{attack_success_rate},{failed_action_rate},{ate_pct},{cons_mean},{brain_size},{brain_size_stddev},{brain_size_p10},{brain_size_p50},{brain_size_p90},{p_fwd_food},{mi_sa},{idle_fraction},{util},{generation_time}",
             tick = metrics.tick,
             pop = metrics.pop,
             births = metrics.births,
@@ -48,6 +48,7 @@ impl Reporter {
             mi_sa = csv_opt(metrics.mi_sa),
             idle_fraction = csv_opt(metrics.idle_fraction),
             util = csv_opt(metrics.util),
+            generation_time = csv_opt(metrics.generation_time),
         )?;
 
         Ok(())
@@ -125,7 +126,9 @@ impl HtmlReportMeta {
 pub struct PerSeedReportRow {
     pub seed: u64,
     pub total_time_seconds: f64,
-    pub state_hash: String,
+    pub foraging_pillar: f64,
+    pub intelligence_pillar: f64,
+    pub competition_pillar: f64,
     pub report_href: String,
 }
 
@@ -260,15 +263,27 @@ pub fn write_html_report(
 
     if !meta.per_seed_rows.is_empty() {
         html.push_str("<div class=\"panel\"><h2>Per-Seed Results</h2><table><thead><tr>");
-        for header in ["seed", "time_s", "state_hash", "report"] {
+        for header in [
+            "seed",
+            "time_s",
+            "foraging",
+            "intelligence",
+            "competition",
+            "report",
+        ] {
             let _ = write!(html, "<th>{header}</th>");
         }
         html.push_str("</tr></thead><tbody>");
         for row in &meta.per_seed_rows {
             let _ = write!(
                 html,
-                "<tr><td>{}</td><td>{:.3}</td><td>{}</td><td><a href=\"{}\">open</a></td></tr>",
-                row.seed, row.total_time_seconds, row.state_hash, row.report_href
+                "<tr><td>{}</td><td>{:.3}</td><td>{:.3}</td><td>{:.3}</td><td>{:.3}</td><td><a href=\"{}\">open</a></td></tr>",
+                row.seed,
+                row.total_time_seconds,
+                row.foraging_pillar,
+                row.intelligence_pillar,
+                row.competition_pillar,
+                row.report_href
             );
         }
         html.push_str("</tbody></table></div>");
@@ -343,6 +358,10 @@ pub fn write_html_report(
             "util",
             "Mean inter-neuron utilization across the interval's deceased-organism cohort. This is the per-organism fraction of inter neurons with sustained nonzero activation.".to_owned(),
         ),
+        (
+            "generation_time",
+            "Mean parent age (in ticks) across every successful reproduction event in the interval. Shorter = faster generational turnover. Interpret alongside lifetime — generation_time ~ life_mean is a knife-edge regime where each parent reproduces roughly once before dying.".to_owned(),
+        ),
     ];
     for (header, tooltip) in timeseries_headers {
         tooltip_th(&mut html, header, &tooltip);
@@ -366,6 +385,7 @@ pub fn write_html_report(
             fmt_opt(row.mi_sa, 4),
             fmt_opt(row.idle_fraction, 4),
             fmt_opt(row.util, 4),
+            fmt_opt(row.generation_time, 2),
         ] {
             let _ = write!(html, "<td>{cell}</td>");
         }
@@ -458,6 +478,12 @@ pub fn write_html_report(
             metric_series(rows, |r| r.util),
             None,
             "#334155",
+        ),
+        (
+            "Generation Time (ticks)",
+            metric_series(rows, |r| r.generation_time),
+            None,
+            "#be185d",
         ),
     ];
 

@@ -6,15 +6,13 @@
 
 use crate::analysis::{
     analyze, average_demographic_analytics, average_pillar_scores, average_timeseries,
-    write_per_seed_artifacts, AnalysisOptions, ScoringWindow,
+    write_aggregate_artifacts, write_per_seed_artifacts, AnalysisOptions, ScoringWindow,
 };
 use crate::dataset::{
     DatasetReader, DatasetWriter as DatasetWriterTrait, Manifest, PartitionedParquetWriter,
     TickSummaryRow, DESCENDANT_CODE, SCHEMA_VERSION,
 };
 use crate::ledger::Ledger;
-use crate::output::{write_summary_json, write_timeseries_csv};
-use crate::report::{write_html_report, HtmlReportContext, HtmlReportMeta, PerSeedReportRow};
 use crate::types::{
     EvaluationSummary, HarnessRunOptions, SeedEvaluationSummary, SeedRunOptions, SeedRunSummary,
 };
@@ -156,8 +154,6 @@ pub(crate) fn run_evaluation_across_seeds(
     seed_summaries.sort_by_key(|summary| summary.seed);
 
     let averaged_timeseries = average_timeseries(&seed_summaries);
-    write_timeseries_csv(&options.out_dir, &averaged_timeseries)?;
-
     let pillars = average_pillar_scores(&seed_summaries);
     let demographics = average_demographic_analytics(&seed_summaries);
     let total_time_seconds = run_started.elapsed().as_secs_f64();
@@ -182,38 +178,17 @@ pub(crate) fn run_evaluation_across_seeds(
         control: options.control,
         worker_threads,
         total_time_seconds,
-        pillars: pillars.clone(),
+        pillars,
         demographics,
-        seed_summaries: seed_run_summaries.clone(),
-        timeseries: averaged_timeseries.clone(),
+        seed_summaries: seed_run_summaries,
+        timeseries: averaged_timeseries,
     };
 
-    write_summary_json(&options.out_dir, &summary)?;
-    let per_seed_rows = seed_run_summaries
-        .iter()
-        .map(|seed_summary| PerSeedReportRow {
-            seed: seed_summary.seed,
-            total_time_seconds: seed_summary.total_time_seconds,
-            state_hash: seed_summary.state_hash.clone(),
-            report_href: format!("seed_{}/report.html", seed_summary.seed),
-        })
-        .collect();
-    write_html_report(
+    write_aggregate_artifacts(
         &options.out_dir,
-        &HtmlReportMeta::from_pillars(
-            &summary.pillars,
-            HtmlReportContext {
-                title: summary.title.clone(),
-                ticks: summary.ticks,
-                report_every: options.report_every,
-                control: summary.control,
-                total_time_seconds: summary.total_time_seconds,
-                generated_at_utc,
-                timeseries_label: "mean across seeds".to_owned(),
-                per_seed_rows,
-            },
-        ),
-        &summary.timeseries,
+        &summary,
+        options.report_every,
+        &generated_at_utc,
     )?;
 
     Ok(summary)

@@ -5,7 +5,10 @@
 //! interval may be shorter than `report_every` if `total_ticks` isn't an
 //! exact multiple.
 
-use crate::dataset::{DatasetReader, ACTION_COUNT, DESCENDANT_CODE, JOINT_LEN, SENSORY_BIN_COUNT};
+use crate::dataset::{
+    DatasetReader, ReproductionOutcome, ACTION_COUNT, DESCENDANT_CODE, JOINT_LEN,
+    SENSORY_BIN_COUNT,
+};
 use crate::types::IntervalMetrics;
 use std::collections::BTreeMap;
 
@@ -82,6 +85,14 @@ pub fn derive_interval_metrics(
             accs[idx].add_lifetime(row);
         }
     }
+    for event in &dataset.reproduction_events {
+        if event.outcome != ReproductionOutcome::Success.code() {
+            continue;
+        }
+        if let Some(idx) = interval_index(&boundaries, event.tick) {
+            accs[idx].add_successful_reproduction(event.parent_age_turns);
+        }
+    }
     // Population snapshots are sparse (one flush boundary per interval). Use
     // the most recent raw descendant-only organism snapshot rows at or before
     // the interval end and derive population-level readouts from them here in
@@ -129,6 +140,9 @@ struct IntervalAccumulator {
     food_ahead_ticks_sum: u64,
     fwd_when_food_ahead_sum: u64,
     pooled_joint: [u64; JOINT_LEN],
+    // reproduction_events (successful only)
+    successful_reproductions: u64,
+    parent_age_sum: u64,
     // population snapshot (filled post-walk)
     population_snapshot: Option<PopulationSnapshotSummary>,
 }
@@ -152,6 +166,8 @@ impl IntervalAccumulator {
             food_ahead_ticks_sum: 0,
             fwd_when_food_ahead_sum: 0,
             pooled_joint: [0; JOINT_LEN],
+            successful_reproductions: 0,
+            parent_age_sum: 0,
             population_snapshot: None,
         }
     }
@@ -190,6 +206,11 @@ impl IntervalAccumulator {
             .fwd_when_food_ahead_sum
             .saturating_add(u64::from(row.fwd_when_food_ahead));
         pool_joint(&mut self.pooled_joint, &row.joint_sensory_action);
+    }
+
+    fn add_successful_reproduction(&mut self, parent_age_turns: u64) {
+        self.successful_reproductions = self.successful_reproductions.saturating_add(1);
+        self.parent_age_sum = self.parent_age_sum.saturating_add(parent_age_turns);
     }
 
     fn finalize(self) -> IntervalMetrics {
@@ -243,6 +264,11 @@ impl IntervalAccumulator {
             Some(self.fwd_when_food_ahead_sum as f64 / self.food_ahead_ticks_sum as f64)
         };
         let mi_sa = mi_from_joint(&self.pooled_joint);
+        let generation_time = if self.successful_reproductions == 0 {
+            None
+        } else {
+            Some(self.parent_age_sum as f64 / self.successful_reproductions as f64)
+        };
 
         let snapshot = self.population_snapshot.as_ref();
 
@@ -267,6 +293,7 @@ impl IntervalAccumulator {
             mi_sa,
             idle_fraction,
             util,
+            generation_time,
             action_histogram,
         }
     }

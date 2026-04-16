@@ -2341,6 +2341,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "bincode",
+ "clap",
  "futures",
  "reqwest",
  "serde",

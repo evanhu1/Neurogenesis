@@ -98,6 +98,7 @@ pub(crate) struct IntervalMetrics {
     pub mi_sa: Option<f64>,
     pub idle_fraction: Option<f64>,
     pub util: Option<f64>,
+    pub generation_time: Option<f64>,
     pub action_histogram: [f64; ACTION_COUNT],
 }
 

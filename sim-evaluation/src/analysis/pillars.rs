@@ -6,7 +6,6 @@ use crate::output::{mean_histogram, mean_option};
 use crate::types::{IntervalMetrics, PillarScores};
 
 const MEAN_MI_SATURATION: f64 = 0.16;
-const UTILIZATION_SATURATION: f64 = 0.60;
 
 /// Which slice of the timeseries feeds pillar computation. Defaults to the
 /// last 20% of the run. `Last { fraction: 1.0 }` uses the whole timeseries.
@@ -17,7 +16,7 @@ pub enum ScoringWindow {
 
 impl Default for ScoringWindow {
     fn default() -> Self {
-        Self::LastFraction(0.20)
+        Self::LastFraction(0.10)
     }
 }
 
@@ -69,9 +68,7 @@ pub fn compute_pillar_scores(
     let anti_idle_component = mean_idle_fraction
         .map(|value| clamp01(1.0 - value / 0.60))
         .unwrap_or(0.0);
-    let util_component = mean_util
-        .map(|value| clamp01(value / UTILIZATION_SATURATION))
-        .unwrap_or(0.0);
+    let util_component = mean_util.map(clamp01).unwrap_or(0.0);
     let attack_success_component = mean_attack_success_rate
         .map(|value| clamp01(value / 0.35))
         .unwrap_or(0.0);

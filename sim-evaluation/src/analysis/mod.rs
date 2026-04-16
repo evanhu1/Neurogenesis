@@ -16,8 +16,10 @@ pub use pillars::{compute_pillar_scores, ScoringWindow};
 
 use crate::dataset::DatasetReader;
 use crate::output::{write_summary_json, write_timeseries_csv};
-use crate::report::{write_html_report, HtmlReportContext, HtmlReportMeta};
-use crate::types::{DemographicAnalytics, IntervalMetrics, PillarScores, SeedEvaluationSummary};
+use crate::report::{write_html_report, HtmlReportContext, HtmlReportMeta, PerSeedReportRow};
+use crate::types::{
+    DemographicAnalytics, EvaluationSummary, IntervalMetrics, PillarScores, SeedEvaluationSummary,
+};
 use anyhow::Result;
 use chrono::Utc;
 use std::path::Path;
@@ -69,6 +71,48 @@ pub fn write_per_seed_artifacts(
                 generated_at_utc: Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
                 timeseries_label: timeseries_label.to_owned(),
                 per_seed_rows: Vec::new(),
+            },
+        ),
+        &summary.timeseries,
+    )
+}
+
+/// Write the three run-level aggregate artifacts (`summary.json`,
+/// `timeseries.csv`, `report.html`) at the run root — the "mean across seeds"
+/// view. Shared between the live evaluation harness and the re-analysis path.
+pub fn write_aggregate_artifacts(
+    out_dir: &Path,
+    summary: &EvaluationSummary,
+    report_every: u64,
+    generated_at_utc: &str,
+) -> Result<()> {
+    write_timeseries_csv(out_dir, &summary.timeseries)?;
+    write_summary_json(out_dir, summary)?;
+    let per_seed_rows = summary
+        .seed_summaries
+        .iter()
+        .map(|seed_summary| PerSeedReportRow {
+            seed: seed_summary.seed,
+            total_time_seconds: seed_summary.total_time_seconds,
+            foraging_pillar: seed_summary.pillars.foraging_pillar,
+            intelligence_pillar: seed_summary.pillars.intelligence_pillar,
+            competition_pillar: seed_summary.pillars.competition_pillar,
+            report_href: format!("seed_{}/report.html", seed_summary.seed),
+        })
+        .collect();
+    write_html_report(
+        out_dir,
+        &HtmlReportMeta::from_pillars(
+            &summary.pillars,
+            HtmlReportContext {
+                title: summary.title.clone(),
+                ticks: summary.ticks,
+                report_every,
+                control: summary.control,
+                total_time_seconds: summary.total_time_seconds,
+                generated_at_utc: generated_at_utc.to_owned(),
+                timeseries_label: "mean across seeds".to_owned(),
+                per_seed_rows,
             },
         ),
         &summary.timeseries,
