@@ -175,16 +175,15 @@ See `sim-core/src/turn/mod.rs::Simulation::tick` for the canonical sequence.
 
 ### Brain
 
-Sensory receptors — **16 neurons** in fixed order
+Sensory receptors — **15 neurons** in fixed order
 (`SensoryReceptor::ordered()` in `sim-types/src/lib.rs`):
 
 - **9 vision rays**: 3 ray offsets `[-1, 0, 1]` around the current facing ×
   3 RGB channels. Rays are cast to `vision_distance` cells, stop on the first
   blocker (walls, organisms, terrain), and accumulate per-channel color
   weighted by `(max_dist - dist + 1) / max_dist`.
-- **7 scalar receptors** (in order): `ContactAhead`, `Energy`, `Health`,
-  `EnergyDelta`, `Reward` (tonic dopamine last tick), `LastActionForward`,
-  `LastActionEat`.
+- **6 scalar receptors** (in order): `ContactAhead`, `Energy`, `Health`,
+  `EnergyDelta`, `LastActionForward`, `LastActionEat`.
 
 Neuron ID ranges (`sim-core/src/brain/topology.rs`):
 

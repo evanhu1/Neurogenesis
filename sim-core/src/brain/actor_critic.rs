@@ -5,15 +5,44 @@ const VALUE_DISCOUNT_GAMMA: f32 = 0.99;
 const VALUE_LEARNING_RATE: f32 = 0.01;
 const VALUE_WEIGHT_CLAMP: f32 = 5.0;
 
-// V(s) = Σ w_i · activation_i over current inter neurons. Returns 0 when the
-// weight vector is out of sync with the inter layer — can happen transiently
-// after inter-layer mutations between ticks.
+fn value_feature_count(brain: &BrainState) -> usize {
+    brain.sensory.len() + brain.inter.len()
+}
+
+fn write_value_features(brain: &BrainState, dst: &mut Vec<f32>) {
+    let sensory_len = brain.sensory.len();
+    dst.resize(value_feature_count(brain), 0.0);
+    for (slot, sensory) in dst.iter_mut().take(sensory_len).zip(brain.sensory.iter()) {
+        *slot = sensory.neuron.activation;
+    }
+    for (slot, inter) in dst.iter_mut().skip(sensory_len).zip(brain.inter.iter()) {
+        *slot = inter.neuron.activation;
+    }
+}
+
+// V(s) = Σ w_i · feature_i over current sensory + inter activations. Returns 0
+// when the weight vector is out of sync with the current feature vector — can
+// happen transiently after inter-layer mutations between ticks.
 fn compute_value_estimate(brain: &BrainState) -> f32 {
-    if brain.value_weights.len() != brain.inter.len() {
+    if brain.value_weights.len() != value_feature_count(brain) {
         return 0.0;
     }
     let mut sum = 0.0_f32;
-    for (weight, inter) in brain.value_weights.iter().zip(brain.inter.iter()) {
+    let sensory_len = brain.sensory.len();
+    for (weight, sensory) in brain
+        .value_weights
+        .iter()
+        .take(sensory_len)
+        .zip(brain.sensory.iter())
+    {
+        sum += weight * sensory.neuron.activation;
+    }
+    for (weight, inter) in brain
+        .value_weights
+        .iter()
+        .skip(sensory_len)
+        .zip(brain.inter.iter())
+    {
         sum += weight * inter.neuron.activation;
     }
     sum
@@ -24,11 +53,12 @@ fn compute_value_estimate(brain: &BrainState) -> f32 {
 // learned behaviors even as reward becomes routine.
 //
 // Also runs one semi-gradient descent step on V(s_{t-1}) toward r + γ·V(s_t);
-// ∂V/∂w_i is the previous inter activation. Skipped when the stash is missing
-// or its size disagrees with the current weight vector (post-mutation transient).
+// ∂V/∂w_i is the previous value-head feature activation. Skipped when the
+// stash is missing or its size disagrees with the current weight vector
+// (post-mutation transient).
 //
 // Rolls the per-organism stash forward so next tick can form V(s_{t+1}) − V(s_t),
-// and resizes `value_weights` to match the current inter layer if a mutation
+// and resizes `value_weights` to match the current feature vector if a mutation
 // resized it between ticks.
 //
 // Returns the tanh-squashed dopamine signal for downstream synapse plasticity.
@@ -37,8 +67,8 @@ pub(crate) fn step_actor_critic(organism: &mut OrganismState, raw_reward: f32) -
     let td_error = raw_reward + VALUE_DISCOUNT_GAMMA * v_current - organism.value_prev;
     let dopamine_signal = fast_tanh(td_error);
 
-    if !organism.value_prev_inter_activations.is_empty()
-        && organism.value_prev_inter_activations.len() == organism.brain.value_weights.len()
+    if !organism.value_prev_feature_activations.is_empty()
+        && organism.value_prev_feature_activations.len() == organism.brain.value_weights.len()
     {
         let is_mature = organism.age_turns >= u64::from(organism.genome.lifecycle.age_of_maturity);
         let lr = VALUE_LEARNING_RATE
@@ -51,7 +81,7 @@ pub(crate) fn step_actor_critic(organism: &mut OrganismState, raw_reward: f32) -
             .brain
             .value_weights
             .iter_mut()
-            .zip(organism.value_prev_inter_activations.iter().copied())
+            .zip(organism.value_prev_feature_activations.iter().copied())
         {
             let updated = (*weight + lr * td_error * pre_activation)
                 .clamp(-VALUE_WEIGHT_CLAMP, VALUE_WEIGHT_CLAMP);
@@ -59,19 +89,15 @@ pub(crate) fn step_actor_critic(organism: &mut OrganismState, raw_reward: f32) -
         }
     }
 
-    if organism.brain.value_weights.len() != organism.brain.inter.len() {
+    if organism.brain.value_weights.len() != value_feature_count(&organism.brain) {
         organism
             .brain
             .value_weights
-            .resize(organism.brain.inter.len(), 0.0);
+            .resize(value_feature_count(&organism.brain), 0.0);
     }
 
     organism.value_prev = v_current;
-    let stash = &mut organism.value_prev_inter_activations;
-    stash.resize(organism.brain.inter.len(), 0.0);
-    for (slot, inter) in stash.iter_mut().zip(organism.brain.inter.iter()) {
-        *slot = inter.neuron.activation;
-    }
+    write_value_features(&organism.brain, &mut organism.value_prev_feature_activations);
 
     dopamine_signal
 }

@@ -19,7 +19,7 @@ pub(crate) struct Cli {
     pub(crate) seeds: Vec<u64>,
     #[arg(long, default_value_t = 500_000)]
     pub(crate) ticks: u64,
-    #[arg(long, default_value_t = 2_500, value_parser = clap::value_parser!(u64).range(1..))]
+    #[arg(long, default_value_t = 10_000, value_parser = clap::value_parser!(u64).range(1..))]
     pub(crate) report_every: u64,
     #[arg(long)]
     pub(crate) out: Option<PathBuf>,

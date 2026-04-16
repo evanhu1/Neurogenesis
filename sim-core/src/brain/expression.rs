@@ -49,7 +49,7 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
         inter,
         action,
         synapse_count: 0,
-        value_weights: vec![0.0; num_inter],
+        value_weights: vec![0.0; num_sensory + num_inter],
         sensory_mean_activation: vec![0.0; num_sensory],
         sensory_mean_initialized: vec![false; num_sensory],
         inter_mean_activation: vec![0.0; num_inter],

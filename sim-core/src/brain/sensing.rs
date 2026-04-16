@@ -63,7 +63,6 @@ pub(super) fn encode_sensory_inputs(
     let energy = energy_signal(organism);
     let health = health_signal(organism);
     let energy_delta = energy_delta_signal(organism);
-    let reward = reward_signal(organism);
     let last_forward = f32::from(organism.last_action_taken == sim_types::ActionType::Forward);
     let last_eat = f32::from(organism.last_action_taken == sim_types::ActionType::Eat);
     let ray_scans = scan_rays(
@@ -87,7 +86,6 @@ pub(super) fn encode_sensory_inputs(
             SensoryReceptor::Energy => energy,
             SensoryReceptor::Health => health,
             SensoryReceptor::EnergyDelta => energy_delta,
-            SensoryReceptor::Reward => reward,
             SensoryReceptor::LastActionForward => last_forward,
             SensoryReceptor::LastActionEat => last_eat,
         };
@@ -169,11 +167,6 @@ fn energy_delta_signal(organism: &OrganismState) -> f32 {
     let scale = organism.max_health.max(1.0);
     let delta = organism.energy - organism.energy_prev;
     (delta / scale).tanh()
-}
-
-fn reward_signal(organism: &OrganismState) -> f32 {
-    // Dopamine is already tanh-normalized in [-1, 1]; pass through.
-    organism.dopamine.clamp(-1.0, 1.0)
 }
 
 fn scan_ray(

@@ -224,7 +224,6 @@ pub enum SensoryReceptor {
     Energy,
     Health,
     EnergyDelta,
-    Reward,
     LastActionForward,
     LastActionEat,
 }
@@ -233,7 +232,7 @@ impl SensoryReceptor {
     /// Fixed relative ray offsets around facing direction.
     pub const VISION_RAY_OFFSETS: [i8; 3] = [-1, 0, 1];
     pub const VISION_CHANNEL_COUNT: u32 = VisionChannel::ALL.len() as u32;
-    pub const SCALAR_NEURON_COUNT: u32 = 7;
+    pub const SCALAR_NEURON_COUNT: u32 = 6;
     pub const VISION_NEURON_COUNT: u32 =
         (Self::VISION_RAY_OFFSETS.len() as u32) * Self::VISION_CHANNEL_COUNT;
     pub const TOTAL_NEURON_COUNT: u32 = Self::VISION_NEURON_COUNT + Self::SCALAR_NEURON_COUNT;
@@ -254,7 +253,6 @@ impl SensoryReceptor {
                 Self::Energy,
                 Self::Health,
                 Self::EnergyDelta,
-                Self::Reward,
                 Self::LastActionForward,
                 Self::LastActionEat,
             ])
@@ -280,7 +278,7 @@ mod tests {
     #[test]
     fn sensory_receptors_include_forward_rgb_plus_scalar_sensors() {
         let receptors = SensoryReceptor::ordered().collect::<Vec<_>>();
-        assert_eq!(receptors.len(), 16);
+        assert_eq!(receptors.len(), 15);
         assert_eq!(
             receptors,
             vec![
@@ -324,7 +322,6 @@ mod tests {
                 SensoryReceptor::Energy,
                 SensoryReceptor::Health,
                 SensoryReceptor::EnergyDelta,
-                SensoryReceptor::Reward,
                 SensoryReceptor::LastActionForward,
                 SensoryReceptor::LastActionEat,
             ]
@@ -562,10 +559,11 @@ pub struct BrainState {
     pub inter: Vec<InterNeuronState>,
     pub action: Vec<ActionNeuronState>,
     pub synapse_count: u32,
-    /// Linear actor-critic value head: V(s) = Σ value_weights[i] ·
-    /// inter[i].neuron.activation. Length matches `inter.len()` after genome
-    /// expression. Empty during legacy deserialization; plasticity resizes to
-    /// match the inter layer so mismatches cannot panic.
+    /// Linear actor-critic value head over the concatenated sensory + inter
+    /// activations. Weights index `sensory` first, then `inter`. Length matches
+    /// `sensory.len() + inter.len()` after genome expression. Empty during
+    /// legacy deserialization; plasticity resizes to match the current feature
+    /// vector so mismatches cannot panic.
     #[serde(default)]
     pub value_weights: Vec<f32>,
     /// Per-sensory-neuron EMA of activation used to center pending
@@ -605,10 +603,11 @@ pub struct OrganismState {
     /// Previous-tick value estimate V(s_{t-1}); used to form TD-error dopamine.
     #[serde(default)]
     pub value_prev: f32,
-    /// Inter activations that produced `value_prev`; used as the pre-activation
-    /// vector for the value head's local gradient update.
+    /// Previous-tick concatenated sensory + inter activations that produced
+    /// `value_prev`; used as the feature vector for the value head's local
+    /// gradient update.
     #[serde(default)]
-    pub value_prev_inter_activations: Vec<f32>,
+    pub value_prev_feature_activations: Vec<f32>,
     #[serde(default)]
     pub damage_taken_last_turn: f32,
     #[serde(default)]
@@ -673,7 +672,7 @@ impl OrganismState {
             health_prev: health,
             dopamine,
             value_prev: 0.0,
-            value_prev_inter_activations: Vec::new(),
+            value_prev_feature_activations: Vec::new(),
             damage_taken_last_turn,
             contingent_action_wasted_last_turn: false,
             is_gestating,
