@@ -56,7 +56,6 @@ pub struct WorldConfigDefaults {
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
 pub struct SeedGenomeConfigDefaults {
-    pub max_health: f32,
     pub max_organism_age: u32,
     pub gestation_ticks: u8,
     pub juvenile_eta_scale: f32,
@@ -113,10 +112,9 @@ pub fn world_config_defaults() -> WorldConfigDefaults {
 
 pub fn seed_genome_config_defaults() -> SeedGenomeConfigDefaults {
     SeedGenomeConfigDefaults {
-        max_health: 1.0,
         max_organism_age: u32::MAX,
         gestation_ticks: 2,
-        juvenile_eta_scale: 0.5,
+        juvenile_eta_scale: 2.0,
         max_weight_delta_per_tick: 0.05,
     }
 }
@@ -148,8 +146,6 @@ pub struct SeedGenomeConfig {
     pub age_of_maturity: u32,
     #[serde(default = "default_gestation_ticks")]
     pub gestation_ticks: u8,
-    #[serde(default = "default_max_health")]
-    pub max_health: f32,
     #[serde(default = "default_max_organism_age")]
     pub max_organism_age: u32,
     pub hebb_eta_gain: f32,
@@ -163,7 +159,6 @@ pub struct SeedGenomeConfig {
     pub mutation_rate_gestation_ticks: f32,
     pub mutation_rate_max_organism_age: f32,
     pub mutation_rate_vision_distance: f32,
-    pub mutation_rate_max_health: f32,
     pub mutation_rate_inter_bias: f32,
     pub mutation_rate_inter_update_rate: f32,
     pub mutation_rate_eligibility_retention: f32,
@@ -255,12 +250,11 @@ impl WorldConfig {
                 num_synapses: 80,
                 spatial_prior_sigma: 3.5,
                 vision_distance: 10,
-                max_health: 1_000_000_000.0,
                 age_of_maturity: 0,
                 gestation_ticks: 2,
                 max_organism_age: u32::MAX,
                 hebb_eta_gain: 0.0,
-                juvenile_eta_scale: 0.5,
+                juvenile_eta_scale: 2.0,
                 eligibility_retention: 0.9,
                 max_weight_delta_per_tick: 0.05,
                 synapse_prune_threshold: 0.01,
@@ -268,7 +262,6 @@ impl WorldConfig {
                 mutation_rate_gestation_ticks: 0.05,
                 mutation_rate_max_organism_age: 0.05,
                 mutation_rate_vision_distance: 0.04,
-                mutation_rate_max_health: 0.05,
                 mutation_rate_inter_bias: 0.2,
                 mutation_rate_inter_update_rate: 0.12,
                 mutation_rate_eligibility_retention: 0.05,
@@ -312,7 +305,6 @@ impl WorldConfig {
                 num_synapses: 0,
                 spatial_prior_sigma: 3.5,
                 vision_distance: 2,
-                max_health: 100.0,
                 age_of_maturity: 0,
                 gestation_ticks: 2,
                 max_organism_age: 500,
@@ -325,7 +317,6 @@ impl WorldConfig {
                 mutation_rate_gestation_ticks: 0.0,
                 mutation_rate_max_organism_age: 0.0,
                 mutation_rate_vision_distance: 0.0,
-                mutation_rate_max_health: 0.0,
                 mutation_rate_inter_bias: 0.0,
                 mutation_rate_inter_update_rate: 0.0,
                 mutation_rate_eligibility_retention: 0.0,
@@ -576,10 +567,6 @@ fn default_juvenile_eta_scale() -> f32 {
 
 fn default_max_weight_delta_per_tick() -> f32 {
     seed_genome_config_defaults().max_weight_delta_per_tick
-}
-
-fn default_max_health() -> f32 {
-    seed_genome_config_defaults().max_health
 }
 
 fn default_max_organism_age() -> u32 {

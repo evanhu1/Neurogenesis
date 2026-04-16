@@ -103,7 +103,7 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
         cfg.food_regrowth_jitter = 0;
         cfg.action_temperature = 0.08;
         cfg.seed_genome_config.max_organism_age = max_age;
-        cfg.seed_genome_config.max_health = 10_000.0;
+
         cfg
     };
 
@@ -257,7 +257,7 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
     genome.plasticity.synapse_prune_threshold = default_seed.synapse_prune_threshold;
     genome.lifecycle.age_of_maturity = default_seed.age_of_maturity;
     genome.lifecycle.max_organism_age = default_seed.max_organism_age;
-    genome.lifecycle.max_health = default_seed.max_health;
+
     genome.topology.vision_distance = default_seed.vision_distance;
     genome.brain.edges = vec![SynapseEdge {
         pre_neuron_id: food_ahead_sensory_id,
@@ -277,7 +277,7 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
         cfg.periodic_injection_count = 0;
         cfg.terrain_threshold = 1.0;
         cfg.seed_genome_config.max_organism_age = max_age;
-        cfg.seed_genome_config.max_health = 10_000.0;
+
         cfg
     };
 
@@ -410,7 +410,7 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
     genome.plasticity.synapse_prune_threshold = default_seed.synapse_prune_threshold;
     genome.lifecycle.age_of_maturity = default_seed.age_of_maturity;
     genome.lifecycle.max_organism_age = default_seed.max_organism_age;
-    genome.lifecycle.max_health = default_seed.max_health;
+
     genome.topology.vision_distance = default_seed.vision_distance;
     genome.brain.edges = vec![
         SynapseEdge {
@@ -439,7 +439,7 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
         cfg.periodic_injection_count = 0;
         cfg.terrain_threshold = 1.0;
         cfg.seed_genome_config.max_organism_age = max_age;
-        cfg.seed_genome_config.max_health = 10_000.0;
+
         cfg
     };
 
@@ -590,10 +590,10 @@ fn delayed_credit_assignment_organism(
         age_turns: 0,
         facing: FacingDirection::East,
         energy: starting_energy,
-        health: genome.lifecycle.max_health.max(1.0),
-        max_health: genome.lifecycle.max_health.max(1.0),
+        health: starting_energy,
+        max_health: starting_energy,
         energy_prev: starting_energy,
-        health_prev: genome.lifecycle.max_health.max(1.0),
+        health_prev: starting_energy,
         dopamine: 0.0,
         value_prev: 0.0,
         value_prev_inter_activations: Vec::new(),

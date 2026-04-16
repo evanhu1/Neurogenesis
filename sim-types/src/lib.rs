@@ -18,7 +18,7 @@ id_newtype!(FoodId, u64);
 
 pub const INTER_NEURON_ID_BASE: u32 = 1000;
 pub const ACTION_NEURON_ID_BASE: u32 = 2000;
-pub const MAX_GESTATION_TICKS: u8 = 4;
+pub const MAX_GESTATION_TICKS: u8 = 10;
 pub const BASE_OFFSPRING_TRANSFER_ENERGY: f32 = 100.0;
 pub const GESTATION_TRANSFER_ENERGY_STEP: f32 = 100.0;
 pub const ORGANISM_VISUAL_OPACITY: f32 = 0.8;
@@ -357,8 +357,6 @@ pub struct TopologyGenes {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LifecycleGenes {
     pub body_color: RgbColor,
-    #[serde(default = "default_max_health")]
-    pub max_health: f32,
     #[serde(default = "default_age_of_maturity")]
     pub age_of_maturity: u32,
     #[serde(default = "default_gestation_ticks")]
@@ -391,8 +389,6 @@ pub struct MutationRateGenes {
     pub max_organism_age: f32,
     #[serde(default)]
     pub vision_distance: f32,
-    #[serde(default)]
-    pub max_health: f32,
     #[serde(default)]
     pub inter_bias: f32,
     #[serde(default)]
@@ -459,7 +455,6 @@ impl OrganismGenome {
             },
             lifecycle: LifecycleGenes {
                 body_color: RgbColor::default(),
-                max_health: 100.0,
                 age_of_maturity: 0,
                 gestation_ticks: 2,
                 max_organism_age: 500,
@@ -511,10 +506,6 @@ fn default_gestation_ticks() -> u8 {
 
 fn default_max_organism_age() -> u32 {
     u32::MAX
-}
-
-fn default_max_health() -> f32 {
-    1.0
 }
 
 fn default_juvenile_eta_scale() -> f32 {

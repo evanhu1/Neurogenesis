@@ -306,7 +306,7 @@ mod tests {
         let config = sim_config::default_world_config();
         let mut rng = ChaCha8Rng::seed_from_u64(7);
         let genome = crate::genome::generate_seed_genome(&config.seed_genome_config, &mut rng);
-        let max_health = genome.lifecycle.max_health.max(1.0);
+        let max_health = sim_types::offspring_transfer_energy(genome.lifecycle.gestation_ticks);
         OrganismState::new(
             OrganismId(1),
             SpeciesId(1),

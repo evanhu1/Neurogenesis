@@ -7,7 +7,7 @@ const META_MUTATION_BASELINE_PULL: f32 = 0.15;
 const META_MUTATION_SECOND_GENE_PROBABILITY: f32 = 0.35;
 const META_MUTATION_THIRD_GENE_PROBABILITY: f32 = 0.1;
 const MUTATION_RATE_BASELINE_FLOOR_FRACTION: f32 = 0.05;
-const MUTATION_RATE_GENE_COUNT: usize = 15;
+const MUTATION_RATE_GENE_COUNT: usize = 14;
 const MUTATION_RATE_MIN: f32 = 1.0e-4;
 const MUTATION_RATE_MAX: f32 = 0.5;
 const MUTATION_RATE_LATENT_MIN: f32 = -8.0;
@@ -65,7 +65,6 @@ define_mutation_rate_ops! {
     gestation_ticks:             mutation_rate_gestation_ticks,
     max_organism_age:            mutation_rate_max_organism_age,
     vision_distance:             mutation_rate_vision_distance,
-    max_health:                  mutation_rate_max_health,
     inter_bias:                  mutation_rate_inter_bias,
     inter_update_rate:           mutation_rate_inter_update_rate,
     eligibility_retention:       mutation_rate_eligibility_retention,

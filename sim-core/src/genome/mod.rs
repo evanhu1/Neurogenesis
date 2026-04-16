@@ -37,15 +37,13 @@ const MAX_MUTATED_VISION_DISTANCE: u32 = 10;
 const MIN_MUTATED_AGE_OF_MATURITY: u32 = 0;
 const MAX_MUTATED_AGE_OF_MATURITY: u32 = 10_000;
 const MIN_MUTATED_GESTATION_TICKS: u8 = 0;
-const MAX_MUTATED_GESTATION_TICKS: u8 = 4;
+const MAX_MUTATED_GESTATION_TICKS: u8 = 10;
 const MIN_MUTATED_MAX_ORGANISM_AGE: u32 = 1;
 const MAX_MUTATED_MAX_ORGANISM_AGE: u32 = 100_000;
-const MIN_MUTATED_MAX_HEALTH: f32 = 1.0;
-const MAX_MUTATED_MAX_HEALTH: f32 = 1_000_000_000.0;
 /// Log-space stddev for multiplicative mutation of strictly-positive
-/// unbounded traits (e.g. `max_health`, `max_organism_age`,
-/// `age_of_maturity`). `σ = 0.1` corresponds to roughly ±10% per mutation,
-/// scale-invariant across orders of magnitude.
+/// unbounded traits (e.g. `max_organism_age`, `age_of_maturity`).
+/// `σ = 0.1` corresponds to roughly ±10% per mutation, scale-invariant
+/// across orders of magnitude.
 const LARGE_UNBOUNDED_LOG_STDDEV: f32 = 0.1;
 pub(crate) const SYNAPSE_STRENGTH_MAX: f32 = 1.5;
 pub(crate) const SYNAPSE_STRENGTH_MIN: f32 = 0.001;
@@ -139,15 +137,6 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
         );
     }
     genome.lifecycle.body_color = mutate_body_color(genome.lifecycle.body_color, rng);
-    if rng.random::<f32>() < inherited_rates.max_health {
-        genome.lifecycle.max_health = perturb_multiplicative_f32(
-            genome.lifecycle.max_health,
-            LARGE_UNBOUNDED_LOG_STDDEV,
-            MIN_MUTATED_MAX_HEALTH,
-            MAX_MUTATED_MAX_HEALTH,
-            rng,
-        );
-    }
     if rng.random::<f32>() < inherited_rates.inter_bias {
         mutate_inter_biases(genome, rng);
     }
@@ -255,17 +244,6 @@ fn step_u32<R: Rng + ?Sized>(value: u32, min: u32, max: u32, rng: &mut R) -> u32
     } else {
         value.saturating_sub(1).max(min)
     }
-}
-
-fn perturb_multiplicative_f32<R: Rng + ?Sized>(
-    value: f32,
-    log_stddev: f32,
-    min: f32,
-    max: f32,
-    rng: &mut R,
-) -> f32 {
-    let scale = (log_stddev * standard_normal(rng)).exp();
-    (value * scale).clamp(min, max)
 }
 
 fn perturb_multiplicative_u32<R: Rng + ?Sized>(

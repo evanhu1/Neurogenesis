@@ -994,7 +994,6 @@ mod tests {
         energy: f32,
     ) -> ChampionGenomeRecord {
         let mut genome = OrganismGenome::test_fixture();
-        genome.lifecycle.max_health = energy.max(1.0);
         genome.lifecycle.max_organism_age = u32::MAX;
         genome.topology.num_neurons = generation as u32 + 1;
         genome.topology.vision_distance = generation as u32 + 2;

@@ -165,7 +165,8 @@ impl Simulation {
         }
 
         if organism.max_health <= 0.0 {
-            organism.max_health = organism.genome.lifecycle.max_health.max(1.0);
+            organism.max_health =
+                sim_types::offspring_transfer_energy(organism.genome.lifecycle.gestation_ticks);
         }
         if organism.health <= 0.0 {
             organism.health = organism.max_health;

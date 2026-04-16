@@ -144,7 +144,8 @@ impl Simulation {
         let starting_energy = params.starting_energy_override.unwrap_or_else(|| {
             sim_types::offspring_transfer_energy(genome.lifecycle.gestation_ticks)
         });
-        let max_health = genome.lifecycle.max_health.max(1.0);
+        let max_health =
+            sim_types::offspring_transfer_energy(genome.lifecycle.gestation_ticks);
         let mut organism = OrganismState {
             id,
             species_id: params.species_id,

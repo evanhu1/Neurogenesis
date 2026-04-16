@@ -57,7 +57,6 @@ export type TopologyGenes = {
 
 export type LifecycleGenes = {
   body_color: RgbColor;
-  max_health: number;
   age_of_maturity: number;
   gestation_ticks: number;
   max_organism_age: number;
@@ -76,7 +75,6 @@ export type MutationRateGenes = {
   gestation_ticks: number;
   max_organism_age: number;
   vision_distance: number;
-  max_health: number;
   inter_bias: number;
   inter_update_rate: number;
   eligibility_retention: number;
@@ -96,7 +94,6 @@ type GenomeCoreParams = {
   spatial_prior_sigma: number;
   vision_distance: number;
   body_color: RgbColor;
-  max_health: number;
   age_of_maturity: number;
   gestation_ticks: number;
   max_organism_age: number;
@@ -112,7 +109,6 @@ type GenomeMutationRateParams = {
   mutation_rate_gestation_ticks: number;
   mutation_rate_max_organism_age: number;
   mutation_rate_vision_distance: number;
-  mutation_rate_max_health: number;
   mutation_rate_inter_bias: number;
   mutation_rate_inter_update_rate: number;
   mutation_rate_eligibility_retention: number;

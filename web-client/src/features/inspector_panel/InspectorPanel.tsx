@@ -111,7 +111,6 @@ export function InspectorPanel({
         { label: 'Maturity', value: String(genome.lifecycle.age_of_maturity) },
         { label: 'Gestation', value: String(genome.lifecycle.gestation_ticks) },
         { label: 'Max Age', value: String(genome.lifecycle.max_organism_age) },
-        { label: 'Max Health', value: formatFloat(genome.lifecycle.max_health, 1) },
         { label: 'Hebb Gain', value: formatFloat(genome.plasticity.hebb_eta_gain, 3) },
         { label: 'Juvenile Eta', value: formatFloat(genome.plasticity.juvenile_eta_scale, 3) },
         { label: 'Elig Ret', value: formatFloat(genome.plasticity.eligibility_retention, 3) },
