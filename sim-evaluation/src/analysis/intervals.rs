@@ -279,7 +279,7 @@ impl IntervalAccumulator {
 
         let snapshot = self.population_snapshot.as_ref();
 
-        let mean_absolute_td_error = if self.abs_dopamine_count == 0 {
+        let abs_td_error = if self.abs_dopamine_count == 0 {
             None
         } else {
             Some(self.abs_dopamine_sum / self.abs_dopamine_count as f64)
@@ -304,7 +304,7 @@ impl IntervalAccumulator {
             idle_fraction,
             util,
             generation_time,
-            mean_absolute_td_error,
+            abs_td_error,
             age_correlated_competence: snapshot.and_then(|r| r.age_correlated_competence),
             action_histogram,
         }
@@ -367,7 +367,7 @@ fn compute_age_correlated_competence(
     let junior_rate = junior_failed as f64 / junior_contingent as f64;
     let senior_rate = senior_failed as f64 / senior_contingent as f64;
 
-    if senior_rate < f64::EPSILON {
+    if senior_rate == 0.0 {
         return None;
     }
 

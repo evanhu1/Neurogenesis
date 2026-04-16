@@ -50,11 +50,17 @@ pub(crate) const SYNAPSE_STRENGTH_MIN: f32 = 0.001;
 const BIAS_MAX: f32 = 1.0;
 const ELIGIBILITY_RETENTION_MIN: f32 = 0.0;
 const ELIGIBILITY_RETENTION_MAX: f32 = 1.0;
+const HEBB_ETA_GAIN_MIN: f32 = 0.0;
+const HEBB_ETA_GAIN_MAX: f32 = 0.2;
+const JUVENILE_ETA_SCALE_MIN: f32 = 0.0;
+const JUVENILE_ETA_SCALE_MAX: f32 = 4.0;
 const SYNAPSE_PRUNE_THRESHOLD_MIN: f32 = 0.0;
 const SYNAPSE_PRUNE_THRESHOLD_MAX: f32 = 1.0;
 
 const BIAS_PERTURBATION_STDDEV: f32 = 0.15;
 const INTER_LOG_TIME_CONSTANT_PERTURBATION_STDDEV: f32 = 0.05;
+const HEBB_ETA_GAIN_PERTURBATION_STDDEV: f32 = 0.01;
+const JUVENILE_ETA_SCALE_PERTURBATION_STDDEV: f32 = 0.25;
 const ELIGIBILITY_RETENTION_PERTURBATION_STDDEV: f32 = 0.05;
 const SYNAPSE_PRUNE_THRESHOLD_PERTURBATION_STDDEV: f32 = 0.02;
 const INTER_BIAS_PERTURB_NEURON_RATE: f32 = 0.8;
@@ -133,6 +139,24 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
             genome.topology.vision_distance,
             MIN_MUTATED_VISION_DISTANCE,
             MAX_MUTATED_VISION_DISTANCE,
+            rng,
+        );
+    }
+    if rng.random::<f32>() < inherited_rates.hebb_eta_gain {
+        genome.plasticity.hebb_eta_gain = perturb_clamped(
+            genome.plasticity.hebb_eta_gain,
+            HEBB_ETA_GAIN_PERTURBATION_STDDEV,
+            HEBB_ETA_GAIN_MIN,
+            HEBB_ETA_GAIN_MAX,
+            rng,
+        );
+    }
+    if rng.random::<f32>() < inherited_rates.juvenile_eta_scale {
+        genome.plasticity.juvenile_eta_scale = perturb_clamped(
+            genome.plasticity.juvenile_eta_scale,
+            JUVENILE_ETA_SCALE_PERTURBATION_STDDEV,
+            JUVENILE_ETA_SCALE_MIN,
+            JUVENILE_ETA_SCALE_MAX,
             rng,
         );
     }

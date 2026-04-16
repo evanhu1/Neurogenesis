@@ -50,6 +50,8 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
             gestation_ticks: config.mutation_rate_gestation_ticks,
             max_organism_age: config.mutation_rate_max_organism_age,
             vision_distance: config.mutation_rate_vision_distance,
+            hebb_eta_gain: config.mutation_rate_hebb_eta_gain,
+            juvenile_eta_scale: config.mutation_rate_juvenile_eta_scale,
             inter_bias: config.mutation_rate_inter_bias,
             inter_update_rate: config.mutation_rate_inter_update_rate,
             eligibility_retention: config.mutation_rate_eligibility_retention,

@@ -159,6 +159,10 @@ pub struct SeedGenomeConfig {
     pub mutation_rate_gestation_ticks: f32,
     pub mutation_rate_max_organism_age: f32,
     pub mutation_rate_vision_distance: f32,
+    #[serde(default)]
+    pub mutation_rate_hebb_eta_gain: f32,
+    #[serde(default)]
+    pub mutation_rate_juvenile_eta_scale: f32,
     pub mutation_rate_inter_bias: f32,
     pub mutation_rate_inter_update_rate: f32,
     pub mutation_rate_eligibility_retention: f32,
@@ -262,6 +266,8 @@ impl WorldConfig {
                 mutation_rate_gestation_ticks: 0.05,
                 mutation_rate_max_organism_age: 0.05,
                 mutation_rate_vision_distance: 0.04,
+                mutation_rate_hebb_eta_gain: 0.05,
+                mutation_rate_juvenile_eta_scale: 0.05,
                 mutation_rate_inter_bias: 0.2,
                 mutation_rate_inter_update_rate: 0.12,
                 mutation_rate_eligibility_retention: 0.05,
@@ -317,6 +323,8 @@ impl WorldConfig {
                 mutation_rate_gestation_ticks: 0.0,
                 mutation_rate_max_organism_age: 0.0,
                 mutation_rate_vision_distance: 0.0,
+                mutation_rate_hebb_eta_gain: 0.0,
+                mutation_rate_juvenile_eta_scale: 0.0,
                 mutation_rate_inter_bias: 0.0,
                 mutation_rate_inter_update_rate: 0.0,
                 mutation_rate_eligibility_retention: 0.0,

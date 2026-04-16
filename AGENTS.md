@@ -227,9 +227,9 @@ a reward-weight vector:
   `eligibility_retention`, `max_weight_delta_per_tick`,
   `synapse_prune_threshold`.
 - **`mutation_rates: MutationRateGenes`** — per-operator rates for every
-  mutation (age, vision, bias, inter update rate, retention, prune threshold,
-  neuron locations, synapse weight perturb, add/remove synapse, add/remove
-  neuron, etc.).
+  mutation (age, vision, eta, juvenile eta scale, bias, inter update rate,
+  retention, prune threshold, neuron locations, synapse weight perturb,
+  add/remove synapse, add/remove neuron, etc.).
 - **`brain: BrainTopology`** — `inter_biases`, `inter_log_time_constants`,
   `action_biases`, neuron-location vectors (`sensory_locations`,
   `inter_locations`, `action_locations`), and sorted `edges` (with runtime
@@ -239,10 +239,11 @@ a reward-weight vector:
   `RewardLedger` fields in `sim-core/src/brain/reward.rs`.
 
 Implemented mutation operators include: age-of-maturity / gestation /
-max-age / vision / max-health scalar mutations, bias and update-rate
-perturbation, retention / prune-threshold perturbation, neuron-location jitter,
-synapse weight perturb/replace, add synapse, remove synapse, split-edge
-add-neuron, remove neuron, plus optional meta-mutation of mutation-rate genes.
+max-age / vision / max-health scalar mutations, Hebbian eta / juvenile-eta
+perturbation, bias and update-rate perturbation, retention / prune-threshold
+perturbation, neuron-location jitter, synapse weight perturb/replace, add
+synapse, remove synapse, split-edge add-neuron, remove neuron, plus optional
+meta-mutation of mutation-rate genes.
 
 No species registry / speciation in sim-core.
 

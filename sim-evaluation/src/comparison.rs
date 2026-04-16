@@ -132,9 +132,7 @@ fn comparison_metric_rows(
         paired("attack_success_rate", |p| p.mean_attack_success_rate),
         paired("failed_action_rate", |p| p.mean_failed_action_rate),
         paired("util", |p| p.mean_util),
-        paired("mean_absolute_td_error", |p| {
-            p.mean_mean_absolute_td_error
-        }),
+        paired("abs_td_error", |p| p.mean_abs_td_error),
         paired("age_correlated_competence", |p| {
             p.mean_age_correlated_competence
         }),

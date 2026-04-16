@@ -96,7 +96,7 @@ pub(crate) struct IntervalMetrics {
     pub idle_fraction: Option<f64>,
     pub util: Option<f64>,
     pub generation_time: Option<f64>,
-    pub mean_absolute_td_error: Option<f64>,
+    pub abs_td_error: Option<f64>,
     pub age_correlated_competence: Option<f64>,
     pub action_histogram: [f64; ACTION_COUNT],
 }
@@ -117,7 +117,7 @@ pub(crate) struct PillarScores {
     pub(crate) mean_idle_fraction: Option<f64>,
     pub(crate) mean_util: Option<f64>,
     pub(crate) mean_action_histogram: [f64; ACTION_COUNT],
-    pub(crate) mean_mean_absolute_td_error: Option<f64>,
+    pub(crate) mean_abs_td_error: Option<f64>,
     pub(crate) mean_age_correlated_competence: Option<f64>,
     pub(crate) foraging_p_fwd_food_component: f64,
     pub(crate) intelligence_mi_component: f64,

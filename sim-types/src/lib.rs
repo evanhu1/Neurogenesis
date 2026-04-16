@@ -387,6 +387,10 @@ pub struct MutationRateGenes {
     #[serde(default)]
     pub vision_distance: f32,
     #[serde(default)]
+    pub hebb_eta_gain: f32,
+    #[serde(default)]
+    pub juvenile_eta_scale: f32,
+    #[serde(default)]
     pub inter_bias: f32,
     #[serde(default)]
     pub inter_update_rate: f32,
