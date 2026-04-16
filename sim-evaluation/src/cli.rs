@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 const DEFAULT_CONFIG_PATH: &str = "sim-evaluation/config.toml";
-const DEFAULT_SEEDS: &str = "42,123,7,2026,99,314,2718,4242";
+const DEFAULT_SEEDS: &str = "42,123,7,2026";
 
 #[derive(Debug, Clone, Parser)]
 #[command(name = "sim-evaluation")]
@@ -17,7 +17,7 @@ pub(crate) struct Cli {
         default_value = DEFAULT_SEEDS
     )]
     pub(crate) seeds: Vec<u64>,
-    #[arg(long, default_value_t = 100_000)]
+    #[arg(long, default_value_t = 500_000)]
     pub(crate) ticks: u64,
     #[arg(long, default_value_t = 2_500, value_parser = clap::value_parser!(u64).range(1..))]
     pub(crate) report_every: u64,

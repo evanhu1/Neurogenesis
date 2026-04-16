@@ -338,7 +338,6 @@ fn apply_edge_weight_update_and_fold_pending(
     edges: &mut [SynapseEdge],
     params: &PlasticityStepParams,
 ) {
-    let instantaneous_scale = 1.0 - params.eligibility_retention;
     for edge in edges {
         let uncapped_delta = params.eta * params.dopamine_signal * edge.eligibility
             - PLASTIC_WEIGHT_DECAY * edge.weight;
@@ -348,8 +347,10 @@ fn apply_edge_weight_update_and_fold_pending(
         );
         let updated_weight = edge.weight + capped_delta;
         edge.weight = constrain_weight(updated_weight);
+        // Additive accumulation (decaying sum) instead of EMA — preserves
+        // transient signal from zero-mean coactivation/policy gradients.
         edge.eligibility = params.eligibility_retention * edge.eligibility
-            + instantaneous_scale * edge.pending_coactivation;
+            + edge.pending_coactivation;
         edge.pending_coactivation = 0.0;
     }
 }

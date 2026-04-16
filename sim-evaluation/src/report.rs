@@ -19,7 +19,7 @@ impl Reporter {
         let mut csv = BufWriter::new(File::create(csv_path)?);
         writeln!(
             csv,
-            "tick,pop,births,deaths,food,max_generation,attack_attempt_rate,attack_success_rate,failed_action_rate,ate_pct,cons_mean,brain_size,brain_size_stddev,brain_size_p10,brain_size_p50,brain_size_p90,p_fwd_food,mi_sa,idle_fraction,util,generation_time"
+            "tick,pop,births,deaths,food,max_generation,attack_attempt_rate,attack_success_rate,failed_action_rate,ate_pct,cons_mean,neurons,synapses,p_fwd_food,mi_sa,idle_fraction,util,generation_time"
         )?;
         Ok(Self { csv })
     }
@@ -27,7 +27,7 @@ impl Reporter {
     pub fn emit(&mut self, metrics: &IntervalMetrics) -> Result<()> {
         writeln!(
             self.csv,
-            "{tick},{pop},{births},{deaths},{food},{max_generation},{attack_attempt_rate},{attack_success_rate},{failed_action_rate},{ate_pct},{cons_mean},{brain_size},{brain_size_stddev},{brain_size_p10},{brain_size_p50},{brain_size_p90},{p_fwd_food},{mi_sa},{idle_fraction},{util},{generation_time}",
+            "{tick},{pop},{births},{deaths},{food},{max_generation},{attack_attempt_rate},{attack_success_rate},{failed_action_rate},{ate_pct},{cons_mean},{neurons},{synapses},{p_fwd_food},{mi_sa},{idle_fraction},{util},{generation_time}",
             tick = metrics.tick,
             pop = metrics.pop,
             births = metrics.births,
@@ -39,11 +39,8 @@ impl Reporter {
             failed_action_rate = csv_opt(metrics.failed_action_rate),
             ate_pct = csv_opt(metrics.ate_pct),
             cons_mean = csv_opt(metrics.cons_mean),
-            brain_size = csv_opt(metrics.brain_size),
-            brain_size_stddev = csv_opt(metrics.brain_size_stddev),
-            brain_size_p10 = csv_opt(metrics.brain_size_p10),
-            brain_size_p50 = csv_opt(metrics.brain_size_p50),
-            brain_size_p90 = csv_opt(metrics.brain_size_p90),
+            neurons = csv_opt(metrics.neurons),
+            synapses = csv_opt(metrics.synapses),
             p_fwd_food = csv_opt(metrics.p_fwd_food),
             mi_sa = csv_opt(metrics.mi_sa),
             idle_fraction = csv_opt(metrics.idle_fraction),
@@ -337,8 +334,12 @@ pub fn write_html_report(
             "Mean lifetime food consumptions for the interval's deceased-organism cohort.".to_owned(),
         ),
         (
-            "brain_size",
-            "Mean brain size at the latest flush snapshot at or before the interval end. Brain size is neurons plus synapses across living organisms in that snapshot.".to_owned(),
+            "neurons",
+            "Mean inter-neuron count per living organism at the latest flush snapshot at or before the interval end.".to_owned(),
+        ),
+        (
+            "synapses",
+            "Mean synapse count per living organism at the latest flush snapshot at or before the interval end.".to_owned(),
         ),
         (
             "p_fwd_food",
@@ -380,7 +381,8 @@ pub fn write_html_report(
             fmt_opt(row.failed_action_rate, 4),
             fmt_opt(row.ate_pct, 2),
             fmt_opt(row.cons_mean, 2),
-            fmt_opt(row.brain_size, 2),
+            fmt_opt(row.neurons, 2),
+            fmt_opt(row.synapses, 2),
             fmt_opt(row.p_fwd_food, 4),
             fmt_opt(row.mi_sa, 4),
             fmt_opt(row.idle_fraction, 4),
@@ -450,10 +452,16 @@ pub fn write_html_report(
             "#0e7490",
         ),
         (
-            "Brain Size",
-            metric_series(rows, |r| r.brain_size),
+            "Neurons",
+            metric_series(rows, |r| r.neurons),
             None,
             "#0891b2",
+        ),
+        (
+            "Synapses",
+            metric_series(rows, |r| r.synapses),
+            None,
+            "#7c3aed",
         ),
         (
             "P(Forward | Food Ahead)",

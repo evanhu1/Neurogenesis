@@ -310,7 +310,7 @@ The analysis layer (`sim-evaluation/src/analysis/`) derives three products
 from the dataset:
 
 - `IntervalMetrics` timeseries (one row per `report_every` window,
-  `intervals.rs`): population, births/deaths, brain-size percentiles,
+  `intervals.rs`): population, births/deaths, mean neuron/synapse counts,
   attack/failure rates, `p_fwd_food`, `MI(S;A)`, idle fraction, inter-neuron
   utilization, generation time (mean `parent_age_turns` over successful
   reproductions), action histogram.

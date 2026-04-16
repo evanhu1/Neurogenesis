@@ -23,11 +23,8 @@ const CONTINGENT_ACTIONS: [usize; 4] = [FORWARD, EAT, ATTACK, REPRODUCE];
 
 #[derive(Clone, Copy)]
 struct PopulationSnapshotSummary {
-    brain_size_mean: Option<f64>,
-    brain_size_stddev: Option<f64>,
-    brain_size_p10: Option<f64>,
-    brain_size_p50: Option<f64>,
-    brain_size_p90: Option<f64>,
+    neurons: Option<f64>,
+    synapses: Option<f64>,
 }
 
 pub fn derive_interval_metrics(
@@ -284,11 +281,8 @@ impl IntervalAccumulator {
             failed_action_rate,
             ate_pct,
             cons_mean,
-            brain_size: snapshot.and_then(|r| r.brain_size_mean),
-            brain_size_stddev: snapshot.and_then(|r| r.brain_size_stddev),
-            brain_size_p10: snapshot.and_then(|r| r.brain_size_p10),
-            brain_size_p50: snapshot.and_then(|r| r.brain_size_p50),
-            brain_size_p90: snapshot.and_then(|r| r.brain_size_p90),
+            neurons: snapshot.and_then(|r| r.neurons),
+            synapses: snapshot.and_then(|r| r.synapses),
             p_fwd_food,
             mi_sa,
             idle_fraction,
@@ -310,41 +304,18 @@ fn summarize_population_snapshot(
 ) -> PopulationSnapshotSummary {
     if rows.is_empty() {
         return PopulationSnapshotSummary {
-            brain_size_mean: None,
-            brain_size_stddev: None,
-            brain_size_p10: None,
-            brain_size_p50: None,
-            brain_size_p90: None,
+            neurons: None,
+            synapses: None,
         };
     }
 
-    let mut sizes: Vec<f64> = rows
-        .iter()
-        .map(|row| (row.num_neurons + row.synapse_count) as f64)
-        .collect();
-    sizes.sort_by(|a, b| a.total_cmp(b));
-
-    let len = sizes.len() as f64;
-    let mean = sizes.iter().sum::<f64>() / len;
-    let variance = sizes
-        .iter()
-        .map(|value| {
-            let delta = *value - mean;
-            delta * delta
-        })
-        .sum::<f64>()
-        / len;
-    let percentile = |fraction: f64| {
-        let idx = ((sizes.len() - 1) as f64 * fraction.clamp(0.0, 1.0)).round() as usize;
-        sizes.get(idx).copied()
-    };
+    let count = rows.len() as f64;
+    let neurons_sum: u64 = rows.iter().map(|row| u64::from(row.num_neurons)).sum();
+    let synapses_sum: u64 = rows.iter().map(|row| u64::from(row.synapse_count)).sum();
 
     PopulationSnapshotSummary {
-        brain_size_mean: Some(mean),
-        brain_size_stddev: Some(variance.sqrt()),
-        brain_size_p10: percentile(0.10),
-        brain_size_p50: percentile(0.50),
-        brain_size_p90: percentile(0.90),
+        neurons: Some(neurons_sum as f64 / count),
+        synapses: Some(synapses_sum as f64 / count),
     }
 }
 

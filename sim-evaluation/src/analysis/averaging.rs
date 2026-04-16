@@ -179,30 +179,15 @@ pub fn average_timeseries(seed_summaries: &[SeedEvaluationSummary]) -> Vec<Inter
                     .iter()
                     .map(|summary| summary.timeseries[row_idx].cons_mean),
             ),
-            brain_size: mean_option(
+            neurons: mean_option(
                 seed_summaries
                     .iter()
-                    .map(|summary| summary.timeseries[row_idx].brain_size),
+                    .map(|summary| summary.timeseries[row_idx].neurons),
             ),
-            brain_size_stddev: mean_option(
+            synapses: mean_option(
                 seed_summaries
                     .iter()
-                    .map(|summary| summary.timeseries[row_idx].brain_size_stddev),
-            ),
-            brain_size_p10: mean_option(
-                seed_summaries
-                    .iter()
-                    .map(|summary| summary.timeseries[row_idx].brain_size_p10),
-            ),
-            brain_size_p50: mean_option(
-                seed_summaries
-                    .iter()
-                    .map(|summary| summary.timeseries[row_idx].brain_size_p50),
-            ),
-            brain_size_p90: mean_option(
-                seed_summaries
-                    .iter()
-                    .map(|summary| summary.timeseries[row_idx].brain_size_p90),
+                    .map(|summary| summary.timeseries[row_idx].synapses),
             ),
             p_fwd_food: mean_option(
                 seed_summaries
