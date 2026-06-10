@@ -14,10 +14,9 @@ of generations.
 
 ![A live Neurogenesis run: each triangle is an organism driven by its own neural network. The right panel shows the live brain of a selected organism.](docs/demo.gif)
 
-_A live run. Every triangle is an organism steering itself with its own neural
-network. The panel on the right is the selected organism's brain — sensory
-neurons in orange, evolved inter neurons in blue, action neurons in green —
-updating every tick until the moment it dies._
+_In this demo run, ~1,300 generations evolved brains to **9 inter neurons and
+25+ synapses**, learning to search for food, predate other organisms and run
+from predators._
 
 </div>
 
@@ -28,10 +27,6 @@ sensors wire straight to actions. Over generations, NEAT-style structural
 mutations add neurons and synapses, runtime plasticity tunes the weights during
 each organism's lifetime, and selection decides what was worth the metabolic
 cost.
-
-In our runs, champion genomes after ~1,300 generations carry brains that grew to
-**9 inter neurons and 25+ synapses**: circuitry that mutation produced and
-selection kept because it paid for its own energy bill.
 
 |                              The world up close                              |                                      A brain, mid-life                                      |
 | :--------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------: |
