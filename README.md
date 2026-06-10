@@ -2,15 +2,14 @@
 
 # Neurogenesis
 
-### Watch brains evolve from nothing.
+### Watch brains evolve.
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/evanhu1/Neurogenesis)
 
 2,000 digital creatures spawn into a world with the simplest possible brains:
-**zero hidden neurons and ten synapses.** No training data. No reward function.
-No gradient descent. Just energy, food, predators, and death.
-
-Then evolution takes the wheel.
+**zero hidden neurons and ten synapses.** There is no training data, no reward
+function, and no gradient descent — just energy, food, predators, and death.
+From there, mutation and selection do all of the design work.
 
 ![A live Neurogenesis run: each triangle is an organism driven by its own neural network. The right panel shows the live brain of a selected organism.](docs/demo.gif)
 
@@ -21,30 +20,17 @@ updating every tick until the moment it dies.*
 
 </div>
 
-## What you're looking at
+## How brains grow
 
-| | |
-| :--- | :--- |
-| **Triangles** | Organisms. The color is a heritable gene; the point is the direction they're facing. Everything they do — turn, move, eat, attack, reproduce — is decided by their own neural circuit reading their own senses. |
-| **Bright green dots** | Plants. The renewable energy source that powers everything. |
-| **Glowing organisms** | Pregnant. Reproduction costs real energy and takes real time. |
-| **The right panel** | A live MRI. Click any organism to watch its neurons fire, inspect its genome, and see its mutation rates — which are themselves evolvable genes. |
-
-Every organism pays a metabolic tax proportional to the size of its brain and
-the sharpness of its eyes. Thinking is not free. Bigger brains have to *earn*
-their keep — exactly the constraint real nervous systems evolved under.
-
-## Brains literally grow here
-
-The seed genome has **0 inter neurons**. There is no hidden layer at the start
-— sensors wire straight to actions. Over generations, NEAT-style structural
+The seed genome has **0 inter neurons**. There is no hidden layer at the start;
+sensors wire straight to actions. Over generations, NEAT-style structural
 mutations add neurons and synapses, runtime plasticity tunes the weights during
 each organism's lifetime, and selection decides what was worth the metabolic
 cost.
 
-After ~1,300 generations, champion genomes carry brains that grew to **9 inter
-neurons and 25+ synapses** — circuitry that evolution invented, paid for, and
-kept.
+In our runs, champion genomes after ~1,300 generations carry brains that grew
+to **9 inter neurons and 25+ synapses**: circuitry that mutation produced and
+selection kept because it paid for its own energy bill.
 
 | The world up close | A brain, mid-life |
 | :---: | :---: |
@@ -53,15 +39,73 @@ kept.
 ## Why
 
 The brain is the only existence proof of general intelligence, and it was
-produced by evolution. It took ~600 million years from the first neuron — but
+produced by evolution. It took ~600 million years from the first neuron, but
 nature had to solve problems we don't: physical embodiment, scarce energy,
 generation times measured in years, and 2 billion years just to assemble the
 molecular machinery of reproduction itself.
 
-Evolution *in silico* rewrites those constraints. Generations take seconds.
-Populations are observable down to the synapse. Every run is perfectly
-reproducible. **Can a well-designed evolutionary search over brain-like systems
-be a path to AGI?** This project is an attempt to find out.
+Evolution *in silico* rewrites those constraints. Generations take seconds,
+populations are observable down to the synapse, and any run can be replayed
+exactly from its seed. Can a well-designed evolutionary search over brain-like
+systems be a path to AGI? This project is an attempt to find out.
+
+## What's packed inside
+
+**The engine**
+
+- Deterministic and multithreaded at the same time: every random choice is a
+  stateless hash of `(seed, turn, organism IDs)`, so the parallel plasticity
+  pass cannot reorder history. Fixed config + seed reproduces the same world,
+  tick for tick, on a given build.
+- Thousands of ticks per second of whole-world simulation on a laptop (a
+  30-second Fast-mode burst covered 230,000 ticks, ~7,700 t/s). The tick hot
+  path is allocation-conscious Rust: parallel vectors, binary search, and
+  rejection sampling instead of hash maps and scans.
+- A Criterion benchmark (`turn_throughput`) tracks engine speed.
+
+**The brain**
+
+- Each organism runs its own onboard **actor-critic**: a learned value head is
+  trained online by TD(0), and its tanh-squashed TD error becomes the brain's
+  dopamine signal. Dopamine gates eligibility traces — three-factor
+  reward-modulated learning, not vanilla Hebb.
+- The plasticity rule is split by circuit location: covariance-style Hebbian
+  updates between inter neurons, advantage-weighted (policy-gradient-like)
+  updates at the motor boundary.
+- Even the reward function is genetic: 7 reward weights over energy, health,
+  and wasted actions live in the genome, so a lineage can evolve what it finds
+  rewarding.
+- Juveniles learn at 2× the adult rate (an evolvable critical period); synapse
+  pruning only activates at maturity.
+- Thinking costs energy. Metabolism scales with neuron and synapse counts,
+  vision range, and the *squared wiring length* of each synapse in latent
+  space — the same connectivity-cost pressure that shapes real cortex — plus
+  Kleiber mass^0.75 body scaling.
+- The interface to the world: 18 sensory neurons in (3 vision rays × 4
+  channels of RGB + shape, plus contact, energy, health, energy flux, and
+  proprioception), 6 action neurons out (turn, move, eat, attack, reproduce),
+  selected by softmax sampling.
+
+**Evolution**
+
+- NEAT-style structural mutation: add a synapse, remove a synapse, split an
+  edge into a new neuron. New wiring is spatially biased toward nearby neurons.
+- Meta-mutation: per-operator mutation rates are themselves genes.
+- A persistent champion pool seeds new worlds from the best genomes of past
+  sessions, and periodic injections of fresh seed genomes keep diversity
+  flowing.
+
+**The ecology**
+
+- A 250×250 toroidal hex grid with Perlin-noise terrain walls, a hidden
+  fertility map, and event-driven plant regrowth. One entity per cell.
+- Energy is conserved, and lossy digestion is the ecosystem's only sink:
+  plants return 20% of stored energy, corpses 80%. There is no population cap —
+  thermodynamics regulates the population.
+- Predation is real and every kill leaves a corpse worth eating, so death
+  feeds the food web.
+- No species registry, no speciation bookkeeping, no hand-written fitness
+  target. Selection pressure comes from the ecology itself.
 
 ## Run it in 60 seconds
 
@@ -82,59 +126,22 @@ cd web-client && npm install && npm run dev
 Things to try:
 
 - **Fast mode** — rendering pauses and the engine runs flat out (hundreds of
-  thousands of ticks in minutes). Pop back to live view to see what evolution
-  built while you weren't looking.
+  thousands of ticks in minutes). Switch back to live view to inspect what the
+  population evolved during the burst.
 - **Click an organism** — live brain activity, genome, and per-operator
   mutation rates.
 - **Save champions** — the server keeps a persistent champion-genome pool and
   bootstraps new worlds from it, so progress compounds across sessions.
 
-## The rules of life
-
-- **The world** — a 250×250 toroidal hex grid: Perlin-noise terrain walls, a
-  hidden fertility map, and event-driven plant regrowth. One entity per cell.
-- **The body** — organisms sense through RGB vision rays with evolvable range,
-  plus internal state like energy flux, and act by turning, moving, eating,
-  attacking, or reproducing. Action selection is softmax sampling over the
-  brain's output neurons.
-- **The brain** — a three-layer circuit of evolvable topology. Inter neurons are leaky
-  integrators with evolvable time constants. During life, dopamine derived from
-  energy swings gates Hebbian plasticity: eat well and recent coactivations
-  strengthen, starve and they weaken. Useless synapses get pruned.
-- **Evolution** — asexual reproduction with structural mutation (add synapse,
-  remove synapse, split an edge into a new neuron), scalar mutation, spatially
-  biased wiring priors, and meta-mutation: the mutation rates themselves
-  evolve. Periodic injections of fresh seed genomes keep diversity flowing.
-- **Death matters** — corpses return 80% of stored energy, plants only 20%.
-  Predation is real, and every kill leaves a corpse worth eating. Ecology, not
-  a fitness function, decides who reproduces.
-
-No species registry, no speciation bookkeeping, no hand-written fitness target.
-Selection pressure is emergent.
-
-## Built like a physics engine, not a screensaver
-
-- **Deterministic to the bit.** Fixed config + seed ⇒ identical history, every
-  time. Tie-breaks are ordered, and all sampling is a deterministic hash of
-  `(seed, turn, organism IDs)`. Evolution experiments are reproducible science,
-  not anecdotes.
-- **Fast.** The Rust engine runs whole-world simulation at thousands of ticks
-  per second on a laptop — a 30-second Fast-mode burst covered 230,000 ticks
-  (~7,700 t/s) — with a CI perf budget guarding the hot path.
-- **Workspace** — `sim-types` (shared domain types), `sim-config` (world +
-  seed-genome TOML baselines), `sim-core` (the deterministic engine),
-  `sim-server` (Axum HTTP + WebSocket), `web-client` (React + Tailwind + Vite
-  canvas UI), `sim-evaluation` (headless science harness).
-
-The canonical tick order lives in `sim-core/src/turn/mod.rs::Simulation::tick`
-— treat it as the source of truth for phase ordering.
-
 ## Measuring whether intelligence is actually emerging
 
-Vibes don't count. `sim-evaluation` runs multi-seed, hundreds-of-thousands-of-
-ticks benchmarks where the sim emits raw facts to partitioned Parquet and every
-metric is derived post-hoc: foraging skill, action-information metrics like
-MI(S;A), competition stats, population dynamics.
+`sim-evaluation` runs multi-seed, hundreds-of-thousands-of-ticks benchmarks
+where the sim emits raw facts to partitioned Parquet and every metric is
+derived post-hoc: foraging skill, Miller-Madow-corrected mutual information
+between sensed state and action MI(S;A), competition stats, and population
+dynamics. Change the analysis and re-derive every report without re-running
+the experiment. A random-action control (`--baseline`) keeps the numbers
+honest.
 
 ![Evaluation report with pillar scores for foraging, intelligence, and competition](docs/evaluation.png)
 
@@ -166,19 +173,16 @@ cargo check --workspace   # fast compile check
 cargo test --workspace    # run all tests
 make fmt                  # format
 make lint                 # clippy, warnings as errors
+cargo bench -p sim-core --bench turn_throughput   # engine throughput benchmark
 ```
 
-Performance benchmarking:
+Workspace layout: `sim-types` (shared domain types), `sim-config` (world +
+seed-genome TOML baselines), `sim-core` (the deterministic engine),
+`sim-server` (Axum HTTP + WebSocket), `web-client` (React + Tailwind + Vite
+canvas UI), `sim-evaluation` (headless evaluation harness).
 
-```bash
-cargo bench -p sim-core --bench turn_throughput
-
-# Perf regression guard (ignored by default)
-cargo test -p sim-core --release performance_regression -- --ignored --nocapture
-
-# Optional CI budget override
-SIM_CORE_TICK_BUDGET_NS_PER_TURN=130000 make perf-test
-```
+The canonical tick order lives in `sim-core/src/turn/mod.rs::Simulation::tick`;
+treat it as the source of truth for phase ordering.
 
 Server flags:
 
