@@ -217,7 +217,7 @@ impl<'a> CommitPhaseContext<'a> {
             self.sim.schedule_food_regrowth(target_idx);
         }
 
-        let gained_energy = food.energy.max(0.0);
+        let gained_energy = food.energy.max(0.0) * food_consumption_energy_fraction(food.kind);
         let predator = &mut self.sim.organisms[predator_idx];
         predator.energy += gained_energy;
         predator.consumptions_count = predator.consumptions_count.saturating_add(1);
@@ -260,9 +260,25 @@ impl<'a> CommitPhaseContext<'a> {
             return;
         }
 
-        let predator_max_health = self.sim.organisms[predator_idx].max_health;
+        // Larger attackers land hits on smaller prey reliably; punching up is
+        // proportionally unlikely. The roll is a deterministic hash (see
+        // `deterministic_predation_sample`); a failed roll is a wasted
+        // contingent action. The predator gains no energy from the hit itself
+        // — the prey's stash is only recoverable by eating the corpse, which
+        // keeps predation a recycling path rather than an energy source.
+        let predator = &self.sim.organisms[predator_idx];
+        let predator_id = predator.id;
+        let predator_size = sim_types::get_size(predator).max(1.0);
+        let prey_size = sim_types::get_size(&self.sim.organisms[prey_idx]).max(1.0);
+        let predation_success = (predator_size / prey_size).clamp(0.0, 1.0);
+        let sample =
+            deterministic_predation_sample(self.sim.seed, self.sim.turn, predator_id, prey_id);
+        if sample >= predation_success {
+            return;
+        }
+
         let prey = &mut self.sim.organisms[prey_idx];
-        let damage = (predator_max_health * ATTACK_DAMAGE_FRACTION).min(prey.health.max(0.0));
+        let damage = (prey.max_health * ATTACK_DAMAGE_FRACTION).min(prey.health.max(0.0));
         prey.health = (prey.health - damage).max(0.0);
         prey.damage_taken_last_turn += damage;
         let killed = prey.health <= 0.0;
@@ -270,7 +286,6 @@ impl<'a> CommitPhaseContext<'a> {
         let prey_r = prey.r;
         let prey_energy = prey.energy.max(0.0);
 
-        self.sim.organisms[predator_idx].energy += damage * ATTACK_ENERGY_GAIN_FRACTION;
         self.contingent_succeeded[predator_idx] = true;
         #[cfg(feature = "instrumentation")]
         self.sim.mark_action_succeeded(predator_idx);

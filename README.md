@@ -2,25 +2,26 @@
 
 # Neurogenesis
 
-### Watch brains evolve.
+### Watch brains evolve from nothing
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/evanhu1/Neurogenesis)
 
-2,000 digital creatures spawn into a world with the simplest possible brains:
-**zero hidden neurons and ten synapses.** There is no training data, no reward
-function, and no gradient descent — just energy, food, predators, and death.
-From there, mutation and selection do all of the design work.
+This is a neuroevolution artificial-life simulation built in rust. 2,000 digital
+creatures spawn into a world with the simplest possible brains: **zero hidden
+neurons and ten synapses.** Then ecology (energy, food, predators, and death)
+and evolution (mutation and selection) "train" intelligent brains over thousands
+of generations.
 
 ![A live Neurogenesis run: each triangle is an organism driven by its own neural network. The right panel shows the live brain of a selected organism.](docs/demo.gif)
 
-*A live run. Every triangle is an organism steering itself with its own neural
+_A live run. Every triangle is an organism steering itself with its own neural
 network. The panel on the right is the selected organism's brain — sensory
 neurons in orange, evolved inter neurons in blue, action neurons in green —
-updating every tick until the moment it dies.*
+updating every tick until the moment it dies._
 
 </div>
 
-## How brains grow
+## How brains evolve
 
 The seed genome has **0 inter neurons**. There is no hidden layer at the start;
 sensors wire straight to actions. Over generations, NEAT-style structural
@@ -28,12 +29,12 @@ mutations add neurons and synapses, runtime plasticity tunes the weights during
 each organism's lifetime, and selection decides what was worth the metabolic
 cost.
 
-In our runs, champion genomes after ~1,300 generations carry brains that grew
-to **9 inter neurons and 25+ synapses**: circuitry that mutation produced and
+In our runs, champion genomes after ~1,300 generations carry brains that grew to
+**9 inter neurons and 25+ synapses**: circuitry that mutation produced and
 selection kept because it paid for its own energy bill.
 
-| The world up close | A brain, mid-life |
-| :---: | :---: |
+|                              The world up close                              |                                      A brain, mid-life                                      |
+| :--------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------: |
 | ![Close-up of the hex world: organisms, plants, and terrain](docs/world.png) | ![Organism inspector showing live stats and the evolved neural network](docs/inspector.png) |
 
 ## Why
@@ -44,12 +45,12 @@ nature had to solve problems we don't: physical embodiment, scarce energy,
 generation times measured in years, and 2 billion years just to assemble the
 molecular machinery of reproduction itself.
 
-Evolution *in silico* rewrites those constraints. Generations take seconds,
+Evolution _in silico_ rewrites those constraints. Generations take seconds,
 populations are observable down to the synapse, and any run can be replayed
 exactly from its seed. Can a well-designed evolutionary search over brain-like
 systems be a path to AGI? This project is an attempt to find out.
 
-## What's packed inside
+## Core features
 
 **The engine**
 
@@ -72,24 +73,24 @@ systems be a path to AGI? This project is an attempt to find out.
 - The plasticity rule is split by circuit location: covariance-style Hebbian
   updates between inter neurons, advantage-weighted (policy-gradient-like)
   updates at the motor boundary.
-- Even the reward function is genetic: 7 reward weights over energy, health,
-  and wasted actions live in the genome, so a lineage can evolve what it finds
+- Even the reward function is genetic: 7 reward weights over energy, health, and
+  wasted actions live in the genome, so a lineage can evolve what it finds
   rewarding.
 - Juveniles learn at 2× the adult rate (an evolvable critical period); synapse
   pruning only activates at maturity.
 - Thinking costs energy. Metabolism scales with neuron and synapse counts,
-  vision range, and the *squared wiring length* of each synapse in latent
-  space — the same connectivity-cost pressure that shapes real cortex — plus
-  Kleiber mass^0.75 body scaling.
-- The interface to the world: 18 sensory neurons in (3 vision rays × 4
-  channels of RGB + shape, plus contact, energy, health, energy flux, and
+  vision range, and the _squared wiring length_ of each synapse in latent space
+  — the same connectivity-cost pressure that shapes real cortex — plus Kleiber
+  mass^0.75 body scaling.
+- The interface to the world: 18 sensory neurons in (3 vision rays × 4 channels
+  of RGB + shape, plus contact, energy, health, energy flux, and
   proprioception), 6 action neurons out (turn, move, eat, attack, reproduce),
   selected by softmax sampling.
 
 **Evolution**
 
-- NEAT-style structural mutation: add a synapse, remove a synapse, split an
-  edge into a new neuron. New wiring is spatially biased toward nearby neurons.
+- NEAT-style structural mutation: add a synapse, remove a synapse, split an edge
+  into a new neuron. New wiring is spatially biased toward nearby neurons.
 - Meta-mutation: per-operator mutation rates are themselves genes.
 - A persistent champion pool seeds new worlds from the best genomes of past
   sessions, and periodic injections of fresh seed genomes keep diversity
@@ -99,11 +100,11 @@ systems be a path to AGI? This project is an attempt to find out.
 
 - A 250×250 toroidal hex grid with Perlin-noise terrain walls, a hidden
   fertility map, and event-driven plant regrowth. One entity per cell.
-- Energy is conserved, and lossy digestion is the ecosystem's only sink:
-  plants return 20% of stored energy, corpses 80%. There is no population cap —
+- Energy is conserved, and lossy digestion is the ecosystem's only sink: plants
+  return 20% of stored energy, corpses 80%. There is no population cap —
   thermodynamics regulates the population.
-- Predation is real and every kill leaves a corpse worth eating, so death
-  feeds the food web.
+- Predation is real and every kill leaves a corpse worth eating, so death feeds
+  the food web.
 - No species registry, no speciation bookkeeping, no hand-written fitness
   target. Selection pressure comes from the ecology itself.
 
@@ -128,20 +129,19 @@ Things to try:
 - **Fast mode** — rendering pauses and the engine runs flat out (hundreds of
   thousands of ticks in minutes). Switch back to live view to inspect what the
   population evolved during the burst.
-- **Click an organism** — live brain activity, genome, and per-operator
-  mutation rates.
+- **Click an organism** — live brain activity, genome, and per-operator mutation
+  rates.
 - **Save champions** — the server keeps a persistent champion-genome pool and
   bootstraps new worlds from it, so progress compounds across sessions.
 
 ## Measuring whether intelligence is actually emerging
 
 `sim-evaluation` runs multi-seed, hundreds-of-thousands-of-ticks benchmarks
-where the sim emits raw facts to partitioned Parquet and every metric is
-derived post-hoc: foraging skill, Miller-Madow-corrected mutual information
-between sensed state and action MI(S;A), competition stats, and population
-dynamics. Change the analysis and re-derive every report without re-running
-the experiment. A random-action control (`--baseline`) keeps the numbers
-honest.
+where the sim emits raw facts to partitioned Parquet and every metric is derived
+post-hoc: foraging skill, Miller-Madow-corrected mutual information between
+sensed state and action MI(S;A), competition stats, and population dynamics.
+Change the analysis and re-derive every report without re-running the
+experiment. A random-action control (`--baseline`) keeps the numbers honest.
 
 ![Evaluation report with pillar scores for foraging, intelligence, and competition](docs/evaluation.png)
 
@@ -177,17 +177,17 @@ cargo bench -p sim-core --bench turn_throughput   # engine throughput benchmark
 ```
 
 Workspace layout: `sim-types` (shared domain types), `sim-config` (world +
-seed-genome TOML baselines), `sim-core` (the deterministic engine),
-`sim-server` (Axum HTTP + WebSocket), `web-client` (React + Tailwind + Vite
-canvas UI), `sim-evaluation` (headless evaluation harness).
+seed-genome TOML baselines), `sim-core` (the deterministic engine), `sim-server`
+(Axum HTTP + WebSocket), `web-client` (React + Tailwind + Vite canvas UI),
+`sim-evaluation` (headless evaluation harness).
 
 The canonical tick order lives in `sim-core/src/turn/mod.rs::Simulation::tick`;
 treat it as the source of truth for phase ordering.
 
 Server flags:
 
-- `--champion-pool-path <path>` — override the default `champion_pool.json`
-  used for champion persistence.
+- `--champion-pool-path <path>` — override the default `champion_pool.json` used
+  for champion persistence.
 - `--seed-genome-snapshot <path.bin>` — boot every organism from a single
   evaluation-snapshot genome (`.../genomes/tNNNNNN.bin`); champion saves no-op
   for the session.
