@@ -11,56 +11,40 @@ pub fn average_pillar_scores(seed_summaries: &[SeedEvaluationSummary]) -> Pillar
     let Some(first) = seed_summaries.first() else {
         return PillarScores::default();
     };
-    let pillars = |f: fn(&SeedEvaluationSummary) -> &PillarScores| seed_summaries.iter().map(f);
+    let pillars = || seed_summaries.iter().map(|s| &s.pillars);
     PillarScores {
         window_start_tick: first.pillars.window_start_tick,
         window_end_tick: first.pillars.window_end_tick,
-        mean_p_fwd_food: mean_option(pillars(|s| &s.pillars).map(|p| p.mean_p_fwd_food)),
-        mean_mi_sa: mean_option(pillars(|s| &s.pillars).map(|p| p.mean_mi_sa)),
-        mean_attack_attempt_rate: mean_option(
-            pillars(|s| &s.pillars).map(|p| p.mean_attack_attempt_rate),
-        ),
-        mean_attack_success_rate: mean_option(
-            pillars(|s| &s.pillars).map(|p| p.mean_attack_success_rate),
-        ),
-        mean_failed_action_rate: mean_option(
-            pillars(|s| &s.pillars).map(|p| p.mean_failed_action_rate),
-        ),
-        mean_idle_fraction: mean_option(pillars(|s| &s.pillars).map(|p| p.mean_idle_fraction)),
-        mean_util: mean_option(pillars(|s| &s.pillars).map(|p| p.mean_util)),
-        mean_action_histogram: mean_histogram(
-            pillars(|s| &s.pillars).map(|p| p.mean_action_histogram),
-        ),
-        mean_abs_td_error: mean_option(
-            pillars(|s| &s.pillars).map(|p| p.mean_abs_td_error),
-        ),
+        mean_p_fwd_food: mean_option(pillars().map(|p| p.mean_p_fwd_food)),
+        mean_mi_sa: mean_option(pillars().map(|p| p.mean_mi_sa)),
+        mean_attack_attempt_rate: mean_option(pillars().map(|p| p.mean_attack_attempt_rate)),
+        mean_attack_success_rate: mean_option(pillars().map(|p| p.mean_attack_success_rate)),
+        mean_failed_action_rate: mean_option(pillars().map(|p| p.mean_failed_action_rate)),
+        mean_idle_fraction: mean_option(pillars().map(|p| p.mean_idle_fraction)),
+        mean_util: mean_option(pillars().map(|p| p.mean_util)),
+        mean_action_histogram: mean_histogram(pillars().map(|p| p.mean_action_histogram)),
+        mean_abs_td_error: mean_option(pillars().map(|p| p.mean_abs_td_error)),
         mean_age_correlated_competence: mean_option(
-            pillars(|s| &s.pillars).map(|p| p.mean_age_correlated_competence),
+            pillars().map(|p| p.mean_age_correlated_competence),
         ),
-        foraging_p_fwd_food_component: mean_f64(
-            pillars(|s| &s.pillars).map(|p| p.foraging_p_fwd_food_component),
-        ),
-        intelligence_mi_component: mean_f64(
-            pillars(|s| &s.pillars).map(|p| p.intelligence_mi_component),
-        ),
+        foraging_p_fwd_food_component: mean_f64(pillars().map(|p| p.foraging_p_fwd_food_component)),
+        intelligence_mi_component: mean_f64(pillars().map(|p| p.intelligence_mi_component)),
         intelligence_action_effectiveness_component: mean_f64(
-            pillars(|s| &s.pillars).map(|p| p.intelligence_action_effectiveness_component),
+            pillars().map(|p| p.intelligence_action_effectiveness_component),
         ),
         intelligence_anti_idle_component: mean_f64(
-            pillars(|s| &s.pillars).map(|p| p.intelligence_anti_idle_component),
+            pillars().map(|p| p.intelligence_anti_idle_component),
         ),
-        intelligence_util_component: mean_f64(
-            pillars(|s| &s.pillars).map(|p| p.intelligence_util_component),
-        ),
+        intelligence_util_component: mean_f64(pillars().map(|p| p.intelligence_util_component)),
         competition_attack_success_component: mean_f64(
-            pillars(|s| &s.pillars).map(|p| p.competition_attack_success_component),
+            pillars().map(|p| p.competition_attack_success_component),
         ),
         competition_attack_attempt_component: mean_f64(
-            pillars(|s| &s.pillars).map(|p| p.competition_attack_attempt_component),
+            pillars().map(|p| p.competition_attack_attempt_component),
         ),
-        foraging_pillar: mean_f64(pillars(|s| &s.pillars).map(|p| p.foraging_pillar)),
-        intelligence_pillar: mean_f64(pillars(|s| &s.pillars).map(|p| p.intelligence_pillar)),
-        competition_pillar: mean_f64(pillars(|s| &s.pillars).map(|p| p.competition_pillar)),
+        foraging_pillar: mean_f64(pillars().map(|p| p.foraging_pillar)),
+        intelligence_pillar: mean_f64(pillars().map(|p| p.intelligence_pillar)),
+        competition_pillar: mean_f64(pillars().map(|p| p.competition_pillar)),
     }
 }
 
@@ -68,11 +52,6 @@ pub fn average_demographic_analytics(
     seed_summaries: &[SeedEvaluationSummary],
 ) -> DemographicAnalytics {
     DemographicAnalytics {
-        births: mean_round_u64(
-            seed_summaries
-                .iter()
-                .map(|summary| summary.demographics.births),
-        ),
         successful_births: mean_round_u64(
             seed_summaries
                 .iter()
@@ -124,15 +103,32 @@ pub fn average_timeseries(seed_summaries: &[SeedEvaluationSummary]) -> Vec<Inter
     let Some(first_summary) = seed_summaries.first() else {
         return Vec::new();
     };
-    let row_count = first_summary.timeseries.len();
+    // Per-seed timeseries can disagree in length or tick alignment (e.g. a
+    // seed interrupted or re-run with different tick settings). Average only
+    // the aligned prefix — rows present in every seed with matching ticks —
+    // instead of indexing unconditionally and panicking.
+    let min_len = seed_summaries
+        .iter()
+        .map(|summary| summary.timeseries.len())
+        .min()
+        .unwrap_or(0);
+    let row_count = (0..min_len)
+        .take_while(|&row_idx| {
+            let tick = first_summary.timeseries[row_idx].tick;
+            seed_summaries
+                .iter()
+                .all(|summary| summary.timeseries[row_idx].tick == tick)
+        })
+        .count();
+    if row_count < first_summary.timeseries.len() {
+        eprintln!(
+            "warning: seed timeseries are misaligned; averaging only the first {row_count} aligned rows"
+        );
+    }
     let mut averaged = Vec::with_capacity(row_count);
 
     for row_idx in 0..row_count {
         let tick = first_summary.timeseries[row_idx].tick;
-        debug_assert!(seed_summaries.iter().all(|summary| {
-            summary.timeseries.len() == row_count && summary.timeseries[row_idx].tick == tick
-        }));
-
         averaged.push(IntervalMetrics {
             tick,
             pop: mean_round_u32(

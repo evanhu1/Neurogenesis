@@ -2,20 +2,17 @@ mod evaluation;
 mod expression;
 mod sensing;
 
-use crate::genome::{
-    inter_alpha_from_log_time_constant, BRAIN_SPACE_MAX, BRAIN_SPACE_MIN,
-    DEFAULT_INTER_LOG_TIME_CONSTANT,
-};
+use crate::genome::inter_alpha_from_log_time_constant;
 #[cfg(feature = "profiling")]
 use crate::profiling::{self, BrainStage};
 use crate::topology::{
     action_neuron_id, constrain_weight, inter_index, inter_neuron_id,
-    refresh_parent_ids_and_synapse_count,
+    refresh_action_synapse_starts_and_count,
 };
 use sim_types::{
     ActionNeuronState, ActionType, BrainLocation, BrainState, InterNeuronState, NeuronId,
     NeuronState, NeuronType, Occupant, OrganismGenome, OrganismId, OrganismState,
-    SensoryNeuronState, SensoryReceptor, SynapseEdge, VisionChannel, VisualProperties,
+    SensoryNeuronState, SensoryReceptor, SynapseEdge, SynapseGene, VisionChannel, VisualProperties,
 };
 #[cfg(feature = "profiling")]
 use std::time::Instant;
@@ -23,8 +20,6 @@ use std::time::Instant;
 pub(crate) use crate::topology::{
     action_index, ACTION_COUNT, ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT,
 };
-#[cfg_attr(not(test), allow(unused_imports))]
-pub use evaluation::derive_active_action_neuron_id;
 pub(crate) use evaluation::{evaluate_brain, BrainEvalContext};
 #[cfg_attr(not(test), allow(unused_imports))]
 pub(crate) use expression::{express_genome, make_action_neuron, make_sensory_neuron};
@@ -36,7 +31,10 @@ pub(crate) const EXPLICIT_IDLE_LOGIT_BIAS: f32 = -0.01;
 pub(crate) const VISION_RAY_COUNT: usize = SensoryReceptor::VISION_RAY_OFFSETS.len();
 
 /// Fast tanh approximation using a Padé rational polynomial.
-/// Accurate to ~1e-5 for |x| < 4.97, exact ±1.0 for larger inputs.
+/// Accurate to ~1e-5 for |x| ≲ 4.2; worst-case absolute error grows to ~1e-4
+/// near the cutoff (≈9.6e-5 at |x| = 4.97). The 4.97 cutoff is where the
+/// rational reaches ≈1.0, chosen so the clamp to exact ±1.0 for larger inputs
+/// is continuous (jump ≈6e-7), not for the 1e-5 bound.
 #[inline(always)]
 pub(crate) fn fast_tanh(x: f32) -> f32 {
     if x >= 4.97 {
@@ -63,14 +61,9 @@ pub(crate) struct BrainEvaluation {
 pub(crate) struct BrainScratch {
     pub(crate) inter_inputs: Vec<f32>,
     pub(crate) prev_inter: Vec<f32>,
-    pub(crate) prev_inter_states: Vec<f32>,
     pub(crate) inter_activations: Vec<f32>,
-    pub(crate) sensory_means: Vec<f32>,
-    pub(crate) inter_means: Vec<f32>,
-    pub(crate) centered_action_post_signals: [f32; ACTION_COUNT],
     pub(crate) action_probabilities: [f32; ACTION_COUNT],
     pub(crate) selected_action_index: Option<usize>,
-    pub(crate) selected_action_confidence: f32,
 }
 
 impl BrainScratch {
@@ -78,14 +71,9 @@ impl BrainScratch {
         Self {
             inter_inputs: Vec::with_capacity(32),
             prev_inter: Vec::with_capacity(32),
-            prev_inter_states: Vec::with_capacity(32),
             inter_activations: Vec::with_capacity(32),
-            sensory_means: Vec::with_capacity(8),
-            inter_means: Vec::with_capacity(32),
-            centered_action_post_signals: [0.0; ACTION_COUNT],
             action_probabilities: [0.0; ACTION_COUNT],
             selected_action_index: None,
-            selected_action_confidence: 0.0,
         }
     }
 
@@ -96,15 +84,5 @@ impl BrainScratch {
         self.prev_inter.clear();
         self.prev_inter
             .extend(brain.inter.iter().map(|inter| inter.neuron.activation));
-        self.prev_inter_states.clear();
-        self.prev_inter_states
-            .extend(brain.inter.iter().map(|inter| inter.state));
-    }
-
-    fn update_action_post_signals(&mut self, action_inputs: &[f32; ACTION_COUNT]) {
-        let centered_action_mean = action_inputs.iter().sum::<f32>() / ACTION_COUNT as f32;
-        for (idx, centered_signal) in self.centered_action_post_signals.iter_mut().enumerate() {
-            *centered_signal = action_inputs[idx] - centered_action_mean;
-        }
     }
 }

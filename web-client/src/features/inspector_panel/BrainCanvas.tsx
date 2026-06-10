@@ -1,12 +1,11 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useCallback, useEffect, useRef, type MouseEvent } from 'react';
 import {
-  renderBrain,
   computeBrainLayout,
+  renderBrain,
   zoomToFitBrain,
   type BrainTransform,
 } from './brainRenderer';
 import type { BrainState } from '../../types';
-import React from 'react';
 
 type BrainCanvasProps = {
   focusedBrain: BrainState | null;
@@ -34,13 +33,35 @@ export function BrainCanvas({
     renderBrain(ctx, canvas, focusedBrain, activeActionNeuronId, transformRef.current, actionBiases);
   }, [focusedBrain, activeActionNeuronId, actionBiases]);
 
-  // Only auto-fit on focus/layout changes, not every tick update.
+  const fitToCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !focusedBrain) return;
+    const layout = computeBrainLayout(focusedBrain, activeActionNeuronId, actionBiases);
+    transformRef.current = zoomToFitBrain(layout, canvas.width, canvas.height);
+  }, [focusedBrain, activeActionNeuronId, actionBiases]);
+
+  // Keep the canvas buffer matched to its displayed size.
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) {
+    if (!canvas) return;
+    const syncSize = () => {
+      const dpr = window.devicePixelRatio || 1;
+      const width = Math.max(1, Math.floor(canvas.clientWidth * dpr));
+      const height = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+      if (canvas.width === width && canvas.height === height) return;
+      canvas.width = width;
+      canvas.height = height;
+      fitToCanvas();
       draw();
-      return;
-    }
+    };
+    syncSize();
+    const observer = new ResizeObserver(syncSize);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [draw, fitToCanvas]);
+
+  // Only auto-fit on focus/layout changes, not every tick update.
+  useEffect(() => {
     if (!focusedBrain) {
       transformRef.current = { x: 0, y: 0, scale: 1 };
       fitKeyRef.current = '';
@@ -54,12 +75,11 @@ export function BrainCanvas({
       focusedBrain.action.length,
     ].join(':');
     if (fitKeyRef.current !== fitKey) {
-      const layout = computeBrainLayout(focusedBrain, activeActionNeuronId, actionBiases);
-      transformRef.current = zoomToFitBrain(layout, canvas.width, canvas.height);
+      fitToCanvas();
       fitKeyRef.current = fitKey;
     }
     draw();
-  }, [focusOrganismId, focusedBrain, activeActionNeuronId, actionBiases, draw]);
+  }, [focusOrganismId, focusedBrain, draw, fitToCanvas]);
 
   // Wheel zoom (centered on cursor)
   useEffect(() => {
@@ -84,26 +104,20 @@ export function BrainCanvas({
     return () => canvas.removeEventListener('wheel', onWheel);
   }, [draw]);
 
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      dragRef.current = {
-        sx: e.clientX,
-        sy: e.clientY,
-        tx: transformRef.current.x,
-        ty: transformRef.current.y,
-      };
-    },
-    [],
-  );
+  const handleMouseDown = useCallback((e: MouseEvent) => {
+    dragRef.current = {
+      sx: e.clientX,
+      sy: e.clientY,
+      tx: transformRef.current.x,
+      ty: transformRef.current.y,
+    };
+  }, []);
 
   const handleMouseMove = useCallback(
-    (e: React.MouseEvent) => {
+    (e: MouseEvent) => {
       const d = dragRef.current;
-      if (!d) return;
       const canvas = canvasRef.current;
-      if (!canvas) return;
+      if (!d || !canvas) return;
       const rect = canvas.getBoundingClientRect();
       const dx = (e.clientX - d.sx) * (canvas.width / rect.width);
       const dy = (e.clientY - d.sy) * (canvas.height / rect.height);
@@ -121,9 +135,7 @@ export function BrainCanvas({
     <canvas
       ref={canvasRef}
       id="brain-canvas"
-      width={420}
-      height={500}
-      className="w-full h-full rounded bg-surface cursor-grab active:cursor-grabbing"
+      className="h-full w-full cursor-grab rounded-lg border border-white/5 bg-void active:cursor-grabbing"
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}

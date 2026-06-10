@@ -1,4 +1,3 @@
-use crate::metabolism::refresh_organism_base_metabolic_cost;
 use crate::{PendingActionState, Simulation};
 use sim_types::FacingDirection;
 use sim_types::{Occupant, OrganismState};
@@ -157,34 +156,26 @@ impl Simulation {
         }
     }
 
-    pub(crate) fn add_organism(&mut self, mut organism: OrganismState) -> bool {
-        let (q, r) = self.wrap_position(organism.q, organism.r);
-        let cell_idx = self.cell_index(q, r);
+    pub(crate) fn add_organism(&mut self, organism: OrganismState) -> bool {
+        debug_assert_eq!(
+            (organism.q, organism.r),
+            self.wrap_position(organism.q, organism.r),
+            "organism position must be canonical before insertion",
+        );
+        debug_assert!(
+            organism.health > 0.0 && organism.health <= organism.max_health,
+            "organism must satisfy 0 < health <= max_health before insertion",
+        );
+        let cell_idx = self.cell_index(organism.q, organism.r);
         if self.occupancy[cell_idx].is_some() {
             return false;
         }
 
-        if organism.max_health <= 0.0 {
-            organism.max_health =
-                sim_types::offspring_transfer_energy(organism.genome.lifecycle.gestation_ticks);
-        }
-        if organism.health <= 0.0 {
-            organism.health = organism.max_health;
-        } else {
-            organism.health = organism.health.min(organism.max_health);
-        }
-
-        organism.q = q;
-        organism.r = r;
-        refresh_organism_base_metabolic_cost(&mut organism);
         self.occupancy[cell_idx] = Some(Occupant::Organism(organism.id));
-        if !self.visual_map.is_empty() {
-            self.visual_map[cell_idx] =
-                sim_types::organism_visual(organism.genome.lifecycle.body_color);
-        }
+        self.visual_map[cell_idx] =
+            sim_types::organism_visual(organism.genome.lifecycle.body_color);
         self.organisms.push(organism);
         self.pending_actions.push(PendingActionState::default());
-        self.reward_ledgers.push(crate::RewardLedger::default());
         true
     }
 

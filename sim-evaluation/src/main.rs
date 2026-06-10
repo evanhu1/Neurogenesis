@@ -34,10 +34,7 @@ fn main() -> Result<()> {
 }
 
 fn run(cli: Cli) -> Result<()> {
-    let mut control_config = load_world_config_from_path(&cli.config)?;
-    if cli.control {
-        control_config.force_random_actions = true;
-    }
+    let base_config = load_world_config_from_path(&cli.config)?;
     let overrides = FeatureOverrides {
         disable_plasticity: cli.disable_plasticity,
     };
@@ -57,12 +54,22 @@ fn run(cli: Cli) -> Result<()> {
     };
 
     if cli.compare || overrides.has_overrides() {
-        let treatment_config = apply_feature_overrides(control_config.clone(), &overrides);
+        // The treatment arm is derived from the unmutated base config so that
+        // `--control` (force random actions) only applies to the control arm.
+        let treatment_config = apply_feature_overrides(base_config.clone(), &overrides);
+        let mut control_config = base_config;
+        if cli.control {
+            control_config.force_random_actions = true;
+        }
         let comparison =
             run_comparison_evaluation(control_config, treatment_config, &options, &overrides)?;
         print_comparison_summary(&options.out_dir, &comparison);
     } else {
-        let summary = run_evaluation_across_seeds(control_config, &options)?;
+        let mut config = base_config;
+        if cli.control {
+            config.force_random_actions = true;
+        }
+        let summary = run_evaluation_across_seeds(config, &options)?;
         print_evaluation_summary(&options.out_dir, &summary);
     }
 

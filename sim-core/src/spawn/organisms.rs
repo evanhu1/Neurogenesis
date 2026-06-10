@@ -1,15 +1,25 @@
 use super::*;
 use crate::metabolism::refresh_organism_base_metabolic_cost;
 
+/// Rejection-sampling attempt budget per requested periodic-injection spawn.
+/// 64 attempts per spawn keeps the expected shortfall negligible down to
+/// ~10% open-cell density while bounding work in crowded worlds, where fewer
+/// than the configured count may be queued.
+const INJECTION_SAMPLE_ATTEMPTS_PER_SPAWN: usize = 64;
+
 impl Simulation {
+    /// Resolves queued spawn requests, returning outcomes aligned 1:1 with the
+    /// drained queue order: `Some(organism)` for each request that spawned and
+    /// `None` for each request whose target cell was occupied. Callers that
+    /// attribute children to parents positionally rely on this alignment.
     pub(crate) fn resolve_spawn_requests(
         &mut self,
         queue: &mut Vec<SpawnRequest>,
-    ) -> Vec<OrganismState> {
-        let mut spawned = Vec::new();
+    ) -> Vec<Option<OrganismState>> {
+        let mut spawned = Vec::with_capacity(queue.len());
         for request in queue.drain(..) {
-            let organism = match request.kind {
-                SpawnRequestKind::Reproduction(mut reproduction) => {
+            let organism = match request {
+                SpawnRequest::Reproduction(mut reproduction) => {
                     mutate_genome(
                         &mut reproduction.parent_genome,
                         &self.config.seed_genome_config,
@@ -20,7 +30,7 @@ impl Simulation {
                     self.build_organism(
                         reproduction.parent_genome,
                         OrganismSpawnParams {
-                            species_id: reproduction.parent_species_id,
+                            species_id: Some(reproduction.parent_species_id),
                             q: reproduction.q,
                             r: reproduction.r,
                             generation: reproduction.parent_generation.saturating_add(1),
@@ -29,30 +39,33 @@ impl Simulation {
                         },
                     )
                 }
-                SpawnRequestKind::PeriodicInjection(injection) => {
+                SpawnRequest::PeriodicInjection(injection) => {
                     let genome =
                         generate_seed_genome(&self.config.seed_genome_config, &mut self.rng);
-                    let starting_energy =
-                        sim_types::offspring_transfer_energy(genome.lifecycle.gestation_ticks);
-                    let species_id = founder_species_id(OrganismId(self.next_organism_id));
                     let facing = self.random_facing();
                     self.build_organism(
                         genome,
                         OrganismSpawnParams {
-                            species_id,
+                            species_id: None,
                             q: injection.q,
                             r: injection.r,
                             generation: 0,
                             facing,
-                            starting_energy_override: Some(starting_energy),
+                            starting_energy_override: None,
                         },
                     )
                 }
             };
 
-            if self.add_organism(organism.clone()) {
-                spawned.push(organism);
-            }
+            // Move the organism into the grid; only successful adds pay for a
+            // clone (taken from the inserted element) for the returned vec.
+            let added = self.add_organism(organism);
+            spawned.push(added.then(|| {
+                self.organisms
+                    .last()
+                    .expect("add_organism pushed the organism on success")
+                    .clone()
+            }));
         }
 
         spawned
@@ -71,61 +84,73 @@ impl Simulation {
         }
 
         let width = self.config.world_width as usize;
-        let mut reserved = vec![false; self.occupancy.len()];
-        for request in queue.iter() {
-            let (q, r) = request.target_position();
-            let idx = r as usize * width + q as usize;
-            reserved[idx] = true;
-        }
+        // Cells already targeted by queued spawn requests (plus the cells
+        // picked below), kept as a small sorted vec probed via binary search
+        // instead of a world-capacity bool buffer.
+        let mut reserved: Vec<usize> = queue
+            .iter()
+            .map(|request| {
+                let (q, r) = request.target_position();
+                r as usize * width + q as usize
+            })
+            .collect();
+        reserved.sort_unstable();
 
-        let mut open_positions = Vec::new();
-        for (idx, occupant) in self.occupancy.iter().enumerate() {
-            if occupant.is_none() && !reserved[idx] {
-                let q = (idx % width) as i32;
-                let r = (idx / width) as i32;
-                open_positions.push((q, r));
+        // Deterministic rejection sampling: draw uniformly random cell
+        // indices from the simulation RNG and keep the first `count` distinct
+        // cells that are unoccupied and unreserved. This replaces the former
+        // full-grid scan + partial_shuffle (which allocated a world-capacity
+        // position vec); the RNG draw sequence differs from that scheme but
+        // is still a pure function of (config, seed, sim state), so fixed
+        // config + seed yields identical results.
+        let capacity = self.occupancy.len();
+        let max_attempts = count.saturating_mul(INJECTION_SAMPLE_ATTEMPTS_PER_SPAWN);
+        let mut picked = 0usize;
+        for _ in 0..max_attempts {
+            if picked == count {
+                break;
             }
-        }
-        open_positions.shuffle(&mut self.rng);
-
-        for (q, r) in open_positions.into_iter().take(count) {
-            queue.push(SpawnRequest {
-                kind: SpawnRequestKind::PeriodicInjection(PeriodicInjectionSpawn { q, r }),
-            });
+            let idx = self.rng.random_range(0..capacity);
+            if self.occupancy[idx].is_some() {
+                continue;
+            }
+            let Err(insert_at) = reserved.binary_search(&idx) else {
+                continue;
+            };
+            reserved.insert(insert_at, idx);
+            picked += 1;
+            queue.push(SpawnRequest::PeriodicInjection(PeriodicInjectionSpawn {
+                q: (idx % width) as i32,
+                r: (idx / width) as i32,
+            }));
         }
     }
 
     pub(crate) fn spawn_initial_population(&mut self) {
-        let seed_config = self.config.seed_genome_config.clone();
-        let champion_pool = self.champion_pool.clone();
-
         let mut open_positions = self.empty_positions();
         open_positions.shuffle(&mut self.rng);
-        let initial_population = self.target_population().min(open_positions.len());
+        let initial_population = (self.config.num_organisms as usize).min(open_positions.len());
 
         for _ in 0..initial_population {
             let (q, r) = open_positions
                 .pop()
                 .expect("initial population requires at least one unique cell per organism");
-            let genome = if champion_pool.is_empty() {
-                generate_seed_genome(&seed_config, &mut self.rng)
+            let genome = if self.champion_pool.is_empty() {
+                generate_seed_genome(&self.config.seed_genome_config, &mut self.rng)
             } else {
-                let idx = self.rng.random_range(0..champion_pool.len());
-                champion_pool[idx].clone()
+                let idx = self.rng.random_range(0..self.champion_pool.len());
+                self.champion_pool[idx].clone()
             };
-            let starting_energy =
-                sim_types::offspring_transfer_energy(genome.lifecycle.gestation_ticks);
-            let species_id = founder_species_id(OrganismId(self.next_organism_id));
             let facing = self.random_facing();
             let organism = self.build_organism(
                 genome,
                 OrganismSpawnParams {
-                    species_id,
+                    species_id: None,
                     q,
                     r,
                     generation: 0,
                     facing,
-                    starting_energy_override: Some(starting_energy),
+                    starting_energy_override: None,
                 },
             );
             let added = self.add_organism(organism);
@@ -138,17 +163,19 @@ impl Simulation {
         mut genome: OrganismGenome,
         params: OrganismSpawnParams,
     ) -> OrganismState {
-        genome.topology.vision_distance = genome.topology.vision_distance.clamp(1, 10);
+        genome.topology.vision_distance = genome
+            .topology
+            .vision_distance
+            .clamp(MIN_MUTATED_VISION_DISTANCE, MAX_MUTATED_VISION_DISTANCE);
         genome.lifecycle.body_color = genome.lifecycle.body_color.clamped();
         let id = self.alloc_organism_id();
-        let starting_energy = params.starting_energy_override.unwrap_or_else(|| {
-            sim_types::offspring_transfer_energy(genome.lifecycle.gestation_ticks)
-        });
-        let max_health =
-            sim_types::offspring_transfer_energy(genome.lifecycle.gestation_ticks);
+        // Founders (no inherited species) take their own ID as species ID.
+        let species_id = params.species_id.unwrap_or(SpeciesId(id.0));
+        let max_health = sim_types::offspring_transfer_energy(genome.lifecycle.gestation_ticks);
+        let starting_energy = params.starting_energy_override.unwrap_or(max_health);
         let mut organism = OrganismState {
             id,
-            species_id: params.species_id,
+            species_id,
             q: params.q,
             r: params.r,
             generation: params.generation,
@@ -159,8 +186,10 @@ impl Simulation {
             max_health,
             energy_prev: starting_energy,
             health_prev: max_health,
+            energy_at_last_sensing: starting_energy,
             dopamine: 0.0,
             value_prev: 0.0,
+            reward_prev: 0.0,
             value_prev_feature_activations: Vec::new(),
             damage_taken_last_turn: 0.0,
             contingent_action_wasted_last_turn: false,
@@ -176,7 +205,10 @@ impl Simulation {
             brain: express_genome(&genome),
             genome,
         };
-        refresh_organism_base_metabolic_cost(&mut organism);
+        refresh_organism_base_metabolic_cost(
+            &mut organism,
+            self.config.body_mass_metabolic_cost_coeff,
+        );
         organism
     }
 
@@ -188,16 +220,6 @@ impl Simulation {
         let id = OrganismId(self.next_organism_id);
         self.next_organism_id += 1;
         id
-    }
-
-    fn target_population(&self) -> usize {
-        let max_population = self.config.num_organisms as usize;
-        let available_cells = if self.terrain_map.is_empty() {
-            world_capacity(self.config.world_width)
-        } else {
-            self.terrain_map.iter().filter(|blocked| !**blocked).count()
-        };
-        max_population.min(available_cells)
     }
 
     fn empty_positions(&self) -> Vec<(i32, i32)> {

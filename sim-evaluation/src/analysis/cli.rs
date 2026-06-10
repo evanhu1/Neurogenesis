@@ -13,7 +13,7 @@
 
 use super::{
     analyze, average_demographic_analytics, average_pillar_scores, average_timeseries,
-    write_aggregate_artifacts, write_per_seed_artifacts, AnalysisOptions, ScoringWindow,
+    write_aggregate_artifacts, write_per_seed_artifacts, AnalysisOptions,
 };
 use crate::dataset::{DatasetReader, Manifest};
 use crate::output::print_evaluation_summary;
@@ -36,8 +36,7 @@ pub fn analyze_run(identifier: &str) -> Result<()> {
 }
 
 fn analyze_single_seed(dataset_dir: &Path) -> Result<EvaluationSummary> {
-    let seed_summary = reanalyze_seed(dataset_dir)?;
-    let manifest = Manifest::read(dataset_dir)?;
+    let (seed_summary, manifest) = reanalyze_seed(dataset_dir)?;
     write_per_seed_artifacts(
         dataset_dir,
         &seed_summary,
@@ -57,9 +56,11 @@ fn analyze_run_root(run_dir: &Path) -> Result<EvaluationSummary> {
     }
 
     let mut seed_summaries = Vec::with_capacity(seed_dirs.len());
+    // The first seed's manifest is the source of truth for run-level options
+    // (report_every, ticks). `control` comes from the persisted world config.
+    let mut first_manifest = None;
     for seed_dir in &seed_dirs {
-        let manifest = Manifest::read(seed_dir)?;
-        let summary = reanalyze_seed(seed_dir)?;
+        let (summary, manifest) = reanalyze_seed(seed_dir)?;
         write_per_seed_artifacts(
             seed_dir,
             &summary,
@@ -67,13 +68,14 @@ fn analyze_run_root(run_dir: &Path) -> Result<EvaluationSummary> {
             "re-analyzed from dataset",
         )?;
         seed_summaries.push(summary);
+        if first_manifest.is_none() {
+            first_manifest = Some(manifest);
+        }
     }
     seed_summaries.sort_by_key(|summary| summary.seed);
 
-    // Use the first seed's manifest as the source of truth for run-level
-    // options (report_every, ticks). `control` comes from the persisted world
-    // config.
-    let first_manifest = Manifest::read(&seed_dirs[0])?;
+    let first_manifest =
+        first_manifest.ok_or_else(|| anyhow!("no seed manifests found under {run_dir:?}"))?;
     let control = first_manifest.world_config.force_random_actions;
 
     let evaluation_summary = EvaluationSummary {
@@ -132,7 +134,7 @@ fn wrap_single_seed(summary: SeedEvaluationSummary) -> EvaluationSummary {
     }
 }
 
-fn reanalyze_seed(dataset_dir: &Path) -> Result<SeedEvaluationSummary> {
+fn reanalyze_seed(dataset_dir: &Path) -> Result<(SeedEvaluationSummary, Manifest)> {
     let manifest = Manifest::read(dataset_dir)?;
     let dataset = DatasetReader::load(dataset_dir)?;
     let analysis = analyze(
@@ -140,10 +142,9 @@ fn reanalyze_seed(dataset_dir: &Path) -> Result<SeedEvaluationSummary> {
         &AnalysisOptions {
             report_every: manifest.report_every,
             total_ticks: manifest.total_ticks,
-            scoring_window: ScoringWindow::default(),
         },
     );
-    Ok(SeedEvaluationSummary {
+    let summary = SeedEvaluationSummary {
         title: None,
         seed: manifest.seed,
         ticks: manifest.total_ticks,
@@ -153,7 +154,8 @@ fn reanalyze_seed(dataset_dir: &Path) -> Result<SeedEvaluationSummary> {
         demographics: analysis.demographics,
         state_hash: String::new(),
         timeseries: analysis.timeseries,
-    })
+    };
+    Ok((summary, manifest))
 }
 
 fn collect_seed_dirs(run_dir: &Path) -> Result<Vec<PathBuf>> {

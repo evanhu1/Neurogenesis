@@ -66,15 +66,11 @@ impl FeatureOverrides {
         self.disable_plasticity
     }
 
-    pub(crate) fn label(&self) -> String {
-        let mut parts = Vec::new();
+    pub(crate) fn label(&self) -> &'static str {
         if self.disable_plasticity {
-            parts.push("disable-plasticity".to_owned());
-        }
-        if parts.is_empty() {
-            "treatment".to_owned()
+            "disable-plasticity"
         } else {
-            parts.join(", ")
+            "treatment"
         }
     }
 }

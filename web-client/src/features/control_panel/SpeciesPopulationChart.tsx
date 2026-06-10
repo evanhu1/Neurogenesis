@@ -267,7 +267,10 @@ export function SpeciesPopulationChart({
 
   return (
     <div className="mt-1">
-      <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="h-60 w-full rounded bg-surface/40">
+      <svg
+        viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+        className="h-60 w-full rounded-lg border border-white/5 bg-void/70"
+      >
         <title>Species population over turns</title>
         <line
           x1={padLeft}
@@ -332,7 +335,7 @@ export function SpeciesPopulationChart({
       </svg>
       <div className="mt-1.5 flex gap-1.5 overflow-x-auto scrollbar-none font-mono text-[11px] text-ink/70">
         {series
-          .slice()
+          .filter((item) => item.latestCount > 0 || item.id === focusedSpeciesId)
           .sort((a, b) => b.latestCount - a.latestCount)
           .map((item) => (
             <button
@@ -340,8 +343,10 @@ export function SpeciesPopulationChart({
               onClick={() => {
                 onSpeciesSeriesClick(item.id);
               }}
-              className={`flex shrink-0 items-center gap-1 rounded bg-surface/50 px-1.5 py-0.5 transition hover:bg-surface ${
-                item.id === focusedSpeciesId ? 'ring-1 ring-accent/40' : ''
+              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 transition ${
+                item.id === focusedSpeciesId
+                  ? 'border-accent/50 bg-accent/10 text-ink'
+                  : 'border-white/5 bg-surface/50 hover:bg-surface'
               }`}
             >
               <span

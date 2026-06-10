@@ -19,12 +19,17 @@ pub(super) struct ReproductionPhaseState {
 }
 
 impl ReproductionPhaseState {
-    pub(super) fn new(organism_count: usize) -> Self {
+    /// `gestation_started_scratch` is a recycled buffer (see `TurnScratch`);
+    /// it is cleared + resized here and handed back by
+    /// `finalize_reproduction_events`.
+    pub(super) fn new(organism_count: usize, mut gestation_started_scratch: Vec<bool>) -> Self {
+        gestation_started_scratch.clear();
+        gestation_started_scratch.resize(organism_count, false);
         Self {
             spawn_requests: Vec::new(),
             successful_births: Vec::new(),
             reproduction_events: Vec::new(),
-            gestation_started_this_tick: vec![false; organism_count],
+            gestation_started_this_tick: gestation_started_scratch,
         }
     }
 
@@ -40,10 +45,12 @@ impl ReproductionPhaseState {
         self.reproduction_events.extend(events);
     }
 
+    /// Returns the finalized events plus the recycled gestation scratch buffer
+    /// so the caller can hand it back to `TurnScratch`.
     pub(super) fn finalize_reproduction_events(
         mut self,
         reproduction_spawned: &[OrganismState],
-    ) -> Vec<ReproductionEvent> {
+    ) -> (Vec<ReproductionEvent>, Vec<bool>) {
         debug_assert_eq!(self.successful_births.len(), reproduction_spawned.len());
         for (birth, child) in self.successful_births.drain(..).zip(reproduction_spawned) {
             self.reproduction_events.push(ReproductionEvent {
@@ -57,7 +64,7 @@ impl ReproductionPhaseState {
                 failure_cause: None,
             });
         }
-        self.reproduction_events
+        (self.reproduction_events, self.gestation_started_this_tick)
     }
 
     pub(super) fn apply_triggers(
@@ -74,11 +81,16 @@ impl ReproductionPhaseState {
         for intent in intents {
             let org_idx = intent.idx;
             let organism = &mut organisms[org_idx];
-            if !intent.wants_reproduce
-                || pending_actions[org_idx].kind == PendingActionKind::Reproduce
-            {
+            if !intent.wants_reproduce {
                 continue;
             }
+            // Invariant: a reproduce intent can never coincide with an active
+            // Reproduce pending. wants_reproduce requires turns_remaining == 0
+            // at intent time (locked_intent otherwise), and queue_completions
+            // always clears a Reproduce pending within the same tick its
+            // counter reaches 0, so one never survives to the next intent
+            // phase with turns_remaining == 0.
+            debug_assert_ne!(pending_actions[org_idx].kind, PendingActionKind::Reproduce);
 
             let transfer_energy =
                 offspring_transfer_energy(organism.genome.lifecycle.gestation_ticks);
@@ -118,11 +130,11 @@ impl ReproductionPhaseState {
     }
 
     pub(super) fn queue_completions(&mut self, sim: &mut Simulation, world_width: i32) {
-        let mut reserved_spawn_cells = HashSet::new();
+        // Few completions per tick: a linear scan over a small vec beats hashing.
+        let mut reserved_spawn_cells: Vec<(i32, i32)> = Vec::new();
 
         for (idx, pending_action) in sim.pending_actions.iter_mut().enumerate() {
             if pending_action.kind != PendingActionKind::Reproduce {
-                pending_action.kind = PendingActionKind::None;
                 continue;
             }
             if self.gestation_started_this_tick[idx] {
@@ -139,10 +151,11 @@ impl ReproductionPhaseState {
             let parent = &sim.organisms[idx];
             let (q, r) = reproduction_target(world_width, parent.q, parent.r, parent.facing);
             if occupancy_snapshot_cell(&sim.occupancy, world_width, q, r).is_none()
-                && reserved_spawn_cells.insert((q, r))
+                && !reserved_spawn_cells.contains(&(q, r))
             {
-                self.spawn_requests.push(SpawnRequest {
-                    kind: SpawnRequestKind::Reproduction(Box::new(ReproductionSpawn {
+                reserved_spawn_cells.push((q, r));
+                self.spawn_requests
+                    .push(SpawnRequest::Reproduction(Box::new(ReproductionSpawn {
                         parent_genome: parent.genome.clone(),
                         parent_generation: parent.generation,
                         parent_species_id: parent.species_id,
@@ -150,8 +163,7 @@ impl ReproductionPhaseState {
                         offspring_starting_energy: pending_action.reproduction_energy(),
                         q,
                         r,
-                    })),
-                });
+                    })));
                 self.successful_births.push(PendingBirthEvent {
                     parent_id: parent.id,
                     parent_species_id: parent.species_id,
@@ -171,6 +183,17 @@ impl ReproductionPhaseState {
                     child_id: None,
                     failure_cause: Some(ReproductionFailureCause::BlockedBirth),
                 });
+                // A zero-gestation Reproduce pending can only reach here on
+                // the same tick its trigger fired (queue_completions always
+                // clears Reproduce pendings once turns_remaining hits 0), so
+                // this BlockedBirth is a same-tick failed Reproduce action.
+                // Mark it wasted, consistent with the failed Forward/Eat/
+                // Attack contract in mark_wasted_contingent_actions.
+                if sim.config.wasted_action_reward_enabled
+                    && parent.genome.lifecycle.gestation_ticks == 0
+                {
+                    sim.organisms[idx].contingent_action_wasted_last_turn = true;
+                }
             }
 
             sim.organisms[idx].is_gestating = false;

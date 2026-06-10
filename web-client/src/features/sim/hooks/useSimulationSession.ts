@@ -37,35 +37,12 @@ export type SpeciesPopulationPoint = {
 
 const MAX_SPECIES_HISTORY_POINTS = 2048;
 const FOCUS_POLL_INTERVAL_MS = 100;
-
-function cloneSpeciesCounts(speciesCounts: Record<string, number>): Record<string, number> {
-  return { ...speciesCounts };
-}
+const CHAMPION_POOL_REFRESH_MS = 5_000;
 
 function speciesCountsEqual(a: Record<string, number>, b: Record<string, number>): boolean {
   const keysA = Object.keys(a);
-  const keysB = Object.keys(b);
-  if (keysA.length !== keysB.length) return false;
-  for (const key of keysA) {
-    if (a[key] !== b[key]) return false;
-  }
-  return true;
-}
-
-function parseStepProgressData(data: unknown): StepProgressData | null {
-  if (!data || typeof data !== 'object') return null;
-  const candidate = data as Partial<StepProgressData>;
-  const requested = Number.isFinite(candidate.requested_count)
-    ? Math.max(1, Math.floor(candidate.requested_count as number))
-    : null;
-  const completed = Number.isFinite(candidate.completed_count)
-    ? Math.max(0, Math.floor(candidate.completed_count as number))
-    : null;
-  if (requested === null || completed === null) return null;
-  return {
-    requested_count: requested,
-    completed_count: Math.min(completed, requested),
-  };
+  if (keysA.length !== Object.keys(b).length) return false;
+  return keysA.every((key) => a[key] === b[key]);
 }
 
 function upsertSpeciesPopulationHistory(
@@ -73,11 +50,7 @@ function upsertSpeciesPopulationHistory(
   point: SpeciesPopulationPoint,
 ): SpeciesPopulationPoint[] {
   const latest = previous[previous.length - 1];
-  if (!latest) {
-    return [point];
-  }
-
-  if (point.turn < latest.turn) {
+  if (!latest || point.turn < latest.turn) {
     return [point];
   }
 
@@ -122,16 +95,12 @@ export type SimulationSessionState = {
   step: (count: number) => void;
   focusOrganism: (organism: WorldOrganismState) => void;
   defocusOrganism: () => void;
-  refreshChampionPool: () => Promise<void>;
   deleteChampionPoolEntry: (index: number) => Promise<void>;
   clearChampionPool: () => Promise<void>;
 };
 
 function parseSessionSeedInput(seedInput?: string): { seed: number | null; error: string | null } {
-  if (seedInput === undefined) {
-    return { seed: null, error: null };
-  }
-  const trimmed = seedInput.trim();
+  const trimmed = seedInput?.trim();
   if (!trimmed) {
     return { seed: null, error: null };
   }
@@ -148,13 +117,6 @@ function parseSessionSeedInput(seedInput?: string): { seed: number | null; error
   return { seed: parsed, error: null };
 }
 
-function liveMetricsFromSnapshot(snapshot: WorldSnapshot): LiveMetricsData {
-  return {
-    turn: snapshot.turn,
-    metrics: snapshot.metrics,
-  };
-}
-
 export function useSimulationSession(): SimulationSessionState {
   const [session, setSession] = useState<SessionMetadata | null>(null);
   const [snapshot, setSnapshot] = useState<WorldSnapshot | null>(null);
@@ -169,8 +131,6 @@ export function useSimulationSession(): SimulationSessionState {
   const liveMetricsRef = useRef<LiveMetricsData | null>(liveMetrics);
   const request = useMemo(() => createSimHttpClient(apiBase), []);
   const sendCommandRef = useRef<(command: unknown) => boolean>(() => false);
-  snapshotRef.current = snapshot;
-  liveMetricsRef.current = liveMetrics;
   const sendCommand = useCallback((command: unknown): boolean => {
     return sendCommandRef.current(command);
   }, []);
@@ -203,67 +163,71 @@ export function useSimulationSession(): SimulationSessionState {
     resetFocusState,
   } = useSimulationFocus({ snapshot, session, request, setErrorText });
 
+  const recordSpeciesHistory = useCallback(
+    (turn: number, speciesCounts: Record<string, number>) => {
+      setSpeciesPopulationHistory((previous) =>
+        upsertSpeciesPopulationHistory(previous, { turn, speciesCounts: { ...speciesCounts } }),
+      );
+    },
+    [],
+  );
+
+  const commitSnapshot = useCallback(
+    (nextSnapshot: WorldSnapshot) => {
+      const nextMetrics = { turn: nextSnapshot.turn, metrics: nextSnapshot.metrics };
+      latestSnapshotTurnRef.current = nextSnapshot.turn;
+      snapshotRef.current = nextSnapshot;
+      liveMetricsRef.current = nextMetrics;
+      setSnapshot(nextSnapshot);
+      setLiveMetrics(nextMetrics);
+      recordSpeciesHistory(nextSnapshot.turn, nextSnapshot.metrics.species_counts);
+    },
+    [recordSpeciesHistory],
+  );
+
+  const refreshFocusedBrain = useCallback(
+    (throttled: boolean) => {
+      const trackedFocusedId = focusedOrganismIdRef.current;
+      if (trackedFocusedId === null) return;
+      if (throttled) {
+        const now = Date.now();
+        if (now < nextFocusPollAtMsRef.current) return;
+        nextFocusPollAtMsRef.current = now + FOCUS_POLL_INTERVAL_MS;
+      }
+      sendCommand({ type: 'SetFocus', data: { organism_id: trackedFocusedId } });
+    },
+    [focusedOrganismIdRef, nextFocusPollAtMsRef, sendCommand],
+  );
+
   const handleServerEvent = useCallback(
     (event: ApiServerEvent) => {
       switch (event.type) {
         case 'StateSnapshot': {
-          const previousTotalSpeciesCreated =
-            liveMetricsRef.current?.metrics.total_species_created ?? 0;
-          const nextSnapshot = normalizeWorldSnapshot(event.data, previousTotalSpeciesCreated);
+          const nextSnapshot = normalizeWorldSnapshot(
+            event.data,
+            liveMetricsRef.current?.metrics.total_species_created ?? 0,
+          );
           if (nextSnapshot.turn <= latestSnapshotTurnRef.current) {
             break;
           }
-          latestSnapshotTurnRef.current = nextSnapshot.turn;
-          snapshotRef.current = nextSnapshot;
           clearPendingStep();
-          setSnapshot(nextSnapshot);
-          setLiveMetrics(liveMetricsFromSnapshot(nextSnapshot));
-          setSpeciesPopulationHistory((previous) =>
-            upsertSpeciesPopulationHistory(previous, {
-              turn: nextSnapshot.turn,
-              speciesCounts: cloneSpeciesCounts(nextSnapshot.metrics.species_counts),
-            }),
-          );
-          const trackedFocusedId = focusedOrganismIdRef.current;
-          if (trackedFocusedId !== null) {
-            sendCommand({ type: 'SetFocus', data: { organism_id: trackedFocusedId } });
-          }
+          commitSnapshot(nextSnapshot);
+          refreshFocusedBrain(false);
           break;
         }
         case 'TickDelta': {
-          const delta = normalizeTickDelta(event.data);
-          latestSnapshotTurnRef.current = delta.turn;
-          clearPendingStep();
           const previousSnapshot = snapshotRef.current;
+          latestSnapshotTurnRef.current = event.data.turn;
+          clearPendingStep();
           if (!previousSnapshot) {
             break;
           }
-          const nextSnapshot = applyTickDelta(previousSnapshot, delta);
-          snapshotRef.current = nextSnapshot;
-          setSnapshot(nextSnapshot);
-          setLiveMetrics(liveMetricsFromSnapshot(nextSnapshot));
-          setSpeciesPopulationHistory((previous) =>
-            upsertSpeciesPopulationHistory(previous, {
-              turn: nextSnapshot.turn,
-              speciesCounts: cloneSpeciesCounts(nextSnapshot.metrics.species_counts),
-            }),
-          );
-
-          const trackedFocusedId = focusedOrganismIdRef.current;
-          if (trackedFocusedId !== null) {
-            const now = Date.now();
-            if (now >= nextFocusPollAtMsRef.current) {
-              nextFocusPollAtMsRef.current = now + FOCUS_POLL_INTERVAL_MS;
-              sendCommand({ type: 'SetFocus', data: { organism_id: trackedFocusedId } });
-            }
-          }
+          commitSnapshot(applyTickDelta(previousSnapshot, normalizeTickDelta(event.data)));
+          refreshFocusedBrain(true);
           break;
         }
         case 'StepProgress': {
-          const progress = parseStepProgressData(event.data);
-          if (progress) {
-            handleStepProgress(progress);
-          }
+          handleStepProgress(event.data);
           break;
         }
         case 'FocusBrain': {
@@ -272,39 +236,30 @@ export function useSimulationSession(): SimulationSessionState {
         }
         case 'Metrics': {
           clearPendingStep();
-          setLiveMetrics((previous) => {
-            const nextMetrics = normalizeLiveMetricsData(
-              event.data,
-              previous?.metrics.total_species_created ?? 0,
-            );
-            setSpeciesPopulationHistory((history) =>
-              upsertSpeciesPopulationHistory(history, {
-                turn: nextMetrics.turn,
-                speciesCounts: cloneSpeciesCounts(nextMetrics.metrics.species_counts),
-              }),
-            );
-            latestSnapshotTurnRef.current = Math.max(latestSnapshotTurnRef.current, nextMetrics.turn);
-            return nextMetrics;
-          });
+          const nextMetrics = normalizeLiveMetricsData(
+            event.data,
+            liveMetricsRef.current?.metrics.total_species_created ?? 0,
+          );
+          liveMetricsRef.current = nextMetrics;
+          latestSnapshotTurnRef.current = Math.max(latestSnapshotTurnRef.current, nextMetrics.turn);
+          setLiveMetrics(nextMetrics);
+          recordSpeciesHistory(nextMetrics.turn, nextMetrics.metrics.species_counts);
           break;
         }
         case 'Error': {
           clearPendingStep();
-          const message = event.data.message || 'Simulation server reported an error';
-          setErrorText(message);
+          setErrorText(event.data.message || 'Simulation server reported an error');
           break;
         }
-        default:
-          break;
       }
     },
     [
       clearPendingStep,
-      focusedOrganismIdRef,
+      commitSnapshot,
       handleFocusBrain,
       handleStepProgress,
-      nextFocusPollAtMsRef,
-      sendCommand,
+      recordSpeciesHistory,
+      refreshFocusedBrain,
     ],
   );
 
@@ -318,22 +273,14 @@ export function useSimulationSession(): SimulationSessionState {
     (metadata: SessionMetadata, loadedSnapshot: WorldSnapshot) => {
       setErrorText(null);
       setSession(metadata);
-      latestSnapshotTurnRef.current = loadedSnapshot.turn;
-      snapshotRef.current = loadedSnapshot;
-      setSnapshot(loadedSnapshot);
-      setLiveMetrics(liveMetricsFromSnapshot(loadedSnapshot));
-      resetFocusState(true);
+      setSpeciesPopulationHistory([]);
+      commitSnapshot(loadedSnapshot);
+      resetFocusState();
       syncSessionState(metadata.running, metadata.ticks_per_second, metadata.stream_mode);
-      setSpeciesPopulationHistory([
-        {
-          turn: loadedSnapshot.turn,
-          speciesCounts: cloneSpeciesCounts(loadedSnapshot.metrics.species_counts),
-        },
-      ]);
       persistSessionId(metadata.id);
       connectWs(metadata.id);
     },
-    [connectWs, resetFocusState, syncSessionState],
+    [commitSnapshot, connectWs, resetFocusState, syncSessionState],
   );
 
   const refreshChampionPool = useCallback(async () => {
@@ -341,28 +288,44 @@ export function useSimulationSession(): SimulationSessionState {
     setChampionPool(normalizeChampionPoolResponse(payload).entries);
   }, [request]);
 
-  const deleteChampionPoolEntry = useCallback(
-    async (index: number) => {
+  const runChampionPoolAction = useCallback(
+    async (action: () => Promise<unknown>, failureMessage: string) => {
       try {
         setErrorText(null);
-        await request<ApiChampionPoolResponse>(`/v1/champion-pool/${index}`, 'DELETE');
+        await action();
         await refreshChampionPool();
       } catch (err) {
-        captureError(setErrorText, err, 'Failed to delete champion genome');
+        captureError(setErrorText, err, failureMessage);
       }
     },
-    [refreshChampionPool, request],
+    [refreshChampionPool],
   );
 
-  const clearChampionPool = useCallback(async () => {
-    try {
-      setErrorText(null);
-      await request<ApiChampionPoolResponse>('/v1/champion-pool', 'DELETE');
-      await refreshChampionPool();
-    } catch (err) {
-      captureError(setErrorText, err, 'Failed to clear champion pool');
-    }
-  }, [refreshChampionPool, request]);
+  const deleteChampionPoolEntry = useCallback(
+    (index: number) =>
+      runChampionPoolAction(
+        () => request(`/v1/champion-pool/${index}`, 'DELETE'),
+        'Failed to delete champion genome',
+      ),
+    [request, runChampionPoolAction],
+  );
+
+  const clearChampionPool = useCallback(
+    () =>
+      runChampionPoolAction(
+        () => request('/v1/champion-pool', 'DELETE'),
+        'Failed to clear champion pool',
+      ),
+    [request, runChampionPoolAction],
+  );
+
+  const saveChampions = useCallback(async () => {
+    if (!session) return;
+    await runChampionPoolAction(
+      () => request(`/v1/sessions/${session.id}/champions`, 'POST'),
+      'Failed to save champions',
+    );
+  }, [request, runChampionPoolAction, session]);
 
   const createSession = useCallback(
     async (seedInput?: string) => {
@@ -371,11 +334,10 @@ export function useSimulationSession(): SimulationSessionState {
         setErrorText(error);
         return;
       }
-      const sessionSeed = seed ?? Math.floor(Date.now() / 1000);
       try {
         setErrorText(null);
         const payload = await request<ApiCreateSessionResponse>('/v1/sessions', 'POST', {
-          seed: sessionSeed,
+          seed: seed ?? Math.floor(Date.now() / 1000),
         });
         const normalized = normalizeCreateSessionResponse(payload);
         applyLoadedSession(normalized.metadata, normalized.snapshot);
@@ -404,17 +366,6 @@ export function useSimulationSession(): SimulationSessionState {
     [applyLoadedSession, request],
   );
 
-  const saveChampions = useCallback(async () => {
-    if (!session) return;
-    try {
-      setErrorText(null);
-      await request<ApiChampionPoolResponse>(`/v1/sessions/${session.id}/champions`, 'POST');
-      await refreshChampionPool();
-    } catch (err) {
-      captureError(setErrorText, err, 'Failed to save champions');
-    }
-  }, [refreshChampionPool, request, session]);
-
   useEffect(() => {
     let cancelled = false;
 
@@ -435,18 +386,41 @@ export function useSimulationSession(): SimulationSessionState {
     };
   }, [createSession, restoreSession]);
 
+  // Metrics-only mode streams no snapshots or focus data: drop focus on entry
+  // (the inspector would freeze on stale state), and re-fetch the world on exit
+  // (the canvas would otherwise keep showing the pre-fast-run world).
+  const isFastMode = isRunning && streamMode === 'metrics_only';
+  const wasFastModeRef = useRef(false);
   useEffect(() => {
-    void refreshChampionPool().catch((err: unknown) => {
-      captureError(setErrorText, err, 'Failed to load champion pool');
-    });
-  }, [refreshChampionPool]);
+    if (isFastMode) {
+      wasFastModeRef.current = true;
+      resetFocusState();
+      return;
+    }
+    if (!wasFastModeRef.current || !session) return;
+    wasFastModeRef.current = false;
+    void request<ApiWorldSnapshot>(`/v1/sessions/${session.id}/state`, 'GET')
+      .then((payload) => {
+        const nextSnapshot = normalizeWorldSnapshot(
+          payload,
+          liveMetricsRef.current?.metrics.total_species_created ?? 0,
+        );
+        if (nextSnapshot.turn >= latestSnapshotTurnRef.current) {
+          commitSnapshot(nextSnapshot);
+        }
+      })
+      .catch((err: unknown) => {
+        captureError(setErrorText, err, 'Failed to refresh world after fast run');
+      });
+  }, [commitSnapshot, isFastMode, request, resetFocusState, session]);
 
   useEffect(() => {
-    const intervalId = window.setInterval(() => {
+    const refresh = () =>
       void refreshChampionPool().catch((err: unknown) => {
-        captureError(setErrorText, err, 'Failed to refresh champion pool');
+        captureError(setErrorText, err, 'Failed to load champion pool');
       });
-    }, 5_000);
+    refresh();
+    const intervalId = window.setInterval(refresh, CHAMPION_POOL_REFRESH_MS);
     return () => {
       window.clearInterval(intervalId);
     };
@@ -467,7 +441,7 @@ export function useSimulationSession(): SimulationSessionState {
     speedLevels,
     speedLevelIndex,
     streamMode,
-    isFastMode: isRunning && streamMode === 'metrics_only',
+    isFastMode,
     errorText,
     createSession,
     saveChampions,
@@ -477,7 +451,6 @@ export function useSimulationSession(): SimulationSessionState {
     step,
     focusOrganism,
     defocusOrganism,
-    refreshChampionPool,
     deleteChampionPoolEntry,
     clearChampionPool,
   };

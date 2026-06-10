@@ -5,21 +5,22 @@ export default {
   theme: {
     extend: {
       colors: {
-        ink: '#e2e8f0',
-        panel: '#0f172a',
-        surface: '#1e293b',
+        ink: '#e7ecf5',
+        panel: '#0c1322',
+        surface: '#16203a',
         accent: '#38bdf8',
-        muted: '#334155',
+        muted: '#2b3854',
+        void: '#080e1a',
       },
       fontFamily: {
         sans: ['Outfit', 'system-ui', 'sans-serif'],
         mono: ['JetBrains Mono', 'SF Mono', 'monospace'],
       },
       boxShadow: {
-        panel: '0 2px 16px rgba(0, 0, 0, 0.35)',
+        panel: '0 8px 28px rgba(2, 6, 23, 0.55)',
       },
       backgroundImage: {
-        page: 'linear-gradient(145deg, #020617 0%, #0a1128 50%, #020617 100%)',
+        page: 'radial-gradient(1200px 800px at 70% -10%, #0d1830 0%, #060b16 55%, #04070f 100%)',
       },
     },
   },

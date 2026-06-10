@@ -7,40 +7,21 @@ use crate::types::{IntervalMetrics, PillarScores};
 
 const MEAN_MI_SATURATION: f64 = 0.16;
 
-/// Which slice of the timeseries feeds pillar computation. Defaults to the
-/// last 20% of the run. `Last { fraction: 1.0 }` uses the whole timeseries.
-#[derive(Debug, Clone, Copy)]
-pub enum ScoringWindow {
-    LastFraction(f64),
+/// Fraction of the timeseries (taken from the end) that feeds pillar
+/// computation: the last 10% of the run.
+const SCORING_WINDOW_FRACTION: f64 = 0.10;
+
+fn window_len(total: usize) -> usize {
+    ((total as f64 * SCORING_WINDOW_FRACTION).ceil() as usize)
+        .max(1)
+        .min(total)
 }
 
-impl Default for ScoringWindow {
-    fn default() -> Self {
-        Self::LastFraction(0.10)
-    }
-}
-
-impl ScoringWindow {
-    fn window_len(self, total: usize) -> usize {
-        match self {
-            ScoringWindow::LastFraction(fraction) => {
-                let fraction = fraction.clamp(0.0, 1.0);
-                ((total as f64 * fraction).ceil() as usize)
-                    .max(1)
-                    .min(total)
-            }
-        }
-    }
-}
-
-pub fn compute_pillar_scores(
-    timeseries: &[IntervalMetrics],
-    window: ScoringWindow,
-) -> PillarScores {
+pub fn compute_pillar_scores(timeseries: &[IntervalMetrics]) -> PillarScores {
     if timeseries.is_empty() {
         return PillarScores::default();
     }
-    let window_len = window.window_len(timeseries.len());
+    let window_len = window_len(timeseries.len());
     let start_idx = timeseries.len().saturating_sub(window_len);
     let slice = &timeseries[start_idx..];
     let window_start_tick = slice.first().map(|row| row.tick).unwrap_or(0);

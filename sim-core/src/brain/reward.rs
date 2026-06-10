@@ -11,6 +11,9 @@ pub(crate) struct RewardLedger {
     pub(crate) health_level: f32,
     pub(crate) health_delta_gain: f32,
     pub(crate) health_delta_loss: f32,
+    // Fires on failed Forward/Eat/Attack/Reproduce when
+    // `wasted_action_reward_enabled` is on (see
+    // `mark_wasted_contingent_actions` in turn/commit.rs).
     pub(crate) contingent_action_wasted: f32,
 }
 
@@ -35,34 +38,22 @@ impl RewardLedger {
         };
     }
 
-    // Short/malformed slices fall back to `DEFAULT_REWARD_WEIGHTS` element-wise
-    // so legacy genomes deserializing with an empty vector keep baseline behavior
-    // even if sanitization hasn't run yet.
+    // Every live genome carries exactly `REWARD_WEIGHT_COUNT` weights: seed
+    // genomes start from `DEFAULT_REWARD_WEIGHTS` and sanitization
+    // pads/truncates on every mutation.
     pub(crate) fn weighted_reward_signal(self, weights: &[f32]) -> f32 {
-        let w = |i: usize| weights.get(i).copied().unwrap_or(DEFAULT_REWARD_WEIGHTS[i]);
-        w(0) * self.energy_level
-            + w(1) * self.energy_delta_gain
-            + w(2) * self.energy_delta_loss
-            + w(3) * self.health_level
-            + w(4) * self.health_delta_gain
-            + w(5) * self.health_delta_loss
-            + w(6) * self.contingent_action_wasted
+        debug_assert_eq!(weights.len(), REWARD_WEIGHT_COUNT);
+        weights[0] * self.energy_level
+            + weights[1] * self.energy_delta_gain
+            + weights[2] * self.energy_delta_loss
+            + weights[3] * self.health_level
+            + weights[4] * self.health_delta_gain
+            + weights[5] * self.health_delta_loss
+            + weights[6] * self.contingent_action_wasted
     }
 }
 
-pub(crate) const REWARD_WEIGHT_COUNT: usize = 7;
-
-// Ordered to match the ledger fields:
-// [energy_level, energy_delta_gain, energy_delta_loss,
-//  health_level, health_delta_gain, health_delta_loss,
-//  contingent_action_wasted].
-// energy_level starts at 0 (absolute energy is a predictor, not a goal on its
-// own) while health_level starts at +1 (higher health is always rewarded).
-// contingent_action_wasted fires on failed Forward/Eat/Attack/Reproduce —
-// negative default since "did a thing, the thing did nothing" is objectively
-// wasted effort.
-pub(crate) const DEFAULT_REWARD_WEIGHTS: [f32; REWARD_WEIGHT_COUNT] =
-    [0.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0];
+pub(crate) use sim_types::{DEFAULT_REWARD_WEIGHTS, REWARD_WEIGHT_COUNT};
 
 // Bound each weight so evolution can flip signs and scale up to 3x without
 // producing arbitrarily large dopamine magnitudes.

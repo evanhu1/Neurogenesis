@@ -78,7 +78,6 @@ pub fn compute_demographic_analytics(
     }
 
     DemographicAnalytics {
-        births: successful_births,
         successful_births,
         blocked_births,
         parent_died_during_reproduction,

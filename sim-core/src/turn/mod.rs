@@ -10,7 +10,7 @@ use crate::brain::scan_rays;
 use crate::brain::{action_index, evaluate_brain, BrainEvalContext, BrainScratch, ACTION_COUNT};
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right, wrap_position};
 use crate::plasticity::{apply_runtime_weight_updates, compute_pending_coactivations};
-use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
+use crate::spawn::{ReproductionSpawn, SpawnRequest};
 #[cfg(feature = "profiling")]
 use crate::{profiling, profiling::TurnPhase};
 use crate::{PendingActionKind, PendingActionState, Simulation};
@@ -21,35 +21,22 @@ use reproduction::ReproductionPhaseState;
 use sim_types::ActionRecord;
 use sim_types::{
     ActionType, EntityId, FacingDirection, FoodKind, FoodState, Occupant, OrganismFacing,
-    OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, TickDelta, VisualProperties,
+    OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, ReproductionEvent, TickDelta,
+    VisualProperties,
 };
-use std::collections::HashSet;
 use std::sync::Arc;
 #[cfg(feature = "profiling")]
 use std::time::Instant;
 
 const RNG_TURN_MIX: u64 = 0x9E37_79B9_7F4A_7C15;
 const RNG_ORGANISM_MIX: u64 = 0xBF58_476D_1CE4_E5B9;
-const PLANT_CONSUMPTION_ENERGY_FRACTION: f32 = 0.20;
-const CORPSE_CONSUMPTION_ENERGY_FRACTION: f32 = 0.80;
 const SPIKE_DAMAGE_FRACTION: f32 = 0.10;
 const ATTACK_DAMAGE_FRACTION: f32 = 0.5;
+const ATTACK_ENERGY_GAIN_FRACTION: f32 = 0.50;
 const HEALTH_REGEN_FRACTION: f32 = 0.10;
 const INTENT_PARALLEL_MIN_LEN: usize = 64;
 
-#[derive(Clone, Copy)]
-struct SnapshotOrganismState {
-    q: i32,
-    r: i32,
-    facing: FacingDirection,
-}
-
-struct TurnSnapshot {
-    world_width: i32,
-    organism_count: usize,
-}
-
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct OrganismIntent {
     idx: usize,
     id: OrganismId,
@@ -62,7 +49,7 @@ struct OrganismIntent {
     move_target: Option<(i32, i32)>,
     interaction_target: Option<(i32, i32)>,
     move_confidence: f32,
-    action_cost_count: u8,
+    took_action: bool,
     synapse_ops: u64,
 }
 
@@ -72,7 +59,7 @@ struct BuiltIntent {
     action_record: Option<ActionRecord>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct MoveCandidate {
     actor_idx: usize,
     actor_id: OrganismId,
@@ -81,12 +68,27 @@ struct MoveCandidate {
     confidence: f32,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct MoveResolution {
     actor_idx: usize,
     actor_id: OrganismId,
     from: (i32, i32),
     to: (i32, i32),
+}
+
+/// Reusable per-tick scratch buffers owned by `Simulation` so the commit /
+/// reproduction / move phases avoid O(population) heap allocations every tick.
+/// Each user takes a buffer with `std::mem::take`, clears + resizes it, and
+/// returns it when done, so contents never leak across ticks.
+#[derive(Debug, Default)]
+pub(crate) struct TurnScratch {
+    removed_food: Vec<bool>,
+    dead_organisms: Vec<bool>,
+    contingent_succeeded: Vec<bool>,
+    gestation_started: Vec<bool>,
+    move_candidates: Vec<(usize, MoveCandidate)>,
+    move_resolutions: Vec<MoveResolution>,
+    intents: Vec<OrganismIntent>,
 }
 
 #[derive(Default)]
@@ -95,6 +97,7 @@ struct CommitResult {
     facing_updates: Vec<OrganismFacing>,
     removed_positions: Vec<RemovedEntityPosition>,
     food_spawned: Vec<FoodState>,
+    reproduction_events: Vec<ReproductionEvent>,
     consumptions: u64,
     predations: u64,
     actions_applied: u64,
@@ -131,25 +134,28 @@ impl Simulation {
     }
 
     pub fn tick(&mut self) -> TickDelta {
-        self.reconcile_pending_actions();
-        self.reconcile_reward_ledgers();
         self.clear_turn_transient_state();
 
         #[cfg(feature = "profiling")]
         let tick_started = Instant::now();
 
-        let (starvations, starved_removed_positions, lifecycle_reproduction_events) =
-            profile_turn_phase!(TurnPhase::Lifecycle, { self.lifecycle_phase() });
+        let (
+            starvations,
+            age_deaths,
+            lifecycle_removed_positions,
+            lifecycle_reproduction_events,
+            lifecycle_food_spawned,
+        ) = profile_turn_phase!(TurnPhase::Lifecycle, { self.lifecycle_phase() });
 
-        let snapshot = TurnSnapshot {
-            world_width: self.config.world_width as i32,
-            organism_count: self.organisms.len(),
-        };
+        let world_width = self.config.world_width as i32;
 
-        let intents = profile_turn_phase!(TurnPhase::Intents, { self.build_intents(&snapshot) });
+        let intents = profile_turn_phase!(TurnPhase::Intents, { self.build_intents(world_width) });
         let synapse_ops = intents.iter().map(|intent| intent.synapse_ops).sum::<u64>();
 
-        let mut reproduction_state = ReproductionPhaseState::new(snapshot.organism_count);
+        let mut reproduction_state = ReproductionPhaseState::new(
+            self.organisms.len(),
+            std::mem::take(&mut self.turn_scratch.gestation_started),
+        );
         reproduction_state.extend_reproduction_events(lifecycle_reproduction_events);
         profile_turn_phase!(TurnPhase::Reproduction, {
             reproduction_state.apply_triggers(
@@ -157,42 +163,68 @@ impl Simulation {
                 &mut self.pending_actions,
                 &intents,
                 &self.occupancy,
-                snapshot.world_width,
+                world_width,
                 #[cfg(feature = "instrumentation")]
                 &mut self.action_records,
             );
         });
 
-        let resolutions = profile_turn_phase!(TurnPhase::MoveResolution, {
-            self.resolve_moves(snapshot.world_width, &self.occupancy, &intents)
-        });
+        let resolutions =
+            profile_turn_phase!(TurnPhase::MoveResolution, { self.resolve_moves(&intents) });
 
-        let commit = profile_turn_phase!(TurnPhase::Commit, {
-            let commit = self.commit_phase(
-                snapshot.world_width,
+        let mut commit = profile_turn_phase!(TurnPhase::Commit, {
+            let mut commit = self.commit_phase(
+                world_width,
                 &intents,
                 &resolutions,
                 reproduction_state.gestation_started_this_tick_mut(),
             );
-            reproduction_state.queue_completions(self, snapshot.world_width);
+            reproduction_state
+                .extend_reproduction_events(std::mem::take(&mut commit.reproduction_events));
+            reproduction_state.queue_completions(self, world_width);
             commit
         });
+        // Old-age corpses spawned during the lifecycle phase ride the same
+        // food-spawned channel as commit-phase corpses so the client sees
+        // them. Zero-cost on ticks without age deaths.
+        commit.food_spawned.extend(lifecycle_food_spawned);
+
+        // Commit was the last reader of the intents and move resolutions;
+        // return the buffers to TurnScratch for reuse next tick.
+        self.turn_scratch.intents = intents;
+        self.turn_scratch.move_resolutions = resolutions;
 
         profile_turn_phase!(TurnPhase::Age, {
             self.increment_age_for_survivors();
         });
 
-        let spawned = profile_turn_phase!(TurnPhase::Spawn, {
+        let (spawned, reproductions) = profile_turn_phase!(TurnPhase::Spawn, {
             let spawn_requests = reproduction_state.spawn_requests_mut();
             let reproduction_spawn_count = spawn_requests.len();
             self.enqueue_periodic_injections(spawn_requests);
-            let spawned = self.resolve_spawn_requests(spawn_requests);
-            let reproduction_events = reproduction_state
+            // Outcomes are aligned 1:1 with the request queue (reproductions
+            // first, then injections). Reproduction requests target cells that
+            // queue_completions verified empty and reserved, and nothing
+            // mutates occupancy in between, so they must all succeed; enforce
+            // that loudly so child-event attribution can never silently
+            // misalign onto injection organisms.
+            let spawn_results = self.resolve_spawn_requests(spawn_requests);
+            assert!(
+                spawn_results[..reproduction_spawn_count]
+                    .iter()
+                    .all(Option::is_some),
+                "reproduction spawn request failed despite its cell being reserved by queue_completions"
+            );
+            let spawned: Vec<_> = spawn_results.into_iter().flatten().collect();
+            let (reproduction_events, gestation_started_scratch) = reproduction_state
                 .finalize_reproduction_events(&spawned[..reproduction_spawn_count]);
+            self.turn_scratch.gestation_started = gestation_started_scratch;
             self.apply_post_commit_runtime_weight_updates();
-            (spawned, reproduction_events)
+            (
+                (spawned, reproduction_events),
+                reproduction_spawn_count as u64,
+            )
         });
-        let reproductions = spawned.0.len() as u64;
 
         profile_turn_phase!(TurnPhase::ConsistencyCheck, {
             self.debug_assert_consistent_state();
@@ -202,16 +234,19 @@ impl Simulation {
             self.turn = self.turn.saturating_add(1);
             self.metrics.turns = self.turn;
             self.metrics.synapse_ops_last_turn = synapse_ops;
-            self.metrics.actions_applied_last_turn = commit.actions_applied + reproductions;
+            // Reproduce trigger ticks already count via intent.took_action;
+            // birth completions are not actions (see reproductions_last_turn).
+            self.metrics.actions_applied_last_turn = commit.actions_applied;
             self.metrics.consumptions_last_turn = commit.consumptions;
             self.metrics.predations_last_turn = commit.predations;
             self.metrics.total_consumptions += commit.consumptions;
             self.metrics.reproductions_last_turn = reproductions;
             self.metrics.starvations_last_turn = starvations;
+            self.metrics.age_deaths_last_turn = age_deaths;
             self.refresh_population_metrics();
 
             let mut removed_positions = commit.removed_positions;
-            removed_positions.extend(starved_removed_positions);
+            removed_positions.extend(lifecycle_removed_positions);
             removed_positions
         });
 
@@ -231,14 +266,17 @@ impl Simulation {
     }
 
     fn apply_post_commit_runtime_weight_updates(&mut self) {
-        if !self.config.runtime_plasticity_enabled {
+        if !self.config.runtime_plasticity_enabled || self.config.force_random_actions {
+            // Nothing on this path consumes the reward/plasticity pass: the
+            // `energy_prev`/`health_prev` stashes are only read by
+            // `RewardLedger::observe`, which feeds `apply_runtime_weight_updates`
+            // — both skipped here. Sensing momentum uses the separate
+            // `energy_at_last_sensing` stash, so skipping the whole pass keeps
+            // organisms byte-identical.
             return;
         }
 
         let food_energy = self.config.food_energy;
-        for (organism, ledger) in self.organisms.iter().zip(self.reward_ledgers.iter_mut()) {
-            ledger.observe(organism, food_energy);
-        }
 
         let any_learners = self
             .organisms
@@ -248,22 +286,70 @@ impl Simulation {
         #[cfg(feature = "profiling")]
         let plasticity_started = Instant::now();
 
+        let body_mass_metabolic_cost_coeff = self.config.body_mass_metabolic_cost_coeff;
+        // The reward ledger is a pure per-tick function of `(organism,
+        // food_energy)`, so it is computed locally per organism — including
+        // inside the rayon closure, where per-organism results are identical
+        // regardless of scheduling, preserving determinism. `observe` must run
+        // before `apply_runtime_weight_updates` mutates the organism's
+        // `energy_prev`/`health_prev` stashes.
+        //
+        // Organisms spawned this tick are skipped: the Age phase has already
+        // incremented every survivor, so `age_turns == 0` here identifies
+        // exactly the newborns appended by resolve_spawn_requests. Their
+        // brains have never been evaluated (intents ran before the spawn), so
+        // observing reward / stepping the actor-critic would seed
+        // `reward_prev`/`value_prev` from a phantom zero-activation
+        // transition; they get their first critic step at the end of their
+        // first active tick instead.
+        //
+        // Organisms action-locked by gestation this tick (pending action kind
+        // Reproduce) are also skipped entirely: learning pauses during the
+        // lock, so reward observation, the actor-critic step, plasticity,
+        // weight decay, and pruning are all withheld. Their
+        // `reward_prev`/`value_prev`/`energy_prev`/`health_prev` stashes
+        // freeze and the first post-unlock update spans the gap — the
+        // intended pause/resume semantics. The skip is a pure per-organism
+        // predicate, so rayon scheduling cannot affect determinism.
+        debug_assert_eq!(self.pending_actions.len(), self.organisms.len());
+        // Acquired before the disjoint field borrows below; the pool is
+        // already cached from the intent phase, so this is an Arc clone.
+        let thread_pool = self.parallel_pool();
+        let organisms = &mut self.organisms;
+        let pending_actions = self.pending_actions.as_slice();
         if any_learners {
-            let thread_pool = self.parallel_pool();
             thread_pool.install(|| {
-                self.organisms
+                organisms
                     .par_iter_mut()
-                    .zip(self.reward_ledgers.par_iter())
+                    .zip(pending_actions.par_iter())
                     .with_min_len(INTENT_PARALLEL_MIN_LEN)
-                    .for_each(|(organism, reward_ledger)| {
-                        apply_runtime_weight_updates(organism, *reward_ledger);
+                    .for_each(|(organism, pending_action)| {
+                        if organism.age_turns == 0
+                            || pending_action.kind == PendingActionKind::Reproduce
+                        {
+                            return;
+                        }
+                        let mut reward_ledger = crate::RewardLedger::default();
+                        reward_ledger.observe(organism, food_energy);
+                        apply_runtime_weight_updates(
+                            organism,
+                            reward_ledger,
+                            body_mass_metabolic_cost_coeff,
+                        );
                     });
             });
         } else {
-            for (organism, reward_ledger) in
-                self.organisms.iter_mut().zip(self.reward_ledgers.iter())
-            {
-                apply_runtime_weight_updates(organism, *reward_ledger);
+            for (organism, pending_action) in organisms.iter_mut().zip(pending_actions.iter()) {
+                if organism.age_turns == 0 || pending_action.kind == PendingActionKind::Reproduce {
+                    continue;
+                }
+                let mut reward_ledger = crate::RewardLedger::default();
+                reward_ledger.observe(organism, food_energy);
+                apply_runtime_weight_updates(
+                    organism,
+                    reward_ledger,
+                    body_mass_metabolic_cost_coeff,
+                );
             }
         }
 
@@ -276,20 +362,13 @@ fn organism_health_regeneration(organism: &OrganismState) -> f32 {
     (organism.max_health.max(1.0) * HEALTH_REGEN_FRACTION).max(0.0)
 }
 
-fn food_consumption_energy_fraction(kind: FoodKind) -> f32 {
-    match kind {
-        FoodKind::Plant => PLANT_CONSUMPTION_ENERGY_FRACTION,
-        FoodKind::Corpse => CORPSE_CONSUMPTION_ENERGY_FRACTION,
-    }
-}
-
 fn occupancy_snapshot_cell(
     occupancy: &[Option<Occupant>],
     world_width: i32,
     q: i32,
     r: i32,
 ) -> Option<Occupant> {
-    let (q, r) = wrap_position((q, r), world_width);
+    debug_assert_eq!(wrap_position((q, r), world_width), (q, r));
     let idx = r as usize * world_width as usize + q as usize;
     occupancy[idx]
 }
@@ -326,9 +405,16 @@ fn deterministic_action_sample(sim_seed: u64, tick: u64, organism_id: OrganismId
 }
 
 fn uniform_random_action(action_sample: f32) -> ActionType {
-    let scaled = action_sample.clamp(0.0, 1.0 - f32::EPSILON) * ACTION_COUNT as f32;
-    let idx = scaled.floor() as usize;
-    ActionType::ALL[idx.min(ACTION_COUNT - 1)]
+    // Sample over the same action support as the real policy: the six action
+    // neurons in `ActionType::ALL` plus explicit Idle, which
+    // `sample_action_from_logits` reaches via its `idle_weight` term.
+    const RANDOM_ACTION_BUCKETS: usize = ACTION_COUNT + 1;
+    let scaled = action_sample.clamp(0.0, 1.0 - f32::EPSILON) * RANDOM_ACTION_BUCKETS as f32;
+    let idx = (scaled.floor() as usize).min(RANDOM_ACTION_BUCKETS - 1);
+    ActionType::ALL
+        .get(idx)
+        .copied()
+        .unwrap_or(ActionType::Idle)
 }
 
 fn mix_u64(mut value: u64) -> u64 {

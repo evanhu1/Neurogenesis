@@ -6,25 +6,13 @@ impl Simulation {
         let policy = terrain_generation_policy();
         let width = self.config.world_width;
         let terrain_seed = self.seed ^ policy.terrain_seed_mix;
-        self.terrain_map = if (self.config.terrain_threshold as f64 - policy.default_threshold)
-            .abs()
-            > f64::EPSILON
-        {
-            build_noise_mask_with_threshold(
-                width,
-                width,
-                self.config.terrain_noise_scale as f64,
-                terrain_seed,
-                self.config.terrain_threshold as f64,
-            )
-        } else {
-            build_terrain_map(
-                width,
-                width,
-                self.config.terrain_noise_scale as f64,
-                terrain_seed,
-            )
-        };
+        self.terrain_map = build_noise_mask_with_threshold(
+            width,
+            width,
+            self.config.terrain_noise_scale as f64,
+            terrain_seed,
+            self.config.terrain_threshold as f64,
+        );
         let spike_seed = self.seed ^ policy.spike_seed_mix;
         self.spike_map = build_random_mask_with_density(
             width,
@@ -41,16 +29,6 @@ impl Simulation {
     }
 }
 
-pub(crate) fn build_terrain_map(width: u32, height: u32, scale: f64, seed: u64) -> Vec<bool> {
-    build_noise_mask_with_threshold(
-        width,
-        height,
-        scale,
-        seed,
-        terrain_generation_policy().default_threshold,
-    )
-}
-
 fn build_noise_mask_with_threshold(
     width: u32,
     height: u32,
@@ -65,7 +43,7 @@ fn build_noise_mask_with_threshold(
         for q in 0..width {
             let x = q as f64 * scale;
             let y = r as f64 * scale;
-            let value = fractal_perlin_2d(x, y, seed);
+            let value = noise_2d(x, y, seed);
             let normalized = ((value + 1.0) * 0.5).clamp(0.0, 1.0);
             blocked.push(normalized > threshold);
         }
@@ -94,27 +72,11 @@ fn build_random_mask_with_density(width: u32, height: u32, seed: u64, density: f
     blocked
 }
 
-pub(super) fn fractal_perlin_2d(x: f64, y: f64, seed: u64) -> f64 {
-    const OCTAVES: usize = 1;
-    let mut amplitude = 1.0_f64;
-    let mut frequency = 1.0_f64;
-    let mut total = 0.0_f64;
-    let mut weight = 0.0_f64;
-
-    for octave in 0..OCTAVES {
-        let octave_seed =
-            seed.wrapping_add(0x9E37_79B9_7F4A_7C15_u64.wrapping_mul(octave as u64 + 1));
-        total += amplitude * perlin_2d(x * frequency, y * frequency, octave_seed);
-        weight += amplitude;
-        amplitude *= 0.5;
-        frequency *= 2.0;
-    }
-
-    if weight == 0.0 {
-        0.0
-    } else {
-        total / weight
-    }
+/// Single-octave Perlin noise. The seed mix matches the octave-0 seed
+/// derivation of the former fractal variant, so output for a given seed is
+/// bit-identical to the previous implementation.
+pub(super) fn noise_2d(x: f64, y: f64, seed: u64) -> f64 {
+    perlin_2d(x, y, seed.wrapping_add(0x9E37_79B9_7F4A_7C15))
 }
 
 fn perlin_2d(x: f64, y: f64, seed: u64) -> f64 {
@@ -138,7 +100,7 @@ fn perlin_2d(x: f64, y: f64, seed: u64) -> f64 {
     lerp(nx0, nx1, v)
 }
 
-pub(super) fn hash_2d(x: i64, y: i64, seed: u64) -> u64 {
+pub(crate) fn hash_2d(x: i64, y: i64, seed: u64) -> u64 {
     let mut z = seed
         ^ (x as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
         ^ (y as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9);
@@ -150,7 +112,7 @@ pub(super) fn hash_2d(x: i64, y: i64, seed: u64) -> u64 {
     z
 }
 
-fn hash_to_unit_interval(hash: u64) -> f64 {
+pub(crate) fn hash_to_unit_interval(hash: u64) -> f64 {
     const HASH_TO_UNIT_F64_SCALE: f64 = 1.0 / ((1_u64 << 53) as f64);
     ((hash >> 11) as f64) * HASH_TO_UNIT_F64_SCALE
 }

@@ -7,12 +7,17 @@ const META_MUTATION_BASELINE_PULL: f32 = 0.15;
 const META_MUTATION_SECOND_GENE_PROBABILITY: f32 = 0.35;
 const META_MUTATION_THIRD_GENE_PROBABILITY: f32 = 0.1;
 const MUTATION_RATE_BASELINE_FLOOR_FRACTION: f32 = 0.05;
-const MUTATION_RATE_GENE_COUNT: usize = 16;
+const MUTATION_RATE_GENE_COUNT: usize = 18;
 const MUTATION_RATE_MIN: f32 = 1.0e-4;
 const MUTATION_RATE_MAX: f32 = 0.5;
-const MUTATION_RATE_LATENT_MIN: f32 = -8.0;
-const MUTATION_RATE_LATENT_MAX: f32 = 8.0;
 const MUTATION_RATE_LOGIT_EPSILON: f32 = 1.0e-6;
+/// Latent clamp implied by `MUTATION_RATE_LOGIT_EPSILON` (the single source
+/// of truth): `logit(1 - ε) = ln((1 - ε) / ε) ≈ 13.815510` for ε = 1e-6,
+/// rounded up at f32 precision so `mutation_rate_to_latent` /
+/// `mutation_rate_from_latent` round-trip at the `MUTATION_RATE_MIN`/`MAX`
+/// boundaries instead of snapping inward on the first meta-mutation.
+const MUTATION_RATE_LATENT_MAX: f32 = 13.815_511;
+const MUTATION_RATE_LATENT_MIN: f32 = -MUTATION_RATE_LATENT_MAX;
 
 /// Generates the `EffectiveMutationRates` struct and all gene-value
 /// extraction/application functions from a single field list. Adding or
@@ -77,6 +82,8 @@ define_mutation_rate_ops! {
     remove_synapse:              mutation_rate_remove_synapse,
     remove_neuron:               mutation_rate_remove_neuron,
     add_neuron_split_edge:       mutation_rate_add_neuron_split_edge,
+    spatial_prior_sigma:         mutation_rate_spatial_prior_sigma,
+    max_weight_delta_per_tick:   mutation_rate_max_weight_delta_per_tick,
 }
 
 pub(super) fn mutate_mutation_rate_genes<R: Rng + ?Sized>(
@@ -135,6 +142,16 @@ fn mutate_single_mutation_rate<R: Rng + ?Sized>(
     baseline_rate: f32,
     rng: &mut R,
 ) -> f32 {
+    // Zero is absorbing: a mutation-rate gene inherited as exactly 0.0 is
+    // exempt from meta-mutation and stays 0.0 forever (logit(0) is -inf
+    // anyway, and the exploration floor would otherwise resurrect it).
+    // Zeroing a rate in the seed config therefore hard-disables that
+    // operator for the lineage. The early return draws no RNG; the skip
+    // condition is a pure function of the inherited genome, so determinism
+    // is preserved.
+    if current_rate == 0.0 {
+        return 0.0;
+    }
     let current_latent = mutation_rate_to_latent(current_rate);
     let baseline_latent = mutation_rate_to_latent(baseline_rate);
     let noise_scale = if rng.random::<f32>() < META_MUTATION_EXPLORATION_PROBABILITY {
@@ -170,6 +187,6 @@ fn mutation_rate_from_latent(latent: f32) -> f32 {
     clamp_mutation_rate(rate)
 }
 
-fn effective_mutation_rate(rate: f32, global_mutation_rate_modifier: f32) -> f32 {
+pub(super) fn effective_mutation_rate(rate: f32, global_mutation_rate_modifier: f32) -> f32 {
     (rate * global_mutation_rate_modifier).clamp(0.0, MUTATION_RATE_MAX)
 }

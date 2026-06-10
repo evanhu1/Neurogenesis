@@ -8,6 +8,7 @@ periodic_injection_count = 200
 
 [lifecycle]
 passive_metabolism_cost_per_unit = 0.005
+body_mass_metabolic_cost_coeff = 1.0
 move_action_energy_cost = 1.0
 action_temperature = 0.08
 intent_parallel_threads = 8

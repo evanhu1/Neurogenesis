@@ -1,4 +1,4 @@
-use super::world::{fractal_perlin_2d, hash_2d};
+use super::world::{hash_2d, noise_2d};
 use super::*;
 use sim_config::food_ecology_policy;
 
@@ -11,18 +11,17 @@ impl Simulation {
             self.config.food_fertility_threshold,
             self.config.food_fertility_jitter_strength,
         );
+        debug_assert_eq!(self.food_fertility.len(), capacity);
         for (idx, blocked) in self.terrain_map.iter().copied().enumerate() {
             if blocked {
                 self.food_fertility[idx] = false;
             }
         }
-        debug_assert_eq!(self.food_fertility.len(), capacity);
         self.food_regrowth_due_turn = vec![NO_REGROWTH_SCHEDULED; capacity];
         self.food_regrowth_schedule.clear();
     }
 
     pub(crate) fn seed_initial_food_supply(&mut self) {
-        self.ensure_food_ecology_state();
         for cell_idx in 0..self.food_fertility.len() {
             if !self.food_fertility[cell_idx] {
                 continue;
@@ -36,35 +35,58 @@ impl Simulation {
     }
 
     pub(crate) fn replenish_food_supply(&mut self) -> Vec<FoodState> {
-        self.ensure_food_ecology_state();
         let mut spawned = Vec::new();
-        let due_turns: Vec<u64> = self
-            .food_regrowth_schedule
-            .range(..=self.turn)
-            .map(|(&due_turn, _)| due_turn)
-            .collect();
-
-        for due_turn in due_turns {
-            let Some(cell_indices) = self.food_regrowth_schedule.remove(&due_turn) else {
-                continue;
-            };
-            for cell_idx in cell_indices {
-                if cell_idx >= self.food_regrowth_due_turn.len() {
-                    continue;
-                }
-                if self.food_regrowth_due_turn[cell_idx] != due_turn {
-                    continue;
-                }
-                self.food_regrowth_due_turn[cell_idx] = NO_REGROWTH_SCHEDULED;
-                if !self.food_fertility[cell_idx] {
-                    continue;
-                }
+        // Due-but-blocked cells (occupied target) are collected here and
+        // re-inserted once as a single batch at `turn + 1`, recycling a
+        // drained schedule Vec, instead of a per-cell
+        // `entry().or_default().push()` plus Vec alloc/dealloc every turn.
+        // Cells are kept in processing order so plant-spawn RNG draws (color
+        // jitter) replay identically to the previous per-cell deferral.
+        let mut blocked: Vec<usize> = Vec::new();
+        while let Some(entry) = self.food_regrowth_schedule.first_entry() {
+            if *entry.key() > self.turn {
+                break;
+            }
+            let (due_turn, mut cell_indices) = entry.remove_entry();
+            cell_indices.retain(|&cell_idx| {
+                // Invariant: a cell has at most one outstanding schedule entry
+                // (inserts require an unscheduled slot), so the slot always
+                // matches its entry's due turn.
+                debug_assert_eq!(self.food_regrowth_due_turn[cell_idx], due_turn);
+                // Invariant: regrowth is only scheduled for fertile cells and
+                // fertility never decays after initialize_food_ecology.
+                debug_assert!(self.food_fertility[cell_idx]);
                 if self.occupancy[cell_idx].is_none() {
+                    self.food_regrowth_due_turn[cell_idx] = NO_REGROWTH_SCHEDULED;
                     if let Some(food) = self.spawn_food_at_cell(cell_idx) {
                         spawned.push(food);
                     }
-                } else if self.occupancy[cell_idx].is_some() {
-                    self.defer_food_regrowth(cell_idx);
+                    false
+                } else {
+                    true
+                }
+            });
+            if !cell_indices.is_empty() {
+                if blocked.is_empty() {
+                    // Recycle the drained entry's allocation for the batch.
+                    blocked = cell_indices;
+                } else {
+                    blocked.append(&mut cell_indices);
+                }
+            }
+        }
+
+        if !blocked.is_empty() {
+            let due_turn = self.turn.saturating_add(1);
+            for &cell_idx in &blocked {
+                self.food_regrowth_due_turn[cell_idx] = due_turn;
+            }
+            match self.food_regrowth_schedule.entry(due_turn) {
+                std::collections::btree_map::Entry::Occupied(mut occupied) => {
+                    occupied.get_mut().append(&mut blocked);
+                }
+                std::collections::btree_map::Entry::Vacant(vacant) => {
+                    vacant.insert(blocked);
                 }
             }
         }
@@ -73,7 +95,6 @@ impl Simulation {
     }
 
     pub(crate) fn schedule_food_regrowth(&mut self, cell_idx: usize) {
-        self.ensure_food_ecology_state();
         if cell_idx >= self.food_fertility.len()
             || !self.food_fertility[cell_idx]
             || self.food_regrowth_due_turn[cell_idx] != NO_REGROWTH_SCHEDULED
@@ -92,17 +113,6 @@ impl Simulation {
         self.spawn_food_with_kind_at_cell(cell_idx, energy, FoodKind::Corpse)
     }
 
-    fn ensure_food_ecology_state(&mut self) {
-        let capacity = world_capacity(self.config.world_width);
-        let valid_fertility = self.food_fertility.len() == capacity;
-        let valid_regrowth_due = self.food_regrowth_due_turn.len() == capacity;
-        if valid_fertility && valid_regrowth_due {
-            return;
-        }
-
-        self.initialize_food_ecology();
-    }
-
     fn regrowth_delay_turns(&mut self) -> u64 {
         let interval = i64::from(self.config.food_regrowth_interval);
         let jitter = i64::from(self.config.food_regrowth_jitter);
@@ -113,18 +123,11 @@ impl Simulation {
         (interval + offset).max(1) as u64
     }
 
-    fn defer_food_regrowth(&mut self, cell_idx: usize) {
-        let due_turn = self.turn.saturating_add(1);
-        self.schedule_food_regrowth_for_turn(cell_idx, due_turn);
-    }
-
     fn schedule_food_regrowth_for_turn(&mut self, cell_idx: usize, due_turn: u64) {
-        if cell_idx >= self.food_regrowth_due_turn.len()
-            || !self.food_fertility[cell_idx]
-            || self.food_regrowth_due_turn[cell_idx] != NO_REGROWTH_SCHEDULED
-        {
-            return;
-        }
+        // The sole caller (schedule_food_regrowth) checks fertility and an
+        // unscheduled slot before calling.
+        debug_assert!(self.food_fertility[cell_idx]);
+        debug_assert_eq!(self.food_regrowth_due_turn[cell_idx], NO_REGROWTH_SCHEDULED);
         self.food_regrowth_due_turn[cell_idx] = due_turn;
         self.food_regrowth_schedule
             .entry(due_turn)
@@ -148,18 +151,21 @@ impl Simulation {
         let width = self.config.world_width as usize;
         let q = (cell_idx % width) as i32;
         let r = (cell_idx / width) as i32;
+        let mut visual = sim_types::food_visual(kind);
+        if kind == FoodKind::Plant {
+            visual =
+                crate::jitter_visual_rgb_uniform(visual, &mut self.rng, crate::PLANT_COLOR_JITTER);
+        }
         let food = FoodState {
             id: self.alloc_food_id(),
             q,
             r,
             energy,
             kind,
-            visual: sim_types::food_visual(kind),
+            visual,
         };
         self.occupancy[cell_idx] = Some(Occupant::Food(food.id));
-        if !self.visual_map.is_empty() {
-            self.visual_map[cell_idx] = food.visual;
-        }
+        self.visual_map[cell_idx] = food.visual;
         self.foods.push(food.clone());
         Some(food)
     }
@@ -186,7 +192,7 @@ fn build_fertility_map(
         for q in 0..width {
             let x = q as f64 * policy.fertility_noise_scale;
             let y = r as f64 * policy.fertility_noise_scale;
-            let value = fractal_perlin_2d(x, y, fertility_seed);
+            let value = noise_2d(x, y, fertility_seed);
             let normalized = ((value + 1.0) * 0.5).clamp(0.0, 1.0);
             let jitter = cell_jitter(q as i64, r as i64, jitter_seed, fertility_jitter_strength);
             let jittered = (normalized * jitter).clamp(0.0, 1.0);

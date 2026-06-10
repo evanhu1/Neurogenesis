@@ -131,8 +131,9 @@ pub struct OrganismEntry {
     pub num_offspring: u32,
     pub total_actions: u64,
     /// Lifetime count of consumptions. Tracked from `ActionRecord::consumptions_count`
-    /// (a cumulative counter produced by the sim), so `record_action` replaces
-    /// the stored value each tick.
+    /// (a cumulative counter produced by the sim and patched post-commit so a
+    /// tick's consumption is visible in that tick's record), so `record_action`
+    /// replaces the stored value each tick.
     pub total_consumptions: u64,
     pub contingent_actions: u64,
     pub failed_actions: u64,
@@ -273,7 +274,7 @@ impl Ledger {
     /// Ingest one tick's worth of per-organism action records. Updates the
     /// per-organism sidecar and the per-tick action aggregates.
     pub fn record_action(&mut self, record: &ActionRecord) {
-        let action_idx = action_index(record.selected_action);
+        let action_idx = record.selected_action.index();
         let sensory_bin = sensory_bin(record);
         // Absent sidecar entry means we never saw this organism's birth —
         // skip so origin-bucketed aggregates stay consistent.
@@ -285,7 +286,7 @@ impl Ledger {
         let bucket = &mut self.tick_aggregates.per_origin[origin_idx];
 
         bucket.counts[action_idx] = bucket.counts[action_idx].saturating_add(1);
-        if action_can_fail(record.selected_action) {
+        if record.selected_action.can_fail() {
             entry.contingent_actions = entry.contingent_actions.saturating_add(1);
             if record.action_failed {
                 bucket.failed[action_idx] = bucket.failed[action_idx].saturating_add(1);
@@ -479,25 +480,6 @@ fn sensory_bin(record: &ActionRecord) -> usize {
     0
 }
 
-fn action_index(action: ActionType) -> usize {
-    match action {
-        ActionType::Idle => 0,
-        ActionType::TurnLeft => 1,
-        ActionType::TurnRight => 2,
-        ActionType::Forward => 3,
-        ActionType::Eat => 4,
-        ActionType::Attack => 5,
-        ActionType::Reproduce => 6,
-    }
-}
-
-fn action_can_fail(action: ActionType) -> bool {
-    matches!(
-        action,
-        ActionType::Forward | ActionType::Eat | ActionType::Attack | ActionType::Reproduce
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -512,7 +494,6 @@ mod tests {
             selected_action: ActionType::TurnLeft,
             action_failed: true,
             food_visible: [false; SensoryReceptor::VISION_RAY_OFFSETS.len()],
-            damage_taken_last_turn: 0.0,
             age_turns: 0,
             utilization: 0.0,
             consumptions_count: 0,
@@ -522,7 +503,6 @@ mod tests {
             selected_action: ActionType::Eat,
             action_failed: true,
             food_visible: [false; SensoryReceptor::VISION_RAY_OFFSETS.len()],
-            damage_taken_last_turn: 0.0,
             age_turns: 0,
             utilization: 0.0,
             consumptions_count: 0,
@@ -532,7 +512,6 @@ mod tests {
             selected_action: ActionType::Attack,
             action_failed: false,
             food_visible: [false; SensoryReceptor::VISION_RAY_OFFSETS.len()],
-            damage_taken_last_turn: 0.0,
             age_turns: 0,
             utilization: 0.0,
             consumptions_count: 0,
@@ -540,10 +519,10 @@ mod tests {
 
         let aggregates = ledger.take_tick_aggregates();
         let founder = &aggregates.per_origin[OrganismOrigin::InitialFounder as usize];
-        assert_eq!(founder.counts[action_index(ActionType::TurnLeft)], 1);
-        assert_eq!(founder.failed[action_index(ActionType::TurnLeft)], 0);
-        assert_eq!(founder.failed[action_index(ActionType::Eat)], 1);
-        assert_eq!(founder.failed[action_index(ActionType::Attack)], 0);
+        assert_eq!(founder.counts[ActionType::TurnLeft.index()], 1);
+        assert_eq!(founder.failed[ActionType::TurnLeft.index()], 0);
+        assert_eq!(founder.failed[ActionType::Eat.index()], 1);
+        assert_eq!(founder.failed[ActionType::Attack.index()], 0);
     }
 
     #[test]

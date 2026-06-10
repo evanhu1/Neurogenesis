@@ -6,6 +6,7 @@ pub(crate) struct ColorSignal {
     pub(crate) red: f32,
     pub(crate) green: f32,
     pub(crate) blue: f32,
+    pub(crate) shape: f32,
 }
 
 impl ColorSignal {
@@ -14,6 +15,7 @@ impl ColorSignal {
             VisionChannel::Red => self.red,
             VisionChannel::Green => self.green,
             VisionChannel::Blue => self.blue,
+            VisionChannel::Shape => self.shape,
         }
     }
 
@@ -22,6 +24,7 @@ impl ColorSignal {
             red: self.red.clamp(0.0, 1.0),
             green: self.green.clamp(0.0, 1.0),
             blue: self.blue.clamp(0.0, 1.0),
+            shape: self.shape.clamp(0.0, 1.0),
         }
     }
 }
@@ -41,15 +44,18 @@ struct RaycastContext<'a> {
     world_width: i32,
     occupancy: &'a [Option<Occupant>],
     spike_map: &'a [bool],
+    spike_visual_map: &'a [VisualProperties],
     visual_map: &'a [VisualProperties],
     vision_distance: u32,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn encode_sensory_inputs(
     organism: &mut OrganismState,
     world_width: i32,
     occupancy: &[Option<Occupant>],
     spike_map: &[bool],
+    spike_visual_map: &[VisualProperties],
     visual_map: &[VisualProperties],
     vision_distance: u32,
 ) -> RayScans {
@@ -63,6 +69,10 @@ pub(super) fn encode_sensory_inputs(
     let energy = energy_signal(organism);
     let health = health_signal(organism);
     let energy_delta = energy_delta_signal(organism);
+    // Re-stash at sensing time so the next EnergyDelta reading spans
+    // sensing-to-sensing and can observe eat/attack/action-cost changes
+    // (energy_prev belongs to the reward ledger and rolls at end of tick).
+    organism.energy_at_last_sensing = organism.energy;
     let last_forward = f32::from(organism.last_action_taken == sim_types::ActionType::Forward);
     let last_eat = f32::from(organism.last_action_taken == sim_types::ActionType::Eat);
     let ray_scans = scan_rays(
@@ -72,6 +82,7 @@ pub(super) fn encode_sensory_inputs(
         world_width,
         occupancy,
         spike_map,
+        spike_visual_map,
         visual_map,
         vision_distance,
     );
@@ -113,6 +124,7 @@ pub(crate) fn scan_rays(
     world_width: i32,
     occupancy: &[Option<Occupant>],
     spike_map: &[bool],
+    spike_visual_map: &[VisualProperties],
     visual_map: &[VisualProperties],
     vision_distance: u32,
 ) -> RayScans {
@@ -121,6 +133,7 @@ pub(crate) fn scan_rays(
         world_width,
         occupancy,
         spike_map,
+        spike_visual_map,
         visual_map,
         vision_distance,
     };
@@ -163,9 +176,10 @@ fn health_signal(organism: &OrganismState) -> f32 {
 }
 
 fn energy_delta_signal(organism: &OrganismState) -> f32 {
-    // Signed [-1, 1] momentum signal via tanh on (energy - energy_prev) / max_health.
+    // Signed [-1, 1] momentum signal via tanh on the sensing-to-sensing
+    // energy delta scaled by max_health.
     let scale = organism.max_health.max(1.0);
-    let delta = organism.energy - organism.energy_prev;
+    let delta = organism.energy - organism.energy_at_last_sensing;
     (delta / scale).tanh()
 }
 
@@ -180,6 +194,7 @@ fn scan_ray(
     let world_width_usize = world_width as usize;
     let occupancy = context.occupancy;
     let spike_map = context.spike_map;
+    let spike_visual_map = context.spike_visual_map;
     let visual_map = context.visual_map;
     let organism_id = context.organism_id;
 
@@ -211,7 +226,7 @@ fn scan_ray(
             accumulate_visual(
                 &mut color,
                 &mut remaining_visibility,
-                sim_types::terrain_visual(sim_types::TerrainType::Spikes),
+                spike_visual_map[idx],
                 distance_signal,
             );
         }
@@ -280,6 +295,7 @@ fn accumulate_visual(
     color.red += visual.r * contribution;
     color.green += visual.g * contribution;
     color.blue += visual.b * contribution;
+    color.shape += visual.shape * contribution;
     *remaining_visibility *= 1.0 - opacity;
 }
 
@@ -327,9 +343,8 @@ mod tests {
                 synapse_count: 0,
                 value_weights: Vec::new(),
                 sensory_mean_activation: Vec::new(),
-                sensory_mean_initialized: Vec::new(),
                 inter_mean_activation: Vec::new(),
-                inter_mean_initialized: Vec::new(),
+                means_initialized: false,
             },
             genome,
         )
@@ -399,6 +414,7 @@ mod tests {
         let world_width = 5;
         let mut occupancy = vec![None; (world_width * world_width) as usize];
         let spike_map = vec![false; occupancy.len()];
+        let spike_visual_map = vec![VisualProperties::default(); occupancy.len()];
         let mut visual_map = vec![VisualProperties::default(); occupancy.len()];
 
         let food_0_visual = VisualProperties {
@@ -406,12 +422,14 @@ mod tests {
             g: 0.0,
             b: 0.0,
             opacity: 0.5,
+            shape: 0.0,
         };
         let food_1_visual = VisualProperties {
             r: 0.0,
             g: 0.0,
             b: 1.0,
             opacity: 0.25,
+            shape: 0.0,
         };
 
         occupancy[world_width as usize + 2] = Some(Occupant::Food(FoodId(0)));
@@ -428,6 +446,7 @@ mod tests {
                 world_width,
                 occupancy: &occupancy,
                 spike_map: &spike_map,
+                spike_visual_map: &spike_visual_map,
                 visual_map: &visual_map,
                 vision_distance: 4,
             },
@@ -442,6 +461,7 @@ mod tests {
                 red: 0.5,
                 green: 0.0,
                 blue: 0.09375,
+                shape: 0.0,
             }
         );
     }

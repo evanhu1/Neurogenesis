@@ -1,4 +1,3 @@
-use super::sanitization::{reconcile_synapse_count, sanitize_synapse_genes, sort_synapse_genes};
 use super::*;
 
 pub(crate) fn mutate_add_synapse<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
@@ -12,7 +11,13 @@ pub(crate) fn mutate_add_synapse<R: Rng + ?Sized>(genome: &mut OrganismGenome, r
     super::spatial_prior::add_synapse_genes_with_spatial_prior(genome, 1, rng);
     if genome.brain.edges.len() > before_len {
         genome.topology.num_synapses = genome.topology.num_synapses.saturating_add(1);
-        sort_synapse_genes(&mut genome.brain.edges);
+        // The new edge was appended at the end; move it to its sorted
+        // (pre, post) position instead of re-sorting the whole list.
+        let edge = genome.brain.edges.pop().expect("edge was just appended");
+        let pos = genome.brain.edges.partition_point(|e| {
+            (e.pre_neuron_id, e.post_neuron_id) < (edge.pre_neuron_id, edge.post_neuron_id)
+        });
+        genome.brain.edges.insert(pos, edge);
     }
 }
 
@@ -23,9 +28,8 @@ pub(crate) fn mutate_remove_synapse<R: Rng + ?Sized>(genome: &mut OrganismGenome
     }
 
     let idx = rng.random_range(0..genome.brain.edges.len());
-    genome.brain.edges.swap_remove(idx);
+    genome.brain.edges.remove(idx);
     genome.topology.num_synapses = genome.topology.num_synapses.saturating_sub(1);
-    sort_synapse_genes(&mut genome.brain.edges);
 }
 
 pub(crate) fn mutate_remove_neuron<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
@@ -63,7 +67,12 @@ pub(crate) fn mutate_remove_neuron<R: Rng + ?Sized>(genome: &mut OrganismGenome,
         true
     });
 
-    sanitize_synapse_genes(genome);
+    // The retain_mut above removes edges touching the dead neuron and applies
+    // a strictly monotone ID remap to the survivors, so the edge list stays
+    // sorted by (pre, post) with unique keys and every ID remains valid.
+    debug_assert!(genome.brain.edges.windows(2).all(|w| {
+        (w[0].pre_neuron_id, w[0].post_neuron_id) < (w[1].pre_neuron_id, w[1].post_neuron_id)
+    }));
     genome.topology.num_synapses = genome.brain.edges.len() as u32;
 }
 
@@ -71,16 +80,27 @@ pub(crate) fn mutate_add_neuron_split_edge<R: Rng + ?Sized>(
     genome: &mut OrganismGenome,
     rng: &mut R,
 ) {
-    if genome.brain.edges.is_empty()
-        || genome.topology.num_neurons >= u32::MAX.saturating_sub(INTER_ID_BASE)
-    {
+    if genome.brain.edges.is_empty() || genome.topology.num_neurons >= MAX_INTER_NEURONS {
         return;
     }
 
-    ensure_neuron_vectors_sized(genome);
+    debug_assert_eq!(
+        genome.brain.inter_biases.len(),
+        genome.topology.num_neurons as usize
+    );
+    debug_assert_eq!(
+        genome.brain.inter_log_time_constants.len(),
+        genome.topology.num_neurons as usize
+    );
+    debug_assert_eq!(
+        genome.brain.inter_locations.len(),
+        genome.topology.num_neurons as usize
+    );
 
     let selected_idx = select_weighted_edge_index(&genome.brain.edges, rng);
-    let selected_edge = genome.brain.edges.swap_remove(selected_idx);
+    // Ordered remove: `swap_remove` would break the sorted-by-(pre, post)
+    // invariant that sibling operators binary-search/debug_assert against.
+    let selected_edge = genome.brain.edges.remove(selected_idx);
     let new_inter_id = inter_neuron_id(genome.topology.num_neurons);
 
     let (new_bias, new_log_tau, new_location) =
@@ -93,33 +113,13 @@ pub(crate) fn mutate_add_neuron_split_edge<R: Rng + ?Sized>(
 
     insert_split_edges(genome, &selected_edge, new_inter_id);
 
+    // The caller (`mutate_genome`) unconditionally reconciles the synapse
+    // count after all topology mutations, so no inner reconcile is needed.
     genome.topology.num_synapses = genome.topology.num_synapses.saturating_add(1);
-    reconcile_synapse_count(genome, rng);
-}
-
-fn ensure_neuron_vectors_sized(genome: &mut OrganismGenome) {
-    let target_inter_len = genome.topology.num_neurons as usize;
-    genome.brain.inter_biases.resize(target_inter_len, 0.0);
-    genome
-        .brain
-        .inter_log_time_constants
-        .resize(target_inter_len, DEFAULT_INTER_LOG_TIME_CONSTANT);
-    genome
-        .brain
-        .inter_locations
-        .resize(target_inter_len, DEFAULT_BRAIN_LOCATION);
-    genome
-        .brain
-        .sensory_locations
-        .resize(SENSORY_COUNT as usize, DEFAULT_BRAIN_LOCATION);
-    genome
-        .brain
-        .action_locations
-        .resize(ACTION_COUNT, DEFAULT_BRAIN_LOCATION);
 }
 
 fn derive_split_neuron_params<R: Rng + ?Sized>(
-    edge: &SynapseEdge,
+    edge: &SynapseGene,
     genome: &OrganismGenome,
     rng: &mut R,
 ) -> (f32, f32, BrainLocation) {
@@ -173,26 +173,38 @@ fn derive_split_neuron_params<R: Rng + ?Sized>(
 
 fn insert_split_edges(
     genome: &mut OrganismGenome,
-    original_edge: &SynapseEdge,
+    original_edge: &SynapseGene,
     new_inter_id: NeuronId,
 ) {
-    genome.brain.edges.push(SynapseEdge {
-        pre_neuron_id: original_edge.pre_neuron_id,
-        post_neuron_id: new_inter_id,
-        weight: 1.0,
-        eligibility: 0.0,
-        pending_coactivation: 0.0,
-    });
-    genome.brain.edges.push(SynapseEdge {
-        pre_neuron_id: new_inter_id,
-        post_neuron_id: original_edge.post_neuron_id,
-        weight: constrain_weight(original_edge.weight),
-        eligibility: 0.0,
-        pending_coactivation: 0.0,
-    });
+    // `new_inter_id` is brand new, so neither replacement edge can collide
+    // with an existing (pre, post) key; sorted-position inserts keep the
+    // edge list's sorted-unique invariant intact mid-mutation-pass.
+    insert_edge_sorted(
+        &mut genome.brain.edges,
+        SynapseGene {
+            pre_neuron_id: original_edge.pre_neuron_id,
+            post_neuron_id: new_inter_id,
+            weight: 1.0,
+        },
+    );
+    insert_edge_sorted(
+        &mut genome.brain.edges,
+        SynapseGene {
+            pre_neuron_id: new_inter_id,
+            post_neuron_id: original_edge.post_neuron_id,
+            weight: constrain_weight(original_edge.weight),
+        },
+    );
 }
 
-fn select_weighted_edge_index<R: Rng + ?Sized>(edges: &[SynapseEdge], rng: &mut R) -> usize {
+fn insert_edge_sorted(edges: &mut Vec<SynapseGene>, edge: SynapseGene) {
+    let pos = edges.partition_point(|e| {
+        (e.pre_neuron_id, e.post_neuron_id) < (edge.pre_neuron_id, edge.post_neuron_id)
+    });
+    edges.insert(pos, edge);
+}
+
+fn select_weighted_edge_index<R: Rng + ?Sized>(edges: &[SynapseGene], rng: &mut R) -> usize {
     if edges.len() <= 1 {
         return 0;
     }

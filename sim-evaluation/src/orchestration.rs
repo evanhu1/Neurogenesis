@@ -6,11 +6,11 @@
 
 use crate::analysis::{
     analyze, average_demographic_analytics, average_pillar_scores, average_timeseries,
-    write_aggregate_artifacts, write_per_seed_artifacts, AnalysisOptions, ScoringWindow,
+    write_aggregate_artifacts, write_per_seed_artifacts, AnalysisOptions,
 };
 use crate::dataset::{
-    DatasetReader, DatasetWriter as DatasetWriterTrait, Manifest, PartitionedParquetWriter,
-    TickSummaryRow, DESCENDANT_CODE, SCHEMA_VERSION,
+    DatasetReader, Manifest, PartitionedParquetWriter, ReproductionOutcome, TickSummaryRow,
+    DESCENDANT_CODE, SCHEMA_VERSION,
 };
 use crate::ledger::Ledger;
 use crate::types::{
@@ -38,8 +38,7 @@ enum WorkerMessage {
         elapsed: Duration,
     },
     Finished {
-        _seed: u64,
-        result: Result<SeedEvaluationSummary>,
+        result: Box<Result<SeedEvaluationSummary>>,
     },
 }
 
@@ -100,8 +99,7 @@ pub(crate) fn run_evaluation_across_seeds(
             let result = run_single_seed_evaluation(config.clone(), seed_options, &tx);
             if tx
                 .send(WorkerMessage::Finished {
-                    _seed: seed,
-                    result,
+                    result: Box::new(result),
                 })
                 .is_err()
             {
@@ -138,8 +136,8 @@ pub(crate) fn run_evaluation_across_seeds(
                     &mut progress_rows_rendered,
                 )?;
             }
-            WorkerMessage::Finished { _seed: _, result } => {
-                seed_summaries.push(result?);
+            WorkerMessage::Finished { result } => {
+                seed_summaries.push((*result)?);
             }
         }
     }
@@ -216,7 +214,6 @@ fn run_single_seed_evaluation(
         );
     }
 
-    let mut current_food_count = sim.snapshot().foods.len() as u64;
     // Running max across all organisms ever observed. Generation is monotonic
     // in reproduction order, so folding over `delta.spawned` is sufficient —
     // iterating every living organism each tick would be O(population) for
@@ -236,10 +233,10 @@ fn run_single_seed_evaluation(
         }
         let mut descendant_births = 0_u32;
         for event in delta.reproduction_events.iter().copied() {
-            if event.failure_cause.is_none() && event.child_id.is_some() {
+            let row = ledger.record_reproduction(tick, event);
+            if row.outcome == ReproductionOutcome::Success.code() {
                 descendant_births = descendant_births.saturating_add(1);
             }
-            let row = ledger.record_reproduction(tick, event);
             writer.emit_reproduction_event(row);
         }
 
@@ -268,13 +265,10 @@ fn run_single_seed_evaluation(
                         writer.emit_organism_lifetime(row);
                     }
                 }
-                EntityId::Food(_) => {
-                    current_food_count = current_food_count.saturating_sub(1);
-                }
+                EntityId::Food(_) => {}
             }
         }
         let food_spawned = delta.food_spawned.len() as u32;
-        current_food_count = current_food_count.saturating_add(u64::from(food_spawned));
 
         let population = delta.metrics.organisms;
         let descendant_population = ledger.descendant_population();
@@ -294,7 +288,7 @@ fn run_single_seed_evaluation(
             descendant_births,
             deaths,
             descendant_deaths,
-            food_count: current_food_count as u32,
+            food_count: sim.foods().len() as u32,
             consumptions: delta.metrics.consumptions_last_turn as u32,
             predations: delta.metrics.predations_last_turn as u32,
             food_spawned,
@@ -351,12 +345,11 @@ fn run_single_seed_evaluation(
         seed: options.seed,
         total_ticks: options.ticks,
         report_every: options.report_every,
-        snapshot_interval: options.report_every,
         created_at_utc: Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
         world_config: config.clone(),
     };
     manifest.write(&options.out_dir)?;
-    Box::new(writer).finalize()?;
+    writer.finalize()?;
 
     // Analysis phase — derive metrics/pillars from the dataset we just wrote.
     let dataset = DatasetReader::load(&options.out_dir)?;
@@ -365,7 +358,6 @@ fn run_single_seed_evaluation(
         &AnalysisOptions {
             report_every: options.report_every,
             total_ticks: options.ticks,
-            scoring_window: ScoringWindow::default(),
         },
     );
 

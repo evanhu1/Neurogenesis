@@ -140,12 +140,12 @@ fn targeted_complex_resolution_snapshot_is_deterministic() {
 
     let mut a = Simulation::new(cfg.clone(), 21).expect("simulation should initialize");
     configure_sim(&mut a, scenario.clone());
-    a.step_n(3);
+    a.advance_n(3);
     let a_snapshot = serde_json::to_string(&a.snapshot()).expect("serialize snapshot");
 
     let mut b = Simulation::new(cfg, 21).expect("simulation should initialize");
     configure_sim(&mut b, scenario);
-    b.step_n(3);
+    b.advance_n(3);
     let b_snapshot = serde_json::to_string(&b.snapshot()).expect("serialize snapshot");
 
     assert_eq!(a_snapshot, b_snapshot);

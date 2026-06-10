@@ -9,7 +9,11 @@ fn bench_1000_turns(c: &mut Criterion) {
         |b| {
             b.iter_batched(
                 || Simulation::new(config.clone(), 42).expect("simulation init"),
-                |mut sim| black_box(sim.step_n(1000)),
+                |mut sim| {
+                    for _ in 0..1000 {
+                        black_box(sim.tick());
+                    }
+                },
                 criterion::BatchSize::SmallInput,
             );
         },

@@ -8,9 +8,17 @@ const LOCAL_SYNAPSE_METABOLIC_COST_FLOOR: f32 = 0.25;
 // A roughly 3-unit latent-space jump adds one full metabolism unit; because the
 // formula uses squared distance, longer-range links get expensive quickly.
 const SPATIAL_SYNAPSE_METABOLIC_RADIUS_SQ: f32 = 9.0;
+// Kleiber's law: basal metabolic rate scales as mass^0.75. Sub-linear scaling
+// means larger bodies pay more in absolute terms but less per unit of mass,
+// which prevents large-body phenotypes from being strictly uninhabitable.
+const BODY_MASS_METABOLIC_EXPONENT: f32 = 0.75;
 
-pub(crate) fn refresh_organism_base_metabolic_cost(organism: &mut OrganismState) {
-    organism.base_metabolic_cost = organism_base_metabolic_cost(organism);
+pub(crate) fn refresh_organism_base_metabolic_cost(
+    organism: &mut OrganismState,
+    body_mass_metabolic_cost_coeff: f32,
+) {
+    organism.base_metabolic_cost =
+        organism_base_metabolic_cost(organism, body_mass_metabolic_cost_coeff);
 }
 
 pub(crate) fn organism_passive_metabolic_energy_cost(
@@ -20,15 +28,28 @@ pub(crate) fn organism_passive_metabolic_energy_cost(
     config.passive_metabolism_cost_per_unit * organism.base_metabolic_cost
 }
 
-fn organism_base_metabolic_cost(organism: &OrganismState) -> f32 {
-    let inter_neuron_count = organism.genome.topology.num_neurons as f32;
+fn organism_base_metabolic_cost(
+    organism: &OrganismState,
+    body_mass_metabolic_cost_coeff: f32,
+) -> f32 {
+    let inter_neuron_count = organism.brain.inter.len() as f32;
     let sensory_neuron_count = organism.brain.sensory.len() as f32;
     let synapse_spatial_cost_units = organism_synapse_spatial_metabolic_cost_units(&organism.brain);
     let vision_distance_cost_units = organism.genome.topology.vision_distance as f32 / 3.0;
+    let body_mass_cost_units =
+        body_mass_metabolic_cost_units(organism.max_health, body_mass_metabolic_cost_coeff);
     inter_neuron_count
         + sensory_neuron_count
         + synapse_spatial_cost_units
         + vision_distance_cost_units
+        + body_mass_cost_units
+}
+
+fn body_mass_metabolic_cost_units(max_health: f32, coeff: f32) -> f32 {
+    if coeff <= 0.0 {
+        return 0.0;
+    }
+    coeff * max_health.max(0.0).powf(BODY_MASS_METABOLIC_EXPONENT)
 }
 
 fn organism_synapse_spatial_metabolic_cost_units(brain: &BrainState) -> f32 {
@@ -70,14 +91,26 @@ fn synapse_group_spatial_metabolic_cost_units(
 ) -> f32 {
     synapses
         .iter()
-        .filter_map(|edge| {
-            post_neuron_location(brain, edge.post_neuron_id).map(|post_location| {
-                synapse_spatial_metabolic_cost_units(distance_sq_between_locations(
-                    pre_location,
-                    post_location,
-                ))
-            })
-        })
+        .map(
+            |edge| match post_neuron_location(brain, edge.post_neuron_id) {
+                Some(post_location) => synapse_spatial_metabolic_cost_units(
+                    distance_sq_between_locations(pre_location, post_location),
+                ),
+                None => {
+                    // Unreachable for well-formed brains: expression drops edges
+                    // whose post is not a valid inter/action neuron and runtime
+                    // plasticity only removes edges. If a dangling edge ever
+                    // appears, charge it the floor cost rather than letting a
+                    // broken brain wire for free.
+                    debug_assert!(
+                        false,
+                        "synapse post neuron {:?} resolves to no inter/action neuron",
+                        edge.post_neuron_id
+                    );
+                    LOCAL_SYNAPSE_METABOLIC_COST_FLOOR
+                }
+            },
+        )
         .sum()
 }
 
@@ -110,6 +143,8 @@ mod tests {
         OrganismGenome, OrganismId, SensoryNeuronState, SensoryReceptor, SpeciesId,
     };
 
+    const TEST_BODY_MASS_COEFF: f32 = 0.1;
+
     fn metabolism_test_organism() -> OrganismState {
         let mut organism = OrganismState {
             id: OrganismId(0),
@@ -124,8 +159,10 @@ mod tests {
             max_health: 100.0,
             energy_prev: 100.0,
             health_prev: 100.0,
+            energy_at_last_sensing: 100.0,
             dopamine: 0.0,
             value_prev: 0.0,
+            reward_prev: 0.0,
             value_prev_feature_activations: Vec::new(),
             damage_taken_last_turn: 0.0,
             contingent_action_wasted_last_turn: false,
@@ -147,10 +184,10 @@ mod tests {
                         x: 0.0,
                         y: 0.0,
                         activation: 0.0,
-                        parent_ids: Vec::new(),
                     },
                     receptor: SensoryReceptor::ContactAhead,
                     synapses: Vec::new(),
+                    action_synapse_start: 0,
                 }],
                 inter: vec![InterNeuronState {
                     neuron: NeuronState {
@@ -160,7 +197,6 @@ mod tests {
                         x: 1.0,
                         y: 1.0,
                         activation: 0.0,
-                        parent_ids: Vec::new(),
                     },
                     state: 0.0,
                     alpha: 1.0,
@@ -172,15 +208,13 @@ mod tests {
                     x: 1.0,
                     y: 1.0,
                     logit: 0.0,
-                    parent_ids: Vec::new(),
                     action_type: ActionType::Forward,
                 }],
                 synapse_count: 0,
                 value_weights: vec![0.0; 2],
                 sensory_mean_activation: Vec::new(),
-                sensory_mean_initialized: Vec::new(),
                 inter_mean_activation: Vec::new(),
-                inter_mean_initialized: Vec::new(),
+                means_initialized: false,
             },
             genome: {
                 let mut genome = OrganismGenome::test_fixture();
@@ -193,7 +227,7 @@ mod tests {
                 genome
             },
         };
-        refresh_organism_base_metabolic_cost(&mut organism);
+        refresh_organism_base_metabolic_cost(&mut organism, TEST_BODY_MASS_COEFF);
         organism
     }
 
@@ -217,14 +251,14 @@ mod tests {
             },
         ];
         local.brain.synapse_count = local.brain.sensory[0].synapses.len() as u32;
-        refresh_organism_base_metabolic_cost(&mut local);
+        refresh_organism_base_metabolic_cost(&mut local, TEST_BODY_MASS_COEFF);
 
         let mut long_range = local.clone();
         long_range.brain.inter[0].neuron.x = 8.0;
         long_range.brain.inter[0].neuron.y = 8.0;
         long_range.brain.action[0].x = 9.0;
         long_range.brain.action[0].y = 9.0;
-        refresh_organism_base_metabolic_cost(&mut long_range);
+        refresh_organism_base_metabolic_cost(&mut long_range, TEST_BODY_MASS_COEFF);
 
         assert!(
             long_range.base_metabolic_cost > local.base_metabolic_cost + 10.0,
@@ -239,14 +273,12 @@ mod tests {
     fn pruned_synapses_stop_contributing_to_metabolic_cost() {
         let mut organism = metabolism_test_organism();
         organism.genome.topology.num_synapses = 1;
-        organism.genome.brain.edges = vec![SynapseEdge {
+        organism.genome.brain.edges = vec![sim_types::SynapseGene {
             pre_neuron_id: NeuronId(0),
             post_neuron_id: NeuronId(2000),
             weight: 1.0,
-            eligibility: 0.0,
-            pending_coactivation: 0.0,
         }];
-        refresh_organism_base_metabolic_cost(&mut organism);
+        refresh_organism_base_metabolic_cost(&mut organism, TEST_BODY_MASS_COEFF);
 
         let baseline_cost = organism.base_metabolic_cost;
 
@@ -258,7 +290,7 @@ mod tests {
             pending_coactivation: 0.0,
         }];
         organism.brain.synapse_count = 1;
-        refresh_organism_base_metabolic_cost(&mut organism);
+        refresh_organism_base_metabolic_cost(&mut organism, TEST_BODY_MASS_COEFF);
 
         assert!(
             organism.base_metabolic_cost > baseline_cost,

@@ -1,86 +1,12 @@
 use crate::{
     analysis::intervals::action_baseline_probability,
+    output::fmt_option,
     types::{IntervalMetrics, PillarScores},
 };
 use anyhow::Result;
 use serde::Serialize;
 use std::fmt::Write as _;
-use std::fs::File;
-use std::io::{BufWriter, Write};
 use std::path::Path;
-
-pub struct Reporter {
-    csv: BufWriter<File>,
-}
-
-impl Reporter {
-    pub fn new(out_dir: &Path) -> Result<Self> {
-        let csv_path = out_dir.join("timeseries.csv");
-        let mut csv = BufWriter::new(File::create(csv_path)?);
-        writeln!(
-            csv,
-            "tick,pop,births,deaths,food,max_generation,attack_attempt_rate,attack_success_rate,failed_action_rate,ate_pct,cons_mean,neurons,synapses,p_fwd_food,mi_sa,idle_fraction,util,generation_time,abs_td_error,age_correlated_competence"
-        )?;
-        Ok(Self { csv })
-    }
-
-    pub fn emit(&mut self, metrics: &IntervalMetrics) -> Result<()> {
-        writeln!(
-            self.csv,
-            "{tick},{pop},{births},{deaths},{food},{max_generation},{attack_attempt_rate},{attack_success_rate},{failed_action_rate},{ate_pct},{cons_mean},{neurons},{synapses},{p_fwd_food},{mi_sa},{idle_fraction},{util},{generation_time},{abs_td_error},{age_correlated_competence}",
-            tick = metrics.tick,
-            pop = metrics.pop,
-            births = metrics.births,
-            deaths = metrics.deaths,
-            food = metrics.food,
-            max_generation = csv_opt_u64(metrics.max_generation),
-            attack_attempt_rate = csv_opt(metrics.attack_attempt_rate),
-            attack_success_rate = csv_opt(metrics.attack_success_rate),
-            failed_action_rate = csv_opt(metrics.failed_action_rate),
-            ate_pct = csv_opt(metrics.ate_pct),
-            cons_mean = csv_opt(metrics.cons_mean),
-            neurons = csv_opt(metrics.neurons),
-            synapses = csv_opt(metrics.synapses),
-            p_fwd_food = csv_opt(metrics.p_fwd_food),
-            mi_sa = csv_opt(metrics.mi_sa),
-            idle_fraction = csv_opt(metrics.idle_fraction),
-            util = csv_opt(metrics.util),
-            generation_time = csv_opt(metrics.generation_time),
-            abs_td_error = csv_opt(metrics.abs_td_error),
-            age_correlated_competence = csv_opt(metrics.age_correlated_competence),
-        )?;
-
-        Ok(())
-    }
-
-    pub fn flush(&mut self) -> Result<()> {
-        self.csv.flush()?;
-        Ok(())
-    }
-}
-
-pub struct HtmlReportMeta {
-    pub title: Option<String>,
-    pub ticks: u64,
-    pub report_every: u64,
-    pub control: bool,
-    pub total_time_seconds: f64,
-    pub generated_at_utc: String,
-    pub pillar_window_start_tick: u64,
-    pub pillar_window_end_tick: u64,
-    pub foraging_pillar: f64,
-    pub intelligence_pillar: f64,
-    pub competition_pillar: f64,
-    pub foraging_p_fwd_food_component: f64,
-    pub intelligence_mi_component: f64,
-    pub intelligence_action_effectiveness_component: f64,
-    pub intelligence_anti_idle_component: f64,
-    pub intelligence_util_component: f64,
-    pub competition_attack_success_component: f64,
-    pub competition_attack_attempt_component: f64,
-    pub timeseries_label: String,
-    pub per_seed_rows: Vec<PerSeedReportRow>,
-}
 
 pub struct HtmlReportContext {
     pub title: Option<String>,
@@ -93,35 +19,7 @@ pub struct HtmlReportContext {
     pub per_seed_rows: Vec<PerSeedReportRow>,
 }
 
-impl HtmlReportMeta {
-    pub fn from_pillars(pillars: &PillarScores, ctx: HtmlReportContext) -> Self {
-        Self {
-            title: ctx.title,
-            ticks: ctx.ticks,
-            report_every: ctx.report_every,
-            control: ctx.control,
-            total_time_seconds: ctx.total_time_seconds,
-            generated_at_utc: ctx.generated_at_utc,
-            pillar_window_start_tick: pillars.window_start_tick,
-            pillar_window_end_tick: pillars.window_end_tick,
-            foraging_pillar: pillars.foraging_pillar,
-            intelligence_pillar: pillars.intelligence_pillar,
-            competition_pillar: pillars.competition_pillar,
-            foraging_p_fwd_food_component: pillars.foraging_p_fwd_food_component,
-            intelligence_mi_component: pillars.intelligence_mi_component,
-            intelligence_action_effectiveness_component: pillars
-                .intelligence_action_effectiveness_component,
-            intelligence_anti_idle_component: pillars.intelligence_anti_idle_component,
-            intelligence_util_component: pillars.intelligence_util_component,
-            competition_attack_success_component: pillars.competition_attack_success_component,
-            competition_attack_attempt_component: pillars.competition_attack_attempt_component,
-            timeseries_label: ctx.timeseries_label,
-            per_seed_rows: ctx.per_seed_rows,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct PerSeedReportRow {
     pub seed: u64,
     pub total_time_seconds: f64,
@@ -141,7 +39,7 @@ pub struct ComparisonMetricRow {
     pub ci_high: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct PerSeedComparisonRow {
     pub seed: u64,
     pub control_report_href: String,
@@ -162,7 +60,8 @@ pub struct ComparisonHtmlReportMeta {
 
 pub fn write_html_report(
     out_dir: &Path,
-    meta: &HtmlReportMeta,
+    pillars: &PillarScores,
+    ctx: &HtmlReportContext,
     rows: &[IntervalMetrics],
 ) -> Result<()> {
     let report_path = out_dir.join("report.html");
@@ -204,63 +103,69 @@ pub fn write_html_report(
     );
 
     html.push_str("<div class=\"panel\"><h1>Simulation Evaluation Report</h1><div class=\"meta\">");
-    if let Some(title) = &meta.title {
+    if let Some(title) = &ctx.title {
         kv(&mut html, "Title", title);
     }
-    kv(&mut html, "Ticks", &meta.ticks.to_string());
-    kv(&mut html, "Report Every", &meta.report_every.to_string());
+    kv(&mut html, "Ticks", &ctx.ticks.to_string());
+    kv(&mut html, "Report Every", &ctx.report_every.to_string());
     kv(
         &mut html,
         "Random-action control",
-        if meta.control { "true" } else { "false" },
+        if ctx.control { "true" } else { "false" },
     );
     kv(
         &mut html,
         "Total Time",
-        &format!("{:.3}s", meta.total_time_seconds),
+        &format!("{:.3}s", ctx.total_time_seconds),
     );
-    kv(&mut html, "Generated At (UTC)", &meta.generated_at_utc);
+    kv(&mut html, "Generated At (UTC)", &ctx.generated_at_utc);
     html.push_str("</div></div>");
 
     html.push_str("<div class=\"panel\"><h2>Pillar Scores</h2>");
     let _ = write!(
         html,
         "<p class=\"score-sub\">window: ticks {}-{} | no aggregate score — each pillar stands on its own, because different niches excel at different pillars.</p>",
-        meta.pillar_window_start_tick, meta.pillar_window_end_tick
+        pillars.window_start_tick, pillars.window_end_tick
     );
     html.push_str("<div class=\"pillar-list\">");
     pillar_card(
         &mut html,
         "Foraging",
-        &format!("{:.3}", meta.foraging_pillar),
-        &[("P(Fwd|food)", meta.foraging_p_fwd_food_component)],
+        &format!("{:.3}", pillars.foraging_pillar),
+        &[("P(Fwd|food)", pillars.foraging_p_fwd_food_component)],
     );
     pillar_card(
         &mut html,
         "Intelligence",
-        &format!("{:.3}", meta.intelligence_pillar),
+        &format!("{:.3}", pillars.intelligence_pillar),
         &[
             (
                 "Action effectiveness",
-                meta.intelligence_action_effectiveness_component,
+                pillars.intelligence_action_effectiveness_component,
             ),
-            ("MI(S;A)", meta.intelligence_mi_component),
-            ("Anti-idle", meta.intelligence_anti_idle_component),
-            ("Util", meta.intelligence_util_component),
+            ("MI(S;A)", pillars.intelligence_mi_component),
+            ("Anti-idle", pillars.intelligence_anti_idle_component),
+            ("Util", pillars.intelligence_util_component),
         ],
     );
     pillar_card(
         &mut html,
         "Competition",
-        &format!("{:.3}", meta.competition_pillar),
+        &format!("{:.3}", pillars.competition_pillar),
         &[
-            ("Attack success", meta.competition_attack_success_component),
-            ("Attack attempts", meta.competition_attack_attempt_component),
+            (
+                "Attack success",
+                pillars.competition_attack_success_component,
+            ),
+            (
+                "Attack attempts",
+                pillars.competition_attack_attempt_component,
+            ),
         ],
     );
     html.push_str("</div></div>");
 
-    if !meta.per_seed_rows.is_empty() {
+    if !ctx.per_seed_rows.is_empty() {
         html.push_str("<div class=\"panel\"><h2>Per-Seed Results</h2><table><thead><tr>");
         for header in [
             "seed",
@@ -273,7 +178,7 @@ pub fn write_html_report(
             let _ = write!(html, "<th>{header}</th>");
         }
         html.push_str("</tr></thead><tbody>");
-        for row in &meta.per_seed_rows {
+        for row in &ctx.per_seed_rows {
             let _ = write!(
                 html,
                 "<tr><td>{}</td><td>{:.3}</td><td>{:.3}</td><td>{:.3}</td><td>{:.3}</td><td><a href=\"{}\">open</a></td></tr>",
@@ -291,7 +196,7 @@ pub fn write_html_report(
     let _ = write!(
         html,
         "<div class=\"panel\"><h2>Timeseries</h2><p class=\"note\">{}</p><div class=\"table-scroll\"><table><thead><tr>",
-        meta.timeseries_label
+        escape_html(&ctx.timeseries_label)
     );
     let baseline_probability = action_baseline_probability();
     let timeseries_headers = [
@@ -310,6 +215,10 @@ pub fn write_html_report(
         (
             "deaths",
             "Total deaths during the interval, summed across ticks.".to_owned(),
+        ),
+        (
+            "food",
+            "Food items present on the grid at the final tick of the interval.".to_owned(),
         ),
         (
             "max_generation",
@@ -385,21 +294,22 @@ pub fn write_html_report(
             row.pop.to_string(),
             row.births.to_string(),
             row.deaths.to_string(),
+            row.food.to_string(),
             fmt_opt_u64(row.max_generation),
-            fmt_opt(row.attack_attempt_rate, 6),
-            fmt_opt(row.attack_success_rate, 4),
-            fmt_opt(row.failed_action_rate, 4),
-            fmt_opt(row.ate_pct, 2),
-            fmt_opt(row.cons_mean, 2),
-            fmt_opt(row.neurons, 2),
-            fmt_opt(row.synapses, 2),
-            fmt_opt(row.p_fwd_food, 4),
-            fmt_opt(row.mi_sa, 4),
-            fmt_opt(row.idle_fraction, 4),
-            fmt_opt(row.util, 4),
-            fmt_opt(row.generation_time, 2),
-            fmt_opt(row.abs_td_error, 4),
-            fmt_opt(row.age_correlated_competence, 4),
+            fmt_option(row.attack_attempt_rate, 6),
+            fmt_option(row.attack_success_rate, 4),
+            fmt_option(row.failed_action_rate, 4),
+            fmt_option(row.ate_pct, 2),
+            fmt_option(row.cons_mean, 2),
+            fmt_option(row.neurons, 2),
+            fmt_option(row.synapses, 2),
+            fmt_option(row.p_fwd_food, 4),
+            fmt_option(row.mi_sa, 4),
+            fmt_option(row.idle_fraction, 4),
+            fmt_option(row.util, 4),
+            fmt_option(row.generation_time, 2),
+            fmt_option(row.abs_td_error, 4),
+            fmt_option(row.age_correlated_competence, 4),
         ] {
             let _ = write!(html, "<td>{cell}</td>");
         }
@@ -618,12 +528,12 @@ pub fn write_comparison_html_report(out_dir: &Path, meta: &ComparisonHtmlReportM
         let _ = write!(
             html,
             "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
-            row.label,
-            fmt_opt(row.control_mean, 4),
-            fmt_opt(row.treatment_mean, 4),
-            fmt_opt(row.mean_diff, 4),
-            fmt_opt(row.ci_low, 4),
-            fmt_opt(row.ci_high, 4),
+            escape_html(&row.label),
+            fmt_option(row.control_mean, 4),
+            fmt_option(row.treatment_mean, 4),
+            fmt_option(row.mean_diff, 4),
+            fmt_option(row.ci_low, 4),
+            fmt_option(row.ci_high, 4),
         );
     }
     html.push_str("</tbody></table></div>");
@@ -647,31 +557,18 @@ pub fn write_comparison_html_report(out_dir: &Path, meta: &ComparisonHtmlReportM
     Ok(())
 }
 
-fn fmt_opt(value: Option<f64>, decimals: usize) -> String {
-    match value {
-        Some(v) => format!("{v:.decimals$}"),
-        None => "NA".to_owned(),
-    }
-}
-
 fn fmt_opt_u64(value: Option<u64>) -> String {
     value
         .map(|v| v.to_string())
         .unwrap_or_else(|| "NA".to_owned())
 }
 
-fn csv_opt(value: Option<f64>) -> String {
-    value.map(|v| v.to_string()).unwrap_or_default()
-}
-
-fn csv_opt_u64(value: Option<u64>) -> String {
-    value.map(|v| v.to_string()).unwrap_or_default()
-}
-
 fn kv(html: &mut String, key: &str, value: &str) {
     let _ = write!(
         html,
-        "<div><div class=\"k\">{key}</div><div class=\"v\">{value}</div></div>"
+        "<div><div class=\"k\">{key}</div><div class=\"v\">{value}</div></div>",
+        key = escape_html(key),
+        value = escape_html(value),
     );
 }
 
@@ -786,10 +683,22 @@ fn line_chart_svg(series: &[(u64, f64)], baseline: Option<f64>, color: &str) -> 
         );
     }
 
-    let _ = write!(
-        svg,
-        "<path d=\"{d}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"2.5\"/>"
-    );
+    if series.len() == 1 {
+        // A stroked path with a single moveto renders nothing in SVG; draw a
+        // marker so single-sample series remain visible.
+        let (tick, value) = series[0];
+        let _ = write!(
+            svg,
+            "<circle cx=\"{cx:.2}\" cy=\"{cy:.2}\" r=\"3\" fill=\"{color}\"/>",
+            cx = map_x(tick),
+            cy = map_y(value)
+        );
+    } else {
+        let _ = write!(
+            svg,
+            "<path d=\"{d}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"2.5\"/>"
+        );
+    }
     let _ = write!(
         svg,
         "<text x=\"{LEFT}\" y=\"{y}\" fill=\"#64748b\" font-size=\"11\">tick {min_tick}</text>\

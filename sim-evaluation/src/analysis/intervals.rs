@@ -6,25 +6,25 @@
 //! exact multiple.
 
 use crate::dataset::{
-    DatasetReader, ReproductionOutcome, ACTION_COUNT, DESCENDANT_CODE, JOINT_LEN,
-    SENSORY_BIN_COUNT,
+    DatasetReader, ReproductionOutcome, ACTION_COUNT, DESCENDANT_CODE, JOINT_LEN, SENSORY_BIN_COUNT,
 };
 use crate::types::IntervalMetrics;
+use sim_types::ActionType;
 use std::collections::BTreeMap;
 
-const IDLE: usize = 0;
-const FORWARD: usize = 3;
-const EAT: usize = 4;
-const ATTACK: usize = 5;
-const REPRODUCE: usize = 6;
+const IDLE: usize = ActionType::Idle.index();
+const FORWARD: usize = ActionType::Forward.index();
+const EAT: usize = ActionType::Eat.index();
+const ATTACK: usize = ActionType::Attack.index();
+const REPRODUCE: usize = ActionType::Reproduce.index();
 
 /// Actions whose failure is a meaningful signal (non-no-op, non-turn).
 const CONTINGENT_ACTIONS: [usize; 4] = [FORWARD, EAT, ATTACK, REPRODUCE];
 
 #[derive(Clone, Copy)]
 struct PopulationSnapshotSummary {
-    neurons: Option<f64>,
-    synapses: Option<f64>,
+    neurons: f64,
+    synapses: f64,
     age_correlated_competence: Option<f64>,
 }
 
@@ -297,8 +297,8 @@ impl IntervalAccumulator {
             failed_action_rate,
             ate_pct,
             cons_mean,
-            neurons: snapshot.and_then(|r| r.neurons),
-            synapses: snapshot.and_then(|r| r.synapses),
+            neurons: snapshot.map(|r| r.neurons),
+            synapses: snapshot.map(|r| r.synapses),
             p_fwd_food,
             mi_sa,
             idle_fraction,
@@ -317,24 +317,18 @@ fn pool_joint(into: &mut [u64; JOINT_LEN], from: &[u64]) {
     }
 }
 
+/// `rows` is never empty: callers pass the per-tick groups built via
+/// `entry(...).or_default().push(row)`.
 fn summarize_population_snapshot(
     rows: &[&crate::dataset::PopulationSnapshotRow],
 ) -> PopulationSnapshotSummary {
-    if rows.is_empty() {
-        return PopulationSnapshotSummary {
-            neurons: None,
-            synapses: None,
-            age_correlated_competence: None,
-        };
-    }
-
     let count = rows.len() as f64;
     let neurons_sum: u64 = rows.iter().map(|row| u64::from(row.num_neurons)).sum();
     let synapses_sum: u64 = rows.iter().map(|row| u64::from(row.synapse_count)).sum();
 
     PopulationSnapshotSummary {
-        neurons: Some(neurons_sum as f64 / count),
-        synapses: Some(synapses_sum as f64 / count),
+        neurons: neurons_sum as f64 / count,
+        synapses: synapses_sum as f64 / count,
         age_correlated_competence: compute_age_correlated_competence(rows),
     }
 }
@@ -364,12 +358,11 @@ fn compute_age_correlated_competence(
         return None;
     }
 
-    let junior_rate = junior_failed as f64 / junior_contingent as f64;
-    let senior_rate = senior_failed as f64 / senior_contingent as f64;
-
-    if senior_rate == 0.0 {
-        return None;
-    }
+    // Additive (add-one) smoothing keeps the ratio finite and symmetric:
+    // zero-failure seniors (the strongest positive-competence signal) and
+    // zero-failure juniors are both retained instead of censoring one side.
+    let junior_rate = (junior_failed + 1) as f64 / (junior_contingent + 1) as f64;
+    let senior_rate = (senior_failed + 1) as f64 / (senior_contingent + 1) as f64;
 
     Some(junior_rate / senior_rate)
 }
@@ -395,6 +388,8 @@ fn mi_from_joint(joint: &[u64; JOINT_LEN]) -> Option<f64> {
             }
         }
     }
+    let nonzero_s = p_s.iter().filter(|&&count| count > 0).count();
+    let nonzero_a = p_a.iter().filter(|&&count| count > 0).count();
 
     let n = total_obs as f64;
     let mut mi = 0.0;
@@ -411,11 +406,12 @@ fn mi_from_joint(joint: &[u64; JOINT_LEN]) -> Option<f64> {
         }
     }
 
-    let correction = if nonzero_cells > 1 {
-        (nonzero_cells as f64 - 1.0) / (2.0 * n * std::f64::consts::LN_2)
-    } else {
-        0.0
-    };
+    // Miller-Madow bias correction for MI = H(S) + H(A) - H(S,A): each
+    // entropy term gets +(K-1)/(2N), so the net ML-estimate bias to subtract
+    // is (K_joint - K_S - K_A + 1)/(2N ln 2). It can be negative, in which
+    // case the corrected estimate is raised.
+    let correction = (nonzero_cells as f64 - nonzero_s as f64 - nonzero_a as f64 + 1.0)
+        / (2.0 * n * std::f64::consts::LN_2);
 
     Some((mi - correction).max(0.0))
 }

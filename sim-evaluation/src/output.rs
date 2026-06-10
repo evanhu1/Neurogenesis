@@ -1,11 +1,11 @@
 use crate::{
     dataset::ACTION_COUNT,
-    report::Reporter,
     types::{ComparisonSummary, EvaluationSummary, IntervalMetrics},
 };
 use anyhow::Result;
 use serde::Serialize;
-use std::fs;
+use std::fs::{self, File};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 pub(crate) fn write_summary_json<T: Serialize>(out_dir: &Path, summary: &T) -> Result<()> {
@@ -16,12 +16,48 @@ pub(crate) fn write_summary_json<T: Serialize>(out_dir: &Path, summary: &T) -> R
 }
 
 pub(crate) fn write_timeseries_csv(out_dir: &Path, rows: &[IntervalMetrics]) -> Result<()> {
-    let mut reporter = Reporter::new(out_dir)?;
-    for row in rows {
-        reporter.emit(row)?;
+    let csv_path = out_dir.join("timeseries.csv");
+    let mut csv = BufWriter::new(File::create(csv_path)?);
+    writeln!(
+        csv,
+        "tick,pop,births,deaths,food,max_generation,attack_attempt_rate,attack_success_rate,failed_action_rate,ate_pct,cons_mean,neurons,synapses,p_fwd_food,mi_sa,idle_fraction,util,generation_time,abs_td_error,age_correlated_competence"
+    )?;
+    for metrics in rows {
+        writeln!(
+            csv,
+            "{tick},{pop},{births},{deaths},{food},{max_generation},{attack_attempt_rate},{attack_success_rate},{failed_action_rate},{ate_pct},{cons_mean},{neurons},{synapses},{p_fwd_food},{mi_sa},{idle_fraction},{util},{generation_time},{abs_td_error},{age_correlated_competence}",
+            tick = metrics.tick,
+            pop = metrics.pop,
+            births = metrics.births,
+            deaths = metrics.deaths,
+            food = metrics.food,
+            max_generation = csv_opt_u64(metrics.max_generation),
+            attack_attempt_rate = csv_opt(metrics.attack_attempt_rate),
+            attack_success_rate = csv_opt(metrics.attack_success_rate),
+            failed_action_rate = csv_opt(metrics.failed_action_rate),
+            ate_pct = csv_opt(metrics.ate_pct),
+            cons_mean = csv_opt(metrics.cons_mean),
+            neurons = csv_opt(metrics.neurons),
+            synapses = csv_opt(metrics.synapses),
+            p_fwd_food = csv_opt(metrics.p_fwd_food),
+            mi_sa = csv_opt(metrics.mi_sa),
+            idle_fraction = csv_opt(metrics.idle_fraction),
+            util = csv_opt(metrics.util),
+            generation_time = csv_opt(metrics.generation_time),
+            abs_td_error = csv_opt(metrics.abs_td_error),
+            age_correlated_competence = csv_opt(metrics.age_correlated_competence),
+        )?;
     }
-    reporter.flush()?;
+    csv.flush()?;
     Ok(())
+}
+
+fn csv_opt(value: Option<f64>) -> String {
+    value.map(|v| v.to_string()).unwrap_or_default()
+}
+
+fn csv_opt_u64(value: Option<u64>) -> String {
+    value.map(|v| v.to_string()).unwrap_or_default()
 }
 
 pub(crate) fn default_output_dir(seeds: &[u64]) -> PathBuf {
@@ -197,7 +233,7 @@ fn seed_slug(seeds: &[u64]) -> String {
     }
 }
 
-fn fmt_option(value: Option<f64>, decimals: usize) -> String {
+pub(crate) fn fmt_option(value: Option<f64>, decimals: usize) -> String {
     value
         .map(|value| format!("{value:.decimals$}"))
         .unwrap_or_else(|| "NA".to_owned())

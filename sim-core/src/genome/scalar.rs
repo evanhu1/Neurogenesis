@@ -5,10 +5,9 @@ pub(crate) fn mutate_random_neuron_location<R: Rng + ?Sized>(
     rng: &mut R,
 ) {
     let enabled_inter = genome.topology.num_neurons as usize;
+    // SENSORY_COUNT and ACTION_COUNT are nonzero compile-time constants, so
+    // `total` is always positive and the range below is never empty.
     let total = SENSORY_COUNT as usize + enabled_inter + ACTION_COUNT;
-    if total == 0 {
-        return;
-    }
 
     let idx = rng.random_range(0..total);
     let location = if idx < SENSORY_COUNT as usize {
@@ -17,12 +16,12 @@ pub(crate) fn mutate_random_neuron_location<R: Rng + ?Sized>(
         genome
             .brain
             .inter_locations
-            .get_mut(idx.saturating_sub(SENSORY_COUNT as usize))
+            .get_mut(idx - SENSORY_COUNT as usize)
     } else {
         genome
             .brain
             .action_locations
-            .get_mut(idx.saturating_sub(SENSORY_COUNT as usize + enabled_inter))
+            .get_mut(idx - SENSORY_COUNT as usize - enabled_inter)
     };
 
     if let Some(location) = location {

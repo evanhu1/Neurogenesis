@@ -1,5 +1,7 @@
 use crate::brain::express_genome;
-use crate::genome::{generate_seed_genome, mutate_genome};
+use crate::genome::{
+    generate_seed_genome, mutate_genome, MAX_MUTATED_VISION_DISTANCE, MIN_MUTATED_VISION_DISTANCE,
+};
 use crate::grid::{opposite_direction, world_capacity};
 use crate::Simulation;
 use rand::seq::SliceRandom;
@@ -11,11 +13,10 @@ use sim_types::{
 
 mod food;
 mod organisms;
-mod world;
+pub(crate) mod world;
 
-const NO_REGROWTH_SCHEDULED: u64 = u64::MAX;
+pub(crate) const NO_REGROWTH_SCHEDULED: u64 = u64::MAX;
 
-#[derive(Clone)]
 pub(crate) struct ReproductionSpawn {
     pub(crate) parent_genome: OrganismGenome,
     pub(crate) parent_generation: u64,
@@ -26,26 +27,20 @@ pub(crate) struct ReproductionSpawn {
     pub(crate) r: i32,
 }
 
-#[derive(Clone)]
 pub(crate) struct PeriodicInjectionSpawn {
     pub(crate) q: i32,
     pub(crate) r: i32,
 }
 
-#[derive(Clone)]
-pub(crate) enum SpawnRequestKind {
+pub(crate) enum SpawnRequest {
     Reproduction(Box<ReproductionSpawn>),
     PeriodicInjection(PeriodicInjectionSpawn),
 }
 
-#[derive(Clone)]
-pub(crate) struct SpawnRequest {
-    pub(crate) kind: SpawnRequestKind,
-}
-
-#[derive(Clone, Copy)]
 struct OrganismSpawnParams {
-    species_id: SpeciesId,
+    /// Inherited species ID; `None` marks a founder, whose species ID is
+    /// derived from its own organism ID inside `build_organism`.
+    species_id: Option<SpeciesId>,
     q: i32,
     r: i32,
     generation: u64,
@@ -55,19 +50,9 @@ struct OrganismSpawnParams {
 
 impl SpawnRequest {
     fn target_position(&self) -> (i32, i32) {
-        self.kind.target_position()
-    }
-}
-
-impl SpawnRequestKind {
-    fn target_position(&self) -> (i32, i32) {
         match self {
             Self::Reproduction(spawn) => (spawn.q, spawn.r),
             Self::PeriodicInjection(spawn) => (spawn.q, spawn.r),
         }
     }
-}
-
-fn founder_species_id(id: OrganismId) -> SpeciesId {
-    SpeciesId(id.0)
 }

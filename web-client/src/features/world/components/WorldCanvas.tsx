@@ -13,14 +13,12 @@ import {
   pickOrganismAtCanvasPoint,
   renderWorld,
 } from '../worldCanvas';
-import { unwrapId } from '../../../protocol';
 import type { WorldOrganismState, WorldSnapshot } from '../../../types';
 import { useWorldViewport } from '../hooks/useWorldViewport';
 
 type WorldCanvasProps = {
   snapshot: WorldSnapshot | null;
   focusedOrganismId: number | null;
-  showFastOverlay?: boolean;
   onOrganismSelect: (organism: WorldOrganismState) => void;
   panToHexRef?: RefObject<((q: number, r: number) => void) | null>;
 };
@@ -28,7 +26,6 @@ type WorldCanvasProps = {
 export function WorldCanvas({
   snapshot,
   focusedOrganismId,
-  showFastOverlay = false,
   onOrganismSelect,
   panToHexRef,
 }: WorldCanvasProps) {
@@ -153,7 +150,7 @@ export function WorldCanvas({
     if (!snapshot || focusedOrganismId == null) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const org = snapshot.organisms.find((o) => unwrapId(o.id) === focusedOrganismId);
+    const org = snapshot.organisms.find((o) => o.id === focusedOrganismId);
     if (!org) return;
     const layout = buildHexLayout(canvas.width, canvas.height, snapshot.config.world_width);
     const center = hexCenter(layout, org.q, org.r);
@@ -164,7 +161,6 @@ export function WorldCanvas({
     (evt: MouseEvent<HTMLCanvasElement>) => {
       if (consumeSuppressedClick()) return;
       if (isSpacePressed) return;
-      if (showFastOverlay) return;
       if (!showOrganismsRef.current) return;
 
       const activeSnapshot = snapshotRef.current;
@@ -184,9 +180,9 @@ export function WorldCanvas({
         viewportRef.current,
       );
       if (!picked) return;
-      onOrganismSelectRef.current(picked.organism);
+      onOrganismSelectRef.current(picked);
     },
-    [consumeSuppressedClick, isSpacePressed, showFastOverlay, viewportRef],
+    [consumeSuppressedClick, isSpacePressed, viewportRef],
   );
 
   useEffect(() => {
@@ -252,48 +248,40 @@ export function WorldCanvas({
         id="world-canvas"
         width={900}
         height={900}
-        className={`block h-full w-full max-h-full max-w-full shrink-0 select-none bg-surface ${cursorClass}`}
+        className={`block h-full w-full max-h-full max-w-full shrink-0 select-none bg-transparent ${cursorClass}`}
       />
 
-      <div className="absolute bottom-3 left-3 z-10 rounded bg-panel/85 px-2.5 py-1.5 shadow-panel backdrop-blur-sm">
-        <div className="text-[10px] font-semibold uppercase tracking-wide text-ink/50">Visibility</div>
-        <label className="mt-1 flex cursor-pointer items-center gap-2 text-xs text-ink">
-          <input
-            type="checkbox"
-            checked={showOrganisms}
-            onChange={(evt) => setShowOrganisms(evt.target.checked)}
-            className="h-3.5 w-3.5 rounded border-accent/40 text-accent focus:ring-accent/30"
-          />
-          <span>Organisms</span>
-        </label>
-        <label className="mt-1 flex cursor-pointer items-center gap-2 text-xs text-ink">
-          <input
-            type="checkbox"
-            checked={showPlants}
-            onChange={(evt) => setShowPlants(evt.target.checked)}
-            className="h-3.5 w-3.5 rounded border-accent/40 text-accent focus:ring-accent/30"
-          />
-          <span>Plants</span>
-        </label>
+      <div className="absolute bottom-3 left-3 z-10 flex gap-1 rounded-full border border-white/10 bg-panel/80 p-1 backdrop-blur-sm">
+        <LayerToggle label="Organisms" checked={showOrganisms} onChange={setShowOrganisms} />
+        <LayerToggle label="Plants" checked={showPlants} onChange={setShowPlants} />
       </div>
 
-      {showFastOverlay ? (
-        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-slate-950/42 backdrop-blur-[1px]">
-          <div className="flex flex-col items-center gap-3 rounded-2xl border border-white/15 bg-slate-950/45 px-6 py-5 text-white shadow-2xl">
-            <svg
-              aria-hidden="true"
-              viewBox="0 0 24 24"
-              className="h-12 w-12 fill-current opacity-95"
-            >
-              <path d="M4 5.5v13l8-6.5-8-6.5Z" />
-              <path d="M12 5.5v13l8-6.5-8-6.5Z" />
-            </svg>
-            <div className="text-xs font-semibold uppercase tracking-[0.28em] text-white/80">
-              Fast Run
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <div className="pointer-events-none absolute bottom-3 right-3 z-10 hidden rounded-full border border-white/5 bg-panel/60 px-3 py-1 text-[10px] text-ink/40 backdrop-blur-sm md:block">
+        Scroll to zoom · Space + drag to pan · Click an organism to inspect
+      </div>
     </div>
+  );
+}
+
+function LayerToggle({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      aria-pressed={checked}
+      className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition ${
+        checked ? 'bg-accent/20 text-accent' : 'text-ink/40 hover:text-ink/70'
+      }`}
+    >
+      {label}
+    </button>
   );
 }

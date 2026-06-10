@@ -52,6 +52,22 @@ impl ActionType {
         ActionType::Reproduce,
     ];
 
+    /// Stable per-action index used by dataset encodings and histograms:
+    /// declaration order including `Idle` (`0..=6`).
+    pub const fn index(self) -> usize {
+        self as usize
+    }
+
+    /// Whether this action is contingent on world state and can therefore
+    /// fail. Single source of truth for both the sim's `ActionRecord`
+    /// initialization and evaluation failure counting.
+    pub const fn can_fail(self) -> bool {
+        matches!(
+            self,
+            ActionType::Forward | ActionType::Eat | ActionType::Attack | ActionType::Reproduce
+        )
+    }
+
     pub fn neuron_id(self) -> Option<NeuronId> {
         let idx = Self::ALL.iter().position(|candidate| *candidate == self)?;
         Some(NeuronId(ACTION_NEURON_ID_BASE + idx as u32))
@@ -70,7 +86,6 @@ pub struct ActionRecord {
     pub selected_action: ActionType,
     pub action_failed: bool,
     pub food_visible: [bool; SensoryReceptor::VISION_RAY_OFFSETS.len()],
-    pub damage_taken_last_turn: f32,
     pub age_turns: u64,
     pub utilization: f32,
     pub consumptions_count: u64,
@@ -140,6 +155,7 @@ pub struct VisualProperties {
     pub g: f32,
     pub b: f32,
     pub opacity: f32,
+    pub shape: f32,
 }
 
 impl VisualProperties {
@@ -149,6 +165,7 @@ impl VisualProperties {
             g: self.g.clamp(0.0, 1.0),
             b: self.b.clamp(0.0, 1.0),
             opacity: self.opacity.clamp(0.0, 1.0),
+            shape: self.shape.clamp(0.0, 1.0),
         }
     }
 }
@@ -203,13 +220,15 @@ pub enum VisionChannel {
     Red,
     Green,
     Blue,
+    Shape,
 }
 
 impl VisionChannel {
-    pub const ALL: [VisionChannel; 3] = [
+    pub const ALL: [VisionChannel; 4] = [
         VisionChannel::Red,
         VisionChannel::Green,
         VisionChannel::Blue,
+        VisionChannel::Shape,
     ];
 }
 
@@ -278,7 +297,7 @@ mod tests {
     #[test]
     fn sensory_receptors_include_forward_rgb_plus_scalar_sensors() {
         let receptors = SensoryReceptor::ordered().collect::<Vec<_>>();
-        assert_eq!(receptors.len(), 15);
+        assert_eq!(receptors.len(), 18);
         assert_eq!(
             receptors,
             vec![
@@ -295,6 +314,10 @@ mod tests {
                     channel: VisionChannel::Blue,
                 },
                 SensoryReceptor::VisionRay {
+                    ray_offset: -1,
+                    channel: VisionChannel::Shape,
+                },
+                SensoryReceptor::VisionRay {
                     ray_offset: 0,
                     channel: VisionChannel::Red,
                 },
@@ -307,6 +330,10 @@ mod tests {
                     channel: VisionChannel::Blue,
                 },
                 SensoryReceptor::VisionRay {
+                    ray_offset: 0,
+                    channel: VisionChannel::Shape,
+                },
+                SensoryReceptor::VisionRay {
                     ray_offset: 1,
                     channel: VisionChannel::Red,
                 },
@@ -317,6 +344,10 @@ mod tests {
                 SensoryReceptor::VisionRay {
                     ray_offset: 1,
                     channel: VisionChannel::Blue,
+                },
+                SensoryReceptor::VisionRay {
+                    ray_offset: 1,
+                    channel: VisionChannel::Shape,
                 },
                 SensoryReceptor::ContactAhead,
                 SensoryReceptor::Energy,
@@ -410,6 +441,10 @@ pub struct MutationRateGenes {
     pub remove_neuron: f32,
     #[serde(default)]
     pub add_neuron_split_edge: f32,
+    #[serde(default)]
+    pub spatial_prior_sigma: f32,
+    #[serde(default)]
+    pub max_weight_delta_per_tick: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -421,8 +456,22 @@ pub struct BrainTopology {
     pub action_locations: Vec<BrainLocation>,
     #[serde(default)]
     pub action_biases: Vec<f32>,
-    pub edges: Vec<SynapseEdge>,
+    pub edges: Vec<SynapseGene>,
 }
+
+pub const REWARD_WEIGHT_COUNT: usize = 7;
+
+// Ordered to match the `RewardLedger` fields in sim-core:
+// [energy_level, energy_delta_gain, energy_delta_loss,
+//  health_level, health_delta_gain, health_delta_loss,
+//  contingent_action_wasted].
+// energy_level starts at 0 (absolute energy is a predictor, not a goal on its
+// own) while health_level starts at +1 (higher health is always rewarded).
+// contingent_action_wasted fires on failed Forward/Eat/Attack/Reproduce —
+// negative default since "did a thing, the thing did nothing" is objectively
+// wasted effort.
+pub const DEFAULT_REWARD_WEIGHTS: [f32; REWARD_WEIGHT_COUNT] =
+    [0.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OrganismGenome {
@@ -477,9 +526,19 @@ impl OrganismGenome {
                 action_biases: vec![0.0; action_count],
                 edges: Vec::new(),
             },
-            reward_weights: Vec::new(),
+            reward_weights: DEFAULT_REWARD_WEIGHTS.to_vec(),
         }
     }
+}
+
+/// Heritable synapse gene: pure wiring + weight. Runtime plasticity state
+/// (eligibility, pending coactivation) lives only on the expressed
+/// [`SynapseEdge`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct SynapseGene {
+    pub pre_neuron_id: NeuronId,
+    pub post_neuron_id: NeuronId,
+    pub weight: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -506,7 +565,9 @@ fn default_gestation_ticks() -> u8 {
 }
 
 fn default_max_organism_age() -> u32 {
-    u32::MAX
+    // Finite lifespan cap matching the mutation clamp in sim-core
+    // (`MAX_MUTATED_MAX_ORGANISM_AGE`); seeds are no longer immortal.
+    100_000
 }
 
 fn default_juvenile_eta_scale() -> f32 {
@@ -525,7 +586,6 @@ pub struct NeuronState {
     pub x: f32,
     pub y: f32,
     pub activation: f32,
-    pub parent_ids: Vec<NeuronId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -534,6 +594,11 @@ pub struct SensoryNeuronState {
     #[serde(flatten)]
     pub receptor: SensoryReceptor,
     pub synapses: Vec<SynapseEdge>,
+    /// Cached index of the first action-targeting edge in `synapses` (which
+    /// stay sorted by post neuron ID). Maintained by
+    /// `refresh_action_synapse_starts_and_count` at birth and after pruning.
+    #[serde(default, skip)]
+    pub action_synapse_start: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -553,7 +618,6 @@ pub struct ActionNeuronState {
     pub x: f32,
     pub y: f32,
     pub logit: f32,
-    pub parent_ids: Vec<NeuronId>,
     pub action_type: ActionType,
 }
 
@@ -564,23 +628,25 @@ pub struct BrainState {
     pub action: Vec<ActionNeuronState>,
     pub synapse_count: u32,
     /// Linear actor-critic value head over the concatenated sensory + inter
-    /// activations. Weights index `sensory` first, then `inter`. Length matches
-    /// `sensory.len() + inter.len()` after genome expression. Empty during
-    /// legacy deserialization; plasticity resizes to match the current feature
-    /// vector so mismatches cannot panic.
+    /// activations. Weights index `sensory` first, then `inter`. Every live
+    /// brain comes from genome expression, which sizes this to exactly
+    /// `sensory.len() + inter.len()`; neuron counts never change after birth,
+    /// so the length is invariant for the organism's lifetime.
     #[serde(default)]
     pub value_weights: Vec<f32>,
     /// Per-sensory-neuron EMA of activation used to center pending
     /// coactivations (covariance rule). Length tracks `sensory.len()`.
     #[serde(skip)]
     pub sensory_mean_activation: Vec<f32>,
-    #[serde(skip)]
-    pub sensory_mean_initialized: Vec<bool>,
     /// Per-inter-neuron EMA of activation. Length tracks `inter.len()`.
     #[serde(skip)]
     pub inter_mean_activation: Vec<f32>,
+    /// True once the activation means have been bootstrapped to the live
+    /// activations on the brain's first plasticity pass. Neurons are never
+    /// added or removed after birth, so every mean initializes on the same
+    /// tick and one flag covers the whole brain.
     #[serde(skip)]
-    pub inter_mean_initialized: Vec<bool>,
+    pub means_initialized: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -602,14 +668,28 @@ pub struct OrganismState {
     pub energy_prev: f32,
     #[serde(default)]
     pub health_prev: f32,
+    /// Energy stash captured at sensing time so the EnergyDelta sensor reads a
+    /// sensing-to-sensing delta (spanning eat/attack/action-cost changes),
+    /// independent of `energy_prev`, which feeds the reward ledger and is
+    /// rolled forward at the end of every tick.
+    #[serde(default)]
+    pub energy_at_last_sensing: f32,
     #[serde(default)]
     pub dopamine: f32,
-    /// Previous-tick value estimate V(s_{t-1}); used to form TD-error dopamine.
+    /// Most recent value estimate V(s); wire-visible readout for the
+    /// inspector. The TD error recomputes V(s_{t-1}) from
+    /// `value_prev_feature_activations` under the current weights instead of
+    /// reusing this cached value.
     #[serde(default)]
     pub value_prev: f32,
-    /// Previous-tick concatenated sensory + inter activations that produced
-    /// `value_prev`; used as the feature vector for the value head's local
-    /// gradient update.
+    /// Previous-tick raw reward r_{t-1} (result of the action chosen in
+    /// s_{t-1}); pairs with the previous tick's eligibility so the TD error
+    /// credits the transition that produced the reward.
+    #[serde(default)]
+    pub reward_prev: f32,
+    /// Previous-tick concatenated sensory + inter activations; used to
+    /// recompute V(s_{t-1}) under the current weights and as the feature
+    /// vector for the value head's local gradient update.
     #[serde(default)]
     pub value_prev_feature_activations: Vec<f32>,
     #[serde(default)]
@@ -674,8 +754,10 @@ impl OrganismState {
             max_health,
             energy_prev,
             health_prev: health,
+            energy_at_last_sensing: energy,
             dopamine,
             value_prev: 0.0,
+            reward_prev: 0.0,
             value_prev_feature_activations: Vec::new(),
             damage_taken_last_turn,
             contingent_action_wasted_last_turn: false,
@@ -720,6 +802,7 @@ pub struct MetricsSnapshot {
     pub total_consumptions: u64,
     pub reproductions_last_turn: u64,
     pub starvations_last_turn: u64,
+    pub age_deaths_last_turn: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -730,7 +813,6 @@ pub struct WorldSnapshot {
     pub organisms: Vec<OrganismState>,
     pub foods: Vec<FoodState>,
     pub terrain: Vec<TerrainCell>,
-    pub occupancy: Vec<OccupancyCell>,
     pub metrics: MetricsSnapshot,
 }
 
@@ -740,13 +822,6 @@ pub enum Occupant {
     Organism(OrganismId),
     Food(FoodId),
     Wall,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub struct OccupancyCell {
-    pub q: i32,
-    pub r: i32,
-    pub occupant: Occupant,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -789,12 +864,21 @@ pub struct TickDelta {
     pub metrics: MetricsSnapshot,
 }
 
+pub const ORGANISM_SHAPE: f32 = 0.2;
+pub const PLANT_SHAPE: f32 = 0.4;
+pub const CORPSE_SHAPE: f32 = 0.6;
+pub const SPIKE_SHAPE: f32 = 0.8;
+pub const MOUNTAIN_SHAPE: f32 = 1.0;
+
+pub const SPIKE_VISION_OPACITY: f32 = 0.25;
+
 pub fn organism_visual(color: RgbColor) -> VisualProperties {
     VisualProperties {
         r: color.r,
         g: color.g,
         b: color.b,
         opacity: ORGANISM_VISUAL_OPACITY,
+        shape: ORGANISM_SHAPE,
     }
     .clamped()
 }
@@ -806,12 +890,14 @@ pub fn food_visual(kind: FoodKind) -> VisualProperties {
             g: 1.0,
             b: 0.0,
             opacity: FOOD_VISUAL_OPACITY,
+            shape: PLANT_SHAPE,
         },
         FoodKind::Corpse => VisualProperties {
             r: 0.95,
             g: 0.45,
             b: 0.10,
             opacity: FOOD_VISUAL_OPACITY,
+            shape: CORPSE_SHAPE,
         },
     }
 }
@@ -822,13 +908,15 @@ pub fn terrain_visual(terrain_type: TerrainType) -> VisualProperties {
             r: 1.0,
             g: 0.0,
             b: 0.0,
-            opacity: 0.0,
+            opacity: SPIKE_VISION_OPACITY,
+            shape: SPIKE_SHAPE,
         },
         TerrainType::Mountain => VisualProperties {
             r: 0.0,
             g: 0.0,
             b: 0.0,
             opacity: 1.0,
+            shape: MOUNTAIN_SHAPE,
         },
     }
 }

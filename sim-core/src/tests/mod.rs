@@ -2,7 +2,7 @@ pub(super) use super::*;
 pub(super) use crate::brain::{make_action_neuron, make_sensory_neuron};
 pub(super) use sim_types::{
     ActionType, BrainLocation, BrainState, FacingDirection, FoodId, InterNeuronState, NeuronId,
-    NeuronState, NeuronType, Occupant, OrganismGenome, SensoryReceptor, SynapseEdge,
+    NeuronState, NeuronType, Occupant, OrganismGenome, SensoryReceptor, SynapseEdge, SynapseGene,
 };
 pub(super) use std::collections::{HashMap, HashSet};
 

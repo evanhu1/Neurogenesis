@@ -1,6 +1,6 @@
 const speciesColorCache = new Map<string, string>();
 
-export function hashSpeciesId(speciesId: string): number {
+function hashSpeciesId(speciesId: string): number {
   let hash = 2166136261;
   for (let i = 0; i < speciesId.length; i += 1) {
     hash ^= speciesId.charCodeAt(i);

@@ -15,8 +15,35 @@
 }
 
 @layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+  }
+
   ::selection {
     background: rgba(56, 189, 248, 0.25);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #2b3854 transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    border-radius: 3px;
+    background: #2b3854;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
   }
 
   input[type='range'] {
@@ -28,7 +55,7 @@
   input[type='range']::-webkit-slider-track {
     height: 3px;
     border-radius: 2px;
-    background: #334155;
+    background: #2b3854;
   }
 
   input[type='range']::-webkit-slider-thumb {
@@ -45,12 +72,4 @@
     background: #475569;
     cursor: not-allowed;
   }
-}
-
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
 }

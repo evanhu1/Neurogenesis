@@ -1,20 +1,6 @@
 use super::*;
 
 impl Simulation {
-    pub(super) fn reconcile_pending_actions(&mut self) {
-        if self.pending_actions.len() != self.organisms.len() {
-            self.pending_actions
-                .resize(self.organisms.len(), PendingActionState::default());
-        }
-    }
-
-    pub(super) fn reconcile_reward_ledgers(&mut self) {
-        if self.reward_ledgers.len() != self.organisms.len() {
-            self.reward_ledgers
-                .resize(self.organisms.len(), crate::RewardLedger::default());
-        }
-    }
-
     pub(super) fn clear_turn_transient_state(&mut self) {
         for organism in self.organisms.iter_mut() {
             organism.damage_taken_last_turn = 0.0;
@@ -29,7 +15,6 @@ impl Simulation {
     ) {
         debug_assert_eq!(removed.len(), self.organisms.len());
         debug_assert_eq!(self.pending_actions.len(), self.organisms.len());
-        debug_assert_eq!(self.reward_ledgers.len(), self.organisms.len());
         if let Some(skip) = gestation_started_this_tick.as_ref() {
             debug_assert_eq!(skip.len(), self.organisms.len());
         }
@@ -44,7 +29,6 @@ impl Simulation {
                 if write != read {
                     self.organisms.swap(write, read);
                     self.pending_actions.swap(write, read);
-                    self.reward_ledgers.swap(write, read);
                     if let Some(ref mut skip) = gestation_started_this_tick {
                         skip.swap(write, read);
                     }
@@ -54,7 +38,6 @@ impl Simulation {
         }
         self.organisms.truncate(write);
         self.pending_actions.truncate(write);
-        self.reward_ledgers.truncate(write);
         if let Some(skip) = gestation_started_this_tick {
             skip.truncate(write);
         }

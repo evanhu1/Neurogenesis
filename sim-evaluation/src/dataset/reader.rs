@@ -3,8 +3,8 @@
 //! (tens of MBs); swap for streaming iterators if runs grow large.
 
 use super::schema::{
-    ActionCountRow, GenomeSnapshotIndexRow, OrganismLifetimeRow, PopulationSnapshotRow,
-    ReproductionEventRow, TickSummaryRow,
+    ActionCountRow, OrganismLifetimeRow, PopulationSnapshotRow, ReproductionEventRow,
+    TickSummaryRow,
 };
 use anyhow::{Context, Result};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -19,11 +19,6 @@ pub struct DatasetReader {
     pub action_counts: Vec<ActionCountRow>,
     pub organism_lifetimes: Vec<OrganismLifetimeRow>,
     pub reproduction_events: Vec<ReproductionEventRow>,
-    /// Populated for ad-hoc inspection via the analyze subcommand. The
-    /// built-in analysis layer doesn't read this yet; genome snapshots are
-    /// for post-hoc tooling.
-    #[allow(dead_code)]
-    pub genome_snapshots: Vec<GenomeSnapshotIndexRow>,
 }
 
 impl DatasetReader {
@@ -34,7 +29,6 @@ impl DatasetReader {
             action_counts: load_table(root, "action_counts")?,
             organism_lifetimes: load_table(root, "organism_lifetimes")?,
             reproduction_events: load_table(root, "reproduction_events")?,
-            genome_snapshots: load_table(root, "genome_snapshots")?,
         })
     }
 }

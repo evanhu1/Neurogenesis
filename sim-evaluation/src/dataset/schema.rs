@@ -3,13 +3,12 @@
 //! so adding/removing a column means editing exactly one struct.
 
 use serde::{Deserialize, Serialize};
-use sim_types::SensoryReceptor;
+use sim_types::{ActionType, SensoryReceptor};
 
 /// Number of action variants in the joint histograms and `action_counts`
-/// table. Matches `sim_types::ActionType::ALL.len() + 1` (Idle + 6 contingent
-/// actions), and the analysis layer reshapes flat Vec<u64> histograms with
-/// this constant.
-pub const ACTION_COUNT: usize = 7;
+/// table: Idle plus every contingent action. The analysis layer reshapes
+/// flat Vec<u64> histograms with this constant.
+pub const ACTION_COUNT: usize = ActionType::ALL.len() + 1;
 
 /// How an organism first appeared in the world. The analysis layer filters to
 /// `Descendant` so that founder behaviour and periodic-injection bursts don't
@@ -100,8 +99,9 @@ pub struct ActionCountRow {
     /// `OrganismOrigin` discriminant. Pairs with `action_type` to form the
     /// row key.
     pub origin: u8,
-    /// `ActionType` encoded as its discriminant index. Kept as u8 for compact
-    /// storage; reverse map lives in `sim_types::ActionType::ALL`.
+    /// `ActionType` encoded as `sim_types::ActionType::index` — declaration
+    /// order including `Idle` (`0..ACTION_COUNT`). Kept as u8 for compact
+    /// storage.
     pub action_type: u8,
     pub count: u64,
     pub failed_count: u64,

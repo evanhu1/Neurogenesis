@@ -1,9 +1,9 @@
-export type ApiScalarId = number | { 0: number };
+// Wire (`Api*`) types mirror the Rust schema exactly (sim-types + sim-server/protocol).
+// UI types are identical except scalar ids are unwrapped to plain numbers; both views
+// are generated from shared `...Of<Id>` shapes so they cannot drift apart.
 
-export type ApiOrganismId = ApiScalarId;
-export type ApiSpeciesId = ApiScalarId;
-export type ApiFoodId = ApiScalarId;
-export type ApiNeuronId = ApiScalarId;
+/** Scalar ids may arrive as plain numbers or single-field tuple objects. */
+export type ApiScalarId = number | { 0: number };
 
 export type OrganismId = number;
 export type SpeciesId = number;
@@ -21,6 +21,7 @@ export type VisualProperties = {
   g: number;
   b: number;
   opacity: number;
+  shape: number;
 };
 
 export type ActionType =
@@ -34,7 +35,7 @@ export type ActionType =
 
 export type FoodKind = 'Plant' | 'Corpse';
 export type TerrainType = 'Spikes' | 'Mountain';
-export type VisionChannel = 'Red' | 'Green' | 'Blue';
+export type VisionChannel = 'Red' | 'Green' | 'Blue' | 'Shape';
 
 export type NeuronType = 'Sensory' | 'Inter' | 'Action';
 
@@ -45,8 +46,6 @@ export type FacingDirection =
   | 'West'
   | 'SouthWest'
   | 'SouthEast';
-
-export type EntityType = 'Food' | 'Organism' | 'Wall' | 'Spikes';
 
 export type TopologyGenes = {
   num_neurons: number;
@@ -75,6 +74,8 @@ export type MutationRateGenes = {
   gestation_ticks: number;
   max_organism_age: number;
   vision_distance: number;
+  hebb_eta_gain: number;
+  juvenile_eta_scale: number;
   inter_bias: number;
   inter_update_rate: number;
   eligibility_retention: number;
@@ -85,10 +86,12 @@ export type MutationRateGenes = {
   remove_synapse: number;
   remove_neuron: number;
   add_neuron_split_edge: number;
+  spatial_prior_sigma: number;
+  max_weight_delta_per_tick: number;
 };
 
 // SeedGenomeConfig wire format stays flat (Rust SeedGenomeConfig is not nested).
-type GenomeCoreParams = {
+export type SeedGenomeConfig = {
   num_neurons: number;
   num_synapses: number;
   spatial_prior_sigma: number;
@@ -102,13 +105,12 @@ type GenomeCoreParams = {
   eligibility_retention: number;
   max_weight_delta_per_tick: number;
   synapse_prune_threshold: number;
-};
-
-type GenomeMutationRateParams = {
   mutation_rate_age_of_maturity: number;
   mutation_rate_gestation_ticks: number;
   mutation_rate_max_organism_age: number;
   mutation_rate_vision_distance: number;
+  mutation_rate_hebb_eta_gain: number;
+  mutation_rate_juvenile_eta_scale: number;
   mutation_rate_inter_bias: number;
   mutation_rate_inter_update_rate: number;
   mutation_rate_eligibility_retention: number;
@@ -117,13 +119,11 @@ type GenomeMutationRateParams = {
   mutation_rate_synapse_weight_perturbation: number;
   mutation_rate_add_synapse: number;
   mutation_rate_remove_synapse: number;
+  mutation_rate_remove_neuron: number;
   mutation_rate_add_neuron_split_edge: number;
+  mutation_rate_spatial_prior_sigma: number;
+  mutation_rate_max_weight_delta_per_tick: number;
 };
-
-export type GenomeHyperparams = GenomeCoreParams & GenomeMutationRateParams;
-
-export type SeedGenomeConfig = GenomeHyperparams;
-export type ApiSeedGenomeConfig = GenomeHyperparams;
 
 export type WorldConfig = {
   world_width: number;
@@ -132,6 +132,7 @@ export type WorldConfig = {
   periodic_injection_count: number;
   food_energy: number;
   passive_metabolism_cost_per_unit: number;
+  body_mass_metabolic_cost_coeff: number;
   move_action_energy_cost: number;
   action_temperature: number;
   food_regrowth_interval: number;
@@ -151,151 +152,108 @@ export type BrainLocation = {
   y: number;
 };
 
-export type ApiSynapseEdge = {
-  pre_neuron_id: ApiNeuronId;
-  post_neuron_id: ApiNeuronId;
+type SynapseEdgeOf<Id> = {
+  pre_neuron_id: Id;
+  post_neuron_id: Id;
   weight: number;
   eligibility: number;
 };
 
-export type SynapseEdge = {
-  pre_neuron_id: NeuronId;
-  post_neuron_id: NeuronId;
+export type ApiSynapseEdge = SynapseEdgeOf<ApiScalarId>;
+export type SynapseEdge = SynapseEdgeOf<NeuronId>;
+
+// Heritable synapse gene: wiring + weight only (no runtime plasticity state).
+type SynapseGeneOf<Id> = {
+  pre_neuron_id: Id;
+  post_neuron_id: Id;
   weight: number;
-  eligibility: number;
 };
 
-export type BrainTopologyGenes<TEdge> = {
+export type ApiSynapseGene = SynapseGeneOf<ApiScalarId>;
+export type SynapseGene = SynapseGeneOf<NeuronId>;
+
+type BrainTopologyGenesOf<Id> = {
   inter_biases: number[];
   inter_log_time_constants: number[];
   sensory_locations: BrainLocation[];
   inter_locations: BrainLocation[];
   action_locations: BrainLocation[];
   action_biases: number[];
-  edges: TEdge[];
+  edges: SynapseGeneOf<Id>[];
 };
 
-export type ApiOrganismGenome = {
+type OrganismGenomeOf<Id> = {
   topology: TopologyGenes;
   lifecycle: LifecycleGenes;
   plasticity: PlasticityGenes;
   mutation_rates: MutationRateGenes;
-  brain: BrainTopologyGenes<ApiSynapseEdge>;
+  brain: BrainTopologyGenesOf<Id>;
   reward_weights: number[];
 };
 
-export type OrganismGenome = {
-  topology: TopologyGenes;
-  lifecycle: LifecycleGenes;
-  plasticity: PlasticityGenes;
-  mutation_rates: MutationRateGenes;
-  brain: BrainTopologyGenes<SynapseEdge>;
-  reward_weights: number[];
-};
+export type ApiOrganismGenome = OrganismGenomeOf<ApiScalarId>;
+export type OrganismGenome = OrganismGenomeOf<NeuronId>;
 
-export type ApiNeuronState = {
-  neuron_id: ApiNeuronId;
+type NeuronStateOf<Id> = {
+  neuron_id: Id;
   neuron_type: NeuronType;
   bias: number;
   x: number;
   y: number;
   activation: number;
-  parent_ids: ApiNeuronId[];
 };
 
-export type NeuronState = {
-  neuron_id: NeuronId;
-  neuron_type: NeuronType;
-  bias: number;
-  x: number;
-  y: number;
-  activation: number;
-  parent_ids: NeuronId[];
-};
-
-type VisionRayReceptor = {
-  receptor_type: 'VisionRay';
-  ray_offset: number;
-  channel: VisionChannel;
-};
-
-type ContactAheadReceptor = {
-  receptor_type: 'ContactAhead';
-};
-
-type EnergyReceptor = {
-  receptor_type: 'Energy';
-};
-
-type HealthReceptor = {
-  receptor_type: 'Health';
-};
+export type ApiNeuronState = NeuronStateOf<ApiScalarId>;
+export type NeuronState = NeuronStateOf<NeuronId>;
 
 export type SensoryReceptor =
-  | VisionRayReceptor
-  | ContactAheadReceptor
-  | EnergyReceptor
-  | HealthReceptor;
+  | { receptor_type: 'VisionRay'; ray_offset: number; channel: VisionChannel }
+  | { receptor_type: 'ContactAhead' }
+  | { receptor_type: 'Energy' }
+  | { receptor_type: 'Health' };
 
-export type ApiSensoryNeuronState = {
-  neuron: ApiNeuronState;
-  synapses: ApiSynapseEdge[];
+type SensoryNeuronStateOf<Id> = {
+  neuron: NeuronStateOf<Id>;
+  synapses: SynapseEdgeOf<Id>[];
 } & SensoryReceptor;
 
-export type SensoryNeuronState = {
-  neuron: NeuronState;
-  synapses: SynapseEdge[];
-} & SensoryReceptor;
+export type ApiSensoryNeuronState = SensoryNeuronStateOf<ApiScalarId>;
+export type SensoryNeuronState = SensoryNeuronStateOf<NeuronId>;
 
-export type ApiInterNeuronState = {
-  neuron: ApiNeuronState;
+type InterNeuronStateOf<Id> = {
+  neuron: NeuronStateOf<Id>;
   alpha: number;
-  synapses: ApiSynapseEdge[];
+  synapses: SynapseEdgeOf<Id>[];
 };
 
-export type InterNeuronState = {
-  neuron: NeuronState;
-  alpha: number;
-  synapses: SynapseEdge[];
-};
+export type ApiInterNeuronState = InterNeuronStateOf<ApiScalarId>;
+export type InterNeuronState = InterNeuronStateOf<NeuronId>;
 
-export type ApiActionNeuronState = {
-  neuron_id: ApiNeuronId;
+type ActionNeuronStateOf<Id> = {
+  neuron_id: Id;
   x: number;
   y: number;
   logit: number;
-  parent_ids: ApiNeuronId[];
   action_type: ActionType;
 };
 
-export type ActionNeuronState = {
-  neuron_id: NeuronId;
-  x: number;
-  y: number;
-  logit: number;
-  parent_ids: NeuronId[];
-  action_type: ActionType;
-};
+export type ApiActionNeuronState = ActionNeuronStateOf<ApiScalarId>;
+export type ActionNeuronState = ActionNeuronStateOf<NeuronId>;
 
-export type ApiBrainState = {
-  sensory: ApiSensoryNeuronState[];
-  inter: ApiInterNeuronState[];
-  action: ApiActionNeuronState[];
+type BrainStateOf<Id> = {
+  sensory: SensoryNeuronStateOf<Id>[];
+  inter: InterNeuronStateOf<Id>[];
+  action: ActionNeuronStateOf<Id>[];
   synapse_count: number;
   value_weights: number[];
 };
 
-export type BrainState = {
-  sensory: SensoryNeuronState[];
-  inter: InterNeuronState[];
-  action: ActionNeuronState[];
-  synapse_count: number;
-  value_weights: number[];
-};
+export type ApiBrainState = BrainStateOf<ApiScalarId>;
+export type BrainState = BrainStateOf<NeuronId>;
 
-export type ApiOrganismState = {
-  id: ApiOrganismId;
-  species_id: ApiSpeciesId;
+type OrganismStateOf<Id> = {
+  id: Id;
+  species_id: Id;
   q: number;
   r: number;
   generation: number;
@@ -306,8 +264,10 @@ export type ApiOrganismState = {
   max_health: number;
   energy_prev: number;
   health_prev: number;
+  energy_at_last_sensing: number;
   dopamine: number;
   value_prev: number;
+  reward_prev: number;
   damage_taken_last_turn: number;
   is_gestating: boolean;
   consumptions_count: number;
@@ -316,40 +276,16 @@ export type ApiOrganismState = {
   reproductions_count: number;
   last_action_taken: ActionType;
   base_metabolic_cost: number;
-  brain: ApiBrainState;
-  genome: ApiOrganismGenome;
+  brain: BrainStateOf<Id>;
+  genome: OrganismGenomeOf<Id>;
 };
 
-export type OrganismState = {
-  id: OrganismId;
-  species_id: SpeciesId;
-  q: number;
-  r: number;
-  generation: number;
-  age_turns: number;
-  facing: FacingDirection;
-  energy: number;
-  health: number;
-  max_health: number;
-  energy_prev: number;
-  health_prev: number;
-  dopamine: number;
-  value_prev: number;
-  damage_taken_last_turn: number;
-  is_gestating: boolean;
-  consumptions_count: number;
-  plant_consumptions_count: number;
-  prey_consumptions_count: number;
-  reproductions_count: number;
-  last_action_taken: ActionType;
-  base_metabolic_cost: number;
-  brain: BrainState;
-  genome: OrganismGenome;
-};
+export type ApiOrganismState = OrganismStateOf<ApiScalarId>;
+export type OrganismState = OrganismStateOf<OrganismId>;
 
-export type ApiWorldOrganismState = {
-  id: ApiOrganismId;
-  species_id: ApiSpeciesId;
+type WorldOrganismStateOf<Id> = {
+  id: Id;
+  species_id: Id;
   q: number;
   r: number;
   generation: number;
@@ -367,28 +303,11 @@ export type ApiWorldOrganismState = {
   visual: VisualProperties;
 };
 
-export type WorldOrganismState = {
-  id: OrganismId;
-  species_id: SpeciesId;
-  q: number;
-  r: number;
-  generation: number;
-  age_turns: number;
-  facing: FacingDirection;
-  energy: number;
-  health: number;
-  max_health: number;
-  damage_taken_last_turn: number;
-  is_gestating: boolean;
-  consumptions_count: number;
-  plant_consumptions_count: number;
-  prey_consumptions_count: number;
-  reproductions_count: number;
-  visual: VisualProperties;
-};
+export type ApiWorldOrganismState = WorldOrganismStateOf<ApiScalarId>;
+export type WorldOrganismState = WorldOrganismStateOf<OrganismId>;
 
-export type ApiFoodState = {
-  id: ApiFoodId;
+type FoodStateOf<Id> = {
+  id: Id;
   q: number;
   r: number;
   energy: number;
@@ -396,14 +315,8 @@ export type ApiFoodState = {
   visual: VisualProperties;
 };
 
-export type FoodState = {
-  id: FoodId;
-  q: number;
-  r: number;
-  energy: number;
-  kind: FoodKind;
-  visual: VisualProperties;
-};
+export type ApiFoodState = FoodStateOf<ApiScalarId>;
+export type FoodState = FoodStateOf<FoodId>;
 
 export type ApiMetricsSnapshot = {
   turns: number;
@@ -415,6 +328,7 @@ export type ApiMetricsSnapshot = {
   total_consumptions: number;
   reproductions_last_turn: number;
   starvations_last_turn: number;
+  age_deaths_last_turn: number;
 };
 
 export type MetricsSnapshot = ApiMetricsSnapshot & {
@@ -424,41 +338,14 @@ export type MetricsSnapshot = ApiMetricsSnapshot & {
 
 export type StreamMode = 'full' | 'metrics_only';
 
-export type ApiOccupant =
-  | { type: 'Organism'; id: ApiOrganismId }
-  | { type: 'Food'; id: ApiFoodId }
-  | { type: 'Wall' };
-
-export type Occupant =
-  | { type: 'Organism'; id: OrganismId }
-  | { type: 'Food'; id: FoodId }
-  | { type: 'Wall' };
-
-export type ApiOccupancyCell = {
-  q: number;
-  r: number;
-  occupant: ApiOccupant;
-};
-
-export type OccupancyCell = {
-  q: number;
-  r: number;
-  occupant: Occupant;
-};
-
-export type ApiTerrainCell = {
-  q: number;
-  r: number;
-  terrain_type: TerrainType;
-  visual: VisualProperties;
-};
-
 export type TerrainCell = {
   q: number;
   r: number;
   terrain_type: TerrainType;
   visual: VisualProperties;
 };
+
+export type ApiTerrainCell = TerrainCell;
 
 export type ApiWorldSnapshot = {
   turn: number;
@@ -467,7 +354,6 @@ export type ApiWorldSnapshot = {
   organisms: ApiWorldOrganismState[];
   foods: ApiFoodState[];
   terrain: ApiTerrainCell[];
-  occupancy: ApiOccupancyCell[];
   metrics: ApiMetricsSnapshot;
 };
 
@@ -478,7 +364,6 @@ export type WorldSnapshot = {
   organisms: WorldOrganismState[];
   foods: FoodState[];
   terrain: TerrainCell[];
-  occupancy: OccupancyCell[];
   metrics: MetricsSnapshot;
 };
 
@@ -503,8 +388,8 @@ export type CreateSessionResponse = {
   snapshot: WorldSnapshot;
 };
 
-export type ApiChampionPoolEntry = {
-  genome: ApiOrganismGenome;
+type ChampionPoolEntryOf<Id> = {
+  genome: OrganismGenomeOf<Id>;
   source_turn: number;
   source_created_at_unix_ms: number;
   generation: number;
@@ -514,16 +399,8 @@ export type ApiChampionPoolEntry = {
   energy: number;
 };
 
-export type ChampionPoolEntry = {
-  genome: OrganismGenome;
-  source_turn: number;
-  source_created_at_unix_ms: number;
-  generation: number;
-  age_turns: number;
-  reproductions_count: number;
-  consumptions_count: number;
-  energy: number;
-};
+export type ApiChampionPoolEntry = ChampionPoolEntryOf<ApiScalarId>;
+export type ChampionPoolEntry = ChampionPoolEntryOf<NeuronId>;
 
 export type ApiChampionPoolResponse = {
   entries: ApiChampionPoolEntry[];
@@ -533,55 +410,42 @@ export type ChampionPoolResponse = {
   entries: ChampionPoolEntry[];
 };
 
-export type ApiEntityId =
-  | { entity_type: 'Organism'; id: ApiOrganismId }
-  | { entity_type: 'Food'; id: ApiFoodId };
+type EntityIdOf<Id> =
+  | { entity_type: 'Organism'; id: Id }
+  | { entity_type: 'Food'; id: Id };
 
-export type EntityId =
-  | { entity_type: 'Organism'; id: OrganismId }
-  | { entity_type: 'Food'; id: FoodId };
+export type ApiEntityId = EntityIdOf<ApiScalarId>;
+export type EntityId = EntityIdOf<number>;
 
 export type ReproductionFailureCause = 'BlockedBirth' | 'ParentDied';
 
 export type ApiReproductionEvent = {
-  parent_id: ApiOrganismId;
-  parent_species_id: ApiSpeciesId;
+  parent_id: ApiScalarId;
+  parent_species_id: ApiScalarId;
   parent_age_turns: number;
   parent_generation: number;
   investment_energy: number;
   parent_energy_after_event: number;
-  child_id: ApiOrganismId | null;
+  child_id: ApiScalarId | null;
   failure_cause: ReproductionFailureCause | null;
 };
 
-export type ReproductionEvent = {
-  parent_id: OrganismId;
-  parent_species_id: SpeciesId;
-  parent_age_turns: number;
-  parent_generation: number;
-  investment_energy: number;
-  parent_energy_after_event: number;
-  child_id: OrganismId | null;
-  failure_cause: ReproductionFailureCause | null;
-};
-
-export type ApiRemovedEntityPosition = {
-  entity_id: ApiEntityId;
+type RemovedEntityPositionOf<Id> = {
+  entity_id: EntityIdOf<Id>;
   q: number;
   r: number;
 };
 
-export type RemovedEntityPosition = {
-  entity_id: EntityId;
-  q: number;
-  r: number;
-};
+export type ApiRemovedEntityPosition = RemovedEntityPositionOf<ApiScalarId>;
+export type RemovedEntityPosition = RemovedEntityPositionOf<number>;
 
-export type ApiOrganismMove = { id: ApiOrganismId; from: [number, number]; to: [number, number] };
-export type ApiOrganismFacing = { id: ApiOrganismId; facing: FacingDirection };
+type OrganismMoveOf<Id> = { id: Id; from: [number, number]; to: [number, number] };
+type OrganismFacingOf<Id> = { id: Id; facing: FacingDirection };
 
-export type OrganismMove = { id: OrganismId; from: [number, number]; to: [number, number] };
-export type OrganismFacing = { id: OrganismId; facing: FacingDirection };
+export type ApiOrganismMove = OrganismMoveOf<ApiScalarId>;
+export type ApiOrganismFacing = OrganismFacingOf<ApiScalarId>;
+export type OrganismMove = OrganismMoveOf<OrganismId>;
+export type OrganismFacing = OrganismFacingOf<OrganismId>;
 
 export type ApiTickDelta = {
   turn: number;
@@ -594,15 +458,17 @@ export type ApiTickDelta = {
   metrics: ApiMetricsSnapshot;
 };
 
+// UI tick delta: reproduction_events are never read by the client, so
+// normalization drops them; metrics stay raw until applyTickDelta derives
+// species counts from the updated organism list.
 export type TickDelta = {
   turn: number;
   moves: OrganismMove[];
   facing_updates: OrganismFacing[];
   removed_positions: RemovedEntityPosition[];
   spawned: WorldOrganismState[];
-  reproduction_events: ReproductionEvent[];
   food_spawned: FoodState[];
-  metrics: MetricsSnapshot;
+  metrics: ApiMetricsSnapshot;
 };
 
 export type ApiStepProgressData = {
@@ -623,17 +489,14 @@ export type LiveMetricsData = {
   metrics: MetricsSnapshot;
 };
 
-export type ApiFocusBrainData = {
+type FocusBrainDataOf<Id> = {
   turn: number;
-  organism: ApiOrganismState;
-  active_action_neuron_id: ApiNeuronId | null;
+  organism: OrganismStateOf<Id>;
+  active_action_neuron_id: Id | null;
 };
 
-export type FocusBrainData = {
-  turn: number;
-  organism: OrganismState;
-  active_action_neuron_id: NeuronId | null;
-};
+export type ApiFocusBrainData = FocusBrainDataOf<ApiScalarId>;
+export type FocusBrainData = FocusBrainDataOf<number>;
 
 export type ApiErrorData = {
   code: string;

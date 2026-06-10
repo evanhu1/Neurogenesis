@@ -1,5 +1,6 @@
 use super::*;
-use crate::spawn::{ReproductionSpawn, SpawnRequest, SpawnRequestKind};
+use crate::spawn::{ReproductionSpawn, SpawnRequest};
+use sim_types::TickDelta;
 
 pub(super) trait IntoEnergy {
     fn into_energy(self) -> f32;
@@ -30,7 +31,8 @@ impl IntoEnergy for f64 {
 }
 
 fn finalize_test_organism(mut organism: OrganismState) -> OrganismState {
-    crate::metabolism::refresh_organism_base_metabolic_cost(&mut organism);
+    let coeff = stable_test_config().body_mass_metabolic_cost_coeff;
+    crate::metabolism::refresh_organism_base_metabolic_cost(&mut organism, coeff);
     organism
 }
 
@@ -104,14 +106,13 @@ fn forced_brain_with_action(preferred_action: ActionType, confidence: f32) -> Br
             x: 1.0,
             y: 1.0,
             activation: confidence,
-            parent_ids: Vec::new(),
         },
         state: inter_state,
         alpha: 1.0,
         synapses: inter_synapses,
         action_synapse_start: 0,
     }];
-    let mut action: Vec<_> = ActionType::ALL
+    let action: Vec<_> = ActionType::ALL
         .iter()
         .copied()
         .enumerate()
@@ -126,9 +127,6 @@ fn forced_brain_with_action(preferred_action: ActionType, confidence: f32) -> Br
             )
         })
         .collect();
-    for action_neuron in &mut action {
-        action_neuron.parent_ids = vec![inter_id];
-    }
 
     BrainState {
         sensory,
@@ -137,9 +135,8 @@ fn forced_brain_with_action(preferred_action: ActionType, confidence: f32) -> Br
         synapse_count,
         value_weights: vec![0.0; 2],
         sensory_mean_activation: vec![0.0],
-        sensory_mean_initialized: vec![false],
         inter_mean_activation: vec![0.0],
-        inter_mean_initialized: vec![false],
+        means_initialized: false,
     }
 }
 
@@ -167,8 +164,10 @@ pub(super) fn make_single_action_organism(
         max_health: initial_energy,
         energy_prev: initial_energy,
         health_prev: initial_energy,
+        energy_at_last_sensing: initial_energy,
         dopamine: 0.0,
         value_prev: 0.0,
+        reward_prev: 0.0,
         value_prev_feature_activations: Vec::new(),
         damage_taken_last_turn: 0.0,
         contingent_action_wasted_last_turn: false,
@@ -213,8 +212,10 @@ pub(super) fn make_organism(
         max_health: initial_energy,
         energy_prev: initial_energy,
         health_prev: initial_energy,
+        energy_at_last_sensing: initial_energy,
         dopamine: 0.0,
         value_prev: 0.0,
+        reward_prev: 0.0,
         value_prev_feature_activations: Vec::new(),
         damage_taken_last_turn: 0.0,
         contingent_action_wasted_last_turn: false,
@@ -246,19 +247,17 @@ pub(super) fn reproduction_request_from_parent(
         crate::grid::opposite_direction(parent.facing),
         sim.config.world_width as i32,
     );
-    SpawnRequest {
-        kind: SpawnRequestKind::Reproduction(Box::new(ReproductionSpawn {
-            parent_genome: parent.genome.clone(),
-            parent_generation: parent.generation,
-            parent_species_id: parent.species_id,
-            parent_facing: parent.facing,
-            offspring_starting_energy: sim_types::offspring_transfer_energy(
-                parent.genome.lifecycle.gestation_ticks,
-            ),
-            q,
-            r,
-        })),
-    }
+    SpawnRequest::Reproduction(Box::new(ReproductionSpawn {
+        parent_genome: parent.genome.clone(),
+        parent_generation: parent.generation,
+        parent_species_id: parent.species_id,
+        parent_facing: parent.facing,
+        offspring_starting_energy: sim_types::offspring_transfer_energy(
+            parent.genome.lifecycle.gestation_ticks,
+        ),
+        q,
+        r,
+    }))
 }
 
 pub(super) fn reproduction_request_at(
@@ -272,24 +271,23 @@ pub(super) fn reproduction_request_at(
         .iter()
         .find(|organism| organism.id == parent_id)
         .expect("parent should exist for reproduction request");
-    SpawnRequest {
-        kind: SpawnRequestKind::Reproduction(Box::new(ReproductionSpawn {
-            parent_genome: parent.genome.clone(),
-            parent_generation: parent.generation,
-            parent_species_id: parent.species_id,
-            parent_facing: parent.facing,
-            offspring_starting_energy: sim_types::offspring_transfer_energy(
-                parent.genome.lifecycle.gestation_ticks,
-            ),
-            q,
-            r,
-        })),
-    }
+    SpawnRequest::Reproduction(Box::new(ReproductionSpawn {
+        parent_genome: parent.genome.clone(),
+        parent_generation: parent.generation,
+        parent_species_id: parent.species_id,
+        parent_facing: parent.facing,
+        offspring_starting_energy: sim_types::offspring_transfer_energy(
+            parent.genome.lifecycle.gestation_ticks,
+        ),
+        q,
+        r,
+    }))
 }
 
 pub(super) fn configure_sim(sim: &mut Simulation, mut organisms: Vec<OrganismState>) {
+    let coeff = sim.config.body_mass_metabolic_cost_coeff;
     for organism in &mut organisms {
-        crate::metabolism::refresh_organism_base_metabolic_cost(organism);
+        crate::metabolism::refresh_organism_base_metabolic_cost(organism, coeff);
     }
     organisms.sort_by_key(|organism| organism.id);
     sim.organisms = organisms;
@@ -317,15 +315,13 @@ pub(super) fn configure_sim(sim: &mut Simulation, mut organisms: Vec<OrganismSta
         sim.occupancy[idx] = Some(Occupant::Organism(organism.id));
     }
     sim.turn = 0;
-    sim.food_fertility.clear();
-    sim.food_regrowth_due_turn.clear();
-    sim.food_regrowth_schedule.clear();
+    sim.initialize_food_ecology();
     sim.metrics = MetricsSnapshot::default();
     sim.refresh_population_metrics();
 }
 
 pub(super) fn tick_once(sim: &mut Simulation) -> TickDelta {
-    sim.step_n(1).into_iter().next().expect("exactly one delta")
+    sim.tick()
 }
 
 #[allow(clippy::type_complexity)]

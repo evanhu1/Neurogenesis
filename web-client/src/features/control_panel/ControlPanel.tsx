@@ -1,124 +1,71 @@
-import { useCallback, useRef, type MutableRefObject } from 'react';
-import type {
-  ChampionPoolEntry,
-  StepProgressData,
-  StreamMode,
-  WorldOrganismState,
-  WorldSnapshot,
-} from '../../types';
-import type { SpeciesPopulationPoint } from '../sim/hooks/useSimulationSession';
+import { useCallback, useRef, type RefObject } from 'react';
+import type { SimulationSessionState } from '../sim/hooks/useSimulationSession';
 import { ChampionPoolPanel } from './ChampionPoolPanel';
 import { SessionOverviewPanel } from './SessionOverviewPanel';
 import { SimulationControlsPanel } from './SimulationControlsPanel';
 import { SpeciesPopulationChart } from './SpeciesPopulationChart';
 
 type ControlPanelProps = {
-  overview: {
-    metricsText: string;
-  };
-  species: {
-    history: SpeciesPopulationPoint[];
-    focusedSpeciesId: number | null;
-    isFastMode: boolean;
-    snapshot: WorldSnapshot | null;
-    onFocusOrganism: (organism: WorldOrganismState) => void;
-    panToHexRef: MutableRefObject<((q: number, r: number) => void) | null>;
-  };
-  championPool: {
-    entries: ChampionPoolEntry[];
-    onDeleteEntry: (index: number) => void;
-    onClearAll: () => void;
-  };
-  controls: {
-    snapshot: WorldSnapshot | null;
-    isRunning: boolean;
-    isStepPending: boolean;
-    stepProgress: StepProgressData | null;
-    speedLevelIndex: number;
-    speedLevelCount: number;
-    streamMode: StreamMode;
-    isFastMode: boolean;
-    onNewSession: (seedInput: string) => void;
-    onSaveChampions: () => void;
-    onToggleRun: () => void;
-    onToggleFastRun: () => void;
-    onSpeedLevelChange: (levelIndex: number) => void;
-    onStep: (count: number) => void;
-  };
-  errorText: string | null;
+  simulation: SimulationSessionState;
+  panToHexRef: RefObject<((q: number, r: number) => void) | null>;
 };
 
-export function ControlPanel({
-  overview,
-  species,
-  championPool,
-  controls,
-  errorText,
-}: ControlPanelProps) {
-  const speciesCycleRef = useRef<{ speciesId: string; index: number } | null>(null);
+export function ControlPanel({ simulation, panToHexRef }: ControlPanelProps) {
+  const { snapshot, isFastMode, focusOrganism } = simulation;
+  const speciesCycleRef = useRef<{ speciesId: number; index: number } | null>(null);
 
+  // Clicking a species cycles focus through its members, highest energy first.
   const onSpeciesClick = useCallback(
     (speciesId: number) => {
-      if (species.isFastMode) return;
-      if (!species.snapshot) return;
-      const candidates = species.snapshot.organisms
+      if (isFastMode || !snapshot) return;
+      const candidates = snapshot.organisms
         .filter((organism) => organism.species_id === speciesId)
         .sort((a, b) => b.energy - a.energy);
       if (candidates.length === 0) return;
 
       const previous = speciesCycleRef.current;
-      const speciesIdKey = String(speciesId);
       const index =
-        previous && previous.speciesId === speciesIdKey ? (previous.index + 1) % candidates.length : 0;
+        previous && previous.speciesId === speciesId ? (previous.index + 1) % candidates.length : 0;
 
-      speciesCycleRef.current = { speciesId: speciesIdKey, index };
+      speciesCycleRef.current = { speciesId, index };
       const organism = candidates[index];
-      species.onFocusOrganism(organism);
-      species.panToHexRef.current?.(organism.q, organism.r);
+      focusOrganism(organism);
+      panToHexRef.current?.(organism.q, organism.r);
     },
-    [species],
+    [focusOrganism, isFastMode, panToHexRef, snapshot],
   );
 
   return (
-    <aside className="h-full overflow-auto rounded-xl bg-panel p-3">
-      <SessionOverviewPanel metricsText={overview.metricsText} />
-
-      <h3 className="mt-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-ink/40">
-        Species Population
-      </h3>
-      <SpeciesPopulationChart
-        history={species.history}
-        focusedSpeciesId={species.focusedSpeciesId}
-        onSpeciesClick={onSpeciesClick}
+    <aside className="h-full overflow-auto rounded-2xl border border-white/5 bg-panel/90 p-3.5 shadow-panel backdrop-blur">
+      <SessionOverviewPanel
+        liveMetrics={simulation.liveMetrics}
+        isRunning={simulation.isRunning}
+        isFastMode={simulation.isFastMode}
       />
 
-      <SimulationControlsPanel
-        snapshot={controls.snapshot}
-        isRunning={controls.isRunning}
-        isStepPending={controls.isStepPending}
-        stepProgress={controls.stepProgress}
-        speedLevelIndex={controls.speedLevelIndex}
-        speedLevelCount={controls.speedLevelCount}
-        streamMode={controls.streamMode}
-        isFastMode={controls.isFastMode}
-        onNewSession={controls.onNewSession}
-        onSaveChampions={controls.onSaveChampions}
-        onToggleRun={controls.onToggleRun}
-        onToggleFastRun={controls.onToggleFastRun}
-        onSpeedLevelChange={controls.onSpeedLevelChange}
-        onStep={controls.onStep}
-      />
+      <div className="mt-3">
+        <h3 className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink/35">
+          Species Population
+        </h3>
+        <SpeciesPopulationChart
+          history={simulation.speciesPopulationHistory}
+          focusedSpeciesId={simulation.focusedOrganism?.species_id ?? null}
+          onSpeciesClick={onSpeciesClick}
+        />
+      </div>
 
-      {errorText ? (
-        <div className="mt-2 rounded bg-rose-500/10 px-2 py-1.5 font-mono text-[11px] text-rose-400">
-          {errorText}
+      <SimulationControlsPanel simulation={simulation} />
+
+      {simulation.errorText ? (
+        <div className="mt-3 rounded-lg border border-rose-500/20 bg-rose-500/10 px-2.5 py-1.5 font-mono text-[11px] text-rose-300">
+          {simulation.errorText}
         </div>
       ) : null}
 
       <ChampionPoolPanel
-        entries={championPool.entries}
-        onDeleteEntry={championPool.onDeleteEntry}
-        onClearAll={championPool.onClearAll}
+        entries={simulation.championPool}
+        onDeleteEntry={(index) => void simulation.deleteChampionPoolEntry(index)}
+        onClearAll={() => void simulation.clearChampionPool()}
       />
     </aside>
   );

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { findOrganism, unwrapId } from '../../../protocol';
+import { findOrganism } from '../../../protocol';
 import type {
   FocusBrainData,
   OrganismState,
@@ -12,6 +12,8 @@ import { captureError } from './captureError';
 
 export const NO_FOCUS_TURN = -1;
 
+// Focused-brain details arrive on a slower channel than world snapshots; overlay
+// the world's authoritative position/lifecycle fields so the inspector never lags.
 function mergeFocusedOrganismWithWorld(
   focused: OrganismState,
   worldOrganism: WorldOrganismState,
@@ -48,34 +50,25 @@ export function useSimulationFocus({
   const latestFocusedTurnRef = useRef<number>(NO_FOCUS_TURN);
   const nextFocusPollAtMsRef = useRef(0);
 
-  const setFocusedOrganismIdTracked = useCallback((organismId: number | null, resetPoll = false) => {
-    const changed = focusedOrganismIdRef.current !== organismId;
-    focusedOrganismIdRef.current = organismId;
-    if (changed) {
-      latestFocusedTurnRef.current = NO_FOCUS_TURN;
-    }
-    if (resetPoll) {
-      nextFocusPollAtMsRef.current = 0;
-    }
-    setFocusedOrganismId(organismId);
+  const resetFocusState = useCallback(() => {
+    focusedOrganismIdRef.current = null;
+    latestFocusedTurnRef.current = NO_FOCUS_TURN;
+    nextFocusPollAtMsRef.current = 0;
+    setFocusedOrganismId(null);
+    setFocusedOrganismDetails(null);
+    setFocusedOrganismTurn(NO_FOCUS_TURN);
+    setActiveActionNeuronId(null);
   }, []);
-
-  const resetFocusState = useCallback(
-    (resetPoll = true) => {
-      setFocusedOrganismIdTracked(null, resetPoll);
-      setFocusedOrganismDetails(null);
-      setFocusedOrganismTurn(NO_FOCUS_TURN);
-      setActiveActionNeuronId(null);
-    },
-    [setFocusedOrganismIdTracked],
-  );
 
   const focusOrganism = useCallback(
     (organism: WorldOrganismState) => {
-      const organismId = unwrapId(organism.id);
+      const organismId = organism.id;
       const isSameFocus = focusedOrganismIdRef.current === organismId;
-      setFocusedOrganismIdTracked(organismId, true);
+      focusedOrganismIdRef.current = organismId;
+      nextFocusPollAtMsRef.current = 0;
+      setFocusedOrganismId(organismId);
       if (!isSameFocus) {
+        latestFocusedTurnRef.current = NO_FOCUS_TURN;
         setFocusedOrganismDetails(null);
         setFocusedOrganismTurn(NO_FOCUS_TURN);
         setActiveActionNeuronId(null);
@@ -87,22 +80,15 @@ export function useSimulationFocus({
         captureError(setErrorText, err, 'Failed to focus organism');
       });
     },
-    [request, session, setErrorText, setFocusedOrganismIdTracked],
+    [request, session, setErrorText],
   );
-
-  const defocusOrganism = useCallback(() => {
-    resetFocusState(true);
-  }, [resetFocusState]);
 
   const handleFocusBrain = useCallback((data: FocusBrainData, latestSnapshotTurn: number) => {
     const { turn, organism, active_action_neuron_id } = data;
-    const organismId = unwrapId(organism.id);
-    const trackedFocusedId = focusedOrganismIdRef.current;
-    if (trackedFocusedId === null || trackedFocusedId !== organismId) {
+    if (focusedOrganismIdRef.current !== organism.id) {
       return;
     }
-    const minimumAcceptedTurn = Math.max(latestSnapshotTurn, latestFocusedTurnRef.current);
-    if (turn < minimumAcceptedTurn) {
+    if (turn < Math.max(latestSnapshotTurn, latestFocusedTurnRef.current)) {
       return;
     }
     latestFocusedTurnRef.current = turn;
@@ -119,10 +105,7 @@ export function useSimulationFocus({
   }, [focusedOrganismId, snapshot]);
 
   const focusedOrganism = useMemo(() => {
-    if (!focusedOrganismDetails || focusedOrganismId === null) {
-      return null;
-    }
-    if (unwrapId(focusedOrganismDetails.id) !== focusedOrganismId) {
+    if (!focusedOrganismDetails || focusedOrganismDetails.id !== focusedOrganismId) {
       return null;
     }
     if (snapshot && focusedWorldOrganism && snapshot.turn >= focusedOrganismTurn) {
@@ -137,11 +120,12 @@ export function useSimulationFocus({
     snapshot,
   ]);
 
+  // Defocus when the focused organism disappears from the world (death/removal).
   useEffect(() => {
     if (!snapshot || focusedOrganismId === null || focusedWorldOrganism) {
       return;
     }
-    resetFocusState(true);
+    resetFocusState();
   }, [focusedOrganismId, focusedWorldOrganism, resetFocusState, snapshot]);
 
   return {
@@ -149,11 +133,10 @@ export function useSimulationFocus({
     focusedOrganism,
     activeActionNeuronId,
     focusedOrganismIdRef,
-    latestFocusedTurnRef,
     nextFocusPollAtMsRef,
     handleFocusBrain,
     focusOrganism,
-    defocusOrganism,
+    defocusOrganism: resetFocusState,
     resetFocusState,
   };
 }

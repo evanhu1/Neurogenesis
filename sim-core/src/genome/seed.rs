@@ -5,7 +5,7 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     config: &SeedGenomeConfig,
     rng: &mut R,
 ) -> OrganismGenome {
-    let num_neurons = config.num_neurons;
+    let num_neurons = config.num_neurons.min(MAX_INTER_NEURONS);
     let max_synapses = max_possible_synapses(num_neurons);
     let inter_biases = (0..num_neurons).map(|_| sample_initial_bias(rng)).collect();
     let inter_log_time_constants = (0..num_neurons)
@@ -62,6 +62,8 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
             remove_synapse: config.mutation_rate_remove_synapse,
             remove_neuron: config.mutation_rate_remove_neuron,
             add_neuron_split_edge: config.mutation_rate_add_neuron_split_edge,
+            spatial_prior_sigma: config.mutation_rate_spatial_prior_sigma,
+            max_weight_delta_per_tick: config.mutation_rate_max_weight_delta_per_tick,
         },
         brain: BrainTopology {
             inter_biases,

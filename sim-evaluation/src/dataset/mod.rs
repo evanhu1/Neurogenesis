@@ -17,4 +17,4 @@ pub use schema::{
     ReproductionEventRow, ReproductionOutcome, TickSummaryRow, ACTION_COUNT, DESCENDANT_CODE,
     JOINT_LEN, ORIGIN_COUNT, SENSORY_BIN_COUNT,
 };
-pub use writer::{DatasetWriter, PartitionedParquetWriter};
+pub use writer::PartitionedParquetWriter;

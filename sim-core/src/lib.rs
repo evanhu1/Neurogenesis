@@ -1,20 +1,65 @@
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
-use serde::{Deserialize, Serialize};
 #[cfg(feature = "instrumentation")]
 use sim_types::ActionRecord;
 use sim_types::{
-    FoodState, MetricsSnapshot, OccupancyCell, Occupant, OrganismGenome, OrganismId, OrganismState,
-    TerrainCell, TerrainType, TickDelta, VisualProperties, WorldConfig, WorldSnapshot,
+    FoodState, MetricsSnapshot, Occupant, OrganismGenome, OrganismId, OrganismState, TerrainCell,
+    TerrainType, VisualProperties, WorldConfig, WorldSnapshot,
 };
 use std::collections::BTreeMap;
 use thiserror::Error;
+
+use crate::spawn::world::{hash_2d, hash_to_unit_interval};
+
+const TERRAIN_COLOR_JITTER: f32 = 0.15;
+pub(crate) const PLANT_COLOR_JITTER: f32 = 0.15;
+
+pub(crate) fn jitter_visual_rgb(
+    base: VisualProperties,
+    x: i64,
+    y: i64,
+    seed: u64,
+    strength: f32,
+) -> VisualProperties {
+    let r_jitter = unit_signed_hash(x, y, seed) * strength;
+    let g_jitter = unit_signed_hash(x, y, seed.wrapping_add(0x1)) * strength;
+    let b_jitter = unit_signed_hash(x, y, seed.wrapping_add(0x2)) * strength;
+    VisualProperties {
+        r: base.r + r_jitter,
+        g: base.g + g_jitter,
+        b: base.b + b_jitter,
+        opacity: base.opacity,
+        shape: base.shape,
+    }
+    .clamped()
+}
+
+fn unit_signed_hash(x: i64, y: i64, seed: u64) -> f32 {
+    // Bit-identical to the previous inline conversion: same `>> 11` shift and
+    // 2^-53 scale, performed in f64 before the f32 cast.
+    (hash_to_unit_interval(hash_2d(x, y, seed)) as f32) * 2.0 - 1.0
+}
+
+pub(crate) fn jitter_visual_rgb_uniform(
+    base: VisualProperties,
+    rng: &mut ChaCha8Rng,
+    strength: f32,
+) -> VisualProperties {
+    use rand::Rng;
+    VisualProperties {
+        r: base.r + rng.random_range(-strength..=strength),
+        g: base.g + rng.random_range(-strength..=strength),
+        b: base.b + rng.random_range(-strength..=strength),
+        opacity: base.opacity,
+        shape: base.shape,
+    }
+    .clamped()
+}
 
 #[path = "brain/actor_critic.rs"]
 mod actor_critic;
 mod brain;
 pub(crate) mod genome;
-#[path = "spawn/grid.rs"]
 mod grid;
 mod metabolism;
 #[path = "brain/plasticity.rs"]
@@ -34,8 +79,6 @@ pub(crate) use reward::{
     REWARD_WEIGHT_COUNT, REWARD_WEIGHT_MAX, REWARD_WEIGHT_MIN,
 };
 
-pub use brain::derive_active_action_neuron_id;
-
 #[cfg(test)]
 mod tests;
 
@@ -47,47 +90,79 @@ pub enum SimError {
     InvalidState(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct Simulation {
     config: WorldConfig,
     turn: u64,
     seed: u64,
     rng: ChaCha8Rng,
-    #[serde(default)]
     champion_pool: Vec<OrganismGenome>,
     next_organism_id: u64,
     next_food_id: u64,
     organisms: Vec<OrganismState>,
-    #[serde(default)]
     pending_actions: Vec<PendingActionState>,
-    #[serde(skip)]
-    reward_ledgers: Vec<RewardLedger>,
     foods: Vec<FoodState>,
     occupancy: Vec<Option<Occupant>>,
-    #[serde(default)]
     terrain_map: Vec<bool>,
-    #[serde(default)]
     spike_map: Vec<bool>,
-    #[serde(default)]
     food_fertility: Vec<bool>,
-    #[serde(default)]
     food_regrowth_due_turn: Vec<u64>,
-    #[serde(default)]
     food_regrowth_schedule: BTreeMap<u64, Vec<usize>>,
-    #[serde(skip)]
     visual_map: Vec<VisualProperties>,
-    #[serde(skip)]
     visual_map_base: Vec<VisualProperties>,
+    spike_visual_map: Vec<VisualProperties>,
+    /// Wire-format terrain cells, sorted by (q, r). Terrain is immutable after
+    /// world generation, so this is built once per reset and cloned per
+    /// snapshot instead of being rebuilt and re-sorted on every call.
+    terrain_cells: Vec<TerrainCell>,
     #[cfg(feature = "instrumentation")]
-    #[serde(skip)]
     action_records: Vec<Option<ActionRecord>>,
     /// Per-simulation rayon pool. Using a dedicated pool avoids the shared-pool
     /// bottleneck when many seed simulations run concurrently in the evaluation
     /// harness — each sim's `par_iter_mut` work actually runs in parallel on
     /// its own workers instead of serializing through one global pool.
-    #[serde(skip)]
     pub(crate) cached_thread_pool: std::sync::OnceLock<std::sync::Arc<rayon::ThreadPool>>,
+    /// Reusable per-tick scratch buffers (see `turn::TurnScratch`). Transient:
+    /// always cleared + resized before use, so contents never affect behavior.
+    turn_scratch: turn::TurnScratch,
     metrics: MetricsSnapshot,
+}
+
+impl Clone for Simulation {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            turn: self.turn,
+            seed: self.seed,
+            rng: self.rng.clone(),
+            champion_pool: self.champion_pool.clone(),
+            next_organism_id: self.next_organism_id,
+            next_food_id: self.next_food_id,
+            organisms: self.organisms.clone(),
+            pending_actions: self.pending_actions.clone(),
+            foods: self.foods.clone(),
+            occupancy: self.occupancy.clone(),
+            terrain_map: self.terrain_map.clone(),
+            spike_map: self.spike_map.clone(),
+            food_fertility: self.food_fertility.clone(),
+            food_regrowth_due_turn: self.food_regrowth_due_turn.clone(),
+            food_regrowth_schedule: self.food_regrowth_schedule.clone(),
+            visual_map: self.visual_map.clone(),
+            visual_map_base: self.visual_map_base.clone(),
+            spike_visual_map: self.spike_visual_map.clone(),
+            terrain_cells: self.terrain_cells.clone(),
+            #[cfg(feature = "instrumentation")]
+            action_records: self.action_records.clone(),
+            // Deliberately NOT cloned: each simulation gets a dedicated rayon
+            // pool (see the field's doc comment), so a clone starts empty and
+            // lazily builds its own pool instead of sharing the original's.
+            cached_thread_pool: std::sync::OnceLock::new(),
+            // Scratch buffers are transient and cleared before every use, so a
+            // clone starts with fresh (empty) ones.
+            turn_scratch: turn::TurnScratch::default(),
+            metrics: self.metrics.clone(),
+        }
+    }
 }
 
 impl Simulation {
@@ -108,16 +183,17 @@ impl Simulation {
             turn: 0,
             seed,
             rng: ChaCha8Rng::seed_from_u64(seed),
-            champion_pool,
+            champion_pool: Vec::new(),
             next_organism_id: 0,
             next_food_id: 0,
             organisms: Vec::new(),
             pending_actions: Vec::new(),
-            reward_ledgers: Vec::new(),
             foods: Vec::new(),
             occupancy: vec![None; capacity],
             visual_map: Vec::new(),
             visual_map_base: Vec::new(),
+            spike_visual_map: Vec::new(),
+            terrain_cells: Vec::new(),
             terrain_map: Vec::new(),
             spike_map: Vec::new(),
             food_fertility: Vec::new(),
@@ -126,15 +202,11 @@ impl Simulation {
             #[cfg(feature = "instrumentation")]
             action_records: Vec::new(),
             cached_thread_pool: std::sync::OnceLock::new(),
+            turn_scratch: turn::TurnScratch::default(),
             metrics: MetricsSnapshot::default(),
         };
 
-        sim.initialize_terrain();
-        sim.build_visual_map_base();
-        sim.spawn_initial_population();
-        sim.initialize_food_ecology();
-        sim.seed_initial_food_supply();
-        sim.refresh_population_metrics();
+        sim.reset_with_champion_pool(None, champion_pool);
         Ok(sim)
     }
 
@@ -143,7 +215,8 @@ impl Simulation {
     }
 
     fn build_visual_map_base(&mut self) {
-        let capacity = self.config.world_width as usize * self.config.world_width as usize;
+        let width = self.config.world_width as usize;
+        let capacity = width * width;
         self.visual_map_base = vec![VisualProperties::default(); capacity];
         for (idx, blocked) in self.terrain_map.iter().enumerate() {
             if *blocked {
@@ -152,6 +225,47 @@ impl Simulation {
             }
         }
         self.visual_map = self.visual_map_base.clone();
+
+        const SPIKE_COLOR_JITTER_MIX: u64 = 0xA1B2_C3D4_E5F6_0789;
+        let spike_jitter_seed = self.seed ^ SPIKE_COLOR_JITTER_MIX;
+        let base_spike = sim_types::terrain_visual(sim_types::TerrainType::Spikes);
+        self.spike_visual_map = vec![VisualProperties::default(); capacity];
+        for (idx, &is_spike) in self.spike_map.iter().enumerate() {
+            if !is_spike {
+                continue;
+            }
+            let q = (idx % width) as i64;
+            let r = (idx / width) as i64;
+            self.spike_visual_map[idx] =
+                jitter_visual_rgb(base_spike, q, r, spike_jitter_seed, TERRAIN_COLOR_JITTER);
+        }
+
+        // Terrain is immutable after world generation, so build the sorted
+        // wire-format cell list once here instead of on every snapshot. Spike
+        // cells carry the per-cell jittered visual organisms actually sense
+        // (spike_visual_map), not the flat base terrain color.
+        self.terrain_cells.clear();
+        for idx in 0..capacity {
+            let q = (idx % width) as i32;
+            let r = (idx / width) as i32;
+            if self.terrain_map[idx] {
+                self.terrain_cells.push(TerrainCell {
+                    q,
+                    r,
+                    terrain_type: TerrainType::Mountain,
+                    visual: self.visual_map_base[idx],
+                });
+            }
+            if self.spike_map[idx] {
+                self.terrain_cells.push(TerrainCell {
+                    q,
+                    r,
+                    terrain_type: TerrainType::Spikes,
+                    visual: self.spike_visual_map[idx],
+                });
+            }
+        }
+        self.terrain_cells.sort_by_key(|cell| (cell.q, cell.r));
     }
 
     pub fn turn(&self) -> u64 {
@@ -159,39 +273,21 @@ impl Simulation {
     }
 
     pub fn snapshot(&self) -> WorldSnapshot {
-        let mut organisms = self.organisms.clone();
-        organisms.sort_by_key(|o| o.id);
-        let mut foods = self.foods.clone();
-        foods.sort_by_key(|food| food.id);
-        let mut terrain = Vec::new();
-
-        let width = self.config.world_width as usize;
-        let mut occupancy = Vec::with_capacity(self.occupancy.iter().flatten().count());
-        for (idx, maybe_entity) in self.occupancy.iter().enumerate() {
-            let q = (idx % width) as i32;
-            let r = (idx / width) as i32;
-            if self.terrain_map[idx] {
-                terrain.push(TerrainCell {
-                    q,
-                    r,
-                    terrain_type: TerrainType::Mountain,
-                    visual: sim_types::terrain_visual(TerrainType::Mountain),
-                });
-            }
-            if self.spike_map[idx] {
-                terrain.push(TerrainCell {
-                    q,
-                    r,
-                    terrain_type: TerrainType::Spikes,
-                    visual: sim_types::terrain_visual(TerrainType::Spikes),
-                });
-            }
-            if let Some(occupant) = *maybe_entity {
-                occupancy.push(OccupancyCell { q, r, occupant });
-            }
-        }
-        terrain.sort_by_key(|cell| (cell.q, cell.r));
-        occupancy.sort_by_key(|cell| (cell.q, cell.r));
+        // Sorted-by-ascending-id is a maintained invariant (monotonic ID
+        // allocation + push/retain); validate_state rejects unsorted vectors.
+        debug_assert!(self
+            .organisms
+            .windows(2)
+            .all(|window| window[0].id < window[1].id));
+        debug_assert!(self
+            .foods
+            .windows(2)
+            .all(|window| window[0].id < window[1].id));
+        let organisms = self.organisms.clone();
+        let foods = self.foods.clone();
+        // Terrain is immutable after world generation; clone the cached
+        // sorted cell list instead of rebuilding it per snapshot.
+        let terrain = self.terrain_cells.clone();
 
         WorldSnapshot {
             turn: self.turn,
@@ -200,38 +296,47 @@ impl Simulation {
             organisms,
             foods,
             terrain,
-            occupancy,
             metrics: self.metrics.clone(),
         }
     }
 
     pub fn reset(&mut self, seed: Option<u64>) {
-        self.reset_with_champion_pool(seed, self.champion_pool.clone());
+        let pool = std::mem::take(&mut self.champion_pool);
+        self.reset_with_champion_pool(seed, pool);
     }
 
     pub fn reset_with_champion_pool(
         &mut self,
         seed: Option<u64>,
-        champion_pool: Vec<OrganismGenome>,
+        mut champion_pool: Vec<OrganismGenome>,
     ) {
         self.seed = seed.unwrap_or(self.seed);
         self.rng = ChaCha8Rng::seed_from_u64(self.seed);
         self.turn = 0;
+        // Champion-pool genomes come from disk (champion_pool.json, evaluation
+        // snapshots) and may be malformed; sanitize at intake so expression
+        // never sees e.g. num_neurons above MAX_INTER_NEURONS or misaligned
+        // brain vectors. Sanitization uses a dedicated RNG stream derived from
+        // the seed — never the world-generation stream — so a malformed pool
+        // entry that draws during repair cannot shift terrain or spawn layout
+        // for the same config + seed. Well-formed genomes pass through
+        // unchanged either way.
+        const CHAMPION_SANITIZE_RNG_MIX: u64 = 0xC4A5_3C5D_2BBF_3A91;
+        let mut sanitize_rng = ChaCha8Rng::seed_from_u64(self.seed ^ CHAMPION_SANITIZE_RNG_MIX);
+        for genome in &mut champion_pool {
+            genome::align_genome_vectors(genome, &mut sanitize_rng);
+        }
         self.champion_pool = champion_pool;
         self.next_organism_id = 0;
         self.next_food_id = 0;
         self.organisms.clear();
         self.pending_actions.clear();
-        self.reward_ledgers.clear();
         self.foods.clear();
         self.occupancy.fill(None);
-        self.visual_map.clear();
-        self.visual_map_base.clear();
-        self.terrain_map.clear();
-        self.spike_map.clear();
-        self.food_fertility.clear();
-        self.food_regrowth_due_turn.clear();
-        self.food_regrowth_schedule.clear();
+        // visual_map/visual_map_base/spike_visual_map/terrain_map/spike_map/
+        // food_fertility/food_regrowth_due_turn/food_regrowth_schedule are
+        // wholesale reassigned by initialize_terrain/build_visual_map_base/
+        // initialize_food_ecology below, so they need no clearing here.
         #[cfg(feature = "instrumentation")]
         self.action_records.clear();
         self.metrics = MetricsSnapshot::default();
@@ -243,14 +348,6 @@ impl Simulation {
         self.refresh_population_metrics();
     }
 
-    pub fn step_n(&mut self, count: u32) -> Vec<TickDelta> {
-        let mut deltas = Vec::with_capacity(count as usize);
-        for _ in 0..count {
-            deltas.push(self.tick());
-        }
-        deltas
-    }
-
     pub fn advance_n(&mut self, count: u32) {
         for _ in 0..count {
             let _ = self.tick();
@@ -258,14 +355,20 @@ impl Simulation {
     }
 
     pub fn focused_organism(&self, id: OrganismId) -> Option<OrganismState> {
+        // Organisms are maintained sorted ascending by id (see validate_state),
+        // so a binary search replaces the previous linear scan.
         self.organisms
-            .iter()
-            .find(|organism| organism.id == id)
-            .cloned()
+            .binary_search_by_key(&id, |organism| organism.id)
+            .ok()
+            .map(|idx| self.organisms[idx].clone())
     }
 
     pub fn organisms(&self) -> &[OrganismState] {
         &self.organisms
+    }
+
+    pub fn foods(&self) -> &[FoodState] {
+        &self.foods
     }
 
     pub fn metrics(&self) -> &MetricsSnapshot {
@@ -289,44 +392,40 @@ impl Simulation {
         }
     }
 
+    /// Patch the current tick's record with the post-commit cumulative
+    /// consumption count so a consumption is visible in the same tick's
+    /// record (the record is built during the intent phase, before commit).
+    #[cfg(feature = "instrumentation")]
+    pub(crate) fn record_consumption_count(
+        &mut self,
+        organism_idx: usize,
+        consumptions_count: u64,
+    ) {
+        if let Some(Some(record)) = self.action_records.get_mut(organism_idx) {
+            record.consumptions_count = consumptions_count;
+        }
+    }
+
     pub fn validate_state(&self) -> Result<(), SimError> {
         sim_config::validate_world_config(&self.config).map_err(SimError::InvalidConfig)?;
 
         let expected_capacity = grid::world_capacity(self.config.world_width);
-        if self.occupancy.len() != expected_capacity {
-            return Err(SimError::InvalidState(format!(
-                "occupancy length {} does not match expected capacity {}",
-                self.occupancy.len(),
-                expected_capacity
-            )));
-        }
-        if self.terrain_map.len() != expected_capacity {
-            return Err(SimError::InvalidState(format!(
-                "terrain_map length {} does not match expected capacity {}",
-                self.terrain_map.len(),
-                expected_capacity
-            )));
-        }
-        if self.spike_map.len() != expected_capacity {
-            return Err(SimError::InvalidState(format!(
-                "spike_map length {} does not match expected capacity {}",
-                self.spike_map.len(),
-                expected_capacity
-            )));
-        }
-        if self.food_fertility.len() != expected_capacity {
-            return Err(SimError::InvalidState(format!(
-                "food_fertility length {} does not match expected capacity {}",
-                self.food_fertility.len(),
-                expected_capacity
-            )));
-        }
-        if self.food_regrowth_due_turn.len() != expected_capacity {
-            return Err(SimError::InvalidState(format!(
-                "food_regrowth_due_turn length {} does not match expected capacity {}",
-                self.food_regrowth_due_turn.len(),
-                expected_capacity
-            )));
+        for (name, len) in [
+            ("occupancy", self.occupancy.len()),
+            ("terrain_map", self.terrain_map.len()),
+            ("spike_map", self.spike_map.len()),
+            ("food_fertility", self.food_fertility.len()),
+            ("food_regrowth_due_turn", self.food_regrowth_due_turn.len()),
+            ("visual_map", self.visual_map.len()),
+            ("visual_map_base", self.visual_map_base.len()),
+            ("spike_visual_map", self.spike_visual_map.len()),
+        ] {
+            if len != expected_capacity {
+                return Err(SimError::InvalidState(format!(
+                    "{} length {} does not match expected capacity {}",
+                    name, len, expected_capacity
+                )));
+            }
         }
         for (due_turn, cell_indices) in &self.food_regrowth_schedule {
             for &cell_idx in cell_indices {
@@ -343,6 +442,24 @@ impl Simulation {
                     )));
                 }
             }
+        }
+        // Reverse direction: every cell with a due turn set must appear in the
+        // schedule. A cell with `food_regrowth_due_turn` set but missing from
+        // `food_regrowth_schedule` can never regrow food again, because
+        // schedule_food_regrowth early-returns on an already-set due turn.
+        // Combined with the per-entry check above, equal counts imply a
+        // one-to-one correspondence.
+        let scheduled_cell_count: usize = self.food_regrowth_schedule.values().map(Vec::len).sum();
+        let due_cell_count = self
+            .food_regrowth_due_turn
+            .iter()
+            .filter(|&&due_turn| due_turn != spawn::NO_REGROWTH_SCHEDULED)
+            .count();
+        if due_cell_count != scheduled_cell_count {
+            return Err(SimError::InvalidState(format!(
+                "{} cells have a food regrowth due turn set but food_regrowth_schedule contains {} cell entries",
+                due_cell_count, scheduled_cell_count
+            )));
         }
 
         if !self

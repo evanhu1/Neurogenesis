@@ -31,7 +31,8 @@ fn spawn_queue_order_is_deterministic_under_limited_space() {
         reproduction_request_at(&sim, OrganismId(1), 1, 1),
     ]);
 
-    assert_eq!(spawned.len(), 1);
+    assert_eq!(spawned.len(), 2);
+    assert_eq!(spawned.iter().flatten().count(), 1);
     let child = sim
         .organisms
         .iter()
@@ -53,16 +54,14 @@ fn reproduction_offspring_behavior_starts_from_genome_not_parent_runtime_state()
         .iter()
         .copied()
         .enumerate()
-        .map(|(idx, action_type)| SynapseEdge {
+        .map(|(idx, action_type)| SynapseGene {
             pre_neuron_id: NeuronId(INTER_ID_BASE),
             post_neuron_id: NeuronId(ACTION_ID_BASE + idx as u32),
             weight: if action_type == ActionType::TurnLeft {
-                8.0
+                1.5
             } else {
-                -8.0
+                -1.5
             },
-            eligibility: 0.0,
-            pending_coactivation: 0.0,
         })
         .collect();
     parent.genome.topology.num_synapses = parent.genome.brain.edges.len() as u32;
@@ -83,8 +82,11 @@ fn reproduction_offspring_behavior_starts_from_genome_not_parent_runtime_state()
     )]);
 
     assert_eq!(spawned.len(), 1);
-    let child_id = spawned[0].id;
-    let initial_facing = spawned[0].facing;
+    let child_state = spawned[0]
+        .as_ref()
+        .expect("reproduction spawn should succeed");
+    let child_id = child_state.id;
+    let initial_facing = child_state.facing;
 
     let delta = tick_once(&mut sim);
     assert!(

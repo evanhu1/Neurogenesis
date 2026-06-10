@@ -85,12 +85,10 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
     genome.plasticity.synapse_prune_threshold = 0.0;
     genome.lifecycle.age_of_maturity = 0;
     genome.topology.vision_distance = 5;
-    genome.brain.edges = vec![SynapseEdge {
+    genome.brain.edges = vec![SynapseGene {
         pre_neuron_id: food_ahead_sensory_id,
         post_neuron_id: consume_action_id,
         weight: initial_weight,
-        eligibility: 0.0,
-        pending_coactivation: 0.0,
     }];
 
     // Shared config: tiny world, fast food regrowth, no injections.
@@ -133,8 +131,10 @@ fn lifetime_plasticity_strengthens_food_consume_synapse() {
             max_health: initial_energy.max(1.0),
             energy_prev: initial_energy,
             health_prev: initial_energy.max(1.0),
+            energy_at_last_sensing: initial_energy,
             dopamine: 0.0,
             value_prev: 0.0,
+            reward_prev: 0.0,
             value_prev_feature_activations: Vec::new(),
             damage_taken_last_turn: 0.0,
             contingent_action_wasted_last_turn: false,
@@ -259,12 +259,10 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
     genome.lifecycle.max_organism_age = default_seed.max_organism_age;
 
     genome.topology.vision_distance = default_seed.vision_distance;
-    genome.brain.edges = vec![SynapseEdge {
+    genome.brain.edges = vec![SynapseGene {
         pre_neuron_id: food_ahead_sensory_id,
         post_neuron_id: consume_action_id,
         weight: initial_weight,
-        eligibility: 0.0,
-        pending_coactivation: 0.0,
     }];
 
     let base_cfg = {
@@ -306,8 +304,10 @@ fn repo_default_plasticity_params_still_produce_learning_signal() {
             max_health: initial_energy.max(1.0),
             energy_prev: initial_energy,
             health_prev: initial_energy.max(1.0),
+            energy_at_last_sensing: initial_energy,
             dopamine: 0.0,
             value_prev: 0.0,
+            reward_prev: 0.0,
             value_prev_feature_activations: Vec::new(),
             damage_taken_last_turn: 0.0,
             contingent_action_wasted_last_turn: false,
@@ -413,19 +413,15 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
 
     genome.topology.vision_distance = default_seed.vision_distance;
     genome.brain.edges = vec![
-        SynapseEdge {
+        SynapseGene {
             pre_neuron_id: food_ahead_sensory_id,
             post_neuron_id: forward_action_id,
             weight: 0.25,
-            eligibility: 0.0,
-            pending_coactivation: 0.0,
         },
-        SynapseEdge {
+        SynapseGene {
             pre_neuron_id: food_ahead_sensory_id,
             post_neuron_id: consume_action_id,
             weight: 0.3,
-            eligibility: 0.0,
-            pending_coactivation: 0.0,
         },
     ];
 
@@ -468,8 +464,10 @@ fn repo_default_plasticity_learns_to_prefer_rewarded_consume_over_forward() {
             max_health: initial_energy.max(1.0),
             energy_prev: initial_energy,
             health_prev: initial_energy.max(1.0),
+            energy_at_last_sensing: initial_energy,
             dopamine: 0.0,
             value_prev: 0.0,
+            reward_prev: 0.0,
             value_prev_feature_activations: Vec::new(),
             damage_taken_last_turn: 0.0,
             contingent_action_wasted_last_turn: false,
@@ -571,12 +569,10 @@ fn delayed_credit_assignment_organism(
     genome.plasticity.eligibility_retention = eligibility_retention;
     genome.plasticity.synapse_prune_threshold = 0.0;
     genome.lifecycle.age_of_maturity = 0;
-    genome.brain.edges = vec![SynapseEdge {
+    genome.brain.edges = vec![SynapseGene {
         pre_neuron_id: food_ahead_sensory_id,
         post_neuron_id: consume_action_id,
         weight: initial_weight,
-        eligibility: 0.0,
-        pending_coactivation: 0.0,
     }];
 
     let brain = express_genome(&genome);
@@ -594,8 +590,10 @@ fn delayed_credit_assignment_organism(
         max_health: starting_energy,
         energy_prev: starting_energy,
         health_prev: starting_energy,
+        energy_at_last_sensing: starting_energy,
         dopamine: 0.0,
         value_prev: 0.0,
+        reward_prev: 0.0,
         value_prev_feature_activations: Vec::new(),
         damage_taken_last_turn: 0.0,
         contingent_action_wasted_last_turn: false,
@@ -611,7 +609,8 @@ fn delayed_credit_assignment_organism(
         brain,
         genome,
     };
-    crate::metabolism::refresh_organism_base_metabolic_cost(&mut organism);
+    let coeff = sim_config::default_world_config().body_mass_metabolic_cost_coeff;
+    crate::metabolism::refresh_organism_base_metabolic_cost(&mut organism, coeff);
     organism
 }
 
@@ -628,13 +627,11 @@ fn set_pending_food_consume_coactivation(
     organism: &mut OrganismState,
     scratch: &mut BrainScratch,
     sensory_activation: f32,
-    consume_post_signal: f32,
 ) {
     organism.brain.sensory[food_ahead_sensory_index()]
         .neuron
         .activation = sensory_activation;
     scratch.selected_action_index = Some(action_index(ActionType::Eat));
-    scratch.selected_action_confidence = consume_post_signal;
     compute_pending_coactivations(organism, scratch);
 }
 
@@ -647,21 +644,22 @@ fn run_delayed_reward_sequence(
 
     // Tick 0: coactivation occurs, but reward is absent. This should only write
     // into the eligibility trace, not strengthen the weight yet.
-    set_pending_food_consume_coactivation(&mut organism, &mut scratch, 1.0, 1.0);
-    apply_runtime_weight_updates(&mut organism, RewardLedger::default());
+    let body_mass_coeff = sim_config::default_world_config().body_mass_metabolic_cost_coeff;
+    set_pending_food_consume_coactivation(&mut organism, &mut scratch, 1.0);
+    apply_runtime_weight_updates(&mut organism, RewardLedger::default(), body_mass_coeff);
 
     // Intermediate ticks: no coactivation and no reward, so only the trace
     // should decay according to eligibility_retention.
     for _ in 0..blank_ticks_before_reward {
-        set_pending_food_consume_coactivation(&mut organism, &mut scratch, 0.0, 0.0);
-        apply_runtime_weight_updates(&mut organism, RewardLedger::default());
+        set_pending_food_consume_coactivation(&mut organism, &mut scratch, 0.0);
+        apply_runtime_weight_updates(&mut organism, RewardLedger::default(), body_mass_coeff);
     }
 
     let eligibility_before_reward = food_consume_edge(&organism).eligibility;
 
     // Reward arrives later with no fresh coactivation on this tick. Any weight
     // increase therefore has to come from the retained eligibility trace.
-    set_pending_food_consume_coactivation(&mut organism, &mut scratch, 0.0, 0.0);
+    set_pending_food_consume_coactivation(&mut organism, &mut scratch, 0.0);
     organism.energy += 20.0;
     // Synthesize a food-gain pulse in the tonic ledger: one food_energy's worth
     // of energy gained this tick. Matches the channel the new ledger populates
@@ -672,7 +670,14 @@ fn run_delayed_reward_sequence(
             energy_delta_gain: 1.0,
             ..RewardLedger::default()
         },
+        body_mass_coeff,
     );
+
+    // The TD error pairs the stashed previous-tick reward with the retained
+    // eligibility, so the dopamine pulse from the reward lands on the
+    // following tick's weight update.
+    set_pending_food_consume_coactivation(&mut organism, &mut scratch, 0.0);
+    apply_runtime_weight_updates(&mut organism, RewardLedger::default(), body_mass_coeff);
 
     (
         food_consume_edge(&organism).weight,

@@ -60,7 +60,7 @@ pub(crate) fn run_comparison_evaluation(
     } else {
         "control".to_owned()
     };
-    let treatment_label = overrides.label();
+    let treatment_label = overrides.label().to_owned();
     let metric_rows = comparison_metric_rows(&control, &treatment);
     let per_seed_rows = control
         .seed_summaries
@@ -73,32 +73,32 @@ pub(crate) fn run_comparison_evaluation(
         })
         .collect::<Vec<_>>();
     let total_time_seconds = run_started.elapsed().as_secs_f64();
-    let comparison = ComparisonSummary {
-        title: options.title.clone(),
-        seeds: options.seeds.clone(),
-        ticks: options.ticks,
-        control_label: control_label.clone(),
-        treatment_label: treatment_label.clone(),
-        total_time_seconds,
-        control: control.clone(),
-        treatment: treatment.clone(),
-        metric_rows: metric_rows.clone(),
-    };
-    write_summary_json(&options.out_dir, &comparison)?;
     write_comparison_html_report(
         &options.out_dir,
         &ComparisonHtmlReportMeta {
             title: options.title.clone(),
             ticks: options.ticks,
-            control_label,
-            treatment_label,
+            control_label: control_label.clone(),
+            treatment_label: treatment_label.clone(),
             total_time_seconds,
-            metric_rows,
+            metric_rows: metric_rows.clone(),
             per_seed_rows,
             control_report_href: "control/report.html".to_owned(),
             treatment_report_href: "treatment/report.html".to_owned(),
         },
     )?;
+    let comparison = ComparisonSummary {
+        title: options.title.clone(),
+        seeds: options.seeds.clone(),
+        ticks: options.ticks,
+        control_label,
+        treatment_label,
+        total_time_seconds,
+        control,
+        treatment,
+        metric_rows,
+    };
+    write_summary_json(&options.out_dir, &comparison)?;
     Ok(comparison)
 }
 
@@ -165,6 +165,14 @@ fn paired_metric_row(
     }
 }
 
+/// Two-sided 95% Student-t critical values for df = 1..=30. For df > 30 the
+/// standard-normal quantile 1.96 is a close approximation.
+const T_CRIT_95: [f64; 30] = [
+    12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228, 2.201, 2.179, 2.160,
+    2.145, 2.131, 2.120, 2.110, 2.101, 2.093, 2.086, 2.080, 2.074, 2.069, 2.064, 2.060, 2.056,
+    2.052, 2.048, 2.045, 2.042,
+];
+
 fn diff_confidence_interval(diffs: &[f64]) -> (Option<f64>, Option<f64>, Option<f64>) {
     if diffs.is_empty() {
         return (None, None, None);
@@ -182,6 +190,8 @@ fn diff_confidence_interval(diffs: &[f64]) -> (Option<f64>, Option<f64>, Option<
         .sum::<f64>()
         / (diffs.len() as f64 - 1.0);
     let se = variance.sqrt() / (diffs.len() as f64).sqrt();
-    let margin = 1.96 * se;
+    let df = diffs.len() - 1;
+    let t = T_CRIT_95.get(df - 1).copied().unwrap_or(1.96);
+    let margin = t * se;
     (Some(mean), Some(mean - margin), Some(mean + margin))
 }

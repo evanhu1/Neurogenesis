@@ -17,6 +17,8 @@ max_weight_delta_per_tick = 0.05 # Per-tick clamp on how much a synapse weight c
 synapse_prune_threshold = 0.05 # Minimum absolute weight and eligibility scale required to keep a mature synapse during pruning.
 
 # Mutation rates
+# Note: a rate set to exactly 0.0 is absorbing — it is exempt from
+# meta-mutation and hard-disables that operator for the entire lineage.
 mutation_rate_age_of_maturity = 0.1 # Probability of mutating `age_of_maturity` during offspring generation.
 mutation_rate_gestation_ticks = 0.1 # Probability of mutating `gestation_ticks` during offspring generation.
 mutation_rate_max_organism_age = 0.1 # Probability of mutating `max_organism_age` during offspring generation.
@@ -33,3 +35,5 @@ mutation_rate_add_synapse = 0.1 # Probability of adding a new synapse.
 mutation_rate_remove_synapse = 0.1 # Probability of removing an existing synapse.
 mutation_rate_remove_neuron = 0.05 # Probability of removing an inter neuron.
 mutation_rate_add_neuron_split_edge = 0.1 # Probability of splitting an edge to insert a new inter neuron.
+mutation_rate_spatial_prior_sigma = 0.1 # Probability of multiplicatively perturbing `spatial_prior_sigma`.
+mutation_rate_max_weight_delta_per_tick = 0.1 # Probability of multiplicatively perturbing `max_weight_delta_per_tick`.

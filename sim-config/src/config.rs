@@ -14,6 +14,7 @@ pub struct PopulationDefaults {
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
 pub struct LifecycleDefaults {
     pub passive_metabolism_cost_per_unit: f32,
+    pub body_mass_metabolic_cost_coeff: f32,
     pub action_temperature: f32,
     pub intent_parallel_threads: u32,
 }
@@ -65,7 +66,6 @@ pub struct SeedGenomeConfigDefaults {
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
 pub struct TerrainGenerationPolicy {
     pub terrain_seed_mix: u64,
-    pub default_threshold: f64,
     pub spike_seed_mix: u64,
 }
 
@@ -86,6 +86,7 @@ pub fn world_config_defaults() -> WorldConfigDefaults {
         },
         lifecycle: LifecycleDefaults {
             passive_metabolism_cost_per_unit: 0.005,
+            body_mass_metabolic_cost_coeff: 1.0,
             action_temperature: 0.5,
             intent_parallel_threads: 8,
         },
@@ -112,7 +113,10 @@ pub fn world_config_defaults() -> WorldConfigDefaults {
 
 pub fn seed_genome_config_defaults() -> SeedGenomeConfigDefaults {
     SeedGenomeConfigDefaults {
-        max_organism_age: u32::MAX,
+        // Finite lifespan cap matching the mutation clamp in sim-core
+        // (`MAX_MUTATED_MAX_ORGANISM_AGE` = 100_000); seeds are no longer
+        // immortal.
+        max_organism_age: 100_000,
         gestation_ticks: 2,
         juvenile_eta_scale: 2.0,
         max_weight_delta_per_tick: 0.05,
@@ -122,7 +126,6 @@ pub fn seed_genome_config_defaults() -> SeedGenomeConfigDefaults {
 pub fn terrain_generation_policy() -> TerrainGenerationPolicy {
     TerrainGenerationPolicy {
         terrain_seed_mix: 0xA5A5_A5A5_u64,
-        default_threshold: 0.86,
         spike_seed_mix: 0xCBBB_9D5D_C105_9ED8,
     }
 }
@@ -178,6 +181,10 @@ pub struct SeedGenomeConfig {
     pub mutation_rate_remove_neuron: f32,
     #[serde(default)]
     pub mutation_rate_add_neuron_split_edge: f32,
+    #[serde(default)]
+    pub mutation_rate_spatial_prior_sigma: f32,
+    #[serde(default)]
+    pub mutation_rate_max_weight_delta_per_tick: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -191,6 +198,8 @@ pub struct WorldConfig {
     pub food_energy: f32,
     #[serde(default = "default_passive_metabolism_cost_per_unit")]
     pub passive_metabolism_cost_per_unit: f32,
+    #[serde(default = "default_body_mass_metabolic_cost_coeff")]
+    pub body_mass_metabolic_cost_coeff: f32,
     pub move_action_energy_cost: f32,
     #[serde(default = "default_action_temperature")]
     pub action_temperature: f32,
@@ -234,6 +243,7 @@ impl WorldConfig {
             periodic_injection_count: 0,
             food_energy: 50.0,
             passive_metabolism_cost_per_unit: 0.005,
+            body_mass_metabolic_cost_coeff: 1.0,
             move_action_energy_cost: 0.0,
             action_temperature: 0.5,
             intent_parallel_threads: 8,
@@ -256,7 +266,7 @@ impl WorldConfig {
                 vision_distance: 10,
                 age_of_maturity: 0,
                 gestation_ticks: 2,
-                max_organism_age: u32::MAX,
+                max_organism_age: 100_000,
                 hebb_eta_gain: 0.0,
                 juvenile_eta_scale: 2.0,
                 eligibility_retention: 0.9,
@@ -278,6 +288,8 @@ impl WorldConfig {
                 mutation_rate_remove_synapse: 0.05,
                 mutation_rate_remove_neuron: 0.02,
                 mutation_rate_add_neuron_split_edge: 0.05,
+                mutation_rate_spatial_prior_sigma: 0.05,
+                mutation_rate_max_weight_delta_per_tick: 0.05,
             },
         }
     }
@@ -291,6 +303,7 @@ impl WorldConfig {
             periodic_injection_count: 0,
             food_energy: 50.0,
             passive_metabolism_cost_per_unit: 0.005,
+            body_mass_metabolic_cost_coeff: 1.0,
             move_action_energy_cost: 1.0,
             action_temperature: 0.5,
             intent_parallel_threads: 8,
@@ -335,6 +348,8 @@ impl WorldConfig {
                 mutation_rate_remove_synapse: 0.0,
                 mutation_rate_remove_neuron: 0.0,
                 mutation_rate_add_neuron_split_edge: 0.0,
+                mutation_rate_spatial_prior_sigma: 0.0,
+                mutation_rate_max_weight_delta_per_tick: 0.0,
             },
         }
     }
@@ -369,6 +384,8 @@ struct WorldPopulationToml {
 struct WorldLifecycleToml {
     #[serde(default = "default_passive_metabolism_cost_per_unit")]
     passive_metabolism_cost_per_unit: f32,
+    #[serde(default = "default_body_mass_metabolic_cost_coeff")]
+    body_mass_metabolic_cost_coeff: f32,
     move_action_energy_cost: f32,
     #[serde(default = "default_action_temperature")]
     action_temperature: f32,
@@ -426,6 +443,7 @@ impl WorldConfigToml {
             periodic_injection_count: self.population.periodic_injection_count,
             food_energy: self.food.food_energy,
             passive_metabolism_cost_per_unit: self.lifecycle.passive_metabolism_cost_per_unit,
+            body_mass_metabolic_cost_coeff: self.lifecycle.body_mass_metabolic_cost_coeff,
             move_action_energy_cost: self.lifecycle.move_action_energy_cost,
             action_temperature: self.lifecycle.action_temperature,
             intent_parallel_threads: self.lifecycle.intent_parallel_threads,
@@ -506,6 +524,11 @@ pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
         || config.passive_metabolism_cost_per_unit < 0.0
     {
         return Err("passive_metabolism_cost_per_unit must be finite and >= 0".to_owned());
+    }
+    if !config.body_mass_metabolic_cost_coeff.is_finite()
+        || config.body_mass_metabolic_cost_coeff < 0.0
+    {
+        return Err("body_mass_metabolic_cost_coeff must be finite and >= 0".to_owned());
     }
     if config.move_action_energy_cost < 0.0 {
         return Err("move_action_energy_cost must be >= 0".to_owned());
@@ -611,6 +634,12 @@ fn default_passive_metabolism_cost_per_unit() -> f32 {
     world_config_defaults()
         .lifecycle
         .passive_metabolism_cost_per_unit
+}
+
+fn default_body_mass_metabolic_cost_coeff() -> f32 {
+    world_config_defaults()
+        .lifecycle
+        .body_mass_metabolic_cost_coeff
 }
 
 fn default_terrain_noise_scale() -> f32 {

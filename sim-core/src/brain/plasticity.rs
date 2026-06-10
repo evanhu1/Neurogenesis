@@ -4,8 +4,8 @@ use crate::metabolism::refresh_organism_base_metabolic_cost;
 #[cfg(feature = "profiling")]
 use crate::profiling::{self, BrainStage};
 use crate::topology::{
-    action_array_index, constrain_weight, inter_index, refresh_parent_ids_and_synapse_count,
-    split_inter_and_action_edges_mut, ACTION_COUNT,
+    action_array_index, constrain_weight, inter_index, refresh_action_synapse_starts_and_count,
+    ACTION_COUNT,
 };
 use crate::RewardLedger;
 use sim_types::{BrainState, OrganismState, SynapseEdge};
@@ -34,17 +34,27 @@ pub(crate) fn compute_pending_coactivations(
     organism: &mut OrganismState,
     scratch: &mut BrainScratch,
 ) {
-    if organism.genome.plasticity.hebb_eta_gain <= 0.0 {
-        return;
-    }
+    // Effective learning rate this tick — the same product the consumer
+    // (`apply_runtime_weight_updates`) gates on. Age increments between this
+    // producer (intents phase) and the consumer (post-commit), so the maturity
+    // gate is evaluated at the post-increment age `age_turns + 1` the consumer
+    // will observe; both sides of one tick then agree, including on the
+    // maturity-boundary tick. When the product is zero (e.g. a juvenile
+    // lineage that evolved juvenile_eta_scale == 0) every pending coactivation
+    // would be discarded unconditionally, so skip the covariance pass; the
+    // activation means keep updating so their semantics are unchanged across
+    // the juvenile/mature boundary.
+    let effective_eta = organism.genome.plasticity.hebb_eta_gain.max(0.0)
+        * learning_rate_scale_at_age(&organism.genome, organism.age_turns + 1);
 
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     let brain = &mut organism.brain;
 
-    // Keep per-neuron mean buffers sized to the current layer layout —
-    // add-neuron / add-sensor mutations can change these between ticks.
-    sync_mean_buffers(brain);
+    // The mean buffers are sized once at expression time; neurons are never
+    // added or removed after birth (runtime pruning removes only synapses).
+    debug_assert_eq!(brain.sensory_mean_activation.len(), brain.sensory.len());
+    debug_assert_eq!(brain.inter_mean_activation.len(), brain.inter.len());
 
     // Bootstrap uninitialized means to the current activation so the
     // covariance term `(activation - mean) * (post - post_mean)` starts at
@@ -52,123 +62,102 @@ pub(crate) fn compute_pending_coactivations(
     // firing at zero. Critical when juvenile_eta_scale > 1 and the critical
     // period is doing most of the learning.
     bootstrap_means(brain);
-
-    // Snapshot current-tick activations and pre-update means. Using the
-    // pre-update mean gives "surprise relative to prior expectation" — the
-    // EMA absorbs this tick's activations only after pending is computed.
-    scratch.inter_activations.clear();
-    scratch
-        .inter_activations
-        .extend(brain.inter.iter().map(|inter| inter.neuron.activation));
-    scratch.inter_means.clear();
-    scratch
-        .inter_means
-        .extend_from_slice(&brain.inter_mean_activation);
-    scratch.sensory_means.clear();
-    scratch
-        .sensory_means
-        .extend_from_slice(&brain.sensory_mean_activation);
-    let selected_action_index = scratch.selected_action_index;
-    let action_probabilities = scratch.action_probabilities;
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::PlasticitySetup, stage_started.elapsed());
 
-    #[cfg(feature = "profiling")]
-    let stage_started = Instant::now();
-    for (sensory_idx, sensory) in brain.sensory.iter_mut().enumerate() {
-        let pre_signal = sensory.neuron.activation;
-        let pre_mean = scratch
-            .sensory_means
-            .get(sensory_idx)
-            .copied()
-            .unwrap_or(0.0);
-        compute_pending_edge_coactivations(
-            &mut sensory.synapses,
-            pre_signal,
-            pre_mean,
-            pre_signal,
-            &scratch.inter_activations,
-            &scratch.inter_means,
-            selected_action_index,
-            &action_probabilities,
-        );
-    }
-    #[cfg(feature = "profiling")]
-    profiling::record_brain_stage(BrainStage::PlasticitySensoryTuning, stage_started.elapsed());
+    if effective_eta > 0.0 {
+        // Snapshot current-tick inter activations: the inter loop mutates
+        // `brain.inter` while reading other inter activations. The means need
+        // no snapshot — they are disjoint struct fields, and they are not
+        // mutated until `update_activation_means` runs after both loops, so
+        // direct borrows yield the pre-update values ("surprise relative to
+        // prior expectation").
+        scratch.inter_activations.clear();
+        scratch
+            .inter_activations
+            .extend(brain.inter.iter().map(|inter| inter.neuron.activation));
+        let sensory_means = &brain.sensory_mean_activation;
+        let inter_means = &brain.inter_mean_activation;
+        let selected_action_index = scratch.selected_action_index;
+        let action_probabilities = scratch.action_probabilities;
 
-    #[cfg(feature = "profiling")]
-    let stage_started = Instant::now();
-    for (pre_idx, inter) in brain.inter.iter_mut().enumerate() {
-        let Some(pre_prev) = scratch.prev_inter.get(pre_idx).copied() else {
-            continue;
-        };
-        let Some(pre_current) = scratch.inter_activations.get(pre_idx).copied() else {
-            continue;
-        };
-        let pre_mean = scratch.inter_means.get(pre_idx).copied().unwrap_or(0.0);
-        compute_pending_edge_coactivations(
-            &mut inter.synapses,
-            pre_prev,
-            pre_mean,
-            pre_current,
-            &scratch.inter_activations,
-            &scratch.inter_means,
-            selected_action_index,
-            &action_probabilities,
-        );
+        #[cfg(feature = "profiling")]
+        let stage_started = Instant::now();
+        for (sensory_idx, sensory) in brain.sensory.iter_mut().enumerate() {
+            let pre_signal = sensory.neuron.activation;
+            // Length equality with the sensory layer is asserted above.
+            let pre_mean = sensory_means[sensory_idx];
+            compute_pending_edge_coactivations(
+                &mut sensory.synapses,
+                sensory.action_synapse_start,
+                pre_signal,
+                pre_mean,
+                pre_signal,
+                &scratch.inter_activations,
+                inter_means,
+                selected_action_index,
+                &action_probabilities,
+            );
+        }
+        #[cfg(feature = "profiling")]
+        profiling::record_brain_stage(BrainStage::PlasticitySensoryTuning, stage_started.elapsed());
+
+        #[cfg(feature = "profiling")]
+        let stage_started = Instant::now();
+        // The scratch is always prepared by `evaluate_brain` immediately
+        // before this pass: `prepare_inter_buffers` fills `prev_inter` to the
+        // inter layer length, and `inter_activations` was just filled above
+        // from the same layer. Fail fast instead of silently skipping the
+        // inter→inter pass on a misprepared scratch.
+        debug_assert_eq!(scratch.prev_inter.len(), brain.inter.len());
+        for (pre_idx, inter) in brain.inter.iter_mut().enumerate() {
+            let pre_prev = scratch.prev_inter[pre_idx];
+            let pre_current = scratch.inter_activations[pre_idx];
+            let pre_mean = inter_means[pre_idx];
+            compute_pending_edge_coactivations(
+                &mut inter.synapses,
+                inter.action_synapse_start,
+                pre_prev,
+                pre_mean,
+                pre_current,
+                &scratch.inter_activations,
+                inter_means,
+                selected_action_index,
+                &action_probabilities,
+            );
+        }
+        #[cfg(feature = "profiling")]
+        profiling::record_brain_stage(BrainStage::PlasticityInterTuning, stage_started.elapsed());
     }
-    #[cfg(feature = "profiling")]
-    profiling::record_brain_stage(BrainStage::PlasticityInterTuning, stage_started.elapsed());
 
     // Fold this tick's activations into the running means. Deferred until
     // after pending is computed so pending reflects the prior expectation.
     update_activation_means(brain);
 }
 
-fn sync_mean_buffers(brain: &mut BrainState) {
-    if brain.sensory_mean_activation.len() != brain.sensory.len() {
-        brain
-            .sensory_mean_activation
-            .resize(brain.sensory.len(), 0.0);
-    }
-    if brain.sensory_mean_initialized.len() != brain.sensory.len() {
-        brain
-            .sensory_mean_initialized
-            .resize(brain.sensory.len(), false);
-    }
-    if brain.inter_mean_activation.len() != brain.inter.len() {
-        brain.inter_mean_activation.resize(brain.inter.len(), 0.0);
-    }
-    if brain.inter_mean_initialized.len() != brain.inter.len() {
-        brain
-            .inter_mean_initialized
-            .resize(brain.inter.len(), false);
-    }
-}
-
+// The mean buffers are allocated at the layer lengths in `express_genome`, so
+// the zips below cover every neuron. All means bootstrap together on the
+// brain's first compute pass (neurons are never added or removed after
+// birth), so a single flag covers the whole brain.
 fn bootstrap_means(brain: &mut BrainState) {
-    for (idx, initialized) in brain.sensory_mean_initialized.iter_mut().enumerate() {
-        if !*initialized {
-            if let (Some(mean_slot), Some(sensory)) = (
-                brain.sensory_mean_activation.get_mut(idx),
-                brain.sensory.get(idx),
-            ) {
-                *mean_slot = sensory.neuron.activation;
-                *initialized = true;
-            }
-        }
+    if brain.means_initialized {
+        return;
     }
-    for (idx, initialized) in brain.inter_mean_initialized.iter_mut().enumerate() {
-        if !*initialized {
-            if let (Some(mean_slot), Some(inter)) = (
-                brain.inter_mean_activation.get_mut(idx),
-                brain.inter.get(idx),
-            ) {
-                *mean_slot = inter.neuron.activation;
-                *initialized = true;
-            }
-        }
+    for (mean, sensory) in brain
+        .sensory_mean_activation
+        .iter_mut()
+        .zip(brain.sensory.iter())
+    {
+        *mean = sensory.neuron.activation;
     }
+    for (mean, inter) in brain
+        .inter_mean_activation
+        .iter_mut()
+        .zip(brain.inter.iter())
+    {
+        *mean = inter.neuron.activation;
+    }
+    brain.means_initialized = true;
 }
 
 fn update_activation_means(brain: &mut BrainState) {
@@ -197,6 +186,7 @@ fn should_prune_synapses(age_turns: u64, age_of_maturity: u32) -> bool {
 pub(crate) fn apply_runtime_weight_updates(
     organism: &mut OrganismState,
     reward_ledger: RewardLedger,
+    body_mass_metabolic_cost_coeff: f32,
 ) {
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
@@ -218,17 +208,17 @@ pub(crate) fn apply_runtime_weight_updates(
 
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
-    for_each_sensory_synapse_group_mut(&mut organism.brain, |edges| {
-        apply_edge_weight_update_and_fold_pending(edges, &params);
-    });
+    for sensory in &mut organism.brain.sensory {
+        apply_edge_weight_update_and_fold_pending(&mut sensory.synapses, &params);
+    }
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::PlasticitySensoryTuning, stage_started.elapsed());
 
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
-    for_each_inter_synapse_group_mut(&mut organism.brain, |edges| {
-        apply_edge_weight_update_and_fold_pending(edges, &params);
-    });
+    for inter in &mut organism.brain.inter {
+        apply_edge_weight_update_and_fold_pending(&mut inter.synapses, &params);
+    }
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::PlasticityInterTuning, stage_started.elapsed());
 
@@ -238,22 +228,35 @@ pub(crate) fn apply_runtime_weight_updates(
         let pruned_any =
             prune_low_weight_synapses(&mut organism.brain, params.weight_prune_threshold);
         if pruned_any {
-            refresh_organism_base_metabolic_cost(organism);
+            refresh_organism_base_metabolic_cost(organism, body_mass_metabolic_cost_coeff);
         }
         #[cfg(feature = "profiling")]
         profiling::record_brain_stage(BrainStage::PlasticityPrune, stage_started.elapsed());
     }
 }
 
+/// Maturity-dependent learning-rate scale at the organism's current age: 1
+/// once mature, otherwise the genome's (non-negative) juvenile eta scale.
+/// Shared by synapse plasticity and the actor-critic value head; consumers
+/// run after `increment_age_for_survivors`, while the producer
+/// (`compute_pending_coactivations`) calls `learning_rate_scale_at_age` with
+/// `age_turns + 1` to evaluate the same post-increment age.
+pub(crate) fn learning_rate_scale(organism: &OrganismState) -> f32 {
+    learning_rate_scale_at_age(&organism.genome, organism.age_turns)
+}
+
+fn learning_rate_scale_at_age(genome: &sim_types::OrganismGenome, age_turns: u64) -> f32 {
+    let is_mature = age_turns >= u64::from(genome.lifecycle.age_of_maturity);
+    if is_mature {
+        1.0
+    } else {
+        genome.plasticity.juvenile_eta_scale.max(0.0)
+    }
+}
+
 impl PlasticityStepParams {
     fn from_organism(organism: &OrganismState, dopamine_signal: f32) -> Self {
-        let is_mature = organism.age_turns >= u64::from(organism.genome.lifecycle.age_of_maturity);
-        let juvenile_eta_scale = organism.genome.plasticity.juvenile_eta_scale.max(0.0);
-        let eta = if is_mature {
-            organism.genome.plasticity.hebb_eta_gain.max(0.0)
-        } else {
-            organism.genome.plasticity.hebb_eta_gain.max(0.0) * juvenile_eta_scale
-        };
+        let eta = organism.genome.plasticity.hebb_eta_gain.max(0.0) * learning_rate_scale(organism);
 
         Self {
             dopamine_signal,
@@ -280,6 +283,7 @@ impl PlasticityStepParams {
 #[allow(clippy::too_many_arguments)]
 fn compute_pending_edge_coactivations(
     edges: &mut [SynapseEdge],
+    action_synapse_start: usize,
     inter_pre_signal: f32,
     inter_pre_mean: f32,
     action_pre_signal: f32,
@@ -288,7 +292,10 @@ fn compute_pending_edge_coactivations(
     selected_action_index: Option<usize>,
     action_probabilities: &[f32; ACTION_COUNT],
 ) {
-    let (inter_edges, action_edges) = split_inter_and_action_edges_mut(edges);
+    // Edges stay sorted by post ID (asserted where the cache is refreshed in
+    // `refresh_action_synapse_starts_and_count`), so the cached split index
+    // separates the inter-targeting prefix from the action-targeting suffix.
+    let (inter_edges, action_edges) = edges.split_at_mut(action_synapse_start);
 
     // Covariance rule on inter-targeting edges:
     //     pending = (pre - pre̅) * (post - post̅)
@@ -297,16 +304,21 @@ fn compute_pending_edge_coactivations(
     // is the deviation from recent average, not the raw activation.
     let pre_dev = inter_pre_signal - inter_pre_mean;
     let inter_len = inter_activations.len();
-    let inter_means_slice = inter_means;
+    debug_assert_eq!(inter_means.len(), inter_len);
     for edge in inter_edges {
         let Some(idx) = inter_index(edge.post_neuron_id, inter_len) else {
             continue;
         };
         // Safety: `inter_index` already proved `idx < inter_len`, and
-        // `inter_means_slice` is the same logical buffer (same length when in
-        // sync; falls back to 0 when shorter, matching the unwrap_or below).
-        let post_activation = unsafe { *inter_activations.get_unchecked(idx) };
-        let post_mean = inter_means_slice.get(idx).copied().unwrap_or(0.0);
+        // `express_genome` allocates `inter_means` at the inter layer length
+        // (asserted in `compute_pending_coactivations`), matching
+        // `inter_activations`.
+        let (post_activation, post_mean) = unsafe {
+            (
+                *inter_activations.get_unchecked(idx),
+                *inter_means.get_unchecked(idx),
+            )
+        };
         edge.pending_coactivation = pre_dev * (post_activation - post_mean);
     }
 
@@ -349,56 +361,32 @@ fn apply_edge_weight_update_and_fold_pending(
         edge.weight = constrain_weight(updated_weight);
         // Additive accumulation (decaying sum) instead of EMA — preserves
         // transient signal from zero-mean coactivation/policy gradients.
-        edge.eligibility = params.eligibility_retention * edge.eligibility
-            + edge.pending_coactivation;
+        edge.eligibility =
+            params.eligibility_retention * edge.eligibility + edge.pending_coactivation;
         edge.pending_coactivation = 0.0;
-    }
-}
-
-fn for_each_sensory_synapse_group_mut(
-    brain: &mut BrainState,
-    mut visitor: impl FnMut(&mut [SynapseEdge]),
-) {
-    for sensory in &mut brain.sensory {
-        visitor(&mut sensory.synapses);
-    }
-}
-
-fn for_each_inter_synapse_group_mut(
-    brain: &mut BrainState,
-    mut visitor: impl FnMut(&mut [SynapseEdge]),
-) {
-    for inter in &mut brain.inter {
-        visitor(&mut inter.synapses);
-    }
-}
-
-fn for_each_synapse_group_vec_mut(
-    brain: &mut BrainState,
-    mut visitor: impl FnMut(&mut Vec<SynapseEdge>),
-) {
-    for sensory in &mut brain.sensory {
-        visitor(&mut sensory.synapses);
-    }
-    for inter in &mut brain.inter {
-        visitor(&mut inter.synapses);
     }
 }
 
 fn prune_low_weight_synapses(brain: &mut BrainState, threshold: f32) -> bool {
     let mut pruned_any = false;
 
-    for_each_synapse_group_vec_mut(brain, |edges| {
+    let mut prune_group = |edges: &mut Vec<SynapseEdge>| {
         let before = edges.len();
         edges.retain(|synapse| {
             synapse.weight.abs() >= threshold
                 || synapse.eligibility.abs() >= (PRUNE_ELIGIBILITY_MULTIPLIER * threshold)
         });
         pruned_any |= edges.len() != before;
-    });
+    };
+    for sensory in &mut brain.sensory {
+        prune_group(&mut sensory.synapses);
+    }
+    for inter in &mut brain.inter {
+        prune_group(&mut inter.synapses);
+    }
 
     if pruned_any {
-        refresh_parent_ids_and_synapse_count(brain);
+        refresh_action_synapse_starts_and_count(brain);
     }
 
     pruned_any

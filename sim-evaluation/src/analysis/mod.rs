@@ -12,11 +12,11 @@ pub mod pillars;
 pub use averaging::{average_demographic_analytics, average_pillar_scores, average_timeseries};
 pub use demographics::compute_demographic_analytics;
 pub use intervals::derive_interval_metrics;
-pub use pillars::{compute_pillar_scores, ScoringWindow};
+pub use pillars::compute_pillar_scores;
 
 use crate::dataset::DatasetReader;
 use crate::output::{write_summary_json, write_timeseries_csv};
-use crate::report::{write_html_report, HtmlReportContext, HtmlReportMeta, PerSeedReportRow};
+use crate::report::{write_html_report, HtmlReportContext, PerSeedReportRow};
 use crate::types::{
     DemographicAnalytics, EvaluationSummary, IntervalMetrics, PillarScores, SeedEvaluationSummary,
 };
@@ -27,7 +27,6 @@ use std::path::Path;
 pub struct AnalysisOptions {
     pub report_every: u64,
     pub total_ticks: u64,
-    pub scoring_window: ScoringWindow,
 }
 
 pub struct AnalysisOutput {
@@ -38,7 +37,7 @@ pub struct AnalysisOutput {
 
 pub fn analyze(dataset: &DatasetReader, options: &AnalysisOptions) -> AnalysisOutput {
     let timeseries = derive_interval_metrics(dataset, options.report_every, options.total_ticks);
-    let pillars = compute_pillar_scores(&timeseries, options.scoring_window);
+    let pillars = compute_pillar_scores(&timeseries);
     let demographics = compute_demographic_analytics(dataset, options.total_ticks);
     AnalysisOutput {
         timeseries,
@@ -60,19 +59,17 @@ pub fn write_per_seed_artifacts(
     write_timeseries_csv(out_dir, &summary.timeseries)?;
     write_html_report(
         out_dir,
-        &HtmlReportMeta::from_pillars(
-            &summary.pillars,
-            HtmlReportContext {
-                title: summary.title.clone(),
-                ticks: summary.ticks,
-                report_every,
-                control: summary.control,
-                total_time_seconds: summary.total_time_seconds,
-                generated_at_utc: Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
-                timeseries_label: timeseries_label.to_owned(),
-                per_seed_rows: Vec::new(),
-            },
-        ),
+        &summary.pillars,
+        &HtmlReportContext {
+            title: summary.title.clone(),
+            ticks: summary.ticks,
+            report_every,
+            control: summary.control,
+            total_time_seconds: summary.total_time_seconds,
+            generated_at_utc: Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+            timeseries_label: timeseries_label.to_owned(),
+            per_seed_rows: Vec::new(),
+        },
         &summary.timeseries,
     )
 }
@@ -102,19 +99,17 @@ pub fn write_aggregate_artifacts(
         .collect();
     write_html_report(
         out_dir,
-        &HtmlReportMeta::from_pillars(
-            &summary.pillars,
-            HtmlReportContext {
-                title: summary.title.clone(),
-                ticks: summary.ticks,
-                report_every,
-                control: summary.control,
-                total_time_seconds: summary.total_time_seconds,
-                generated_at_utc: generated_at_utc.to_owned(),
-                timeseries_label: "mean across seeds".to_owned(),
-                per_seed_rows,
-            },
-        ),
+        &summary.pillars,
+        &HtmlReportContext {
+            title: summary.title.clone(),
+            ticks: summary.ticks,
+            report_every,
+            control: summary.control,
+            total_time_seconds: summary.total_time_seconds,
+            generated_at_utc: generated_at_utc.to_owned(),
+            timeseries_label: "mean across seeds".to_owned(),
+            per_seed_rows,
+        },
         &summary.timeseries,
     )
 }

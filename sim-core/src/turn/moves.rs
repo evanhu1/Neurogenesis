@@ -1,14 +1,10 @@
 use super::*;
 
 impl Simulation {
-    pub(super) fn resolve_moves(
-        &self,
-        world_width: i32,
-        occupancy: &[Option<Occupant>],
-        intents: &[OrganismIntent],
-    ) -> Vec<MoveResolution> {
-        let w = world_width as usize;
-        let mut candidates: Vec<(usize, MoveCandidate)> = Vec::new();
+    pub(super) fn resolve_moves(&mut self, intents: &[OrganismIntent]) -> Vec<MoveResolution> {
+        let w = self.config.world_width as usize;
+        let mut candidates = std::mem::take(&mut self.turn_scratch.move_candidates);
+        candidates.clear();
 
         for intent in intents {
             if !intent.wants_move {
@@ -18,7 +14,7 @@ impl Simulation {
                 continue;
             };
             let cell_idx = target.1 as usize * w + target.0 as usize;
-            if occupancy[cell_idx].is_some() {
+            if self.occupancy[cell_idx].is_some() {
                 continue;
             }
             candidates.push((
@@ -44,17 +40,25 @@ impl Simulation {
         });
         candidates.dedup_by_key(|c| c.0);
 
-        // Sort winners by actor_idx for deterministic commit ordering.
-        candidates.sort_unstable_by_key(|c| c.1.actor_idx);
+        // Winners stay in cell-index order — already fully deterministic, so
+        // no re-sort is needed. Commit order is also irrelevant: target cells
+        // are pairwise distinct (dedup above), from-cells are pairwise
+        // distinct (one candidate per actor, one actor per cell), and no
+        // winner's from can equal another winner's target because every
+        // target was unoccupied at the snapshot above while every from was
+        // occupied by its actor. Each applied move therefore touches only
+        // cells and organism state no other move reads or writes.
+        let mut resolutions = std::mem::take(&mut self.turn_scratch.move_resolutions);
+        resolutions.clear();
+        resolutions.extend(candidates.iter().map(|(_, winner)| MoveResolution {
+            actor_idx: winner.actor_idx,
+            actor_id: winner.actor_id,
+            from: winner.from,
+            to: winner.target,
+        }));
 
-        candidates
-            .into_iter()
-            .map(|(_, winner)| MoveResolution {
-                actor_idx: winner.actor_idx,
-                actor_id: winner.actor_id,
-                from: winner.from,
-                to: winner.target,
-            })
-            .collect()
+        // Return the scratch buffer to the simulation for reuse next tick.
+        self.turn_scratch.move_candidates = candidates;
+        resolutions
     }
 }

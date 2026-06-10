@@ -19,38 +19,6 @@ use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-/// Minimal write-side abstraction. The orchestration loop only sees this
-/// trait; the in-process Parquet impl is the sole concrete implementor today,
-/// but this boundary keeps orchestration testable and lets us swap in a
-/// JSONL or in-memory sink later without changing emission code.
-pub trait DatasetWriter {
-    fn emit_tick(&mut self, row: TickSummaryRow);
-    fn emit_population_snapshot(&mut self, row: PopulationSnapshotRow);
-    fn emit_action_count(&mut self, row: ActionCountRow);
-    fn emit_organism_lifetime(&mut self, row: OrganismLifetimeRow);
-    fn emit_reproduction_event(&mut self, row: ReproductionEventRow);
-    /// Serialize `genome` to `genomes/t{tick:06}.bin` relative to the dataset
-    /// root and enqueue an index row pointing at it. Returns the relative
-    /// file path stored in the index so tests and callers can verify.
-    fn emit_genome_snapshot(
-        &mut self,
-        tick: u64,
-        organism_id: u64,
-        species_id: u64,
-        generation: u64,
-        num_offspring: u32,
-        genome: &OrganismGenome,
-    ) -> Result<String>;
-
-    /// Write every buffered table to its partition directory and clear the
-    /// buffers. Called at each reporting interval so tailers can observe
-    /// progress.
-    fn flush(&mut self) -> Result<()>;
-
-    /// Final flush. Consumes self so the writer can't be reused.
-    fn finalize(self: Box<Self>) -> Result<()>;
-}
-
 pub struct PartitionedParquetWriter {
     root: PathBuf,
     partition_index: u32,
@@ -94,26 +62,26 @@ impl PartitionedParquetWriter {
             genome_snapshots: TableBuffer::new("genome_snapshots"),
         })
     }
-}
 
-impl DatasetWriter for PartitionedParquetWriter {
-    fn emit_tick(&mut self, row: TickSummaryRow) {
+    pub fn emit_tick(&mut self, row: TickSummaryRow) {
         self.tick_summary.push(row);
     }
-    fn emit_population_snapshot(&mut self, row: PopulationSnapshotRow) {
+    pub fn emit_population_snapshot(&mut self, row: PopulationSnapshotRow) {
         self.population_snapshots.push(row);
     }
-    fn emit_action_count(&mut self, row: ActionCountRow) {
+    pub fn emit_action_count(&mut self, row: ActionCountRow) {
         self.action_counts.push(row);
     }
-    fn emit_organism_lifetime(&mut self, row: OrganismLifetimeRow) {
+    pub fn emit_organism_lifetime(&mut self, row: OrganismLifetimeRow) {
         self.organism_lifetimes.push(row);
     }
-    fn emit_reproduction_event(&mut self, row: ReproductionEventRow) {
+    pub fn emit_reproduction_event(&mut self, row: ReproductionEventRow) {
         self.reproduction_events.push(row);
     }
 
-    fn emit_genome_snapshot(
+    /// Serialize `genome` to `genomes/t{tick:06}.bin` relative to the dataset
+    /// root and enqueue an index row pointing at it.
+    pub fn emit_genome_snapshot(
         &mut self,
         tick: u64,
         organism_id: u64,
@@ -121,7 +89,7 @@ impl DatasetWriter for PartitionedParquetWriter {
         generation: u64,
         num_offspring: u32,
         genome: &OrganismGenome,
-    ) -> Result<String> {
+    ) -> Result<()> {
         let file_name = format!("t{:06}.bin", tick);
         let rel_path = format!("{GENOMES_DIR}/{file_name}");
         let abs_path = self.root.join(&rel_path);
@@ -142,12 +110,15 @@ impl DatasetWriter for PartitionedParquetWriter {
             species_id,
             generation,
             num_offspring,
-            file_path: rel_path.clone(),
+            file_path: rel_path,
         });
-        Ok(rel_path)
+        Ok(())
     }
 
-    fn flush(&mut self) -> Result<()> {
+    /// Write every buffered table to its partition directory and clear the
+    /// buffers. Called at each reporting interval so tailers can observe
+    /// progress.
+    pub fn flush(&mut self) -> Result<()> {
         let part = self.partition_index;
         self.tick_summary.flush(&self.root, part)?;
         self.population_snapshots.flush(&self.root, part)?;
@@ -159,7 +130,8 @@ impl DatasetWriter for PartitionedParquetWriter {
         Ok(())
     }
 
-    fn finalize(mut self: Box<Self>) -> Result<()> {
+    /// Final flush. Consumes self so the writer can't be reused.
+    pub fn finalize(mut self) -> Result<()> {
         self.flush()
     }
 }
@@ -193,9 +165,11 @@ where
     }
 
     /// Writes the buffer to `{root}/{table}/part_{index:06}.parquet` and
-    /// clears it. Skipped entirely if the buffer is empty, so partition
-    /// numbering stays contiguous but empty intervals don't produce empty
-    /// files.
+    /// clears it. Skipped entirely if the buffer is empty. The partition
+    /// index is shared across all tables per flush, so a given index
+    /// corresponds to the same interval in every table; per-table sequences
+    /// may therefore have gaps, which the reader tolerates because it sorts
+    /// and concatenates whatever files exist.
     fn flush(&mut self, root: &Path, partition_index: u32) -> Result<()> {
         if self.rows.is_empty() {
             return Ok(());
@@ -326,7 +300,7 @@ mod tests {
         for row in &batch_two {
             writer.emit_tick(row.clone());
         }
-        Box::new(writer).finalize().unwrap();
+        writer.finalize().unwrap();
 
         let dataset = DatasetReader::load(&dir).unwrap();
         let mut expected = batch_one.clone();
@@ -420,7 +394,7 @@ mod tests {
             parent_energy_after: 800.0,
             outcome: ReproductionOutcome::Success.code(),
         });
-        Box::new(writer).finalize().unwrap();
+        writer.finalize().unwrap();
 
         let dataset = DatasetReader::load(&dir).unwrap();
         assert_eq!(dataset.tick_summary.len(), 1);
@@ -428,7 +402,6 @@ mod tests {
         assert_eq!(dataset.action_counts.len(), 1);
         assert_eq!(dataset.organism_lifetimes.len(), 1);
         assert_eq!(dataset.reproduction_events.len(), 1);
-        assert_eq!(dataset.genome_snapshots.len(), 0);
         assert_eq!(dataset.organism_lifetimes[0].action_histogram.len(), 7);
         assert_eq!(
             dataset.organism_lifetimes[0].joint_sensory_action.len(),

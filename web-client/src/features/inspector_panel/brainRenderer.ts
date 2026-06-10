@@ -1,5 +1,4 @@
 import type { BrainState } from '../../types';
-import { unwrapId } from '../../protocol';
 
 export type BrainTransform = { x: number; y: number; scale: number };
 
@@ -43,9 +42,8 @@ export function computeBrainLayout(
   const nodes: BrainNode[] = [];
 
   brain.sensory.forEach((neuron, sensoryIdx) => {
-    const nid = unwrapId(neuron.neuron.neuron_id);
     nodes.push({
-      id: nid,
+      id: neuron.neuron.neuron_id,
       type: 'sensory',
       label:
         neuron.receptor_type === 'VisionRay'
@@ -60,9 +58,8 @@ export function computeBrainLayout(
   });
 
   brain.inter.forEach((neuron, interIdx) => {
-    const nid = unwrapId(neuron.neuron.neuron_id);
     nodes.push({
-      id: nid,
+      id: neuron.neuron.neuron_id,
       type: 'inter',
       value: neuron.neuron.activation,
       bias: neuron.neuron.bias,
@@ -74,16 +71,15 @@ export function computeBrainLayout(
   });
 
   brain.action.forEach((neuron, actionIdx) => {
-    const nid = unwrapId(neuron.neuron_id);
     nodes.push({
-      id: nid,
+      id: neuron.neuron_id,
       type: 'action',
       label: neuron.action_type,
       value: neuron.logit,
       bias: actionBiases[actionIdx],
       gx: finiteOr(neuron.x, 8.5),
       gy: finiteOr(neuron.y, actionIdx * 1.2 + 2),
-      isActive: activeActionNeuronId === nid,
+      isActive: activeActionNeuronId === neuron.neuron_id,
     });
   });
 
@@ -407,36 +403,15 @@ export function renderBrain(
 
   // Draw synapses
   ctx.lineWidth = 1;
-  for (const neuron of focusedBrain.sensory) {
-    const pre = positions.get(unwrapId(neuron.neuron.neuron_id));
+  for (const neuron of [...focusedBrain.sensory, ...focusedBrain.inter]) {
+    const pre = positions.get(neuron.neuron.neuron_id);
     if (!pre) continue;
     for (const synapse of neuron.synapses) {
-      const postId = unwrapId(synapse.post_neuron_id);
-      const post = positions.get(postId);
+      const post = positions.get(synapse.post_neuron_id);
       if (!post) continue;
       const strokeColor = synapse.weight >= 0 ? 'rgba(56,189,248,0.5)' : 'rgba(248,113,113,0.55)';
       const strokeWidth = Math.max(0.5, (Math.abs(synapse.weight) / 8) * 2);
-      if (pre.id === postId) {
-        drawSelfSynapse(pre, strokeColor, strokeWidth);
-        if (showWeightLabels) drawSelfSynapseWeightLabel(pre, synapse.weight, synapse.eligibility);
-      } else {
-        drawDirectedSynapse(pre, post, strokeColor, strokeWidth);
-        if (showWeightLabels)
-          drawSynapseWeightLabel(pre, post, synapse.weight, synapse.eligibility);
-      }
-    }
-  }
-
-  for (const neuron of focusedBrain.inter) {
-    const pre = positions.get(unwrapId(neuron.neuron.neuron_id));
-    if (!pre) continue;
-    for (const synapse of neuron.synapses) {
-      const postId = unwrapId(synapse.post_neuron_id);
-      const post = positions.get(postId);
-      if (!post) continue;
-      const strokeColor = synapse.weight >= 0 ? 'rgba(56,189,248,0.45)' : 'rgba(248,113,113,0.5)';
-      const strokeWidth = Math.max(0.5, (Math.abs(synapse.weight) / 8) * 2);
-      if (pre.id === postId) {
+      if (pre.id === post.id) {
         drawSelfSynapse(pre, strokeColor, strokeWidth);
         if (showWeightLabels) drawSelfSynapseWeightLabel(pre, synapse.weight, synapse.eligibility);
       } else {

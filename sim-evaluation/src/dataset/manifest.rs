@@ -15,7 +15,6 @@ pub struct Manifest {
     pub seed: u64,
     pub total_ticks: u64,
     pub report_every: u64,
-    pub snapshot_interval: u64,
     pub created_at_utc: String,
     pub world_config: WorldConfig,
 }
@@ -31,14 +30,23 @@ impl Manifest {
     pub fn read(dir: &Path) -> Result<Self> {
         let file = File::open(dir.join("manifest.json"))?;
         let reader = BufReader::new(file);
-        let manifest: Manifest = serde_json::from_reader(reader)?;
-        if manifest.schema_version != SCHEMA_VERSION {
+        // Two-stage parse: check schema_version on the raw JSON first so a
+        // version mismatch reports as such instead of failing deep inside
+        // typed deserialization (e.g. a "missing field" error from an old
+        // WorldConfig shape).
+        let value: serde_json::Value = serde_json::from_reader(reader)?;
+        let schema_version = value
+            .get("schema_version")
+            .and_then(serde_json::Value::as_u64);
+        if schema_version != Some(u64::from(SCHEMA_VERSION)) {
             anyhow::bail!(
                 "dataset schema_version {} does not match reader's {}",
-                manifest.schema_version,
+                schema_version
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "<missing>".to_owned()),
                 SCHEMA_VERSION
             );
         }
-        Ok(manifest)
+        Ok(serde_json::from_value(value)?)
     }
 }

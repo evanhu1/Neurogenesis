@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sim_types::{
-    organism_visual, FacingDirection, FoodState, MetricsSnapshot, NeuronId, OccupancyCell,
-    OrganismFacing, OrganismGenome, OrganismId, OrganismMove, OrganismState, RemovedEntityPosition,
+    organism_visual, FacingDirection, FoodState, MetricsSnapshot, NeuronId, OrganismFacing,
+    OrganismGenome, OrganismId, OrganismMove, OrganismState, RemovedEntityPosition,
     ReproductionEvent, SpeciesId, TerrainCell, TickDelta, VisualProperties, WorldConfig,
     WorldSnapshot,
 };
@@ -161,7 +161,6 @@ pub struct WorldSnapshotView {
     pub organisms: Vec<WorldOrganismState>,
     pub foods: Vec<FoodState>,
     pub terrain: Vec<TerrainCell>,
-    pub occupancy: Vec<OccupancyCell>,
     pub metrics: MetricsSnapshot,
 }
 
@@ -178,7 +177,6 @@ impl From<WorldSnapshot> for WorldSnapshotView {
                 .collect(),
             foods: snapshot.foods,
             terrain: snapshot.terrain,
-            occupancy: snapshot.occupancy,
             metrics: snapshot.metrics,
         }
     }

@@ -1,30 +1,39 @@
 use super::*;
 
 pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
-    let sensory_spawn = sensory_spawn_location();
-    let action_spawn = action_spawn_location();
+    // `align_genome_vectors` forces every genome vector to its exact target
+    // length on all paths into expression (seed generation, mutation,
+    // external-genome intake) — fail fast instead of silently expressing
+    // zero-bias / default-alpha / center-located neurons.
+    let num_inter = genome.topology.num_neurons as usize;
+    debug_assert_eq!(genome.brain.inter_biases.len(), num_inter);
+    debug_assert_eq!(genome.brain.inter_log_time_constants.len(), num_inter);
+    debug_assert_eq!(genome.brain.inter_locations.len(), num_inter);
+    debug_assert_eq!(genome.brain.sensory_locations.len(), SENSORY_COUNT as usize);
+    debug_assert_eq!(genome.brain.action_locations.len(), ACTION_COUNT);
 
     let sensory = sensory_receptors_in_order()
-        .map(|(sensory_id, receptor)| make_sensory_neuron(sensory_id, receptor, sensory_spawn))
+        .map(|(sensory_id, receptor)| {
+            make_sensory_neuron(
+                sensory_id,
+                receptor,
+                genome.brain.sensory_locations[sensory_id as usize],
+            )
+        })
         .collect::<Vec<_>>();
 
-    let mut inter = Vec::with_capacity(genome.topology.num_neurons as usize);
+    let mut inter = Vec::with_capacity(num_inter);
     for i in 0..genome.topology.num_neurons {
         let idx = i as usize;
-        let bias = genome.brain.inter_biases.get(idx).copied().unwrap_or(0.0);
-        let log_time_constant = genome
-            .brain
-            .inter_log_time_constants
-            .get(idx)
-            .copied()
-            .unwrap_or(DEFAULT_INTER_LOG_TIME_CONSTANT);
+        let bias = genome.brain.inter_biases[idx];
+        let log_time_constant = genome.brain.inter_log_time_constants[idx];
         let alpha = inter_alpha_from_log_time_constant(log_time_constant);
         inter.push(InterNeuronState {
             neuron: make_neuron(
                 inter_neuron_id(i),
                 NeuronType::Inter,
                 bias,
-                location_or_default(&genome.brain.inter_locations, idx),
+                genome.brain.inter_locations[idx],
             ),
             state: 0.0,
             alpha,
@@ -38,7 +47,7 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
         action.push(make_action_neuron(
             action_neuron_id(idx).0,
             action_type,
-            action_spawn,
+            genome.brain.action_locations[idx],
         ));
     }
 
@@ -51,12 +60,11 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
         synapse_count: 0,
         value_weights: vec![0.0; num_sensory + num_inter],
         sensory_mean_activation: vec![0.0; num_sensory],
-        sensory_mean_initialized: vec![false; num_sensory],
         inter_mean_activation: vec![0.0; num_inter],
-        inter_mean_initialized: vec![false; num_inter],
+        means_initialized: false,
     };
     wire_birth_synapses_from_genome(genome, &mut brain.sensory, &mut brain.inter);
-    refresh_parent_ids_and_synapse_count(&mut brain);
+    refresh_action_synapse_starts_and_count(&mut brain);
     brain
 }
 
@@ -69,6 +77,7 @@ pub(crate) fn make_sensory_neuron(
         neuron: make_neuron(NeuronId(id), NeuronType::Sensory, 0.0, location),
         receptor,
         synapses: Vec::new(),
+        action_synapse_start: 0,
     }
 }
 
@@ -82,7 +91,6 @@ pub(crate) fn make_action_neuron(
         x: location.x,
         y: location.y,
         logit: 0.0,
-        parent_ids: Vec::new(),
         action_type,
     }
 }
@@ -91,27 +99,6 @@ fn sensory_receptors_in_order() -> impl Iterator<Item = (u32, SensoryReceptor)> 
     SensoryReceptor::ordered()
         .enumerate()
         .map(|(idx, receptor)| (idx as u32, receptor))
-}
-
-fn location_or_default(locations: &[BrainLocation], index: usize) -> BrainLocation {
-    locations.get(index).copied().unwrap_or(BrainLocation {
-        x: 0.5 * (BRAIN_SPACE_MIN + BRAIN_SPACE_MAX),
-        y: 0.5 * (BRAIN_SPACE_MIN + BRAIN_SPACE_MAX),
-    })
-}
-
-fn sensory_spawn_location() -> BrainLocation {
-    BrainLocation {
-        x: BRAIN_SPACE_MIN,
-        y: 0.5 * (BRAIN_SPACE_MIN + BRAIN_SPACE_MAX),
-    }
-}
-
-fn action_spawn_location() -> BrainLocation {
-    BrainLocation {
-        x: BRAIN_SPACE_MAX,
-        y: 0.5 * (BRAIN_SPACE_MIN + BRAIN_SPACE_MAX),
-    }
 }
 
 fn wire_birth_synapses_from_genome(
@@ -150,36 +137,32 @@ fn wire_birth_synapses_from_genome(
         pre.synapses.push(runtime_edge_from_gene(edge));
     }
 
-    sort_outgoing_synapses(
-        sensory
-            .iter_mut()
-            .map(|sensory_neuron| &mut sensory_neuron.synapses),
-    );
-    sort_outgoing_synapses(
-        inter
-            .iter_mut()
-            .map(|inter_neuron| &mut inter_neuron.synapses),
-    );
-}
-
-fn runtime_edge_from_gene(edge: &SynapseEdge) -> SynapseEdge {
-    SynapseEdge {
-        pre_neuron_id: edge.pre_neuron_id,
-        post_neuron_id: edge.post_neuron_id,
-        weight: constrain_weight(edge.weight),
-        eligibility: 0.0,
-        pending_coactivation: 0.0,
+    // Genome edges are sorted by (pre, post) with unique keys — sanitization
+    // runs on every path into expression (seed generation, mutation,
+    // external-genome intake) — and edges are pushed per pre-neuron in genome
+    // iteration order, so every per-pre list is already sorted by post ID.
+    // Partition-based routing and plasticity assume this invariant.
+    if cfg!(debug_assertions) {
+        for sensory_neuron in sensory.iter() {
+            crate::topology::debug_assert_sorted_by_post_neuron_id(&sensory_neuron.synapses);
+        }
+        for inter_neuron in inter.iter() {
+            crate::topology::debug_assert_sorted_by_post_neuron_id(&inter_neuron.synapses);
+        }
     }
 }
 
-fn sort_outgoing_synapses<'a>(synapse_groups: impl Iterator<Item = &'a mut Vec<SynapseEdge>>) {
-    for synapses in synapse_groups {
-        // Keep outgoing edges sorted by post ID; partition-based routing and plasticity assume it.
-        synapses.sort_by(|a, b| {
-            a.post_neuron_id
-                .cmp(&b.post_neuron_id)
-                .then_with(|| a.weight.total_cmp(&b.weight))
-        });
+fn runtime_edge_from_gene(gene: &SynapseGene) -> SynapseEdge {
+    // Gene weights are already constrained: `sanitize_synapse_genes` clamps
+    // every retained edge and spatial-prior additions sample within
+    // [SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX].
+    debug_assert_eq!(gene.weight, constrain_weight(gene.weight));
+    SynapseEdge {
+        pre_neuron_id: gene.pre_neuron_id,
+        post_neuron_id: gene.post_neuron_id,
+        weight: gene.weight,
+        eligibility: 0.0,
+        pending_coactivation: 0.0,
     }
 }
 
@@ -196,6 +179,5 @@ fn make_neuron(
         x: location.x,
         y: location.y,
         activation: 0.0,
-        parent_ids: Vec::new(),
     }
 }

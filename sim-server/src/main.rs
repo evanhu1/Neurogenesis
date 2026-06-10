@@ -7,7 +7,7 @@ use axum::{Json, Router};
 use clap::Parser;
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use sim_core::{derive_active_action_neuron_id, SimError, Simulation};
+use sim_core::{SimError, Simulation};
 use sim_server::{
     load_default_world_config,
     protocol::{
@@ -709,7 +709,7 @@ async fn set_focus(
     let session = get_session(&state, id).await?;
     let sim = session.simulation.lock().await;
     if let Some(org) = sim.focused_organism(req.organism_id) {
-        let active = derive_active_action_neuron_id(&org);
+        let active = org.last_action_taken.neuron_id();
         let _ = session.events.send(ServerEvent::FocusBrain(FocusBrainData {
             turn: sim.turn(),
             organism: org,
@@ -872,7 +872,7 @@ async fn handle_command(command: ClientCommand, session: Arc<Session>) -> Result
         ClientCommand::SetFocus { organism_id } => {
             let sim = session.simulation.lock().await;
             if let Some(organism) = sim.focused_organism(organism_id) {
-                let active = derive_active_action_neuron_id(&organism);
+                let active = organism.last_action_taken.neuron_id();
                 let _ = session.events.send(ServerEvent::FocusBrain(FocusBrainData {
                     turn: sim.turn(),
                     organism,
@@ -909,14 +909,12 @@ async fn session_start(session: Arc<Session>, ticks_per_second: u32, stream_mode
                 StreamMode::Full => {
                     let delta = {
                         let mut sim = session_for_task.simulation.lock().await;
-                        sim.step_n(1).into_iter().next()
+                        sim.tick()
                     };
 
-                    if let Some(delta) = delta {
-                        let _ = session_for_task
-                            .events
-                            .send(ServerEvent::TickDelta(delta.into()));
-                    }
+                    let _ = session_for_task
+                        .events
+                        .send(ServerEvent::TickDelta(delta.into()));
                 }
                 StreamMode::MetricsOnly => {
                     let metrics = {
@@ -978,7 +976,7 @@ mod tests {
     use super::*;
     use sim_types::{
         inter_neuron_id, ActionType, BrainLocation, BrainState, FacingDirection, OrganismId,
-        SensoryReceptor, SpeciesId, SynapseEdge,
+        SensoryReceptor, SpeciesId, SynapseGene,
     };
 
     fn action_type_index(action_type: ActionType) -> Option<usize> {
@@ -1047,9 +1045,8 @@ mod tests {
             synapse_count: 0,
             value_weights: Vec::new(),
             sensory_mean_activation: Vec::new(),
-            sensory_mean_initialized: Vec::new(),
             inter_mean_activation: Vec::new(),
-            inter_mean_initialized: Vec::new(),
+            means_initialized: false,
         };
 
         let organisms = vec![
@@ -1139,26 +1136,20 @@ mod tests {
         record.genome.brain.action_locations[action_type_index(attack_action).unwrap()] =
             BrainLocation { x: 8.0, y: 3.5 };
         record.genome.brain.edges = vec![
-            SynapseEdge {
+            SynapseGene {
                 pre_neuron_id: food_receptor.neuron_id().unwrap(),
                 post_neuron_id: inter_neuron_id(0),
                 weight: 0.75,
-                eligibility: 0.0,
-                pending_coactivation: 0.0,
             },
-            SynapseEdge {
+            SynapseGene {
                 pre_neuron_id: blue_receptor.neuron_id().unwrap(),
                 post_neuron_id: attack_action.neuron_id().unwrap(),
                 weight: -0.5,
-                eligibility: 0.0,
-                pending_coactivation: 0.0,
             },
-            SynapseEdge {
+            SynapseGene {
                 pre_neuron_id: inter_neuron_id(0),
                 post_neuron_id: forward_action.neuron_id().unwrap(),
                 weight: 1.25,
-                eligibility: 0.0,
-                pending_coactivation: 0.0,
             },
         ];
         record.genome.topology.num_synapses = record.genome.brain.edges.len() as u32;

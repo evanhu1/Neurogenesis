@@ -1,6 +1,6 @@
 use crate::dataset::ACTION_COUNT;
 use crate::report::ComparisonMetricRow;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
@@ -62,7 +62,6 @@ pub(crate) struct SeedRunSummary {
 
 #[derive(Debug, Clone, Serialize, Default)]
 pub(crate) struct DemographicAnalytics {
-    pub(crate) births: u64,
     pub(crate) successful_births: u64,
     pub(crate) blocked_births: u64,
     pub(crate) parent_died_during_reproduction: u64,
@@ -76,7 +75,7 @@ pub(crate) struct DemographicAnalytics {
 /// One row per reporting interval — the primary timeseries format consumed by
 /// reports, comparisons, and the CSV export. Derived by `analysis::intervals`
 /// from the raw dataset.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct IntervalMetrics {
     pub tick: u64,
     pub pop: u32,

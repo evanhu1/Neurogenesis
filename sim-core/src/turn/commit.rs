@@ -1,5 +1,5 @@
 use super::*;
-use rand::Rng;
+use sim_types::ReproductionFailureCause;
 
 struct CommitPhaseContext<'a> {
     sim: &'a mut Simulation,
@@ -34,14 +34,23 @@ impl<'a> CommitPhaseContext<'a> {
     ) -> Self {
         let org_count = sim.organisms.len();
         let food_count = sim.foods.len();
+        let mut removed_food = std::mem::take(&mut sim.turn_scratch.removed_food);
+        removed_food.clear();
+        removed_food.resize(food_count, false);
+        let mut dead_organisms = std::mem::take(&mut sim.turn_scratch.dead_organisms);
+        dead_organisms.clear();
+        dead_organisms.resize(org_count, false);
+        let mut contingent_succeeded = std::mem::take(&mut sim.turn_scratch.contingent_succeeded);
+        contingent_succeeded.clear();
+        contingent_succeeded.resize(org_count, false);
         Self {
             sim,
             intents,
             resolutions,
             world_width_usize: world_width as usize,
-            removed_food: vec![false; food_count],
-            dead_organisms: vec![false; org_count],
-            contingent_succeeded: vec![false; org_count],
+            removed_food,
+            dead_organisms,
+            contingent_succeeded,
             result: CommitResult::default(),
         }
     }
@@ -64,8 +73,21 @@ impl<'a> CommitPhaseContext<'a> {
             if self.dead_organisms[idx] {
                 continue;
             }
-            let attempted_contingent = intent.wants_eat || intent.wants_attack;
-            if attempted_contingent && !self.contingent_succeeded[idx] {
+            let attempted_contingent = intent.wants_move
+                || intent.wants_eat
+                || intent.wants_attack
+                || intent.wants_reproduce;
+            if !attempted_contingent {
+                continue;
+            }
+            // A Reproduce trigger accepted by apply_triggers leaves the
+            // pending action set to Reproduce through the commit phase
+            // (queue_completions clears it only afterwards), so the pending
+            // kind doubles as the success flag here.
+            let succeeded = self.contingent_succeeded[idx]
+                || (intent.wants_reproduce
+                    && self.sim.pending_actions[idx].kind == PendingActionKind::Reproduce);
+            if !succeeded {
                 self.sim.organisms[idx].contingent_action_wasted_last_turn = true;
             }
         }
@@ -83,11 +105,9 @@ impl<'a> CommitPhaseContext<'a> {
                 });
             }
             organism.facing = intent.facing_after_actions;
-            let action_count = u64::from(intent.action_cost_count);
-            self.result.actions_applied += action_count;
-            if action_count > 0 {
-                let energy_cost = action_energy_cost * intent.action_cost_count as f32;
-                organism.energy -= energy_cost;
+            if intent.took_action {
+                self.result.actions_applied += 1;
+                organism.energy -= action_energy_cost;
             }
         }
     }
@@ -106,10 +126,8 @@ impl<'a> CommitPhaseContext<'a> {
 
             self.sim.occupancy[from_idx] = None;
             self.sim.occupancy[to_idx] = Some(Occupant::Organism(resolution.actor_id));
-            if !self.sim.visual_map.is_empty() {
-                self.sim.visual_map[to_idx] = self.sim.visual_map[from_idx];
-                self.sim.visual_map[from_idx] = self.sim.visual_map_base[from_idx];
-            }
+            self.sim.visual_map[to_idx] = self.sim.visual_map[from_idx];
+            self.sim.visual_map[from_idx] = self.sim.visual_map_base[from_idx];
             let organism = &mut self.sim.organisms[resolution.actor_idx];
             organism.q = resolution.to.0;
             organism.r = resolution.to.1;
@@ -178,21 +196,28 @@ impl<'a> CommitPhaseContext<'a> {
         let Some(food_idx) = food_index_by_id(&self.sim.foods, food_id) else {
             return;
         };
-        if food_idx >= self.removed_food.len() || self.removed_food[food_idx] {
-            return;
+        if food_idx >= self.removed_food.len() {
+            // Corpses spawned earlier in this commit (spike hazards / attack
+            // kills) live past the buffer sized at commit start; they are
+            // edible, so grow lazily instead of conflating "spawned this tick"
+            // with "already consumed".
+            self.removed_food.resize(self.sim.foods.len(), false);
         }
+        // A food can never be consumed twice in one tick: it occupies exactly
+        // one cell (occupancy<->foods bijection) and the first consumption
+        // clears that cell's occupancy below, so no later intent can resolve
+        // the same food id.
+        debug_assert!(!self.removed_food[food_idx]);
 
         let food = self.sim.foods[food_idx].clone();
         self.removed_food[food_idx] = true;
         self.sim.occupancy[target_idx] = None;
-        if !self.sim.visual_map.is_empty() {
-            self.sim.visual_map[target_idx] = self.sim.visual_map_base[target_idx];
-        }
+        self.sim.visual_map[target_idx] = self.sim.visual_map_base[target_idx];
         if food.kind == FoodKind::Plant {
             self.sim.schedule_food_regrowth(target_idx);
         }
 
-        let gained_energy = food.energy.max(0.0) * food_consumption_energy_fraction(food.kind);
+        let gained_energy = food.energy.max(0.0);
         let predator = &mut self.sim.organisms[predator_idx];
         predator.energy += gained_energy;
         predator.consumptions_count = predator.consumptions_count.saturating_add(1);
@@ -208,7 +233,12 @@ impl<'a> CommitPhaseContext<'a> {
             }
         }
         #[cfg(feature = "instrumentation")]
-        self.sim.mark_action_succeeded(predator_idx);
+        {
+            let consumptions_count = self.sim.organisms[predator_idx].consumptions_count;
+            self.sim
+                .record_consumption_count(predator_idx, consumptions_count);
+            self.sim.mark_action_succeeded(predator_idx);
+        }
         self.result.consumptions += 1;
         self.result.removed_positions.push(RemovedEntityPosition {
             entity_id: EntityId::Food(food_id),
@@ -230,15 +260,9 @@ impl<'a> CommitPhaseContext<'a> {
             return;
         }
 
-        let predator_size = sim_types::get_size(&self.sim.organisms[predator_idx]).max(1.0);
-        let prey_size = sim_types::get_size(&self.sim.organisms[prey_idx]).max(1.0);
-        let predation_success = (predator_size / prey_size).clamp(0.0, 1.0);
-        if self.sim.rng.random::<f32>() >= predation_success {
-            return;
-        }
-
+        let predator_max_health = self.sim.organisms[predator_idx].max_health;
         let prey = &mut self.sim.organisms[prey_idx];
-        let damage = (prey.max_health * ATTACK_DAMAGE_FRACTION).min(prey.health.max(0.0));
+        let damage = (predator_max_health * ATTACK_DAMAGE_FRACTION).min(prey.health.max(0.0));
         prey.health = (prey.health - damage).max(0.0);
         prey.damage_taken_last_turn += damage;
         let killed = prey.health <= 0.0;
@@ -246,6 +270,7 @@ impl<'a> CommitPhaseContext<'a> {
         let prey_r = prey.r;
         let prey_energy = prey.energy.max(0.0);
 
+        self.sim.organisms[predator_idx].energy += damage * ATTACK_ENERGY_GAIN_FRACTION;
         self.contingent_succeeded[predator_idx] = true;
         #[cfg(feature = "instrumentation")]
         self.sim.mark_action_succeeded(predator_idx);
@@ -275,29 +300,52 @@ impl<'a> CommitPhaseContext<'a> {
             r: position.1,
         });
         self.sim.occupancy[cell_idx] = None;
-        if !self.sim.visual_map.is_empty() {
-            self.sim.visual_map[cell_idx] = self.sim.visual_map_base[cell_idx];
-        }
+        self.sim.visual_map[cell_idx] = self.sim.visual_map_base[cell_idx];
         if let Some(corpse) = self.sim.spawn_corpse_at_cell(cell_idx, corpse_energy) {
             self.result.food_spawned.push(corpse);
         }
     }
 
     fn finalize(&mut self, gestation_started_this_tick: &mut Vec<bool>) {
+        // Gestating parents killed during commit (spike hazards or predation)
+        // must still report a failed reproduction before their pending action
+        // is compacted away, mirroring the starvation/old-age path in
+        // lifecycle_phase.
+        for (idx, dead) in self.dead_organisms.iter().enumerate() {
+            if !dead || self.sim.pending_actions[idx].kind != PendingActionKind::Reproduce {
+                continue;
+            }
+            let organism = &self.sim.organisms[idx];
+            self.result.reproduction_events.push(ReproductionEvent {
+                parent_id: organism.id,
+                parent_species_id: organism.species_id,
+                parent_age_turns: organism.age_turns,
+                parent_generation: organism.generation,
+                investment_energy: self.sim.pending_actions[idx].reproduction_energy(),
+                parent_energy_after_event: organism.energy,
+                child_id: None,
+                failure_cause: Some(ReproductionFailureCause::ParentDied),
+            });
+        }
+
         self.sim
             .compact_organism_state(&self.dead_organisms, Some(gestation_started_this_tick));
 
-        let food_count = self.removed_food.len();
-        let mut write = 0_usize;
-        for read in 0..self.sim.foods.len() {
-            if read >= food_count || !self.removed_food[read] {
-                if write != read {
-                    self.sim.foods.swap(write, read);
+        // Mirror compact_organism_state's early-out: skip the per-food scan
+        // entirely on ticks with no consumptions.
+        if self.removed_food.iter().any(|&removed| removed) {
+            let food_count = self.removed_food.len();
+            let mut write = 0_usize;
+            for read in 0..self.sim.foods.len() {
+                if read >= food_count || !self.removed_food[read] {
+                    if write != read {
+                        self.sim.foods.swap(write, read);
+                    }
+                    write += 1;
                 }
-                write += 1;
             }
+            self.sim.foods.truncate(write);
         }
-        self.sim.foods.truncate(write);
 
         self.result
             .food_spawned
@@ -311,5 +359,10 @@ impl<'a> CommitPhaseContext<'a> {
                 to: resolution.to,
             })
             .collect();
+
+        // Return the scratch buffers to the simulation for reuse next tick.
+        self.sim.turn_scratch.removed_food = std::mem::take(&mut self.removed_food);
+        self.sim.turn_scratch.dead_organisms = std::mem::take(&mut self.dead_organisms);
+        self.sim.turn_scratch.contingent_succeeded = std::mem::take(&mut self.contingent_succeeded);
     }
 }
