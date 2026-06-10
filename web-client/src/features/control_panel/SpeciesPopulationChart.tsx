@@ -269,7 +269,7 @@ export function SpeciesPopulationChart({
     <div className="mt-1">
       <svg
         viewBox={`0 0 ${chartWidth} ${chartHeight}`}
-        className="h-60 w-full rounded-lg border border-white/5 bg-void/70"
+        className="h-60 w-full rounded-lg border border-line bg-void/70"
       >
         <title>Species population over turns</title>
         <line
@@ -277,7 +277,7 @@ export function SpeciesPopulationChart({
           y1={padTop}
           x2={padLeft}
           y2={chartHeight - padBottom}
-          stroke="#334155"
+          stroke="#d3ccba"
           strokeWidth={1}
         />
         <line
@@ -285,7 +285,7 @@ export function SpeciesPopulationChart({
           y1={chartHeight - padBottom}
           x2={chartWidth - padRight}
           y2={chartHeight - padBottom}
-          stroke="#334155"
+          stroke="#d3ccba"
           strokeWidth={1}
         />
         {series.map((item) => {
@@ -313,13 +313,13 @@ export function SpeciesPopulationChart({
             />
           );
         })}
-        <text x={4} y={padTop + 8} className="fill-slate-400 text-[10px] font-mono">
+        <text x={4} y={padTop + 8} className="fill-stone-500 text-[10px] font-mono">
           {maxCount}
         </text>
         <text
           x={padLeft}
           y={chartHeight - 6}
-          className="fill-slate-400 text-[10px] font-mono"
+          className="fill-stone-500 text-[10px] font-mono"
           textAnchor="start"
         >
           {turnStart}
@@ -327,7 +327,7 @@ export function SpeciesPopulationChart({
         <text
           x={chartWidth - padRight}
           y={chartHeight - 6}
-          className="fill-slate-400 text-[10px] font-mono"
+          className="fill-stone-500 text-[10px] font-mono"
           textAnchor="end"
         >
           {turnEnd}
@@ -346,7 +346,7 @@ export function SpeciesPopulationChart({
               className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 transition ${
                 item.id === focusedSpeciesId
                   ? 'border-accent/50 bg-accent/10 text-ink'
-                  : 'border-white/5 bg-surface/50 hover:bg-surface'
+                  : 'border-line bg-surface/50 hover:bg-surface'
               }`}
             >
               <span

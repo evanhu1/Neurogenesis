@@ -16,7 +16,7 @@ export function ChampionPoolPanel({
   onClearAll,
 }: ChampionPoolPanelProps) {
   return (
-    <section className="mt-3 border-t border-white/5 pt-3">
+    <section className="mt-3 border-t border-line pt-3">
       <div className="flex items-center justify-between">
         <h3 className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink/35">
           Champions

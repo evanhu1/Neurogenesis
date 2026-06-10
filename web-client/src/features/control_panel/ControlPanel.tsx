@@ -36,7 +36,7 @@ export function ControlPanel({ simulation, panToHexRef }: ControlPanelProps) {
   );
 
   return (
-    <aside className="h-full overflow-auto rounded-2xl border border-white/5 bg-panel/90 p-3.5 shadow-panel backdrop-blur">
+    <aside className="h-full overflow-auto rounded-2xl border border-line bg-panel/90 p-3.5 shadow-panel backdrop-blur">
       <SessionOverviewPanel
         liveMetrics={simulation.liveMetrics}
         isRunning={simulation.isRunning}

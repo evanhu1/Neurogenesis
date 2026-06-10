@@ -24,12 +24,12 @@
   }
 
   ::selection {
-    background: rgba(56, 189, 248, 0.25);
+    background: rgba(21, 128, 61, 0.18);
   }
 
   * {
     scrollbar-width: thin;
-    scrollbar-color: #2b3854 transparent;
+    scrollbar-color: #cfc7b4 transparent;
   }
 
   ::-webkit-scrollbar {
@@ -39,7 +39,7 @@
 
   ::-webkit-scrollbar-thumb {
     border-radius: 3px;
-    background: #2b3854;
+    background: #cfc7b4;
   }
 
   ::-webkit-scrollbar-track {
@@ -55,7 +55,7 @@
   input[type='range']::-webkit-slider-track {
     height: 3px;
     border-radius: 2px;
-    background: #2b3854;
+    background: #d9d2c0;
   }
 
   input[type='range']::-webkit-slider-thumb {
@@ -63,13 +63,13 @@
     width: 12px;
     height: 12px;
     border-radius: 50%;
-    background: #38bdf8;
+    background: #15803d;
     margin-top: -5px;
     cursor: pointer;
   }
 
   input[type='range']:disabled::-webkit-slider-thumb {
-    background: #475569;
+    background: #b3ac9b;
     cursor: not-allowed;
   }
 }

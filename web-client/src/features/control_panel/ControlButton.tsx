@@ -11,9 +11,9 @@ type ControlButtonProps = {
 };
 
 const VARIANT_CLASSES = {
-  primary: 'bg-accent font-semibold text-slate-950 hover:bg-sky-300',
-  ghost: 'border border-white/10 bg-surface/60 text-ink/75 hover:bg-surface hover:text-ink',
-  ghostActive: 'border border-accent/50 bg-accent/15 text-accent hover:bg-accent/25',
+  primary: 'bg-accent font-semibold text-white shadow-sm hover:bg-green-800',
+  ghost: 'border border-line bg-panel text-ink/75 shadow-sm hover:bg-surface/70 hover:text-ink',
+  ghostActive: 'border border-accent/40 bg-accent/10 text-accent hover:bg-accent/15',
 };
 
 export function ControlButton({

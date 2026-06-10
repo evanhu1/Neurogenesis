@@ -23,7 +23,7 @@ const BoltIcon = (
 );
 
 const INPUT_CLASSES =
-  'rounded-lg border border-white/10 bg-surface/60 px-2 py-1 font-mono text-[11px] text-ink/85 outline-none transition focus:border-accent/50 disabled:cursor-not-allowed disabled:opacity-40';
+  'rounded-lg border border-line bg-surface/60 px-2 py-1 font-mono text-[11px] text-ink/85 outline-none transition focus:border-accent/50 disabled:cursor-not-allowed disabled:opacity-40';
 
 function SectionLabel({ children }: { children: string }) {
   return (

@@ -135,7 +135,7 @@ export function BrainCanvas({
     <canvas
       ref={canvasRef}
       id="brain-canvas"
-      className="h-full w-full cursor-grab rounded-lg border border-white/5 bg-void active:cursor-grabbing"
+      className="h-full w-full cursor-grab rounded-lg border border-line bg-void active:cursor-grabbing"
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}

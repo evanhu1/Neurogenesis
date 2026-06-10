@@ -276,14 +276,14 @@ export function renderBrain(
     const weightWidth = ctx.measureText(wLabel).width;
     const eligibilityWidth = ctx.measureText(eLabel).width;
     const boxWidth = Math.max(weightWidth, eligibilityWidth) + 4;
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+    ctx.fillStyle = 'rgba(253, 252, 248, 0.92)';
     ctx.fillRect(midX - boxWidth / 2, midY - 7, boxWidth, 26);
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = weight >= 0 ? '#38bdf8' : '#f87171';
+    ctx.fillStyle = weight >= 0 ? '#075985' : '#b91c1c';
     ctx.fillText(wLabel, midX, midY);
-    ctx.fillStyle = '#cbd5f5';
+    ctx.fillStyle = '#57534e';
     ctx.fillText(eLabel, midX, midY + 12);
     ctx.textAlign = 'start';
     ctx.textBaseline = 'alphabetic';
@@ -388,14 +388,14 @@ export function renderBrain(
     const weightWidth = ctx.measureText(wLabel).width;
     const eligibilityWidth = ctx.measureText(eLabel).width;
     const boxWidth = Math.max(weightWidth, eligibilityWidth) + 4;
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+    ctx.fillStyle = 'rgba(253, 252, 248, 0.92)';
     ctx.fillRect(labelX - boxWidth / 2, labelY - 7, boxWidth, 26);
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = weight >= 0 ? '#38bdf8' : '#f87171';
+    ctx.fillStyle = weight >= 0 ? '#075985' : '#b91c1c';
     ctx.fillText(wLabel, labelX, labelY);
-    ctx.fillStyle = '#cbd5f5';
+    ctx.fillStyle = '#57534e';
     ctx.fillText(eLabel, labelX, labelY + 12);
     ctx.textAlign = 'start';
     ctx.textBaseline = 'alphabetic';
@@ -409,7 +409,7 @@ export function renderBrain(
     for (const synapse of neuron.synapses) {
       const post = positions.get(synapse.post_neuron_id);
       if (!post) continue;
-      const strokeColor = synapse.weight >= 0 ? 'rgba(56,189,248,0.5)' : 'rgba(248,113,113,0.55)';
+      const strokeColor = synapse.weight >= 0 ? 'rgba(7, 89, 133, 0.55)' : 'rgba(185, 60, 40, 0.55)';
       const strokeWidth = Math.max(0.5, (Math.abs(synapse.weight) / 8) * 2);
       if (pre.id === post.id) {
         drawSelfSynapse(pre, strokeColor, strokeWidth);
@@ -434,20 +434,20 @@ export function renderBrain(
     ctx.arc(node.x, node.y, NODE_RADIUS, 0, Math.PI * 2);
     ctx.fill();
     if (node.isActive) {
-      ctx.strokeStyle = '#f59e0b';
+      ctx.strokeStyle = '#b45309';
       // Keep highlight visible even when zoomed out.
       ctx.lineWidth = Math.max(2.0, 2.0 / Math.max(scale, 0.05));
       ctx.stroke();
     }
 
     if (showMetrics) {
-      ctx.fillStyle = '#e2e8f0';
+      ctx.fillStyle = '#1f2937';
       ctx.font = '11px Outfit';
       const hasLabel = typeof node.label === 'string' && node.label.length > 0;
       if (hasLabel) {
         ctx.fillText(node.label as string, node.x + 12, node.y + 4);
       }
-      ctx.fillStyle = '#94a3b8';
+      ctx.fillStyle = '#6b7280';
       const metricsY = hasLabel ? node.y + 16 : node.y + 4;
       const valueLabel = node.type === 'action' ? 'logit' : 'h';
       ctx.fillText(`${valueLabel}=${node.value.toFixed(2)}`, node.x + 12, metricsY);

@@ -7,7 +7,7 @@ import { WorldCanvas } from './features/world/components/WorldCanvas';
 function FastModeWorldPanel() {
   return (
     <div className="flex h-full w-full items-center justify-center px-6 text-center">
-      <div className="max-w-md">
+      <div className="max-w-md rounded-2xl border border-line bg-panel/80 px-8 py-7 shadow-panel backdrop-blur-sm">
         <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl border border-accent/20 bg-accent/10">
           <svg aria-hidden="true" viewBox="0 0 24 24" className="h-10 w-10 fill-accent/70">
             <path d="M4 5.5v13l8-6.5-8-6.5Z" />
@@ -38,7 +38,7 @@ export default function App() {
       <div className="mx-auto grid h-full max-w-[1760px] gap-3 xl:grid-cols-[320px_minmax(480px,1fr)_400px]">
         <ControlPanel simulation={simulation} panToHexRef={panToHexRef} />
 
-        <main className="relative h-full overflow-hidden rounded-2xl border border-white/5 bg-void shadow-panel">
+        <main className="relative h-full overflow-hidden rounded-2xl border border-line bg-water shadow-panel">
           {simulation.isFastMode ? (
             <FastModeWorldPanel />
           ) : (

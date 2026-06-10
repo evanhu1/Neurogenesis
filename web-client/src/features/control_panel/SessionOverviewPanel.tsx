@@ -8,7 +8,7 @@ type SessionOverviewPanelProps = {
 
 function StatTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-white/5 bg-surface/50 px-2 py-1.5">
+    <div className="rounded-lg border border-line bg-surface/50 px-2 py-1.5">
       <div className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink/35">
         {label}
       </div>
@@ -23,10 +23,10 @@ export function SessionOverviewPanel({
   isFastMode,
 }: SessionOverviewPanelProps) {
   const status = isFastMode
-    ? { label: 'Fast', dotClass: 'bg-amber-400', textClass: 'text-amber-300/90', pulse: true }
+    ? { label: 'Fast', dotClass: 'bg-amber-500', textClass: 'text-amber-700', pulse: true }
     : isRunning
-      ? { label: 'Live', dotClass: 'bg-emerald-400', textClass: 'text-emerald-300/90', pulse: true }
-      : { label: 'Paused', dotClass: 'bg-slate-500', textClass: 'text-ink/40', pulse: false };
+      ? { label: 'Live', dotClass: 'bg-emerald-500', textClass: 'text-emerald-700', pulse: true }
+      : { label: 'Paused', dotClass: 'bg-stone-400', textClass: 'text-ink/45', pulse: false };
 
   return (
     <div>
@@ -35,7 +35,7 @@ export function SessionOverviewPanel({
           NEURO<span className="text-accent">GENESIS</span>
         </h1>
         <span
-          className={`flex items-center gap-1.5 rounded-full border border-white/5 bg-surface/50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${status.textClass}`}
+          className={`flex items-center gap-1.5 rounded-full border border-line bg-surface/50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${status.textClass}`}
         >
           <span className="relative flex h-1.5 w-1.5">
             {status.pulse && (
