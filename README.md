@@ -6,7 +6,7 @@
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/evanhu1/Neurogenesis)
 
-This is a neuroevolution artificial-life simulation built in rust. 2,000 digital
+This is a neuroevolution artificial-life simulation built in Rust. 2,000 digital
 creatures spawn into a world with the simplest possible brains: **zero hidden
 neurons and ten synapses.** Then ecology (energy, food, predators, and death)
 and evolution (mutation and selection) "train" intelligent brains over thousands
