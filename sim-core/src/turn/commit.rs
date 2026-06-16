@@ -198,9 +198,12 @@ impl<'a> CommitPhaseContext<'a> {
         }
         #[cfg(feature = "instrumentation")]
         {
-            let consumptions_count = self.sim.organisms[predator_idx].consumptions_count;
+            let predator = &self.sim.organisms[predator_idx];
+            let total = predator.consumptions_count;
+            let plant = predator.plant_consumptions_count;
+            let prey = predator.prey_consumptions_count;
             self.sim
-                .record_consumption_count(predator_idx, consumptions_count);
+                .record_consumption_counts(predator_idx, total, plant, prey);
             self.sim.mark_action_succeeded(predator_idx);
         }
         self.result.consumptions += 1;

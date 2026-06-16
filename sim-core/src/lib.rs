@@ -388,16 +388,22 @@ impl Simulation {
     }
 
     /// Patch the current tick's record with the post-commit cumulative
-    /// consumption count so a consumption is visible in the same tick's
+    /// consumption counts so a consumption is visible in the same tick's
     /// record (the record is built during the intent phase, before commit).
+    /// All three counters are patched together so `plant + prey == total`
+    /// holds on the record, not just on the organism.
     #[cfg(feature = "instrumentation")]
-    pub(crate) fn record_consumption_count(
+    pub(crate) fn record_consumption_counts(
         &mut self,
         organism_idx: usize,
-        consumptions_count: u64,
+        total: u64,
+        plant: u64,
+        prey: u64,
     ) {
         if let Some(Some(record)) = self.action_records.get_mut(organism_idx) {
-            record.consumptions_count = consumptions_count;
+            record.consumptions_count = total;
+            record.plant_consumptions_count = plant;
+            record.prey_consumptions_count = prey;
         }
     }
 
