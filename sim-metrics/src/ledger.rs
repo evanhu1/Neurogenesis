@@ -157,6 +157,24 @@ impl Ledger {
         self.sidecar.insert(id, OrganismEntry::new(id.0, origin));
     }
 
+    /// Register an organism that is *already alive* when recording begins
+    /// mid-run (so its real birth — and any reproduction event that would have
+    /// classified it — was never observed). Origin is inferred from the live
+    /// `generation`: only `generation > 0` marks a descendant, which is the
+    /// sole class that feeds pillars. Lifetime counters therefore start partway
+    /// through the organism's life; callers should label such windows partial.
+    pub fn register_existing(&mut self, id: OrganismId, generation: u64) {
+        let origin = if generation > 0 {
+            OrganismOrigin::Descendant
+        } else {
+            OrganismOrigin::InitialFounder
+        };
+        if origin == OrganismOrigin::Descendant {
+            self.descendant_population = self.descendant_population.saturating_add(1);
+        }
+        self.sidecar.insert(id, OrganismEntry::new(id.0, origin));
+    }
+
     /// Ingest one tick's worth of one organism's action record.
     pub fn record_action(&mut self, record: &ActionRecord) {
         let action_idx = record.selected_action.index();

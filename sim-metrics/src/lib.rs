@@ -26,7 +26,7 @@ pub mod pillars;
 pub mod schema;
 pub mod stats;
 
-pub use ingest::{ingest_tick, register_founders};
+pub use ingest::{ingest_tick, register_existing, register_founders};
 pub use intervals::{derive_interval_metrics, IntervalMetrics};
 pub use ledger::{Ledger, OrganismEntry};
 pub use pillars::{compute_pillar_scores, PillarScores};
