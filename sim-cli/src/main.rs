@@ -36,6 +36,7 @@ fn main() -> Result<()> {
         recorder: None,
         report_every: REPORT_EVERY,
         format: Format::default(),
+        scaled: false,
     };
     let stdin = io::stdin();
     let mut out = io::stdout();
@@ -73,6 +74,9 @@ struct App {
     report_every: u64,
     /// Global default output format; per-command `--json`/`--text` override it.
     format: Format,
+    /// True when the loaded world used `--scale` (or otherwise diverges from the
+    /// canonical eval config), so metrics are not eval-comparable.
+    scaled: bool,
 }
 
 /// In-memory metric recorder. Holds the shared per-organism ledger plus the two
@@ -188,6 +192,7 @@ impl App {
             "load" => self.load(&args, out),
             "step" => self.step(&args, out),
             "run-to" => self.run_to(&args, out),
+            "bench" => self.bench(&args, out),
             "turn" => {
                 let t = self.sim()?.turn();
                 writeln!(out, "turn = {t}").map_err(Into::into)
@@ -246,9 +251,10 @@ impl App {
         writeln!(
             out,
             "commands (most accept --json | --text):\n\
-             \x20 load [--config PATH] [--seed N] [--report-every R]  build Simulation::new (defaults: config {DEFAULT_CONFIG}, seed 0, report-every 10000)\n\
+             \x20 load [--config PATH] [--seed N] [--report-every R] [--threads K] [--scale W,POP]  build Simulation::new (defaults: config {DEFAULT_CONFIG}, seed 0, report-every 10000)\n\
              \x20 step [N]                          advance N ticks (default 1)\n\
              \x20 run-to T                          advance until turn == T\n\
+             \x20 bench [N]                         time N ticks (default 100000); report ticks/sec\n\
              \x20 watch T [--every E]               advance to T, emitting a metrics row every E ticks\n\
              \x20 turn                              print current turn\n\
              \x20 record on|off|status             toggle live metric recording (required for pillars/eco/lineage history)\n\
@@ -275,6 +281,8 @@ impl App {
         let mut config_path = DEFAULT_CONFIG.to_string();
         let mut seed: u64 = 0;
         let mut report_every: u64 = REPORT_EVERY;
+        let mut threads: Option<u32> = None;
+        let mut scale: Option<(u32, u32)> = None;
         let mut i = 0;
         while i < args.len() {
             match args[i] {
@@ -302,14 +310,53 @@ impl App {
                     }
                     i += 2;
                 }
+                "--threads" => {
+                    let t: u32 = args
+                        .get(i + 1)
+                        .ok_or_else(|| anyhow!("--threads needs a value"))?
+                        .parse()?;
+                    if t == 0 {
+                        bail!("--threads must be >= 1");
+                    }
+                    threads = Some(t);
+                    i += 2;
+                }
+                "--scale" => {
+                    let spec = args
+                        .get(i + 1)
+                        .ok_or_else(|| anyhow!("--scale needs WIDTH,POP"))?;
+                    let (w, p) = spec
+                        .split_once(',')
+                        .ok_or_else(|| anyhow!("--scale wants WIDTH,POP (e.g. 60,300)"))?;
+                    let w: u32 = w.trim().parse().map_err(|_| anyhow!("bad --scale width"))?;
+                    let p: u32 = p.trim().parse().map_err(|_| anyhow!("bad --scale pop"))?;
+                    if w == 0 || p == 0 {
+                        bail!("--scale width and pop must be >= 1");
+                    }
+                    scale = Some((w, p));
+                    i += 2;
+                }
                 other => bail!("unknown load arg `{other}`"),
             }
         }
-        let config = load_world_config_from_path(Path::new(&config_path))?;
+        let mut config = load_world_config_from_path(Path::new(&config_path))?;
+        if let Some(t) = threads {
+            config.intent_parallel_threads = t;
+        }
+        if let Some((w, p)) = scale {
+            config.world_width = w;
+            config.num_organisms = p;
+        }
         let sim = Simulation::new(config, seed).map_err(|e| anyhow!("{e}"))?;
+        let scaled_tag = if scale.is_some() {
+            "  [scaled: non-canonical]"
+        } else {
+            ""
+        };
         writeln!(
             out,
-            "loaded config={config_path} seed={seed} report_every={report_every}: world_width={} num_organisms={} food_energy={} turn=0 population={}",
+            "loaded config={config_path} seed={seed} report_every={report_every} threads={}: world_width={} num_organisms={} food_energy={} turn=0 population={}{scaled_tag}",
+            sim.config().intent_parallel_threads,
             sim.config().world_width,
             sim.config().num_organisms,
             sim.config().food_energy,
@@ -318,7 +365,57 @@ impl App {
         self.sim = Some(sim);
         self.recorder = None;
         self.report_every = report_every;
+        self.scaled = scale.is_some();
         Ok(())
+    }
+
+    /// Time `n` ticks through the current advance path (respects the recorder
+    /// state) and report throughput. Advances the simulation by `n`.
+    fn bench(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
+        let (fmt, rest) = self.take_format(args);
+        let n: u64 = rest.first().map(|s| s.parse()).transpose()?.unwrap_or(100_000);
+        if n == 0 {
+            bail!("bench needs N >= 1");
+        }
+        let recording = self.recorder.is_some();
+        let threads = self.sim()?.config().intent_parallel_threads;
+        let start = std::time::Instant::now();
+        self.advance(n)?;
+        let elapsed = start.elapsed().as_secs_f64();
+        let tps = if elapsed > 0.0 { n as f64 / elapsed } else { 0.0 };
+        let ns_per_tick = if n > 0 {
+            elapsed * 1e9 / n as f64
+        } else {
+            0.0
+        };
+        let turn = self.sim()?.turn();
+        if fmt.is_json() {
+            return writeln!(
+                out,
+                "{}",
+                json!({
+                    "ticks": n,
+                    "seconds": elapsed,
+                    "ticks_per_sec": tps,
+                    "ns_per_tick": ns_per_tick,
+                    "recording": recording,
+                    "threads": threads,
+                    "turn": turn,
+                })
+            )
+            .map_err(Into::into);
+        }
+        writeln!(
+            out,
+            "bench: {n} ticks in {elapsed:.3}s = {tps:.0} ticks/s ({ns_per_tick:.0} ns/tick) \
+             [recording={recording} threads={threads}] turn={turn}{}",
+            if cfg!(debug_assertions) {
+                "  (debug build — rebuild with --release for real throughput)"
+            } else {
+                ""
+            }
+        )
+        .map_err(Into::into)
     }
 
     fn step(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
@@ -408,9 +505,16 @@ impl App {
             bail!("recording is off; `record on` then advance before `pillars`");
         };
         if fmt.is_json() {
-            return writeln!(out, "{}", pillars_value(&p, n_intervals, partial)).map_err(Into::into);
+            let mut v = pillars_value(&p, n_intervals, partial);
+            v["scaled"] = json!(self.scaled);
+            return writeln!(out, "{v}").map_err(Into::into);
         }
-        let tag = if partial { "  [PARTIAL window]" } else { "" };
+        let tag = match (partial, self.scaled) {
+            (true, true) => "  [PARTIAL window; scaled: non-canonical]",
+            (true, false) => "  [PARTIAL window]",
+            (false, true) => "  [scaled: non-canonical]",
+            (false, false) => "",
+        };
         writeln!(
             out,
             "pillars over ({}, {}]  ({n_intervals} interval(s), report_every={}){tag}",
@@ -447,6 +551,7 @@ impl App {
     fn state(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
         let (fmt, _) = self.take_format(args);
         let pillars = self.live_pillars();
+        let scaled = self.scaled;
         let sim = self.sim()?;
         let orgs = sim.organisms();
         let pop = orgs.len();
@@ -479,6 +584,7 @@ impl App {
                     "starvations": m.starvations_last_turn,
                     "age_deaths": m.age_deaths_last_turn,
                 },
+                "scaled": scaled,
             });
             if let Some((p, n, partial)) = pillars {
                 v["pillars"] = pillars_value(&p, n, partial);
@@ -487,7 +593,11 @@ impl App {
         }
 
         let fmt_stats = |s: Option<Stats>| s.map(|s| s.text()).unwrap_or_else(|| "(none)".into());
-        writeln!(out, "turn = {turn}")?;
+        writeln!(
+            out,
+            "turn = {turn}{}",
+            if scaled { "  [scaled: non-canonical]" } else { "" }
+        )?;
         writeln!(
             out,
             "population = {pop}  (descendants gen>0 = {descendants}, founders/injections = {})",

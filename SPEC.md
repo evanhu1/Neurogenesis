@@ -377,8 +377,10 @@ review (file:line):
    summary|synapses|activations|dot`, `decide ID` (sensory→logits→softmax probs,
    exact reproduction of `evaluation.rs`). Text + json. (`top`/`hist`/`inspect`
    retained from v1; expanded fields/filters deferred.)
-6. **Perf & ergonomics** (partial): `--report-every` done; `bench`,
-   `--threads`, `--scale` still TODO.
+6. **Perf & ergonomics** ✅ *done* — `load --report-every/--threads/--scale`
+   (`--scale W,POP` marks the session `[scaled: non-canonical]`, surfaced in
+   `state`/`pillars`/json); `bench [N]` reports ticks/sec + ns/tick (notes
+   debug builds). `--threads` maps to `config.intent_parallel_threads`.
 7. **Determinism/parity check** ✅ live `pillars` match eval `summary.json` at
    seed 1 (20k). Full 8-seed / 500k golden run still optional.
 
