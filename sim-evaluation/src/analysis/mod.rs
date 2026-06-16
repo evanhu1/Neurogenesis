@@ -84,10 +84,11 @@ pub fn write_aggregate_artifacts(
         .map(|seed_summary| PerSeedReportRow {
             seed: seed_summary.seed,
             total_time_seconds: seed_summary.total_time_seconds,
-            foraging_pillar: seed_summary.pillars.foraging_pillar,
-            predation_pillar: seed_summary.pillars.predation_pillar,
-            intelligence_pillar: seed_summary.pillars.intelligence_pillar,
-            learning_pillar: seed_summary.pillars.learning_pillar,
+            plant_consumption_rate: seed_summary.pillars.mean_plant_consumption_rate,
+            prey_consumption_rate: seed_summary.pillars.mean_prey_consumption_rate,
+            action_effectiveness: seed_summary.pillars.mean_action_effectiveness,
+            mi_sa: seed_summary.pillars.mean_mi_sa,
+            learning_slope: seed_summary.pillars.mean_learning_slope,
             report_href: format!("seed_{}/report.html", seed_summary.seed),
         })
         .collect();

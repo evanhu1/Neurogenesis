@@ -122,14 +122,10 @@ fn comparison_metric_rows(
         )
     };
     vec![
-        paired("foraging_pillar", |p| Some(p.foraging_pillar)),
-        paired("predation_pillar", |p| Some(p.predation_pillar)),
-        paired("intelligence_pillar", |p| Some(p.intelligence_pillar)),
-        paired("learning_pillar", |p| Some(p.learning_pillar)),
-        paired("action_effectiveness", |p| p.mean_action_effectiveness),
-        paired("mi_sa", |p| p.mean_mi_sa),
         paired("plant_consumption_rate", |p| p.mean_plant_consumption_rate),
         paired("prey_consumption_rate", |p| p.mean_prey_consumption_rate),
+        paired("action_effectiveness", |p| p.mean_action_effectiveness),
+        paired("mi_sa", |p| p.mean_mi_sa),
         paired("learning_slope", |p| p.mean_learning_slope),
     ]
 }

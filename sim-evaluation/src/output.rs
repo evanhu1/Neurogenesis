@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 // Numeric mean helpers moved to `sim-metrics`; re-exported under the historical
 // `crate::output::…` path so callers (comparison, averaging) are unchanged.
-pub(crate) use sim_metrics::{mean_f64, mean_option, mean_round_u32};
+pub(crate) use sim_metrics::{mean_option, mean_round_u32};
 
 pub(crate) fn write_summary_json<T: Serialize>(out_dir: &Path, summary: &T) -> Result<()> {
     let summary_path = out_dir.join("summary.json");
@@ -108,35 +108,32 @@ pub(crate) fn print_evaluation_summary(out_dir: &Path, summary: &EvaluationSumma
     println!("worker_threads: {}", summary.worker_threads);
     let pillars = &summary.pillars;
     println!(
-        "foraging_pillar: {:.3} [plant_consumption_rate={}]",
-        pillars.foraging_pillar,
+        "plant_consumption_rate: {}",
         fmt_option(pillars.mean_plant_consumption_rate, 4),
     );
     println!(
-        "predation_pillar: {:.3} [prey_consumption_rate={}]",
-        pillars.predation_pillar,
+        "prey_consumption_rate: {}",
         fmt_option(pillars.mean_prey_consumption_rate, 4),
     );
     println!(
-        "intelligence_pillar: {:.3} [effectiveness={:.3} mi={:.3}]",
-        pillars.intelligence_pillar,
-        pillars.intelligence_effectiveness_component,
-        pillars.intelligence_mi_component,
+        "action_effectiveness: {} | mi_sa: {}",
+        fmt_option(pillars.mean_action_effectiveness, 4),
+        fmt_option(pillars.mean_mi_sa, 4),
     );
     println!(
-        "learning_pillar: {:.3} [mean_slope={}]",
-        pillars.learning_pillar,
+        "learning_slope: {}",
         fmt_option(pillars.mean_learning_slope, 6),
     );
     for seed_summary in &summary.seed_summaries {
         let p = &seed_summary.pillars;
         println!(
-            "seed[{}]: foraging={:.3} predation={:.3} intelligence={:.3} learning={:.3}",
+            "seed[{}]: plant={} prey={} effectiveness={} mi={} learning={}",
             seed_summary.seed,
-            p.foraging_pillar,
-            p.predation_pillar,
-            p.intelligence_pillar,
-            p.learning_pillar,
+            fmt_option(p.mean_plant_consumption_rate, 4),
+            fmt_option(p.mean_prey_consumption_rate, 4),
+            fmt_option(p.mean_action_effectiveness, 4),
+            fmt_option(p.mean_mi_sa, 4),
+            fmt_option(p.mean_learning_slope, 6),
         );
     }
     println!("total_time_seconds: {:.3}", summary.total_time_seconds);

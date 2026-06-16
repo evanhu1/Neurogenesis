@@ -45,8 +45,9 @@ evaluation assumptions.
   reads `--in <world.bin>`, runs one command, and (for mutating commands) writes
   `--out <world.bin>` (defaults to `--in` = advance in place). Typical flow:
   `new [--seed N] [--set k=v]… --out w.bin` → `run-to T --in w.bin` → read
-  `pillars` (live foraging/predation/intelligence/learning — byte-identical to
-  the eval via the shared `sim-metrics` crate), `state`, `eco`, `lineage`,
+  `pillars` (raw windowed metrics: plant/prey consumption rates,
+  action_effectiveness, mi_sa, learning_slope — via the shared `sim-metrics`
+  crate, no [0,1] interpretation), `state`, `eco`, `lineage`,
   `genome`, `timeseries`, and per-organism `find`/`top`/`hist`/`inspect`/`brain`/
   `decide`; `bench [N]` for throughput; `query` for batch reads off one load;
   `sweep --grid k=v,v --seeds N,N --to T` for parallel grid×seed experiments

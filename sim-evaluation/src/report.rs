@@ -22,10 +22,11 @@ pub struct HtmlReportContext {
 pub struct PerSeedReportRow {
     pub seed: u64,
     pub total_time_seconds: f64,
-    pub foraging_pillar: f64,
-    pub predation_pillar: f64,
-    pub intelligence_pillar: f64,
-    pub learning_pillar: f64,
+    pub plant_consumption_rate: Option<f64>,
+    pub prey_consumption_rate: Option<f64>,
+    pub action_effectiveness: Option<f64>,
+    pub mi_sa: Option<f64>,
+    pub learning_slope: Option<f64>,
     pub report_href: String,
 }
 
@@ -121,55 +122,49 @@ pub fn write_html_report(
     kv(&mut html, "Generated At (UTC)", &ctx.generated_at_utc);
     html.push_str("</div></div>");
 
-    html.push_str("<div class=\"panel\"><h2>Pillar Scores</h2>");
+    html.push_str("<div class=\"panel\"><h2>Windowed Metrics</h2>");
     let _ = write!(
         html,
-        "<p class=\"score-sub\">window: ticks {}-{} | no aggregate score — each pillar stands on its own, because different niches excel at different pillars.</p>",
+        "<p class=\"score-sub\">window: ticks {}-{} | raw windowed means of each behavioural signal — no aggregate or normalised score.</p>",
         pillars.window_start_tick, pillars.window_end_tick
     );
     html.push_str("<div class=\"pillar-list\">");
     pillar_card(
         &mut html,
         "Foraging",
-        &format!("{:.3}", pillars.foraging_pillar),
+        &fmt_option(pillars.mean_plant_consumption_rate, 4),
         4,
         &[(
             "plant consumptions / action",
-            pillars.mean_plant_consumption_rate.unwrap_or(0.0),
+            pillars.mean_plant_consumption_rate,
         )],
     );
     pillar_card(
         &mut html,
         "Predation",
-        &format!("{:.3}", pillars.predation_pillar),
+        &fmt_option(pillars.mean_prey_consumption_rate, 4),
         4,
         &[(
             "prey consumptions / action",
-            pillars.mean_prey_consumption_rate.unwrap_or(0.0),
+            pillars.mean_prey_consumption_rate,
         )],
     );
     pillar_card(
         &mut html,
         "Intelligence",
-        &format!("{:.3}", pillars.intelligence_pillar),
+        &fmt_option(pillars.mean_action_effectiveness, 3),
         3,
         &[
-            (
-                "Action effectiveness",
-                pillars.intelligence_effectiveness_component,
-            ),
-            ("MI(S;A)", pillars.intelligence_mi_component),
+            ("Action effectiveness", pillars.mean_action_effectiveness),
+            ("MI(S;A)", pillars.mean_mi_sa),
         ],
     );
     pillar_card(
         &mut html,
         "Learning",
-        &format!("{:.3}", pillars.learning_pillar),
+        &fmt_option(pillars.mean_learning_slope, 6),
         6,
-        &[(
-            "mean success-vs-age slope",
-            pillars.mean_learning_slope.unwrap_or(0.0),
-        )],
+        &[("mean success-vs-age slope", pillars.mean_learning_slope)],
     );
     html.push_str("</div></div>");
 
@@ -178,10 +173,11 @@ pub fn write_html_report(
         for header in [
             "seed",
             "time_s",
-            "foraging",
-            "predation",
-            "intelligence",
-            "learning",
+            "plant_consumption_rate",
+            "prey_consumption_rate",
+            "action_effectiveness",
+            "mi_sa",
+            "learning_slope",
             "report",
         ] {
             let _ = write!(html, "<th>{header}</th>");
@@ -190,13 +186,14 @@ pub fn write_html_report(
         for row in &ctx.per_seed_rows {
             let _ = write!(
                 html,
-                "<tr><td>{}</td><td>{:.3}</td><td>{:.3}</td><td>{:.3}</td><td>{:.3}</td><td>{:.3}</td><td><a href=\"{}\">open</a></td></tr>",
+                "<tr><td>{}</td><td>{:.3}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td><a href=\"{}\">open</a></td></tr>",
                 row.seed,
                 row.total_time_seconds,
-                row.foraging_pillar,
-                row.predation_pillar,
-                row.intelligence_pillar,
-                row.learning_pillar,
+                fmt_option(row.plant_consumption_rate, 4),
+                fmt_option(row.prey_consumption_rate, 4),
+                fmt_option(row.action_effectiveness, 3),
+                fmt_option(row.mi_sa, 4),
+                fmt_option(row.learning_slope, 6),
                 row.report_href
             );
         }
@@ -440,7 +437,7 @@ fn pillar_card(
     title: &str,
     score: &str,
     decimals: usize,
-    subscores: &[(&str, f64)],
+    subscores: &[(&str, Option<f64>)],
 ) {
     let _ = write!(
         html,
@@ -449,7 +446,8 @@ fn pillar_card(
     for (name, value) in subscores {
         let _ = write!(
             html,
-            "<div class=\"pillar-subscore\"><span class=\"pillar-subscore-name\">{name}</span><span class=\"pillar-subscore-value\">{value:.decimals$}</span></div>"
+            "<div class=\"pillar-subscore\"><span class=\"pillar-subscore-name\">{name}</span><span class=\"pillar-subscore-value\">{}</span></div>",
+            fmt_option(*value, decimals)
         );
     }
     html.push_str("</div></div>");

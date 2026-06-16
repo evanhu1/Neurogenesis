@@ -2,7 +2,7 @@
 //! `IntervalMetrics` / `PillarScores` into a single "mean across seeds" view
 //! for reports.
 
-use crate::output::{mean_f64, mean_option, mean_round_u32};
+use crate::output::{mean_option, mean_round_u32};
 use crate::types::{IntervalMetrics, PillarScores, SeedEvaluationSummary};
 
 pub fn average_pillar_scores(seed_summaries: &[SeedEvaluationSummary]) -> PillarScores {
@@ -18,14 +18,6 @@ pub fn average_pillar_scores(seed_summaries: &[SeedEvaluationSummary]) -> Pillar
         mean_plant_consumption_rate: mean_option(pillars().map(|p| p.mean_plant_consumption_rate)),
         mean_prey_consumption_rate: mean_option(pillars().map(|p| p.mean_prey_consumption_rate)),
         mean_learning_slope: mean_option(pillars().map(|p| p.mean_learning_slope)),
-        intelligence_effectiveness_component: mean_f64(
-            pillars().map(|p| p.intelligence_effectiveness_component),
-        ),
-        intelligence_mi_component: mean_f64(pillars().map(|p| p.intelligence_mi_component)),
-        foraging_pillar: mean_f64(pillars().map(|p| p.foraging_pillar)),
-        predation_pillar: mean_f64(pillars().map(|p| p.predation_pillar)),
-        intelligence_pillar: mean_f64(pillars().map(|p| p.intelligence_pillar)),
-        learning_pillar: mean_f64(pillars().map(|p| p.learning_pillar)),
     }
 }
 

@@ -892,27 +892,23 @@ impl App {
         )?;
         writeln!(
             out,
-            "  foraging      {:.3}   plant_consumption_rate {}",
-            p.foraging_pillar,
+            "  foraging      plant_consumption_rate {}",
             opt(p.mean_plant_consumption_rate, 4)
         )?;
         writeln!(
             out,
-            "  predation     {:.3}   prey_consumption_rate  {}",
-            p.predation_pillar,
+            "  predation     prey_consumption_rate  {}",
             opt(p.mean_prey_consumption_rate, 4)
         )?;
         writeln!(
             out,
-            "  intelligence  {:.3}   action_effectiveness {}  mi_sa {}",
-            p.intelligence_pillar,
+            "  intelligence  action_effectiveness {}  mi_sa {}",
             opt(p.mean_action_effectiveness, 4),
             opt(p.mean_mi_sa, 4),
         )?;
         writeln!(
             out,
-            "  learning      {:.3}   learning_slope {}",
-            p.learning_pillar,
+            "  learning      learning_slope {}",
             opt(p.mean_learning_slope, 6),
         )?;
         // Granular per-interval series behind the scores (the window marked *).
@@ -1012,11 +1008,12 @@ impl App {
         if let Some((p, _, partial)) = pillars {
             writeln!(
                 out,
-                "pillars: forage {:.3} | pred {:.3} | intel {:.3} | learn {:.3}{}",
-                p.foraging_pillar,
-                p.predation_pillar,
-                p.intelligence_pillar,
-                p.learning_pillar,
+                "metrics: plant_rate {} | prey_rate {} | action_eff {} | mi_sa {} | learn_slope {}{}",
+                opt(p.mean_plant_consumption_rate, 4),
+                opt(p.mean_prey_consumption_rate, 4),
+                opt(p.mean_action_effectiveness, 4),
+                opt(p.mean_mi_sa, 4),
+                opt(p.mean_learning_slope, 6),
                 if partial { "  [PARTIAL]" } else { "" },
             )?;
         }
@@ -1199,17 +1196,14 @@ impl App {
     }
 }
 
-/// Shared JSON encoding of a pillar readout (used by `pillars` and `state`).
+/// Shared JSON encoding of the windowed metric readout (used by `pillars` and
+/// `state`). Raw values only — no [0,1] pillar scoring.
 fn pillars_value(p: &PillarScores, n_intervals: usize, partial: bool) -> serde_json::Value {
     json!({
         "window_start_tick": p.window_start_tick,
         "window_end_tick": p.window_end_tick,
         "intervals": n_intervals,
         "partial": partial,
-        "foraging": p.foraging_pillar,
-        "predation": p.predation_pillar,
-        "intelligence": p.intelligence_pillar,
-        "learning": p.learning_pillar,
         "plant_consumption_rate": opt_json(p.mean_plant_consumption_rate),
         "prey_consumption_rate": opt_json(p.mean_prey_consumption_rate),
         "action_effectiveness": opt_json(p.mean_action_effectiveness),

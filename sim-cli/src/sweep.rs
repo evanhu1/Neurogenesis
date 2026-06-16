@@ -17,24 +17,25 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-/// The four pillars plus the raw learning slope, the signals a sweep ranks on.
+/// The raw windowed metrics a sweep ranks on (no [0,1] interpretation).
 const METRIC_KEYS: [&str; 5] = [
-    "foraging",
-    "predation",
-    "intelligence",
-    "learning",
+    "plant_consumption_rate",
+    "prey_consumption_rate",
+    "action_effectiveness",
+    "mi_sa",
     "learning_slope",
 ];
 
 fn metric(p: &PillarScores, key: &str) -> f64 {
-    match key {
-        "foraging" => p.foraging_pillar,
-        "predation" => p.predation_pillar,
-        "intelligence" => p.intelligence_pillar,
-        "learning" => p.learning_pillar,
-        "learning_slope" => p.mean_learning_slope.unwrap_or(f64::NAN),
+    let value = match key {
+        "plant_consumption_rate" => p.mean_plant_consumption_rate,
+        "prey_consumption_rate" => p.mean_prey_consumption_rate,
+        "action_effectiveness" => p.mean_action_effectiveness,
+        "mi_sa" => p.mean_mi_sa,
+        "learning_slope" => p.mean_learning_slope,
         other => unreachable!("metric() called with key outside METRIC_KEYS: {other}"),
-    }
+    };
+    value.unwrap_or(f64::NAN)
 }
 
 struct Job {
@@ -419,8 +420,8 @@ fn print_table(out: &mut impl Write, result: &Value) -> Result<()> {
     let cells = result["cells"].as_array().cloned().unwrap_or_default();
     writeln!(
         out,
-        "{:<32} {:>9} {:>9} {:>9} {:>9} {:>11}",
-        "cell", "forage", "pred", "intel", "learn", "Δforage"
+        "{:<32} {:>9} {:>9} {:>9} {:>9} {:>11} {:>12}",
+        "cell", "plant", "prey", "act_eff", "mi_sa", "learn_slope", "Δplant_rate"
     )?;
     for c in &cells {
         let label = c["overrides"]
@@ -433,18 +434,20 @@ fn print_table(out: &mut impl Write, result: &Value) -> Result<()> {
             })
             .unwrap_or_default();
         let m = |key: &str| c["metrics"][key]["mean"].as_f64();
-        let fmt = |v: Option<f64>| v.map(|x| format!("{x:.3}")).unwrap_or_else(|| "NA".into());
-        let dforage = c["delta_vs_baseline"]["foraging"].as_f64();
+        let fmt = |v: Option<f64>| v.map(|x| format!("{x:.4}")).unwrap_or_else(|| "NA".into());
+        let fmt_slope = |v: Option<f64>| v.map(|x| format!("{x:.6}")).unwrap_or_else(|| "NA".into());
+        let dplant = c["delta_vs_baseline"]["plant_consumption_rate"].as_f64();
         let star = if c["is_baseline"].as_bool().unwrap_or(false) { "*" } else { " " };
         writeln!(
             out,
-            "{star}{:<31} {:>9} {:>9} {:>9} {:>9} {:>11}",
+            "{star}{:<31} {:>9} {:>9} {:>9} {:>9} {:>11} {:>12}",
             label,
-            fmt(m("foraging")),
-            fmt(m("predation")),
-            fmt(m("intelligence")),
-            fmt(m("learning")),
-            dforage.map(|x| format!("{x:+.3}")).unwrap_or_else(|| "—".into()),
+            fmt(m("plant_consumption_rate")),
+            fmt(m("prey_consumption_rate")),
+            fmt(m("action_effectiveness")),
+            fmt(m("mi_sa")),
+            fmt_slope(m("learning_slope")),
+            dplant.map(|x| format!("{x:+.4}")).unwrap_or_else(|| "—".into()),
         )?;
     }
     Ok(())

@@ -641,11 +641,12 @@ impl App {
                 "food": { "plants": plants, "corpses": corpses, "total_energy": food_energy },
             });
             if let Some((p, _, partial)) = pillars {
-                v["pillars"] = json!({
-                    "foraging": p.foraging_pillar,
-                    "predation": p.predation_pillar,
-                    "intelligence": p.intelligence_pillar,
-                    "learning": p.learning_pillar,
+                v["metrics"] = json!({
+                    "plant_consumption_rate": p.mean_plant_consumption_rate,
+                    "prey_consumption_rate": p.mean_prey_consumption_rate,
+                    "action_effectiveness": p.mean_action_effectiveness,
+                    "mi_sa": p.mean_mi_sa,
+                    "learning_slope": p.mean_learning_slope,
                     "partial": partial,
                 });
             }
@@ -657,11 +658,12 @@ impl App {
             writeln!(
                 out,
                 "t={turn:<8} pop={pop:<6} desc={descendants:<6} food={food:<6} \
-                 forage={:.3} pred={:.3} intel={:.3} learn={:.3}{}",
-                p.foraging_pillar,
-                p.predation_pillar,
-                p.intelligence_pillar,
-                p.learning_pillar,
+                 plant={} prey={} eff={} mi={} slope={}{}",
+                opt(p.mean_plant_consumption_rate, 4),
+                opt(p.mean_prey_consumption_rate, 4),
+                opt(p.mean_action_effectiveness, 4),
+                opt(p.mean_mi_sa, 4),
+                opt(p.mean_learning_slope, 6),
                 if partial { " [PARTIAL]" } else { "" },
             )
             .map_err(Into::into)

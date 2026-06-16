@@ -65,10 +65,11 @@ cargo build -p sim-cli --release        # --release strongly recommended
 - `turn` — current turn.
 - `state` — population, energy/health/age/generation summaries, food, last-turn
   ecology (+ a pillars line if a sidecar is present).
-- `pillars` — foraging/predation/intelligence/learning + sub-signals, **plus a
-  `granular` section** with the full per-interval metric series behind the
-  windowed scores (each interval's action_effectiveness, plant/prey rates, mi_sa,
-  learning_slope; the scoring window is marked). **Needs a sidecar.**
+- `pillars` — the **raw windowed-mean metrics** (no [0,1] interpretation):
+  `plant_consumption_rate` (foraging), `prey_consumption_rate` (predation),
+  `action_effectiveness` + `mi_sa` (intelligence), `learning_slope` (learning) —
+  **plus a `granular` section** with the full per-interval series behind the
+  window (the scoring window is marked). **Needs a sidecar.**
 - `eco` — population/food trajectory, deaths-by-cause, rates (trajectory needs a
   sidecar; point-in-time works without).
 - `lineage` — generation distribution + founder-lineage composition.
