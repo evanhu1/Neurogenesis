@@ -276,6 +276,8 @@ fn instrument_action_record(
         age_turns: organism.age_turns,
         utilization: update_instrumentation_utilization(organism),
         consumptions_count: organism.consumptions_count,
+        plant_consumptions_count: organism.plant_consumptions_count,
+        prey_consumptions_count: organism.prey_consumptions_count,
     }
 }
 

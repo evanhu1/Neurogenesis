@@ -89,6 +89,11 @@ pub struct ActionRecord {
     pub age_turns: u64,
     pub utilization: f32,
     pub consumptions_count: u64,
+    /// Cumulative plant (foraging) consumptions, split out so the evaluation
+    /// layer can score foraging and predation competence separately.
+    pub plant_consumptions_count: u64,
+    /// Cumulative prey/corpse (predation) consumptions.
+    pub prey_consumptions_count: u64,
 }
 
 #[cfg(feature = "instrumentation")]
