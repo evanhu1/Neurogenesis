@@ -70,8 +70,7 @@ pub(super) fn encode_sensory_inputs(
     let health = health_signal(organism);
     let energy_delta = energy_delta_signal(organism);
     // Re-stash at sensing time so the next EnergyDelta reading spans
-    // sensing-to-sensing and can observe eat/attack/action-cost changes
-    // (energy_prev belongs to the reward ledger and rolls at end of tick).
+    // sensing-to-sensing and can observe eat/attack/action-cost changes.
     organism.energy_at_last_sensing = organism.energy;
     let last_forward = f32::from(organism.last_action_taken == sim_types::ActionType::Forward);
     let last_eat = f32::from(organism.last_action_taken == sim_types::ActionType::Eat);
@@ -327,8 +326,6 @@ mod tests {
             max_health,
             max_health,
             max_health,
-            max_health,
-            0.0,
             0.0,
             false,
             0,
@@ -341,9 +338,9 @@ mod tests {
                 inter: Vec::new(),
                 action: Vec::new(),
                 synapse_count: 0,
-                value_weights: Vec::new(),
                 sensory_mean_activation: Vec::new(),
                 inter_mean_activation: Vec::new(),
+                action_mean_activation: Vec::new(),
                 means_initialized: false,
             },
             genome,

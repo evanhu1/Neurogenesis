@@ -183,17 +183,6 @@ impl ReproductionPhaseState {
                     child_id: None,
                     failure_cause: Some(ReproductionFailureCause::BlockedBirth),
                 });
-                // A zero-gestation Reproduce pending can only reach here on
-                // the same tick its trigger fired (queue_completions always
-                // clears Reproduce pendings once turns_remaining hits 0), so
-                // this BlockedBirth is a same-tick failed Reproduce action.
-                // Mark it wasted, consistent with the failed Forward/Eat/
-                // Attack contract in mark_wasted_contingent_actions.
-                if sim.config.wasted_action_reward_enabled
-                    && parent.genome.lifecycle.gestation_ticks == 0
-                {
-                    sim.organisms[idx].contingent_action_wasted_last_turn = true;
-                }
             }
 
             sim.organisms[idx].is_gestating = false;

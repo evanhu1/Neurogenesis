@@ -188,7 +188,6 @@ type OrganismGenomeOf<Id> = {
   plasticity: PlasticityGenes;
   mutation_rates: MutationRateGenes;
   brain: BrainTopologyGenesOf<Id>;
-  reward_weights: number[];
 };
 
 export type ApiOrganismGenome = OrganismGenomeOf<ApiScalarId>;
@@ -245,7 +244,6 @@ type BrainStateOf<Id> = {
   inter: InterNeuronStateOf<Id>[];
   action: ActionNeuronStateOf<Id>[];
   synapse_count: number;
-  value_weights: number[];
 };
 
 export type ApiBrainState = BrainStateOf<ApiScalarId>;
@@ -262,12 +260,7 @@ type OrganismStateOf<Id> = {
   energy: number;
   health: number;
   max_health: number;
-  energy_prev: number;
-  health_prev: number;
   energy_at_last_sensing: number;
-  dopamine: number;
-  value_prev: number;
-  reward_prev: number;
   damage_taken_last_turn: number;
   is_gestating: boolean;
   consumptions_count: number;

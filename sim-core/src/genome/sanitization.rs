@@ -32,7 +32,6 @@ pub(crate) fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome,
     align_vec_to(&mut genome.brain.action_biases, ACTION_COUNT, || {
         sample_initial_bias(rng)
     });
-    align_reward_weights(&mut genome.reward_weights);
 
     // Padding fixes lengths but leaves existing entries untouched; a NaN
     // bias/log-tau/location from malformed intake would flow through
@@ -99,7 +98,6 @@ pub(super) fn debug_assert_genome_well_formed(genome: &OrganismGenome) {
     debug_assert_eq!(genome.brain.sensory_locations.len(), SENSORY_COUNT as usize);
     debug_assert_eq!(genome.brain.action_locations.len(), ACTION_COUNT);
     debug_assert_eq!(genome.brain.action_biases.len(), ACTION_COUNT);
-    debug_assert_eq!(genome.reward_weights.len(), crate::REWARD_WEIGHT_COUNT);
     debug_assert_eq!(
         genome.brain.edges.len() as u32,
         genome.topology.num_synapses
@@ -121,26 +119,6 @@ fn debug_assert_synapse_genes_well_formed(genome: &OrganismGenome) {
             genome.topology.num_neurons,
         ) && edge.weight == constrain_weight(edge.weight)
     }));
-}
-
-fn align_reward_weights(weights: &mut Vec<f32>) {
-    use crate::{
-        DEFAULT_REWARD_WEIGHTS, REWARD_WEIGHT_COUNT, REWARD_WEIGHT_MAX, REWARD_WEIGHT_MIN,
-    };
-    while weights.len() < REWARD_WEIGHT_COUNT {
-        weights.push(DEFAULT_REWARD_WEIGHTS[weights.len()]);
-    }
-    weights.truncate(REWARD_WEIGHT_COUNT);
-    for (w, default) in weights.iter_mut().zip(DEFAULT_REWARD_WEIGHTS) {
-        // `f32::clamp` propagates NaN, so a non-finite weight from malformed
-        // intake would scale dopamine with NaN forever; reset it to the
-        // default for its channel instead.
-        if w.is_finite() {
-            *w = w.clamp(REWARD_WEIGHT_MIN, REWARD_WEIGHT_MAX);
-        } else {
-            *w = default;
-        }
-    }
 }
 
 pub(super) fn reconcile_synapse_count<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {

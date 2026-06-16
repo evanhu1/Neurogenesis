@@ -92,7 +92,6 @@ struct MoveResolution {
 pub(crate) struct TurnScratch {
     removed_food: Vec<bool>,
     dead_organisms: Vec<bool>,
-    contingent_succeeded: Vec<bool>,
     gestation_started: Vec<bool>,
     move_candidates: Vec<(usize, MoveCandidate)>,
     move_resolutions: Vec<MoveResolution>,
@@ -275,16 +274,11 @@ impl Simulation {
 
     fn apply_post_commit_runtime_weight_updates(&mut self) {
         if !self.config.runtime_plasticity_enabled || self.config.force_random_actions {
-            // Nothing on this path consumes the reward/plasticity pass: the
-            // `energy_prev`/`health_prev` stashes are only read by
-            // `RewardLedger::observe`, which feeds `apply_runtime_weight_updates`
-            // — both skipped here. Sensing momentum uses the separate
-            // `energy_at_last_sensing` stash, so skipping the whole pass keeps
-            // organisms byte-identical.
+            // Nothing on this path consumes the plasticity pass, so skipping it
+            // keeps organisms byte-identical. Sensing momentum uses the
+            // separate `energy_at_last_sensing` stash, untouched here.
             return;
         }
-
-        let food_energy = self.config.food_energy;
 
         let any_learners = self
             .organisms
@@ -295,30 +289,20 @@ impl Simulation {
         let plasticity_started = Instant::now();
 
         let body_mass_metabolic_cost_coeff = self.config.body_mass_metabolic_cost_coeff;
-        // The reward ledger is a pure per-tick function of `(organism,
-        // food_energy)`, so it is computed locally per organism — including
-        // inside the rayon closure, where per-organism results are identical
-        // regardless of scheduling, preserving determinism. `observe` must run
-        // before `apply_runtime_weight_updates` mutates the organism's
-        // `energy_prev`/`health_prev` stashes.
-        //
         // Organisms spawned this tick are skipped: the Age phase has already
         // incremented every survivor, so `age_turns == 0` here identifies
-        // exactly the newborns appended by resolve_spawn_requests. Their
-        // brains have never been evaluated (intents ran before the spawn), so
-        // observing reward / stepping the actor-critic would seed
-        // `reward_prev`/`value_prev` from a phantom zero-activation
-        // transition; they get their first critic step at the end of their
-        // first active tick instead.
+        // exactly the newborns appended by resolve_spawn_requests. Their brains
+        // have never been evaluated (intents ran before the spawn), so their
+        // eligibility traces carry no pending coactivation yet; they get their
+        // first weight update at the end of their first active tick instead.
         //
         // Organisms action-locked by gestation this tick (pending action kind
         // Reproduce) are also skipped entirely: learning pauses during the
-        // lock, so reward observation, the actor-critic step, plasticity,
-        // weight decay, and pruning are all withheld. Their
-        // `reward_prev`/`value_prev`/`energy_prev`/`health_prev` stashes
-        // freeze and the first post-unlock update spans the gap — the
-        // intended pause/resume semantics. The skip is a pure per-organism
-        // predicate, so rayon scheduling cannot affect determinism.
+        // lock, so plasticity, weight decay, and pruning are all withheld.
+        // Their eligibility traces freeze and the first post-unlock update
+        // spans the gap — the intended pause/resume semantics. The skip is a
+        // pure per-organism predicate, so rayon scheduling cannot affect
+        // determinism.
         debug_assert_eq!(self.pending_actions.len(), self.organisms.len());
         // Acquired before the disjoint field borrows below; the pool is
         // already cached from the intent phase, so this is an Arc clone.
@@ -337,13 +321,7 @@ impl Simulation {
                         {
                             return;
                         }
-                        let mut reward_ledger = crate::RewardLedger::default();
-                        reward_ledger.observe(organism, food_energy);
-                        apply_runtime_weight_updates(
-                            organism,
-                            reward_ledger,
-                            body_mass_metabolic_cost_coeff,
-                        );
+                        apply_runtime_weight_updates(organism, body_mass_metabolic_cost_coeff);
                     });
             });
         } else {
@@ -351,13 +329,7 @@ impl Simulation {
                 if organism.age_turns == 0 || pending_action.kind == PendingActionKind::Reproduce {
                     continue;
                 }
-                let mut reward_ledger = crate::RewardLedger::default();
-                reward_ledger.observe(organism, food_energy);
-                apply_runtime_weight_updates(
-                    organism,
-                    reward_ledger,
-                    body_mass_metabolic_cost_coeff,
-                );
+                apply_runtime_weight_updates(organism, body_mass_metabolic_cost_coeff);
             }
         }
 

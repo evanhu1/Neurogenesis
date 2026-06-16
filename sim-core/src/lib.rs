@@ -56,28 +56,23 @@ pub(crate) fn jitter_visual_rgb_uniform(
     .clamped()
 }
 
-#[path = "brain/actor_critic.rs"]
-mod actor_critic;
 mod brain;
 pub(crate) mod genome;
 mod grid;
 mod metabolism;
+#[path = "brain/pending_action.rs"]
+mod pending_action;
 #[path = "brain/plasticity.rs"]
 mod plasticity;
 #[cfg(feature = "profiling")]
 #[path = "../profiling/profiling.rs"]
 pub mod profiling;
-#[path = "brain/reward.rs"]
-mod reward;
 mod spawn;
 #[path = "brain/topology.rs"]
 mod topology;
 mod turn;
 
-pub(crate) use reward::{
-    PendingActionKind, PendingActionState, RewardLedger, DEFAULT_REWARD_WEIGHTS,
-    REWARD_WEIGHT_COUNT, REWARD_WEIGHT_MAX, REWARD_WEIGHT_MIN,
-};
+pub(crate) use pending_action::{PendingActionKind, PendingActionState};
 
 #[cfg(test)]
 mod tests;

@@ -58,9 +58,9 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
         inter,
         action,
         synapse_count: 0,
-        value_weights: vec![0.0; num_sensory + num_inter],
         sensory_mean_activation: vec![0.0; num_sensory],
         inter_mean_activation: vec![0.0; num_inter],
+        action_mean_activation: vec![0.0; ACTION_COUNT],
         means_initialized: false,
     };
     wire_birth_synapses_from_genome(genome, &mut brain.sensory, &mut brain.inter);

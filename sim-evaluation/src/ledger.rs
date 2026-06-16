@@ -391,20 +391,6 @@ impl Ledger {
         self.descendant_population
     }
 
-    pub fn descendant_abs_dopamine(&self, organisms: &[OrganismState]) -> (f64, u32) {
-        let mut sum = 0.0_f64;
-        let mut count = 0_u32;
-        for organism in organisms {
-            if let Some(entry) = self.sidecar.get(&organism.id) {
-                if entry.origin == OrganismOrigin::Descendant {
-                    sum += f64::from(organism.dopamine.abs());
-                    count += 1;
-                }
-            }
-        }
-        (sum, count)
-    }
-
     pub fn population_snapshot_rows(
         &self,
         tick: u64,

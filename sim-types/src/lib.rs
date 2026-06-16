@@ -459,20 +459,6 @@ pub struct BrainTopology {
     pub edges: Vec<SynapseGene>,
 }
 
-pub const REWARD_WEIGHT_COUNT: usize = 7;
-
-// Ordered to match the `RewardLedger` fields in sim-core:
-// [energy_level, energy_delta_gain, energy_delta_loss,
-//  health_level, health_delta_gain, health_delta_loss,
-//  contingent_action_wasted].
-// energy_level starts at 0 (absolute energy is a predictor, not a goal on its
-// own) while health_level starts at +1 (higher health is always rewarded).
-// contingent_action_wasted fires on failed Forward/Eat/Attack/Reproduce —
-// negative default since "did a thing, the thing did nothing" is objectively
-// wasted effort.
-pub const DEFAULT_REWARD_WEIGHTS: [f32; REWARD_WEIGHT_COUNT] =
-    [0.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0];
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OrganismGenome {
     pub topology: TopologyGenes,
@@ -481,11 +467,6 @@ pub struct OrganismGenome {
     #[serde(default)]
     pub mutation_rates: MutationRateGenes,
     pub brain: BrainTopology,
-    /// Genomic coefficients applied to the tonic reward-ledger channels before
-    /// the dopamine squash. Index order matches `RewardLedger` fields in
-    /// sim-core. Empty vectors are filled with defaults during sanitization.
-    #[serde(default)]
-    pub reward_weights: Vec<f32>,
 }
 
 impl OrganismGenome {
@@ -526,7 +507,6 @@ impl OrganismGenome {
                 action_biases: vec![0.0; action_count],
                 edges: Vec::new(),
             },
-            reward_weights: DEFAULT_REWARD_WEIGHTS.to_vec(),
         }
     }
 }
@@ -627,13 +607,6 @@ pub struct BrainState {
     pub inter: Vec<InterNeuronState>,
     pub action: Vec<ActionNeuronState>,
     pub synapse_count: u32,
-    /// Linear actor-critic value head over the concatenated sensory + inter
-    /// activations. Weights index `sensory` first, then `inter`. Every live
-    /// brain comes from genome expression, which sizes this to exactly
-    /// `sensory.len() + inter.len()`; neuron counts never change after birth,
-    /// so the length is invariant for the organism's lifetime.
-    #[serde(default)]
-    pub value_weights: Vec<f32>,
     /// Per-sensory-neuron EMA of activation used to center pending
     /// coactivations (covariance rule). Length tracks `sensory.len()`.
     #[serde(skip)]
@@ -641,6 +614,10 @@ pub struct BrainState {
     /// Per-inter-neuron EMA of activation. Length tracks `inter.len()`.
     #[serde(skip)]
     pub inter_mean_activation: Vec<f32>,
+    /// Per-action-neuron EMA of the squashed action logit, used to center the
+    /// covariance rule on inter→action edges. Length tracks `action.len()`.
+    #[serde(skip)]
+    pub action_mean_activation: Vec<f32>,
     /// True once the activation means have been bootstrapped to the live
     /// activations on the brain's first plasticity pass. Neurons are never
     /// added or removed after birth, so every mean initializes on the same
@@ -664,38 +641,13 @@ pub struct OrganismState {
     pub health: f32,
     #[serde(default)]
     pub max_health: f32,
-    #[serde(default)]
-    pub energy_prev: f32,
-    #[serde(default)]
-    pub health_prev: f32,
     /// Energy stash captured at sensing time so the EnergyDelta sensor reads a
     /// sensing-to-sensing delta (spanning eat/attack/action-cost changes),
-    /// independent of `energy_prev`, which feeds the reward ledger and is
-    /// rolled forward at the end of every tick.
+    /// rolled forward at the start of every tick's sensing pass.
     #[serde(default)]
     pub energy_at_last_sensing: f32,
     #[serde(default)]
-    pub dopamine: f32,
-    /// Most recent value estimate V(s); wire-visible readout for the
-    /// inspector. The TD error recomputes V(s_{t-1}) from
-    /// `value_prev_feature_activations` under the current weights instead of
-    /// reusing this cached value.
-    #[serde(default)]
-    pub value_prev: f32,
-    /// Previous-tick raw reward r_{t-1} (result of the action chosen in
-    /// s_{t-1}); pairs with the previous tick's eligibility so the TD error
-    /// credits the transition that produced the reward.
-    #[serde(default)]
-    pub reward_prev: f32,
-    /// Previous-tick concatenated sensory + inter activations; used to
-    /// recompute V(s_{t-1}) under the current weights and as the feature
-    /// vector for the value head's local gradient update.
-    #[serde(default)]
-    pub value_prev_feature_activations: Vec<f32>,
-    #[serde(default)]
     pub damage_taken_last_turn: f32,
-    #[serde(default)]
-    pub contingent_action_wasted_last_turn: bool,
     #[serde(default)]
     pub is_gestating: bool,
     #[serde(default)]
@@ -729,8 +681,6 @@ impl OrganismState {
         energy: f32,
         health: f32,
         max_health: f32,
-        energy_prev: f32,
-        dopamine: f32,
         damage_taken_last_turn: f32,
         is_gestating: bool,
         consumptions_count: u64,
@@ -752,15 +702,8 @@ impl OrganismState {
             energy,
             health,
             max_health,
-            energy_prev,
-            health_prev: health,
             energy_at_last_sensing: energy,
-            dopamine,
-            value_prev: 0.0,
-            reward_prev: 0.0,
-            value_prev_feature_activations: Vec::new(),
             damage_taken_last_turn,
-            contingent_action_wasted_last_turn: false,
             is_gestating,
             consumptions_count,
             plant_consumptions_count,

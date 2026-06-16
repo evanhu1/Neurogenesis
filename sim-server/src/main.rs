@@ -1043,9 +1043,9 @@ mod tests {
             inter: Vec::new(),
             action: Vec::new(),
             synapse_count: 0,
-            value_weights: Vec::new(),
             sensory_mean_activation: Vec::new(),
             inter_mean_activation: Vec::new(),
+            action_mean_activation: Vec::new(),
             means_initialized: false,
         };
 
@@ -1061,8 +1061,6 @@ mod tests {
                 strong.energy,
                 strong.energy.max(1.0),
                 strong.energy.max(1.0),
-                strong.energy,
-                0.0,
                 0.0,
                 false,
                 strong.consumptions_count,
@@ -1084,8 +1082,6 @@ mod tests {
                 weaker_duplicate.energy,
                 weaker_duplicate.energy.max(1.0),
                 weaker_duplicate.energy.max(1.0),
-                weaker_duplicate.energy,
-                0.0,
                 0.0,
                 false,
                 weaker_duplicate.consumptions_count,

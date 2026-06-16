@@ -23,7 +23,6 @@ pub fn average_pillar_scores(seed_summaries: &[SeedEvaluationSummary]) -> Pillar
         mean_idle_fraction: mean_option(pillars().map(|p| p.mean_idle_fraction)),
         mean_util: mean_option(pillars().map(|p| p.mean_util)),
         mean_action_histogram: mean_histogram(pillars().map(|p| p.mean_action_histogram)),
-        mean_abs_td_error: mean_option(pillars().map(|p| p.mean_abs_td_error)),
         mean_age_correlated_competence: mean_option(
             pillars().map(|p| p.mean_age_correlated_competence),
         ),
@@ -215,11 +214,6 @@ pub fn average_timeseries(seed_summaries: &[SeedEvaluationSummary]) -> Vec<Inter
                 seed_summaries
                     .iter()
                     .map(|summary| summary.timeseries[row_idx].generation_time),
-            ),
-            abs_td_error: mean_option(
-                seed_summaries
-                    .iter()
-                    .map(|summary| summary.timeseries[row_idx].abs_td_error),
             ),
             age_correlated_competence: mean_option(
                 seed_summaries

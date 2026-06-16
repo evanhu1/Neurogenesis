@@ -20,12 +20,12 @@ pub(crate) fn write_timeseries_csv(out_dir: &Path, rows: &[IntervalMetrics]) -> 
     let mut csv = BufWriter::new(File::create(csv_path)?);
     writeln!(
         csv,
-        "tick,pop,births,deaths,food,max_generation,attack_attempt_rate,attack_success_rate,failed_action_rate,ate_pct,cons_mean,neurons,synapses,p_fwd_food,mi_sa,idle_fraction,util,generation_time,abs_td_error,age_correlated_competence"
+        "tick,pop,births,deaths,food,max_generation,attack_attempt_rate,attack_success_rate,failed_action_rate,ate_pct,cons_mean,neurons,synapses,p_fwd_food,mi_sa,idle_fraction,util,generation_time,age_correlated_competence"
     )?;
     for metrics in rows {
         writeln!(
             csv,
-            "{tick},{pop},{births},{deaths},{food},{max_generation},{attack_attempt_rate},{attack_success_rate},{failed_action_rate},{ate_pct},{cons_mean},{neurons},{synapses},{p_fwd_food},{mi_sa},{idle_fraction},{util},{generation_time},{abs_td_error},{age_correlated_competence}",
+            "{tick},{pop},{births},{deaths},{food},{max_generation},{attack_attempt_rate},{attack_success_rate},{failed_action_rate},{ate_pct},{cons_mean},{neurons},{synapses},{p_fwd_food},{mi_sa},{idle_fraction},{util},{generation_time},{age_correlated_competence}",
             tick = metrics.tick,
             pop = metrics.pop,
             births = metrics.births,
@@ -44,7 +44,6 @@ pub(crate) fn write_timeseries_csv(out_dir: &Path, rows: &[IntervalMetrics]) -> 
             idle_fraction = csv_opt(metrics.idle_fraction),
             util = csv_opt(metrics.util),
             generation_time = csv_opt(metrics.generation_time),
-            abs_td_error = csv_opt(metrics.abs_td_error),
             age_correlated_competence = csv_opt(metrics.age_correlated_competence),
         )?;
     }

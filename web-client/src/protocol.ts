@@ -65,7 +65,6 @@ function normalizeBrainState(brain: ApiOrganismState['brain']): BrainState {
 
   return {
     synapse_count: brain.synapse_count,
-    value_weights: brain.value_weights ?? [],
     sensory: brain.sensory.map((sensory) => ({
       ...sensory,
       neuron: normalizeNeuronState(sensory.neuron),

@@ -81,23 +81,6 @@ pub(crate) fn mutate_action_biases<R: Rng + ?Sized>(genome: &mut OrganismGenome,
     );
 }
 
-pub(crate) fn mutate_reward_weights<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
-    mutate_many_or_one(
-        &mut genome.reward_weights,
-        REWARD_WEIGHT_PERTURB_RATE,
-        rng,
-        |weight, rng| {
-            *weight = perturb_clamped(
-                *weight,
-                REWARD_WEIGHT_PERTURBATION_STDDEV,
-                crate::REWARD_WEIGHT_MIN,
-                crate::REWARD_WEIGHT_MAX,
-                rng,
-            );
-        },
-    );
-}
-
 pub(crate) fn mutate_inter_update_rates<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
     mutate_many_or_one(
         &mut genome.brain.inter_log_time_constants,

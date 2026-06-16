@@ -23,7 +23,6 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     let action_biases = (0..ACTION_COUNT)
         .map(|_| sample_initial_bias(rng))
         .collect();
-    let reward_weights = crate::DEFAULT_REWARD_WEIGHTS.to_vec();
 
     let mut genome = OrganismGenome {
         topology: TopologyGenes {
@@ -74,7 +73,6 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
             action_biases,
             edges: Vec::new(),
         },
-        reward_weights,
     };
     reconcile_synapse_count(&mut genome, rng);
     genome

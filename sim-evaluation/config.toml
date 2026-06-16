@@ -33,4 +33,3 @@ global_mutation_rate_modifier = 1.0
 meta_mutation_enabled = true
 runtime_plasticity_enabled = true
 force_random_actions = false
-wasted_action_reward_enabled = false

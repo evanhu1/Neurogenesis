@@ -138,9 +138,6 @@ struct IntervalAccumulator {
     food_ahead_ticks_sum: u64,
     fwd_when_food_ahead_sum: u64,
     pooled_joint: [u64; JOINT_LEN],
-    // dopamine
-    abs_dopamine_sum: f64,
-    abs_dopamine_count: u64,
     // reproduction_events (successful only)
     successful_reproductions: u64,
     parent_age_sum: u64,
@@ -167,8 +164,6 @@ impl IntervalAccumulator {
             food_ahead_ticks_sum: 0,
             fwd_when_food_ahead_sum: 0,
             pooled_joint: [0; JOINT_LEN],
-            abs_dopamine_sum: 0.0,
-            abs_dopamine_count: 0,
             successful_reproductions: 0,
             parent_age_sum: 0,
             population_snapshot: None,
@@ -184,10 +179,6 @@ impl IntervalAccumulator {
         self.last_pop = row.descendant_population;
         self.last_food = row.food_count;
         self.last_max_generation = row.max_generation.or(self.last_max_generation);
-        self.abs_dopamine_sum += row.descendant_abs_dopamine_sum;
-        self.abs_dopamine_count = self
-            .abs_dopamine_count
-            .saturating_add(u64::from(row.descendant_abs_dopamine_count));
     }
 
     fn add_action_count(&mut self, row: &crate::dataset::ActionCountRow) {
@@ -279,12 +270,6 @@ impl IntervalAccumulator {
 
         let snapshot = self.population_snapshot.as_ref();
 
-        let abs_td_error = if self.abs_dopamine_count == 0 {
-            None
-        } else {
-            Some(self.abs_dopamine_sum / self.abs_dopamine_count as f64)
-        };
-
         IntervalMetrics {
             tick: self.end_tick,
             pop: self.last_pop,
@@ -304,7 +289,6 @@ impl IntervalAccumulator {
             idle_fraction,
             util,
             generation_time,
-            abs_td_error,
             age_correlated_competence: snapshot.and_then(|r| r.age_correlated_competence),
             action_histogram,
         }

@@ -275,10 +275,6 @@ pub fn write_html_report(
             "Mean parent age (in ticks) across every successful reproduction event in the interval. Shorter = faster generational turnover. Interpret alongside lifetime — generation_time ~ life_mean is a knife-edge regime where each parent reproduces roughly once before dying.".to_owned(),
         ),
         (
-            "mean_abs_td_error",
-            "Mean |tanh(TD_error)| (absolute dopamine signal) across the descendant population per tick, averaged over the interval. Higher values indicate stronger reward/punishment signals driving plasticity.".to_owned(),
-        ),
-        (
             "age_corr_competence",
             "Junior failure rate / Senior failure rate. Juniors = organisms in the bottom 25% of their lifespan, Seniors = top 25%. Values > 1 indicate seniors fail less often than juniors — evidence of within-lifetime learning via plasticity.".to_owned(),
         ),
@@ -308,7 +304,6 @@ pub fn write_html_report(
             fmt_option(row.idle_fraction, 4),
             fmt_option(row.util, 4),
             fmt_option(row.generation_time, 2),
-            fmt_option(row.abs_td_error, 4),
             fmt_option(row.age_correlated_competence, 4),
         ] {
             let _ = write!(html, "<td>{cell}</td>");
@@ -414,12 +409,6 @@ pub fn write_html_report(
             metric_series(rows, |r| r.generation_time),
             None,
             "#be185d",
-        ),
-        (
-            "Mean Absolute TD Error",
-            metric_series(rows, |r| r.abs_td_error),
-            Some(0.0),
-            "#ea580c",
         ),
         (
             "Age-Correlated Competence",

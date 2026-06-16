@@ -1,4 +1,4 @@
-use crate::actor_critic::step_actor_critic;
+use crate::brain::fast_tanh;
 use crate::brain::BrainScratch;
 use crate::metabolism::refresh_organism_base_metabolic_cost;
 #[cfg(feature = "profiling")]
@@ -7,7 +7,6 @@ use crate::topology::{
     action_array_index, constrain_weight, inter_index, refresh_action_synapse_starts_and_count,
     ACTION_COUNT,
 };
-use crate::RewardLedger;
 use sim_types::{BrainState, OrganismState, SynapseEdge};
 #[cfg(feature = "profiling")]
 use std::time::Instant;
@@ -22,12 +21,19 @@ const PRUNE_ELIGIBILITY_MULTIPLIER: f32 = 2.0;
 const ACTIVATION_MEAN_ALPHA: f32 = 0.05;
 
 struct PlasticityStepParams {
-    dopamine_signal: f32,
     eta: f32,
     eligibility_retention: f32,
     max_weight_delta_per_tick: f32,
     should_prune: bool,
     weight_prune_threshold: f32,
+}
+
+/// Squashed action-neuron logit used as the post-side "activation" for the
+/// covariance rule on inter→action edges. Bounding it with the same tanh the
+/// inter layer uses keeps action-edge pending magnitudes comparable to
+/// inter-edge pending instead of scaling with an unbounded logit.
+fn action_activation(logit: f32) -> f32 {
+    fast_tanh(logit)
 }
 
 pub(crate) fn compute_pending_coactivations(
@@ -55,6 +61,7 @@ pub(crate) fn compute_pending_coactivations(
     // added or removed after birth (runtime pruning removes only synapses).
     debug_assert_eq!(brain.sensory_mean_activation.len(), brain.sensory.len());
     debug_assert_eq!(brain.inter_mean_activation.len(), brain.inter.len());
+    debug_assert_eq!(brain.action_mean_activation.len(), brain.action.len());
 
     // Bootstrap uninitialized means to the current activation so the
     // covariance term `(activation - mean) * (post - post_mean)` starts at
@@ -76,10 +83,15 @@ pub(crate) fn compute_pending_coactivations(
         scratch
             .inter_activations
             .extend(brain.inter.iter().map(|inter| inter.neuron.activation));
+        // Snapshot squashed action logits the same way: the action edges read
+        // them while the sensory/inter loops below mutate their synapses.
+        let mut action_activations = [0.0_f32; ACTION_COUNT];
+        for (slot, action) in action_activations.iter_mut().zip(brain.action.iter()) {
+            *slot = action_activation(action.logit);
+        }
         let sensory_means = &brain.sensory_mean_activation;
         let inter_means = &brain.inter_mean_activation;
-        let selected_action_index = scratch.selected_action_index;
-        let action_probabilities = scratch.action_probabilities;
+        let action_means = &brain.action_mean_activation;
 
         #[cfg(feature = "profiling")]
         let stage_started = Instant::now();
@@ -95,8 +107,8 @@ pub(crate) fn compute_pending_coactivations(
                 pre_signal,
                 &scratch.inter_activations,
                 inter_means,
-                selected_action_index,
-                &action_probabilities,
+                &action_activations,
+                action_means,
             );
         }
         #[cfg(feature = "profiling")]
@@ -122,8 +134,8 @@ pub(crate) fn compute_pending_coactivations(
                 pre_current,
                 &scratch.inter_activations,
                 inter_means,
-                selected_action_index,
-                &action_probabilities,
+                &action_activations,
+                action_means,
             );
         }
         #[cfg(feature = "profiling")]
@@ -157,6 +169,13 @@ fn bootstrap_means(brain: &mut BrainState) {
     {
         *mean = inter.neuron.activation;
     }
+    for (mean, action) in brain
+        .action_mean_activation
+        .iter_mut()
+        .zip(brain.action.iter())
+    {
+        *mean = action_activation(action.logit);
+    }
     brain.means_initialized = true;
 }
 
@@ -176,6 +195,13 @@ fn update_activation_means(brain: &mut BrainState) {
     {
         *mean = retention * *mean + ACTIVATION_MEAN_ALPHA * inter.neuron.activation;
     }
+    for (mean, action) in brain
+        .action_mean_activation
+        .iter_mut()
+        .zip(brain.action.iter())
+    {
+        *mean = retention * *mean + ACTIVATION_MEAN_ALPHA * action_activation(action.logit);
+    }
 }
 
 fn should_prune_synapses(age_turns: u64, age_of_maturity: u32) -> bool {
@@ -185,19 +211,12 @@ fn should_prune_synapses(age_turns: u64, age_of_maturity: u32) -> bool {
 
 pub(crate) fn apply_runtime_weight_updates(
     organism: &mut OrganismState,
-    reward_ledger: RewardLedger,
     body_mass_metabolic_cost_coeff: f32,
 ) {
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
 
-    let raw_reward = reward_ledger.weighted_reward_signal(&organism.genome.reward_weights);
-    let dopamine_signal = step_actor_critic(organism, raw_reward);
-
-    let params = PlasticityStepParams::from_organism(organism, dopamine_signal);
-    organism.dopamine = dopamine_signal;
-    organism.energy_prev = organism.energy;
-    organism.health_prev = organism.health;
+    let params = PlasticityStepParams::from_organism(organism);
 
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::PlasticitySetup, stage_started.elapsed());
@@ -237,8 +256,7 @@ pub(crate) fn apply_runtime_weight_updates(
 
 /// Maturity-dependent learning-rate scale at the organism's current age: 1
 /// once mature, otherwise the genome's (non-negative) juvenile eta scale.
-/// Shared by synapse plasticity and the actor-critic value head; consumers
-/// run after `increment_age_for_survivors`, while the producer
+/// Consumers run after `increment_age_for_survivors`, while the producer
 /// (`compute_pending_coactivations`) calls `learning_rate_scale_at_age` with
 /// `age_turns + 1` to evaluate the same post-increment age.
 pub(crate) fn learning_rate_scale(organism: &OrganismState) -> f32 {
@@ -255,11 +273,10 @@ fn learning_rate_scale_at_age(genome: &sim_types::OrganismGenome, age_turns: u64
 }
 
 impl PlasticityStepParams {
-    fn from_organism(organism: &OrganismState, dopamine_signal: f32) -> Self {
+    fn from_organism(organism: &OrganismState) -> Self {
         let eta = organism.genome.plasticity.hebb_eta_gain.max(0.0) * learning_rate_scale(organism);
 
         Self {
-            dopamine_signal,
             eta,
             eligibility_retention: organism
                 .genome
@@ -289,8 +306,8 @@ fn compute_pending_edge_coactivations(
     action_pre_signal: f32,
     inter_activations: &[f32],
     inter_means: &[f32],
-    selected_action_index: Option<usize>,
-    action_probabilities: &[f32; ACTION_COUNT],
+    action_activations: &[f32],
+    action_means: &[f32],
 ) {
     // Edges stay sorted by post ID (asserted where the cache is refreshed in
     // `refresh_action_synapse_starts_and_count`), so the cached split index
@@ -322,27 +339,17 @@ fn compute_pending_edge_coactivations(
         edge.pending_coactivation = pre_dev * (post_activation - post_mean);
     }
 
-    // Action edges keep the boundary-layer `(A_i - P_i)` structure — the
-    // policy is discrete and mutually exclusive, so the advantage-style term
-    // already centers post-side signal around the softmax-probability
-    // baseline.
-    if action_pre_signal != 0.0 {
-        for edge in action_edges {
-            let Some(idx) = action_array_index(edge.post_neuron_id) else {
-                continue;
-            };
-            let a_i = if Some(idx) == selected_action_index {
-                1.0
-            } else {
-                0.0
-            };
-            let p_i = action_probabilities[idx];
-            edge.pending_coactivation = action_pre_signal * (a_i - p_i);
-        }
-    } else {
-        for edge in action_edges {
-            edge.pending_coactivation = 0.0;
-        }
+    // Same centered covariance rule on inter→action edges: the action neuron
+    // has no recurrent state, so its squashed logit (`action_activations`)
+    // stands in for the post activation, centered by its own running mean.
+    // The pre side uses the current activation (`action_pre_signal`) because
+    // action logits are accumulated from current-tick inter activations.
+    let action_pre_dev = action_pre_signal - inter_pre_mean;
+    for edge in action_edges {
+        let Some(idx) = action_array_index(edge.post_neuron_id) else {
+            continue;
+        };
+        edge.pending_coactivation = action_pre_dev * (action_activations[idx] - action_means[idx]);
     }
 }
 
@@ -351,8 +358,10 @@ fn apply_edge_weight_update_and_fold_pending(
     params: &PlasticityStepParams,
 ) {
     for edge in edges {
-        let uncapped_delta = params.eta * params.dopamine_signal * edge.eligibility
-            - PLASTIC_WEIGHT_DECAY * edge.weight;
+        // Ungated covariance-rule update: the eligibility trace is a decaying
+        // sum of centered coactivations, scaled by the maturity-gated learning
+        // rate, with a small passive decay toward zero.
+        let uncapped_delta = params.eta * edge.eligibility - PLASTIC_WEIGHT_DECAY * edge.weight;
         let capped_delta = uncapped_delta.clamp(
             -params.max_weight_delta_per_tick,
             params.max_weight_delta_per_tick,
@@ -360,7 +369,7 @@ fn apply_edge_weight_update_and_fold_pending(
         let updated_weight = edge.weight + capped_delta;
         edge.weight = constrain_weight(updated_weight);
         // Additive accumulation (decaying sum) instead of EMA — preserves
-        // transient signal from zero-mean coactivation/policy gradients.
+        // transient signal from zero-mean coactivations.
         edge.eligibility =
             params.eligibility_retention * edge.eligibility + edge.pending_coactivation;
         edge.pending_coactivation = 0.0;

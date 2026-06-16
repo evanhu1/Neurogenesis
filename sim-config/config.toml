@@ -33,4 +33,3 @@ global_mutation_rate_modifier = 1.0 # Global multiplier applied to genome mutati
 meta_mutation_enabled = true # Whether mutation-rate genes themselves are allowed to mutate.
 runtime_plasticity_enabled = true # Whether runtime Hebbian plasticity updates are applied after each tick.
 force_random_actions = false # Debug toggle that ignores policy logits and forces random actions.
-wasted_action_reward_enabled = false # Whether failed Forward/Eat/Attack/Reproduce actions contribute to the reward ledger via the contingent_action_wasted channel. Off by default; at 500k ticks the penalty hurt foraging more than it helped.

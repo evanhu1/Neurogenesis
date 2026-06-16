@@ -64,8 +64,6 @@ pub struct TickSummaryRow {
     pub consumptions: u32,
     pub predations: u32,
     pub food_spawned: u32,
-    pub descendant_abs_dopamine_sum: f64,
-    pub descendant_abs_dopamine_count: u32,
 }
 
 /// One row per living organism at a flush boundary. This is raw snapshot data;
