@@ -2,6 +2,11 @@ use super::world::{hash_2d, noise_2d};
 use super::*;
 use sim_config::food_ecology_policy;
 
+/// Fraction of a dead organism's remaining energy that carries into its corpse.
+/// Consumption transfers a corpse's full energy, so this loss is applied once,
+/// at corpse creation, rather than every time something takes a bite.
+const CORPSE_ENERGY_RETENTION: f32 = 0.80;
+
 impl Simulation {
     pub(crate) fn initialize_food_ecology(&mut self) {
         let capacity = world_capacity(self.config.world_width);
@@ -110,7 +115,11 @@ impl Simulation {
         cell_idx: usize,
         energy: f32,
     ) -> Option<FoodState> {
-        self.spawn_food_with_kind_at_cell(cell_idx, energy, FoodKind::Corpse)
+        self.spawn_food_with_kind_at_cell(
+            cell_idx,
+            energy.max(0.0) * CORPSE_ENERGY_RETENTION,
+            FoodKind::Corpse,
+        )
     }
 
     fn regrowth_delay_turns(&mut self) -> u64 {

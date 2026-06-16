@@ -14,7 +14,7 @@ action_temperature = 0.05 # Softmax temperature for action sampling; lower value
 intent_parallel_threads = 8 # Worker threads used during the intent-evaluation phase.
 
 [food]
-food_energy = 40 # Energy stored in each plant food item before consumption multipliers are applied.
+food_energy = 8 # Energy a plant yields when eaten (transferred in full; no digestion multiplier).
 food_regrowth_interval = 200 # Base turns before an eaten food tile becomes eligible to regrow.
 food_regrowth_jitter = 50 # Random plus/minus variation added to the base food regrowth delay.
 food_fertility_threshold = 0.5 # Binary fertility cutoff after deterministic jitter.

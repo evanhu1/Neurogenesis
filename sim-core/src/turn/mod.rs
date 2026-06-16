@@ -33,14 +33,6 @@ const RNG_ORGANISM_MIX: u64 = 0xBF58_476D_1CE4_E5B9;
 const RNG_PREY_MIX: u64 = 0x2545_F491_4F6C_DD1D;
 const SPIKE_DAMAGE_FRACTION: f32 = 0.10;
 const ATTACK_DAMAGE_FRACTION: f32 = 0.5;
-// Eating is lossy: only a fraction of the item's stored energy transfers to
-// the eater. Plants are inefficient to digest; corpses much less so. These
-// losses are the ecosystem's primary energy sink — without them consumption
-// is lossless, predation recycles energy for free, and the population
-// equilibrium roughly triples (which is what a 500k-tick evaluation run
-// surfaced as a 3-5x wall-clock blowup).
-const PLANT_CONSUMPTION_ENERGY_FRACTION: f32 = 0.20;
-const CORPSE_CONSUMPTION_ENERGY_FRACTION: f32 = 0.80;
 const HEALTH_REGEN_FRACTION: f32 = 0.10;
 const INTENT_PARALLEL_MIN_LEN: usize = 64;
 
@@ -382,13 +374,6 @@ fn action_rng_seed(sim_seed: u64, tick: u64, organism_id: OrganismId) -> u64 {
 fn deterministic_action_sample(sim_seed: u64, tick: u64, organism_id: OrganismId) -> f32 {
     let sample = (action_rng_seed(sim_seed, tick, organism_id) >> 40) as u32;
     sample as f32 / ((1_u32 << 24) - 1) as f32
-}
-
-fn food_consumption_energy_fraction(kind: FoodKind) -> f32 {
-    match kind {
-        FoodKind::Plant => PLANT_CONSUMPTION_ENERGY_FRACTION,
-        FoodKind::Corpse => CORPSE_CONSUMPTION_ENERGY_FRACTION,
-    }
 }
 
 /// Predation roll in [0, 1] as a deterministic hash of

@@ -182,7 +182,7 @@ impl<'a> CommitPhaseContext<'a> {
             self.sim.schedule_food_regrowth(target_idx);
         }
 
-        let gained_energy = food.energy.max(0.0) * food_consumption_energy_fraction(food.kind);
+        let gained_energy = food.energy.max(0.0);
         let predator = &mut self.sim.organisms[predator_idx];
         predator.energy += gained_energy;
         predator.consumptions_count = predator.consumptions_count.saturating_add(1);
@@ -233,6 +233,9 @@ impl<'a> CommitPhaseContext<'a> {
         let predator = &self.sim.organisms[predator_idx];
         let predator_id = predator.id;
         let predator_size = sim_types::get_size(predator).max(1.0);
+        // Damage scales with the attacker's own size, so bigger predators hit
+        // harder regardless of how tough the prey is.
+        let predator_max_health = predator.max_health.max(0.0);
         let prey_size = sim_types::get_size(&self.sim.organisms[prey_idx]).max(1.0);
         let predation_success = (predator_size / prey_size).clamp(0.0, 1.0);
         let sample =
@@ -242,7 +245,7 @@ impl<'a> CommitPhaseContext<'a> {
         }
 
         let prey = &mut self.sim.organisms[prey_idx];
-        let damage = (prey.max_health * ATTACK_DAMAGE_FRACTION).min(prey.health.max(0.0));
+        let damage = (predator_max_health * ATTACK_DAMAGE_FRACTION).min(prey.health.max(0.0));
         prey.health = (prey.health - damage).max(0.0);
         prey.damage_taken_last_turn += damage;
         let killed = prey.health <= 0.0;
