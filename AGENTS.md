@@ -36,6 +36,18 @@ evaluation assumptions.
   `summary.json`/`timeseries.csv`/`report.html` from a persisted dataset without
   re-running the sim. `<run>` accepts a path (run root or seed dir), a timestamp
   prefix resolved under `artifacts/evaluation/`, or `latest`.
+- `cargo run -p sim-cli` (add `--release` for speed): the agent-facing research
+  cockpit — an interactive stdin REPL that holds one `Simulation` in memory so a
+  world can be scrubbed forward and inspected repeatedly. Type `help` for the
+  full command list (it is the source of truth and stays current); every command
+  accepts `--json`, and invalid arguments print the valid options. Typical flow:
+  `load [--seed N] [--report-every R] [--scale W,POP] [--threads K]` →
+  `record on` → `run-to T` → read `pillars` (live foraging/predation/
+  intelligence/learning — byte-identical to the eval via the shared `sim-metrics`
+  crate), `state`, `eco`, `lineage`, `genome`, `timeseries`, and per-organism
+  `find`/`top`/`hist`/`inspect`/`brain`/`decide`; `bench [N]` for throughput.
+  Pillars/eco/timeseries history require `record on` first; point-in-time queries
+  do not. See `docs/sim-cli.md` (usage) and `SPEC.md` (design).
 - `cargo run -p sim-server`: start backend on `127.0.0.1:8080`. Flags:
   - `--champion-pool-path <path>`: override the default `champion_pool.json`
     location used for read-back and persistence of saved champions.

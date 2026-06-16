@@ -526,7 +526,13 @@ impl App {
         for name in &cols {
             let series = sample_col(name).or_else(|| interval_col(name));
             let mut series =
-                series.ok_or_else(|| anyhow!("unknown column `{name}` (see help/spec)"))?;
+                series.ok_or_else(|| {
+                    anyhow!(
+                        "unknown column `{name}`; valid: population descendants food births \
+                         deaths consumptions predations reproductions action_effectiveness \
+                         plant_consumption_rate prey_consumption_rate mi_sa learning_slope pop"
+                    )
+                })?;
             if let Some(k) = last {
                 if series.len() > k {
                     series = series[series.len() - k..].to_vec();

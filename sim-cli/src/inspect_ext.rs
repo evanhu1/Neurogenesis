@@ -62,7 +62,7 @@ impl App {
         };
         for f in &fields {
             if !is_field(f) {
-                bail!("unknown --fields column `{f}` (see `find` field names)");
+                bail!("unknown --fields column `{f}`; valid: {FIND_FIELDS}");
             }
         }
 
@@ -303,6 +303,11 @@ impl App {
 const DEFAULT_FIND_FIELDS: &[&str] =
     &["id", "energy", "age", "generation", "consumptions", "reproductions"];
 
+/// All field names accepted by `find` predicates and `--fields` columns. Shown
+/// in error messages so the command is self-documenting.
+const FIND_FIELDS: &str = "id energy health max_health age generation species \
+    consumptions plant prey reproductions neurons synapses vision hebb_eta gestating";
+
 /// Whether `name` is a known numeric field. The same table validates both
 /// predicate fields and `--fields` columns; `org_field` maps each to a value.
 fn is_field(name: &str) -> bool {
@@ -506,7 +511,7 @@ where
         .ok_or_else(|| anyhow!("expected a field name"))?
         .to_string();
     if !is_field(&field) {
-        bail!("unknown field `{field}` in predicate");
+        bail!("unknown field `{field}` in predicate; valid: {FIND_FIELDS}");
     }
     let op_tok = iter
         .next()

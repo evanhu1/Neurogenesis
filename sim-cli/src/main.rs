@@ -272,7 +272,8 @@ impl App {
              \x20 find EXPR [--fields LIST] [--limit N]  filter organisms by a predicate (and/or evaluated left-to-right, no precedence)\n\
              \x20 brain ID [--view summary|synapses|activations|dot]  neural inspection\n\
              \x20 decide ID                         explain one organism's current-tick decision\n\
-             \x20 quit"
+             \x20 quit\n\
+             field/column/gene vocabularies: invalid args list valid values; full reference in docs/sim-cli.md"
         )
         .map_err(Into::into)
     }
