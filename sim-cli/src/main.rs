@@ -1,40 +1,41 @@
-//! sim-cli — headless, stateful command client for the NeuroGenesis engine.
+//! sim-cli — headless, stateful research client for the NeuroGenesis engine.
 //!
 //! Reads commands from stdin (one per line), holding a single `Simulation` in
 //! memory so the world can be scrubbed forward and inspected repeatedly without
-//! rebuilding. Designed to reproduce a `sim-evaluation` seed run exactly
-//! (`Simulation::new(load_world_config_from_path("sim-evaluation/config.toml"),
-//! seed)`, no champion pool) and to recompute the foraging signal locally from
-//! the `instrumentation` `ActionRecord`s.
+//! rebuilding. Live metrics (pillars, ecology, lineage, genome drift) are
+//! computed from the shared `sim-metrics` crate, so they match the offline eval
+//! byte-for-byte. Output defaults to compact text; `--json` (or the `format`
+//! command) emits machine-parseable JSON.
 //!
-//! See docs/sim-cli-design.md.
+//! See docs/sim-cli-design.md and SPEC.md.
+
+mod dashboards;
+mod inspect_ext;
+mod output;
 
 use anyhow::{anyhow, bail, Result};
+use output::{opt, opt_json, Format, Stats};
+use serde_json::json;
 use sim_config::load_world_config_from_path;
 use sim_core::Simulation;
 use sim_metrics::{
     compute_pillar_scores, derive_interval_metrics, ingest_tick, register_existing,
     register_founders, Ledger, OrganismLifetimeRow, PillarScores, TickSummaryRow,
 };
-use sim_types::{ActionType, EntityId};
-use std::collections::HashMap;
+use sim_types::EntityId;
 use std::io::{self, BufRead, Write};
 use std::path::Path;
 
 const DEFAULT_CONFIG: &str = "sim-evaluation/config.toml";
-/// Matches the eval's reporting interval (`sim-evaluation/src/cli.rs`).
+/// Default reporting-interval width (matches the eval; override at `load`).
 const REPORT_EVERY: u64 = 10_000;
-/// Foraging baseline: `1 / ACTION_COUNT`, `ACTION_COUNT = ActionType::ALL.len()
-/// + 1` (the implicit Idle), i.e. 7. Verified in `dataset/schema.rs`.
-const P_BASELINE: f64 = 1.0 / 7.0;
-/// Upper anchor of the foraging pillar normalization (`analysis/pillars.rs`).
-const PILLAR_TARGET: f64 = 0.55;
 
 fn main() -> Result<()> {
     let mut app = App {
         sim: None,
         recorder: None,
         report_every: REPORT_EVERY,
+        format: Format::default(),
     };
     let stdin = io::stdin();
     let mut out = io::stdout();
@@ -70,6 +71,8 @@ struct App {
     /// Reporting-interval width used for pillar windowing (eval default 10k;
     /// override at `load --report-every`).
     report_every: u64,
+    /// Global default output format; per-command `--json`/`--text` override it.
+    format: Format,
 }
 
 /// In-memory metric recorder. Holds the shared per-organism ledger plus the two
@@ -81,9 +84,28 @@ struct Recorder {
     ledger: Ledger,
     tick_summary: Vec<TickSummaryRow>,
     lifetimes: Vec<OrganismLifetimeRow>,
+    /// Richer per-recorded-tick ecology samples for `eco`/`timeseries`
+    /// trajectories (the metric `tick_summary` only carries descendant pop).
+    samples: Vec<EcoSample>,
     /// Turn at which recording began. `> 0` means already-alive organisms were
     /// back-registered with partial lifetime counters (windows are approximate).
     started_turn: u64,
+}
+
+/// One per recorded tick: a cheap, whole-world ecology snapshot from the
+/// `TickDelta` metrics (no extra organism scans), powering `eco`/`timeseries`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct EcoSample {
+    pub population: u32,
+    pub descendants: u32,
+    pub food: u32,
+    pub births: u32,
+    pub deaths: u32,
+    pub starvations: u32,
+    pub age_deaths: u32,
+    pub predations: u32,
+    pub consumptions: u32,
+    pub reproductions: u32,
 }
 
 impl App {
@@ -113,9 +135,27 @@ impl App {
                     let turn = sim.turn();
                     let deaths = ingest_tick(&mut rec.ledger, turn, &delta, sim.action_records());
                     rec.lifetimes.extend(deaths);
+                    let descendants = rec.ledger.descendant_population();
                     rec.tick_summary.push(TickSummaryRow {
                         tick: turn,
-                        descendant_population: rec.ledger.descendant_population(),
+                        descendant_population: descendants,
+                    });
+                    let org_deaths = delta
+                        .removed_positions
+                        .iter()
+                        .filter(|r| matches!(r.entity_id, EntityId::Organism(_)))
+                        .count() as u32;
+                    rec.samples.push(EcoSample {
+                        population: delta.metrics.organisms,
+                        descendants,
+                        food: sim.foods().len() as u32,
+                        births: delta.spawned.len() as u32,
+                        deaths: org_deaths,
+                        starvations: delta.metrics.starvations_last_turn as u32,
+                        age_deaths: delta.metrics.age_deaths_last_turn as u32,
+                        predations: delta.metrics.predations_last_turn as u32,
+                        consumptions: delta.metrics.consumptions_last_turn as u32,
+                        reproductions: delta.metrics.reproductions_last_turn as u32,
                     });
                 }
             }
@@ -153,33 +193,79 @@ impl App {
                 writeln!(out, "turn = {t}").map_err(Into::into)
             }
             "record" => self.record(&args, out),
-            "pillars" => self.pillars(out),
-            "state" => self.state(out),
-            "forage" => self.forage(&args, out),
-            "food" => self.food(out),
+            "format" => self.set_format(&args, out),
+            "pillars" => self.pillars(&args, out),
+            "state" => self.state(&args, out),
+            "eco" => self.eco(&args, out),
+            "lineage" => self.lineage(&args, out),
+            "genome" => self.genome(&args, out),
+            "timeseries" => self.timeseries(&args, out),
+            "watch" => self.watch(&args, out),
+            "food" => self.food(&args, out),
             "inspect" => self.inspect(&args, out),
             "top" => self.top(&args, out),
             "hist" => self.hist(&args, out),
+            "find" => self.find(&args, out),
+            "brain" => self.brain(&args, out),
+            "decide" => self.decide(&args, out),
             other => bail!("unknown command `{other}` (try `help`)"),
         }
+    }
+
+    /// Strip `--json` / `--text` from `args`, returning the effective format
+    /// (per-command flag overriding the session default) and the rest.
+    fn take_format<'a>(&self, args: &[&'a str]) -> (Format, Vec<&'a str>) {
+        let mut fmt = self.format;
+        let mut rest = Vec::with_capacity(args.len());
+        for &a in args {
+            match a {
+                "--json" => fmt = Format::Json,
+                "--text" => fmt = Format::Text,
+                _ => rest.push(a),
+            }
+        }
+        (fmt, rest)
+    }
+
+    fn set_format(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
+        match args.first().copied() {
+            Some("json") => self.format = Format::Json,
+            Some("text") => self.format = Format::Text,
+            None => {}
+            Some(other) => bail!("unknown format `{other}` (json|text)"),
+        }
+        writeln!(
+            out,
+            "format = {}",
+            if self.format.is_json() { "json" } else { "text" }
+        )
+        .map_err(Into::into)
     }
 
     fn help(&self, out: &mut impl Write) -> Result<()> {
         writeln!(
             out,
-            "commands:\n\
+            "commands (most accept --json | --text):\n\
              \x20 load [--config PATH] [--seed N] [--report-every R]  build Simulation::new (defaults: config {DEFAULT_CONFIG}, seed 0, report-every 10000)\n\
              \x20 step [N]                          advance N ticks (default 1)\n\
              \x20 run-to T                          advance until turn == T\n\
+             \x20 watch T [--every E]               advance to T, emitting a metrics row every E ticks\n\
              \x20 turn                              print current turn\n\
-             \x20 record on|off|status             toggle live metric recording (required for pillars)\n\
+             \x20 record on|off|status             toggle live metric recording (required for pillars/eco/lineage history)\n\
+             \x20 format json|text                  set the default output format\n\
              \x20 pillars                           foraging/predation/intelligence/learning pillars + sub-signals (needs recording)\n\
-             \x20 state                             population / energy / food / last-turn metrics summary (+ pillars if recording)\n\
-             \x20 forage [FROM] TO                  trace FROM..TO; live foraging probe + eval-style window pillar\n\
+             \x20 state                             population / energy / food / last-turn metrics (+ pillars if recording)\n\
+             \x20 eco                               ecological dynamics: population/food trajectory, deaths-by-cause, rates\n\
+             \x20 lineage                           generation distribution + founder-lineage (species) composition\n\
+             \x20 genome [--gene G] [--drift]       population genome-gene distribution (what evolution is selecting for)\n\
+             \x20 timeseries [--cols LIST] [--last K]  recorded metric columns as sparklines\n\
              \x20 food                              food (plant/corpse) summary\n\
              \x20 inspect ID                        full dump of one organism\n\
-             \x20 top FIELD [N]                     top-N by energy|health|age|generation|consumptions|reproductions\n\
-             \x20 hist FIELD                        histogram of energy|health|age|generation\n\
+             \x20 top FIELD [N]                     top-N organisms by a field\n\
+             \x20 hist FIELD                        histogram of a scalar field\n\
+             \x20 find EXPR [--fields LIST] [--limit N]  filter organisms by a predicate (and/or evaluated left-to-right, no precedence)\n\
+             \x20 brain ID [--view summary|synapses|activations|dot]  neural inspection\n\
+             \x20 decide ID                         explain one organism's current-tick decision\n\
              \x20 quit"
         )
         .map_err(Into::into)
@@ -271,6 +357,7 @@ impl App {
                     ledger,
                     tick_summary: Vec::new(),
                     lifetimes: Vec::new(),
+                    samples: Vec::new(),
                     started_turn,
                 });
                 let mode = if started_turn == 0 {
@@ -315,10 +402,14 @@ impl App {
         }
     }
 
-    fn pillars(&mut self, out: &mut impl Write) -> Result<()> {
+    fn pillars(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
+        let (fmt, _) = self.take_format(args);
         let Some((p, n_intervals, partial)) = self.live_pillars() else {
             bail!("recording is off; `record on` then advance before `pillars`");
         };
+        if fmt.is_json() {
+            return writeln!(out, "{}", pillars_value(&p, n_intervals, partial)).map_err(Into::into);
+        }
         let tag = if partial { "  [PARTIAL window]" } else { "" };
         writeln!(
             out,
@@ -353,30 +444,59 @@ impl App {
         .map_err(Into::into)
     }
 
-    fn state(&mut self, out: &mut impl Write) -> Result<()> {
+    fn state(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
+        let (fmt, _) = self.take_format(args);
+        let pillars = self.live_pillars();
         let sim = self.sim()?;
         let orgs = sim.organisms();
         let pop = orgs.len();
         let descendants = orgs.iter().filter(|o| o.generation > 0).count();
         let m = sim.metrics().clone();
+        let turn = sim.turn();
 
-        let energy: Vec<f64> = orgs.iter().map(|o| o.energy as f64).collect();
-        let health: Vec<f64> = orgs.iter().map(|o| o.health as f64).collect();
-        let age: Vec<f64> = orgs.iter().map(|o| o.age_turns as f64).collect();
-        let gen: Vec<f64> = orgs.iter().map(|o| o.generation as f64).collect();
+        let energy = Stats::of(&orgs.iter().map(|o| o.energy as f64).collect::<Vec<_>>());
+        let health = Stats::of(&orgs.iter().map(|o| o.health as f64).collect::<Vec<_>>());
+        let age = Stats::of(&orgs.iter().map(|o| o.age_turns as f64).collect::<Vec<_>>());
+        let gen = Stats::of(&orgs.iter().map(|o| o.generation as f64).collect::<Vec<_>>());
 
         let (plants, corpses, food_energy) = food_summary(sim);
 
-        writeln!(out, "turn = {}", sim.turn())?;
+        if fmt.is_json() {
+            let mut v = json!({
+                "turn": turn,
+                "population": pop,
+                "descendants": descendants,
+                "founders": pop - descendants,
+                "energy": energy.map(|s| s.json()),
+                "health": health.map(|s| s.json()),
+                "age_turns": age.map(|s| s.json()),
+                "generation": gen.map(|s| s.json()),
+                "food": { "plants": plants, "corpses": corpses, "total_energy": food_energy },
+                "last_turn": {
+                    "consumptions": m.consumptions_last_turn,
+                    "predations": m.predations_last_turn,
+                    "reproductions": m.reproductions_last_turn,
+                    "starvations": m.starvations_last_turn,
+                    "age_deaths": m.age_deaths_last_turn,
+                },
+            });
+            if let Some((p, n, partial)) = pillars {
+                v["pillars"] = pillars_value(&p, n, partial);
+            }
+            return writeln!(out, "{v}").map_err(Into::into);
+        }
+
+        let fmt_stats = |s: Option<Stats>| s.map(|s| s.text()).unwrap_or_else(|| "(none)".into());
+        writeln!(out, "turn = {turn}")?;
         writeln!(
             out,
             "population = {pop}  (descendants gen>0 = {descendants}, founders/injections = {})",
             pop - descendants
         )?;
-        writeln!(out, "  energy:     {}", stats_line(&energy))?;
-        writeln!(out, "  health:     {}", stats_line(&health))?;
-        writeln!(out, "  age_turns:  {}", stats_line(&age))?;
-        writeln!(out, "  generation: {}", stats_line(&gen))?;
+        writeln!(out, "  energy:     {}", fmt_stats(energy))?;
+        writeln!(out, "  health:     {}", fmt_stats(health))?;
+        writeln!(out, "  age_turns:  {}", fmt_stats(age))?;
+        writeln!(out, "  generation: {}", fmt_stats(gen))?;
         writeln!(
             out,
             "food: plants={plants} corpses={corpses} total_energy={food_energy:.0}"
@@ -390,7 +510,7 @@ impl App {
             m.starvations_last_turn,
             m.age_deaths_last_turn,
         )?;
-        if let Some((p, _, partial)) = self.live_pillars() {
+        if let Some((p, _, partial)) = pillars {
             writeln!(
                 out,
                 "pillars: forage {:.3} | pred {:.3} | intel {:.3} | learn {:.3}{}",
@@ -404,222 +524,34 @@ impl App {
         Ok(())
     }
 
-    fn food(&mut self, out: &mut impl Write) -> Result<()> {
+    fn food(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
+        let (fmt, _) = self.take_format(args);
         let sim = self.sim()?;
         let (plants, corpses, energy) = food_summary(sim);
         let total = plants + corpses;
         let cells = (sim.config().world_width as u64).pow(2);
+        let coverage = total as f64 / cells as f64 * 100.0;
+        if fmt.is_json() {
+            return writeln!(
+                out,
+                "{}",
+                json!({
+                    "plants": plants,
+                    "corpses": corpses,
+                    "total": total,
+                    "total_energy": energy,
+                    "coverage_pct": coverage,
+                    "cells": cells,
+                })
+            )
+            .map_err(Into::into);
+        }
         writeln!(
             out,
             "food: plants={plants} corpses={corpses} total={total} total_energy={energy:.0} \
-             coverage={:.3}% of {cells} cells",
-            total as f64 / cells as f64 * 100.0
+             coverage={coverage:.3}% of {cells} cells"
         )
         .map_err(Into::into)
-    }
-
-    /// Trace [FROM, TO] tick-by-tick, accumulating the foraging signal two ways:
-    /// a **live behavioral probe** over descendant organism-ticks, and an
-    /// **eval-style window pillar** from death-tick-bucketed lifetime counters.
-    fn forage(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
-        let (from, to) = match args {
-            [to] => (None, to.parse::<u64>()?),
-            [from, to] => (Some(from.parse::<u64>()?), to.parse::<u64>()?),
-            _ => bail!("usage: forage [FROM] TO"),
-        };
-        let sim = self.sim()?;
-        if let Some(from) = from {
-            while sim.turn() < from {
-                sim.tick();
-            }
-        }
-        let start = sim.turn();
-        if to <= start {
-            bail!("TO ({to}) must be greater than current turn ({start})");
-        }
-
-        // Live probe accumulators (descendant organism-ticks over the window).
-        let mut desc_ticks: u64 = 0;
-        let mut food_ahead_ticks: u64 = 0;
-        let mut fwd_when_food_ahead: u64 = 0;
-        let mut any_food_visible_ticks: u64 = 0;
-        // Action histogram restricted to ticks where food is ahead.
-        let mut action_hist_when_ahead = [0u64; 7];
-        let mut desc_pop_sum: u64 = 0;
-        let mut food_count_sum: u64 = 0;
-        let mut samples: u64 = 0;
-
-        // Eval-style: per-organism lifetime counters (since FROM), finalized on
-        // death into death-tick buckets. Approximate for organisms born before
-        // FROM (counters start at FROM); labeled as such in the output.
-        let mut lifetime: HashMap<u64, Life> = HashMap::new();
-        let mut buckets: HashMap<u64, (u64, u64)> = HashMap::new(); // bucket -> (food_ahead, fwd)
-
-        while sim.turn() < to {
-            let delta = sim.tick();
-            let turn = sim.turn();
-
-            // Finalize descendants that died this tick.
-            for removed in &delta.removed_positions {
-                if let EntityId::Organism(id) = removed.entity_id {
-                    if let Some(life) = lifetime.remove(&id.0) {
-                        if life.is_descendant {
-                            let b = bucket_of(turn);
-                            let e = buckets.entry(b).or_insert((0, 0));
-                            e.0 += life.food_ahead;
-                            e.1 += life.fwd;
-                        }
-                    }
-                }
-            }
-
-            // Accumulate this tick from survivors' action records.
-            let records = sim.action_records();
-            let orgs = sim.organisms();
-            let mut desc_pop = 0u64;
-            for (org, rec) in orgs.iter().zip(records.iter()) {
-                let is_desc = org.generation > 0;
-                if is_desc {
-                    desc_pop += 1;
-                }
-                let Some(rec) = rec else { continue };
-                let food_ahead = rec.food_visible_at_offset(0);
-                let fwd = matches!(rec.selected_action, ActionType::Forward);
-
-                // Lifetime ledger (all organisms; filtered to descendants at finalize).
-                let life = lifetime.entry(org.id.0).or_insert(Life {
-                    is_descendant: is_desc,
-                    food_ahead: 0,
-                    fwd: 0,
-                });
-                if food_ahead {
-                    life.food_ahead += 1;
-                    if fwd {
-                        life.fwd += 1;
-                    }
-                }
-
-                // Live probe (descendants only).
-                if is_desc {
-                    desc_ticks += 1;
-                    if rec.food_visible.iter().any(|v| *v) {
-                        any_food_visible_ticks += 1;
-                    }
-                    if food_ahead {
-                        food_ahead_ticks += 1;
-                        action_hist_when_ahead[action_index(rec.selected_action)] += 1;
-                        if fwd {
-                            fwd_when_food_ahead += 1;
-                        }
-                    }
-                }
-            }
-            desc_pop_sum += desc_pop;
-            food_count_sum += sim.foods().len() as u64;
-            samples += 1;
-        }
-
-        // Flush still-alive descendants at TO (mirrors the eval's end-of-run flush).
-        let end_bucket = bucket_of(to);
-        for life in lifetime.values() {
-            if life.is_descendant {
-                let e = buckets.entry(end_bucket).or_insert((0, 0));
-                e.0 += life.food_ahead;
-                e.1 += life.fwd;
-            }
-        }
-
-        // ---- Report: live behavioral probe ----
-        writeln!(
-            out,
-            "== foraging trace [{start}, {to}] ({samples} ticks) =="
-        )?;
-        writeln!(
-            out,
-            "-- live behavioral probe (descendant organism-ticks) --"
-        )?;
-        let mean_desc_pop = ratio(desc_pop_sum, samples);
-        let mean_food = ratio(food_count_sum, samples);
-        writeln!(
-            out,
-            "  mean descendant population = {mean_desc_pop:.0}   mean food items = {mean_food:.0}"
-        )?;
-        writeln!(out, "  descendant ticks = {desc_ticks}")?;
-        writeln!(
-            out,
-            "  any-food-visible ticks = {any_food_visible_ticks} ({:.2}% of descendant ticks)",
-            pct(any_food_visible_ticks, desc_ticks)
-        )?;
-        writeln!(
-            out,
-            "  food-AHEAD ticks       = {food_ahead_ticks} ({:.2}% of descendant ticks)",
-            pct(food_ahead_ticks, desc_ticks)
-        )?;
-        if food_ahead_ticks == 0 {
-            writeln!(
-                out,
-                "  p_fwd_food = N/A (no food-ahead ticks → eval denominator 0 → pillar 0)"
-            )?;
-        } else {
-            let p = fwd_when_food_ahead as f64 / food_ahead_ticks as f64;
-            writeln!(
-                out,
-                "  p_fwd_food = {p:.4}  (fwd {fwd_when_food_ahead} / food-ahead {food_ahead_ticks}; baseline {P_BASELINE:.4})"
-            )?;
-            writeln!(out, "  action taken WHEN FOOD AHEAD:")?;
-            for (i, name) in ACTION_NAMES.iter().enumerate() {
-                let c = action_hist_when_ahead[i];
-                if c > 0 {
-                    writeln!(
-                        out,
-                        "    {name:<9} {c:>10} ({:.2}%)",
-                        pct(c, food_ahead_ticks)
-                    )?;
-                }
-            }
-        }
-
-        // ---- Report: eval-style window pillar ----
-        writeln!(
-            out,
-            "-- eval-style window pillar (death-tick-bucketed lifetimes; counters since FROM, approximate) --"
-        )?;
-        let mut bkeys: Vec<u64> = buckets.keys().copied().collect();
-        bkeys.sort_unstable();
-        let mut ratios: Vec<f64> = Vec::new();
-        for b in &bkeys {
-            let (fa, fw) = buckets[b];
-            let lo = (b - 1) * REPORT_EVERY + 1;
-            let hi = b * REPORT_EVERY;
-            if fa == 0 {
-                writeln!(
-                    out,
-                    "  interval ({lo},{hi}]: no food-ahead deaths → skipped"
-                )?;
-            } else {
-                let r = fw as f64 / fa as f64;
-                ratios.push(r);
-                writeln!(
-                    out,
-                    "  interval ({lo},{hi}]: p_fwd_food = {r:.4}  (fwd {fw} / food-ahead {fa})"
-                )?;
-            }
-        }
-        if ratios.is_empty() {
-            writeln!(out, "  mean p_fwd_food = N/A → foraging pillar = 0.000")?;
-        } else {
-            let mean = ratios.iter().sum::<f64>() / ratios.len() as f64;
-            let pillar = (((mean - P_BASELINE) / (PILLAR_TARGET - P_BASELINE)).clamp(0.0, 1.0)
-                * 1000.0)
-                .round()
-                / 1000.0;
-            writeln!(
-                out,
-                "  mean p_fwd_food = {mean:.4} over {} interval(s) → foraging pillar = {pillar:.3}",
-                ratios.len()
-            )?;
-        }
-        Ok(())
     }
 
     fn inspect(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
@@ -768,37 +700,23 @@ impl App {
     }
 }
 
-struct Life {
-    is_descendant: bool,
-    food_ahead: u64,
-    fwd: u64,
-}
-
-const ACTION_NAMES: [&str; 7] = [
-    "Idle",
-    "TurnLeft",
-    "TurnRight",
-    "Forward",
-    "Eat",
-    "Attack",
-    "Reproduce",
-];
-
-fn action_index(a: ActionType) -> usize {
-    match a {
-        ActionType::Idle => 0,
-        ActionType::TurnLeft => 1,
-        ActionType::TurnRight => 2,
-        ActionType::Forward => 3,
-        ActionType::Eat => 4,
-        ActionType::Attack => 5,
-        ActionType::Reproduce => 6,
-    }
-}
-
-/// 1-based interval index containing `turn` (interval i covers ((i-1)*R, i*R]).
-fn bucket_of(turn: u64) -> u64 {
-    turn.saturating_sub(1) / REPORT_EVERY + 1
+/// Shared JSON encoding of a pillar readout (used by `pillars` and `state`).
+fn pillars_value(p: &PillarScores, n_intervals: usize, partial: bool) -> serde_json::Value {
+    json!({
+        "window_start_tick": p.window_start_tick,
+        "window_end_tick": p.window_end_tick,
+        "intervals": n_intervals,
+        "partial": partial,
+        "foraging": p.foraging_pillar,
+        "predation": p.predation_pillar,
+        "intelligence": p.intelligence_pillar,
+        "learning": p.learning_pillar,
+        "plant_consumption_rate": opt_json(p.mean_plant_consumption_rate),
+        "prey_consumption_rate": opt_json(p.mean_prey_consumption_rate),
+        "action_effectiveness": opt_json(p.mean_action_effectiveness),
+        "mi_sa": opt_json(p.mean_mi_sa),
+        "learning_slope": opt_json(p.mean_learning_slope),
+    })
 }
 
 fn food_summary(sim: &Simulation) -> (u64, u64, f64) {
@@ -815,38 +733,3 @@ fn food_summary(sim: &Simulation) -> (u64, u64, f64) {
     (plants, corpses, energy)
 }
 
-fn stats_line(vals: &[f64]) -> String {
-    if vals.is_empty() {
-        return "(none)".to_string();
-    }
-    let mut v = vals.to_vec();
-    v.sort_by(f64::total_cmp);
-    let min = v[0];
-    let max = v[v.len() - 1];
-    let mean = v.iter().sum::<f64>() / v.len() as f64;
-    let median = v[v.len() / 2];
-    format!("min={min:.2} median={median:.2} mean={mean:.2} max={max:.2}")
-}
-
-fn ratio(num: u64, den: u64) -> f64 {
-    if den == 0 {
-        0.0
-    } else {
-        num as f64 / den as f64
-    }
-}
-
-/// Format an optional metric, printing `NA` when the signal is absent.
-fn opt(value: Option<f64>, decimals: usize) -> String {
-    value
-        .map(|v| format!("{v:.decimals$}"))
-        .unwrap_or_else(|| "NA".to_string())
-}
-
-fn pct(num: u64, den: u64) -> f64 {
-    if den == 0 {
-        0.0
-    } else {
-        num as f64 / den as f64 * 100.0
-    }
-}

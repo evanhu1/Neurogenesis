@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+serde_json.workspace = true
 sim-config = { path = "../sim-config" }
 sim-core = { path = "../sim-core", features = ["instrumentation"] }
 sim-types = { path = "../sim-types", features = ["instrumentation"] }

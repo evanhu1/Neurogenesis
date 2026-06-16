@@ -362,15 +362,31 @@ review (file:line):
    the four axes via `derive_interval_metrics`/`compute_pillar_scores`. Verified:
    live pillars at seed 1 / 20k == eval baseline (forage .384, pred .094,
    intel .690, learn 0). Added `Ledger::register_existing` / `ingest::register_existing`.
-3. **Output layer**: `format text|json`, stats (min/p50/mean/p90/max) + sparkline
-   helpers; port existing commands; delete hand-rolled action/pillar constants.
-4. **Dashboards**: `state` v2, `pillars`, `actions`, `eco`, `lineage`, `genome`,
-   `timeseries`, `watch`.
-5. **Per-organism**: `top` (expanded + cohort filters), `hist`, `find`,
-   `inspect`, `brain`, `decide`.
-6. **Perf & ergonomics**: `bench`, `--threads`, `--scale`, `--report-every`.
-7. **Determinism/parity check**: CLI seed-N reproduces eval trajectory; live
-   `pillars` match eval `summary.json` within the same window.
+3. **Output layer** ✅ *done* — `output` module: `Format` text/json switch,
+   `Stats` (min/p50/mean/p90/max), `sparkline`; `format` command + per-command
+   `--json`/`--text`; `state`/`pillars`/`food` json; stale hand-rolled `forage`
+   + pillar constants deleted. `EcoSample` per-tick recorder stream added for
+   trajectories.
+4. **Dashboards** ✅ *done* (`sim-cli/src/dashboards.rs`) — `eco` (pop/food
+   sparklines, deaths-by-cause incl. `other`, rates, carrying-capacity),
+   `lineage` (generation dist + founder-lineage composition), `genome`
+   (per-gene Stats, mutation hot/cold, `--gene`, `--drift`), `timeseries`
+   (`--cols`/`--last` sparklines), `watch T --every E`. Text + json.
+5. **Per-organism** ✅ *done* (`sim-cli/src/inspect_ext.rs`) — `find EXPR`
+   (predicate, `--fields`/`--limit`; and/or left-to-right), `brain ID --view
+   summary|synapses|activations|dot`, `decide ID` (sensory→logits→softmax probs,
+   exact reproduction of `evaluation.rs`). Text + json. (`top`/`hist`/`inspect`
+   retained from v1; expanded fields/filters deferred.)
+6. **Perf & ergonomics** (partial): `--report-every` done; `bench`,
+   `--threads`, `--scale` still TODO.
+7. **Determinism/parity check** ✅ live `pillars` match eval `summary.json` at
+   seed 1 (20k). Full 8-seed / 500k golden run still optional.
+
+All of M1–M5 reviewed by four parallel correctness/quality agents: no
+blockers/majors; the `sim-metrics` extraction is byte-identical and `decide`'s
+softmax exactly reproduces the engine. Minor review fixes applied (`find`
+`==`/`!=` tolerance, `decide` post-tick note, `eco` deaths-by-cause `other`
+bucket, `timeseries --last 0` guard, help precedence note).
 
 ## Open Questions (deferred)
 
