@@ -61,22 +61,17 @@ systems be a path to AGI? This project is an attempt to find out.
 
 **The brain**
 
-- Each organism runs its own onboard **actor-critic**: a learned value head is
-  trained online by TD(0), and its tanh-squashed TD error becomes the brain's
-  dopamine signal. Dopamine gates eligibility traces — three-factor
-  reward-modulated learning, not vanilla Hebb.
-- The plasticity rule is split by circuit location: covariance-style Hebbian
-  updates between inter neurons, advantage-weighted (policy-gradient-like)
-  updates at the motor boundary.
-- Even the reward function is genetic: 7 reward weights over energy, health, and
-  wasted actions live in the genome, so a lineage can evolve what it finds
-  rewarding.
+- Lifetime learning is **unsupervised Hebbian plasticity** — no reward, no value
+  head, no dopamine. A covariance rule (Δw = η·eligibility − decay·w)
+  accumulates centered pre/post coactivation into a per-synapse eligibility
+  trace, decayed by an evolvable retention gene. The same rule runs everywhere:
+  between inter neurons and at the motor boundary (inter→action), where the
+  squashed action logit stands in as the postsynaptic activation.
 - Juveniles learn at 2× the adult rate (an evolvable critical period); synapse
   pruning only activates at maturity.
-- Thinking costs energy. Metabolism scales with neuron and synapse counts,
-  vision range, and the _squared wiring length_ of each synapse in latent space
-  — the same connectivity-cost pressure that shapes real cortex — plus Kleiber
-  mass^0.75 body scaling.
+- Thinking costs energy. Metabolism scales with neuron count and vision range,
+  plus Kleiber mass^0.75 body scaling, so every neuron a lineage keeps has to
+  pay for itself.
 - The interface to the world: 18 sensory neurons in (3 vision rays × 4 channels
   of RGB + shape, plus contact, energy, health, energy flux, and
   proprioception), 6 action neurons out (turn, move, eat, attack, reproduce),
@@ -85,7 +80,8 @@ systems be a path to AGI? This project is an attempt to find out.
 **Evolution**
 
 - NEAT-style structural mutation: add a synapse, remove a synapse, split an edge
-  into a new neuron. New wiring is spatially biased toward nearby neurons.
+  into a new neuron. New synapses are drawn uniformly at random from the
+  unconnected (pre, post) pairs.
 - Meta-mutation: per-operator mutation rates are themselves genes.
 - A persistent champion pool seeds new worlds from the best genomes of past
   sessions, and periodic injections of fresh seed genomes keep diversity

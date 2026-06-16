@@ -39,11 +39,11 @@ output flood your context. All logs and evaluation outputs must live under
 
 **What you CAN modify:**
 
-- `sim-core/src/brain.rs` — neural network architecture, activation functions,
+- `sim-core/src/brain/` — neural network architecture, activation functions,
   neuron dynamics, sensory processing, action selection.
-- `sim-core/src/plasticity.rs` — runtime learning rules, eligibility traces,
-  reward signals, synapse pruning.
-- `sim-core/src/genome.rs` — mutation operators, genome structure, mutation
+- `sim-core/src/brain/plasticity.rs` — runtime Hebbian learning rule,
+  eligibility traces, synapse pruning.
+- `sim-core/src/genome/` — mutation operators, genome structure, mutation
   rates logic.
 - `sim-config/config.toml` + `sim-config/seed_genome.toml` — world parameters,
   seed genome config, and mutation rates.
