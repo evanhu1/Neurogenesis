@@ -3,6 +3,7 @@ members = [
   "sim-config",
   "sim-core",
   "sim-evaluation",
+  "sim-metrics",
   "sim-types",
   "sim-server",
   "sim-cli",

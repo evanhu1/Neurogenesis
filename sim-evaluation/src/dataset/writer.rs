@@ -2,7 +2,8 @@
 //! one file per table per interval to enable tailing — each closed file is
 //! immediately readable by DuckDB/polars/pandas via a glob of the table dir.
 
-use super::schema::{GenomeSnapshotIndexRow, OrganismLifetimeRow, TickSummaryRow};
+use super::schema::GenomeSnapshotIndexRow;
+use super::{OrganismLifetimeRow, TickSummaryRow};
 use anyhow::{Context, Result};
 use arrow::array::RecordBatch;
 use arrow::datatypes::FieldRef;
@@ -188,8 +189,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::super::reader::DatasetReader;
-    use super::super::schema::{OrganismLifetimeRow, TickSummaryRow, JOINT_LEN};
+    use super::super::{OrganismLifetimeRow, TickSummaryRow};
     use super::*;
+    use sim_metrics::JOINT_LEN;
     use std::env;
 
     fn tmp_dir(tag: &str) -> PathBuf {

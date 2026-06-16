@@ -5,6 +5,10 @@ use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+// Numeric mean helpers moved to `sim-metrics`; re-exported under the historical
+// `crate::output::…` path so callers (comparison, averaging) are unchanged.
+pub(crate) use sim_metrics::{mean_f64, mean_option, mean_round_u32};
+
 pub(crate) fn write_summary_json<T: Serialize>(out_dir: &Path, summary: &T) -> Result<()> {
     let summary_path = out_dir.join("summary.json");
     let json = serde_json::to_vec_pretty(summary)?;
@@ -136,42 +140,6 @@ pub(crate) fn print_evaluation_summary(out_dir: &Path, summary: &EvaluationSumma
         );
     }
     println!("total_time_seconds: {:.3}", summary.total_time_seconds);
-}
-
-pub(crate) fn mean_option(values: impl Iterator<Item = Option<f64>>) -> Option<f64> {
-    let mut sum = 0.0;
-    let mut count = 0_u64;
-    for value in values.flatten() {
-        if value.is_finite() {
-            sum += value;
-            count = count.saturating_add(1);
-        }
-    }
-    if count == 0 {
-        None
-    } else {
-        Some(sum / count as f64)
-    }
-}
-
-pub(crate) fn mean_round_u32(values: impl Iterator<Item = u32>) -> u32 {
-    mean_f64(values.map(|value| value as f64)).round() as u32
-}
-
-pub(crate) fn mean_f64(values: impl Iterator<Item = f64>) -> f64 {
-    let mut sum = 0.0;
-    let mut count = 0_u64;
-    for value in values {
-        if value.is_finite() {
-            sum += value;
-            count = count.saturating_add(1);
-        }
-    }
-    if count == 0 {
-        0.0
-    } else {
-        sum / count as f64
-    }
 }
 
 fn seed_slug(seeds: &[u64]) -> String {

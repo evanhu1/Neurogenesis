@@ -12,8 +12,10 @@ pub mod writer;
 
 pub use manifest::{Manifest, SCHEMA_VERSION};
 pub use reader::DatasetReader;
-pub use schema::{
-    OrganismLifetimeRow, OrganismOrigin, TickSummaryRow, ACTION_COUNT, DESCENDANT_CODE, JOINT_LEN,
-    SENSORY_BIN_COUNT,
-};
 pub use writer::PartitionedParquetWriter;
+
+// The metric vocabulary is owned by `sim-metrics`; re-export the row types this
+// crate persists under the historical `crate::dataset::…` path. The histogram
+// constants/enum are consumed inside `sim-metrics` itself, so they are imported
+// directly from there where still needed (e.g. dataset tests).
+pub use sim_metrics::{OrganismLifetimeRow, TickSummaryRow};

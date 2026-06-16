@@ -2342,6 +2342,15 @@ dependencies = [
  "serde_json",
  "sim-config",
  "sim-core",
+ "sim-metrics",
+ "sim-types",
+]
+
+[[package]]
+name = "sim-metrics"
+version = "0.1.0"
+dependencies = [
+ "serde",
  "sim-types",
 ]
 

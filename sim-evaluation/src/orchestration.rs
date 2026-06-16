@@ -17,7 +17,8 @@ use crate::types::{
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use sim_core::Simulation;
-use sim_types::{EntityId, OrganismState, WorldConfig};
+use sim_metrics::{ingest_tick, register_founders};
+use sim_types::{OrganismState, WorldConfig};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, VecDeque};
 use std::fs;
@@ -199,28 +200,13 @@ fn run_single_seed_evaluation(
     let mut ledger = Ledger::new();
     let mut writer = PartitionedParquetWriter::new(&options.out_dir)?;
 
-    for organism in sim.organisms() {
-        ledger.birth(organism.id, 0);
-    }
+    register_founders(&mut ledger, sim.organisms());
 
     for tick in 1..=options.ticks {
         let delta = sim.tick();
 
-        for record in sim.action_records().iter().flatten() {
-            ledger.record_action(record);
-        }
-        for event in &delta.reproduction_events {
-            ledger.record_reproduction(event);
-        }
-        for spawned in &delta.spawned {
-            ledger.birth(spawned.id, tick);
-        }
-        for removed in &delta.removed_positions {
-            if let EntityId::Organism(id) = removed.entity_id {
-                if let Some(row) = ledger.death(id, tick) {
-                    writer.emit_organism_lifetime(row);
-                }
-            }
+        for row in ingest_tick(&mut ledger, tick, &delta, sim.action_records()) {
+            writer.emit_organism_lifetime(row);
         }
 
         writer.emit_tick(TickSummaryRow {

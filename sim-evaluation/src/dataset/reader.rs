@@ -2,7 +2,7 @@
 //! Keeps the whole dataset in memory because per-seed datasets are small
 //! (tens of MBs); swap for streaming iterators if runs grow large.
 
-use super::schema::{OrganismLifetimeRow, TickSummaryRow};
+use super::{OrganismLifetimeRow, TickSummaryRow};
 use anyhow::{Context, Result};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use serde::Deserialize;
