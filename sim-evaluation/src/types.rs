@@ -1,4 +1,3 @@
-use crate::dataset::ACTION_COUNT;
 use crate::report::ComparisonMetricRow;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -77,7 +76,6 @@ pub(crate) struct IntervalMetrics {
     pub mi_sa: Option<f64>,
     /// Mean within-life success-vs-age slope over descendants — in-life learning.
     pub learning_slope: Option<f64>,
-    pub action_histogram: [f64; ACTION_COUNT],
 }
 
 /// Per-pillar evaluation readout. There is deliberately no single aggregate
@@ -94,7 +92,6 @@ pub(crate) struct PillarScores {
     pub(crate) mean_plant_consumption_rate: Option<f64>,
     pub(crate) mean_prey_consumption_rate: Option<f64>,
     pub(crate) mean_learning_slope: Option<f64>,
-    pub(crate) mean_action_histogram: [f64; ACTION_COUNT],
     pub(crate) intelligence_effectiveness_component: f64,
     pub(crate) intelligence_mi_component: f64,
     pub(crate) foraging_pillar: f64,

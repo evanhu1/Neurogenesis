@@ -6,7 +6,7 @@
 //! tunable anchors (calibrate against the `--control` random-action baseline,
 //! which should score ≈0 on every axis).
 
-use crate::output::{mean_histogram, mean_option};
+use crate::output::mean_option;
 use crate::types::{IntervalMetrics, PillarScores};
 
 /// MI(S;A) at which the intelligence MI component saturates to 1.0.
@@ -47,7 +47,6 @@ pub fn compute_pillar_scores(timeseries: &[IntervalMetrics]) -> PillarScores {
         mean_option(slice.iter().map(|row| row.plant_consumption_rate));
     let mean_prey_consumption_rate = mean_option(slice.iter().map(|row| row.prey_consumption_rate));
     let mean_learning_slope = mean_option(slice.iter().map(|row| row.learning_slope));
-    let mean_action_histogram = mean_histogram(slice.iter().map(|row| row.action_histogram));
 
     let intelligence_effectiveness_component =
         mean_action_effectiveness.map(clamp01).unwrap_or(0.0);
@@ -77,7 +76,6 @@ pub fn compute_pillar_scores(timeseries: &[IntervalMetrics]) -> PillarScores {
         mean_plant_consumption_rate,
         mean_prey_consumption_rate,
         mean_learning_slope,
-        mean_action_histogram,
         intelligence_effectiveness_component,
         intelligence_mi_component,
         foraging_pillar,

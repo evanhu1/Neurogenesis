@@ -81,7 +81,7 @@ pub fn write_html_report(
         .k{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}.v{font-weight:600}\
         table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:8px;border-bottom:1px solid var(--line);text-align:right}th:first-child,td:first-child{text-align:left}\
         .table-scroll{max-width:100%;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}\
-        .table-scroll table{min-width:1280px}\
+        .table-scroll table{min-width:760px}\
         .th-tip{position:relative;display:inline-block;cursor:help;border-bottom:1px dotted var(--muted);padding-bottom:1px}\
         .th-tip .tip{position:fixed;left:0;top:0;transform:translate(-50%,-100%);width:min(320px,70vw);padding:10px 12px;border-radius:10px;background:#0f172a;color:#f8fafc;font-size:12px;font-weight:500;line-height:1.45;text-align:left;box-shadow:0 12px 30px rgba(15,23,42,.22);opacity:0;visibility:hidden;pointer-events:none;z-index:1000}\
         .th-tip .tip::after{content:\"\";position:absolute;left:50%;top:100%;transform:translateX(-50%);border:6px solid transparent;border-top-color:#0f172a}\
@@ -132,6 +132,7 @@ pub fn write_html_report(
         &mut html,
         "Foraging",
         &format!("{:.3}", pillars.foraging_pillar),
+        4,
         &[(
             "plant consumptions / action",
             pillars.mean_plant_consumption_rate.unwrap_or(0.0),
@@ -141,6 +142,7 @@ pub fn write_html_report(
         &mut html,
         "Predation",
         &format!("{:.3}", pillars.predation_pillar),
+        4,
         &[(
             "prey consumptions / action",
             pillars.mean_prey_consumption_rate.unwrap_or(0.0),
@@ -150,6 +152,7 @@ pub fn write_html_report(
         &mut html,
         "Intelligence",
         &format!("{:.3}", pillars.intelligence_pillar),
+        3,
         &[
             (
                 "Action effectiveness",
@@ -162,6 +165,7 @@ pub fn write_html_report(
         &mut html,
         "Learning",
         &format!("{:.3}", pillars.learning_pillar),
+        6,
         &[(
             "mean success-vs-age slope",
             pillars.mean_learning_slope.unwrap_or(0.0),
@@ -431,7 +435,13 @@ fn kv(html: &mut String, key: &str, value: &str) {
     );
 }
 
-fn pillar_card(html: &mut String, title: &str, score: &str, subscores: &[(&str, f64)]) {
+fn pillar_card(
+    html: &mut String,
+    title: &str,
+    score: &str,
+    decimals: usize,
+    subscores: &[(&str, f64)],
+) {
     let _ = write!(
         html,
         "<div class=\"pillar-card\"><div class=\"pillar-head\"><div class=\"pillar-title\">{title}</div><div class=\"pillar-score\">{score}</div></div><div class=\"pillar-subscores\">"
@@ -439,7 +449,7 @@ fn pillar_card(html: &mut String, title: &str, score: &str, subscores: &[(&str, 
     for (name, value) in subscores {
         let _ = write!(
             html,
-            "<div class=\"pillar-subscore\"><span class=\"pillar-subscore-name\">{name}</span><span class=\"pillar-subscore-value\">{value:.3}</span></div>"
+            "<div class=\"pillar-subscore\"><span class=\"pillar-subscore-name\">{name}</span><span class=\"pillar-subscore-value\">{value:.decimals$}</span></div>"
         );
     }
     html.push_str("</div></div>");

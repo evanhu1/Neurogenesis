@@ -78,7 +78,6 @@ struct IntervalAccumulator {
     failed_actions: u64,
     plant_consumptions: u64,
     prey_consumptions: u64,
-    action_counts: [u64; ACTION_COUNT],
     pooled_joint: [u64; JOINT_LEN],
     learning_slope_sum: f64,
     learning_slope_count: u64,
@@ -94,7 +93,6 @@ impl IntervalAccumulator {
             failed_actions: 0,
             plant_consumptions: 0,
             prey_consumptions: 0,
-            action_counts: [0; ACTION_COUNT],
             pooled_joint: [0; JOINT_LEN],
             learning_slope_sum: 0.0,
             learning_slope_count: 0,
@@ -111,13 +109,6 @@ impl IntervalAccumulator {
             .plant_consumptions
             .saturating_add(row.plant_consumptions);
         self.prey_consumptions = self.prey_consumptions.saturating_add(row.prey_consumptions);
-        for (slot, count) in self
-            .action_counts
-            .iter_mut()
-            .zip(row.action_histogram.iter())
-        {
-            *slot = slot.saturating_add(*count);
-        }
         pool_joint(&mut self.pooled_joint, &row.joint_sensory_action);
         if let Some(slope) = row.learning_slope {
             self.learning_slope_sum += f64::from(slope);
@@ -134,14 +125,6 @@ impl IntervalAccumulator {
         let plant_consumption_rate = rate(self.plant_consumptions);
         let prey_consumption_rate = rate(self.prey_consumptions);
 
-        let mut action_histogram = [0.0_f64; ACTION_COUNT];
-        let action_total: u64 = self.action_counts.iter().sum();
-        if action_total > 0 {
-            for (slot, count) in action_histogram.iter_mut().zip(self.action_counts.iter()) {
-                *slot = *count as f64 / action_total as f64;
-            }
-        }
-
         let mi_sa = mi_from_joint(&self.pooled_joint);
         let learning_slope = (self.learning_slope_count > 0)
             .then(|| self.learning_slope_sum / self.learning_slope_count as f64);
@@ -154,7 +137,6 @@ impl IntervalAccumulator {
             prey_consumption_rate,
             mi_sa,
             learning_slope,
-            action_histogram,
         }
     }
 }

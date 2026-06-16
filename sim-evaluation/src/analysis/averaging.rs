@@ -2,7 +2,7 @@
 //! `IntervalMetrics` / `PillarScores` into a single "mean across seeds" view
 //! for reports.
 
-use crate::output::{mean_f64, mean_histogram, mean_option, mean_round_u32};
+use crate::output::{mean_f64, mean_option, mean_round_u32};
 use crate::types::{IntervalMetrics, PillarScores, SeedEvaluationSummary};
 
 pub fn average_pillar_scores(seed_summaries: &[SeedEvaluationSummary]) -> PillarScores {
@@ -18,7 +18,6 @@ pub fn average_pillar_scores(seed_summaries: &[SeedEvaluationSummary]) -> Pillar
         mean_plant_consumption_rate: mean_option(pillars().map(|p| p.mean_plant_consumption_rate)),
         mean_prey_consumption_rate: mean_option(pillars().map(|p| p.mean_prey_consumption_rate)),
         mean_learning_slope: mean_option(pillars().map(|p| p.mean_learning_slope)),
-        mean_action_histogram: mean_histogram(pillars().map(|p| p.mean_action_histogram)),
         intelligence_effectiveness_component: mean_f64(
             pillars().map(|p| p.intelligence_effectiveness_component),
         ),
@@ -91,11 +90,6 @@ pub fn average_timeseries(seed_summaries: &[SeedEvaluationSummary]) -> Vec<Inter
                 seed_summaries
                     .iter()
                     .map(|summary| summary.timeseries[row_idx].learning_slope),
-            ),
-            action_histogram: mean_histogram(
-                seed_summaries
-                    .iter()
-                    .map(|summary| summary.timeseries[row_idx].action_histogram),
             ),
         });
     }

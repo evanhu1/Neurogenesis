@@ -1,7 +1,4 @@
-use crate::{
-    dataset::ACTION_COUNT,
-    types::{ComparisonSummary, EvaluationSummary, IntervalMetrics},
-};
+use crate::types::{ComparisonSummary, EvaluationSummary, IntervalMetrics};
 use anyhow::Result;
 use serde::Serialize;
 use std::fs::{self, File};
@@ -139,28 +136,6 @@ pub(crate) fn print_evaluation_summary(out_dir: &Path, summary: &EvaluationSumma
         );
     }
     println!("total_time_seconds: {:.3}", summary.total_time_seconds);
-}
-
-pub(crate) fn mean_histogram(
-    values: impl Iterator<Item = [f64; ACTION_COUNT]>,
-) -> [f64; ACTION_COUNT] {
-    let mut sums = [0.0; ACTION_COUNT];
-    let mut count = 0.0;
-    for value in values {
-        for idx in 0..ACTION_COUNT {
-            if value[idx].is_finite() {
-                sums[idx] += value[idx];
-            }
-        }
-        count += 1.0;
-    }
-    if count == 0.0 {
-        return [0.0; ACTION_COUNT];
-    }
-    for sum in &mut sums {
-        *sum /= count;
-    }
-    sums
 }
 
 pub(crate) fn mean_option(values: impl Iterator<Item = Option<f64>>) -> Option<f64> {

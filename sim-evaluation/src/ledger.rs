@@ -82,7 +82,6 @@ pub struct OrganismEntry {
     failed_actions: u64,
     plant_consumptions: u64,
     prey_consumptions: u64,
-    action_histogram: [u64; ACTION_COUNT],
     /// Row-major `[SENSORY_BIN_COUNT][ACTION_COUNT]` flattened across the whole
     /// lifetime.
     joint_sensory_action: Vec<u64>,
@@ -100,7 +99,6 @@ impl OrganismEntry {
             failed_actions: 0,
             plant_consumptions: 0,
             prey_consumptions: 0,
-            action_histogram: [0; ACTION_COUNT],
             joint_sensory_action: vec![0; JOINT_LEN],
             learning: LearningAccumulator::default(),
         }
@@ -116,7 +114,6 @@ impl OrganismEntry {
             failed_actions: self.failed_actions,
             plant_consumptions: self.plant_consumptions,
             prey_consumptions: self.prey_consumptions,
-            action_histogram: self.action_histogram.to_vec(),
             joint_sensory_action: self.joint_sensory_action,
             learning_slope: self.learning.slope(),
         }
@@ -169,7 +166,6 @@ impl Ledger {
         };
 
         entry.total_actions = entry.total_actions.saturating_add(1);
-        entry.action_histogram[action_idx] = entry.action_histogram[action_idx].saturating_add(1);
         let joint_idx = sensory_bin * ACTION_COUNT + action_idx;
         entry.joint_sensory_action[joint_idx] =
             entry.joint_sensory_action[joint_idx].saturating_add(1);

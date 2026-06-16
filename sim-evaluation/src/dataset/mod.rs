@@ -1,6 +1,6 @@
-//! Central experiment dataset: raw tick/event/lifetime facts emitted during a
-//! sim run, written as partitioned Parquet files plus a JSON manifest, then
-//! read back by the analysis layer.
+//! Central experiment dataset: raw per-tick population and per-organism
+//! lifetime facts emitted during a sim run, written as partitioned Parquet
+//! files plus a JSON manifest, then read back by the analysis layer.
 //!
 //! The dataset is the single source of truth. The sim loop only produces raw
 //! data; every derived metric or report reads from here.

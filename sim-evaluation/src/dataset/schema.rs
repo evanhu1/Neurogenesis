@@ -72,8 +72,6 @@ pub struct OrganismLifetimeRow {
     pub plant_consumptions: u64,
     /// Lifetime prey/corpse (predation) consumptions.
     pub prey_consumptions: u64,
-    /// Length `ACTION_COUNT`. Counts across the whole lifetime.
-    pub action_histogram: Vec<u64>,
     /// Row-major flattened `[SENSORY_BIN_COUNT][ACTION_COUNT]` across the whole
     /// lifetime — feeds MI(S;A).
     pub joint_sensory_action: Vec<u64>,

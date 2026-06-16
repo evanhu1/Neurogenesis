@@ -1,7 +1,7 @@
 //! Derive interpretable metrics from a persisted dataset. This is the only
-//! place that knows how to turn raw rows into `IntervalMetrics`, pillar
-//! scores, and demographic analytics. The sim-run layer emits raw data; the
-//! reporting layer consumes analysis output; this module is the pivot.
+//! place that knows how to turn raw rows into `IntervalMetrics` and pillar
+//! scores. The sim-run layer emits raw data; the reporting layer consumes
+//! analysis output; this module is the pivot.
 
 pub mod averaging;
 pub mod cli;

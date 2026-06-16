@@ -1,8 +1,7 @@
 //! Drives the simulation and funnels everything it emits into the on-disk
-//! dataset. Every per-tick row, per-action count, per-death lifetime, and
-//! per-reproduction event is written as raw data. Pillars, comparisons and
-//! reports are produced afterwards by the analysis layer reading the same
-//! dataset.
+//! dataset: a per-tick population line and a per-organism lifetime row written
+//! at death (or end-of-run). Pillars, comparisons and reports are produced
+//! afterwards by the analysis layer reading the same dataset.
 
 use crate::analysis::{
     analyze, average_pillar_scores, average_timeseries, write_aggregate_artifacts,

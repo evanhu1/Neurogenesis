@@ -259,7 +259,6 @@ mod tests {
             failed_actions: 12,
             plant_consumptions: 10,
             prey_consumptions: 5,
-            action_histogram: vec![10, 20, 30, 15, 10, 10, 5],
             joint_sensory_action: vec![0; JOINT_LEN],
             learning_slope: Some(0.001),
         });
@@ -268,7 +267,6 @@ mod tests {
         let dataset = DatasetReader::load(&dir).unwrap();
         assert_eq!(dataset.tick_summary.len(), 1);
         assert_eq!(dataset.organism_lifetimes.len(), 1);
-        assert_eq!(dataset.organism_lifetimes[0].action_histogram.len(), 7);
         assert_eq!(
             dataset.organism_lifetimes[0].joint_sensory_action.len(),
             JOINT_LEN
