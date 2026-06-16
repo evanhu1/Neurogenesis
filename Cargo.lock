@@ -2293,6 +2293,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sim-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "sim-config",
+ "sim-core",
+ "sim-types",
+]
+
+[[package]]
 name = "sim-config"
 version = "0.1.0"
 dependencies = [

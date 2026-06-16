@@ -5,6 +5,7 @@ members = [
   "sim-evaluation",
   "sim-types",
   "sim-server",
+  "sim-cli",
 ]
 resolver = "2"
 
