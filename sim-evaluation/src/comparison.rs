@@ -123,18 +123,14 @@ fn comparison_metric_rows(
     };
     vec![
         paired("foraging_pillar", |p| Some(p.foraging_pillar)),
+        paired("predation_pillar", |p| Some(p.predation_pillar)),
         paired("intelligence_pillar", |p| Some(p.intelligence_pillar)),
-        paired("competition_pillar", |p| Some(p.competition_pillar)),
-        paired("idle_fraction", |p| p.mean_idle_fraction),
-        paired("p_fwd_food", |p| p.mean_p_fwd_food),
+        paired("learning_pillar", |p| Some(p.learning_pillar)),
+        paired("action_effectiveness", |p| p.mean_action_effectiveness),
         paired("mi_sa", |p| p.mean_mi_sa),
-        paired("attack_attempt_rate", |p| p.mean_attack_attempt_rate),
-        paired("attack_success_rate", |p| p.mean_attack_success_rate),
-        paired("failed_action_rate", |p| p.mean_failed_action_rate),
-        paired("util", |p| p.mean_util),
-        paired("age_correlated_competence", |p| {
-            p.mean_age_correlated_competence
-        }),
+        paired("plant_consumption_rate", |p| p.mean_plant_consumption_rate),
+        paired("prey_consumption_rate", |p| p.mean_prey_consumption_rate),
+        paired("learning_slope", |p| p.mean_learning_slope),
     ]
 }
 

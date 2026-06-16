@@ -5,21 +5,17 @@
 
 pub mod averaging;
 pub mod cli;
-pub mod demographics;
 pub mod intervals;
 pub mod pillars;
 
-pub use averaging::{average_demographic_analytics, average_pillar_scores, average_timeseries};
-pub use demographics::compute_demographic_analytics;
+pub use averaging::{average_pillar_scores, average_timeseries};
 pub use intervals::derive_interval_metrics;
 pub use pillars::compute_pillar_scores;
 
 use crate::dataset::DatasetReader;
 use crate::output::{write_summary_json, write_timeseries_csv};
 use crate::report::{write_html_report, HtmlReportContext, PerSeedReportRow};
-use crate::types::{
-    DemographicAnalytics, EvaluationSummary, IntervalMetrics, PillarScores, SeedEvaluationSummary,
-};
+use crate::types::{EvaluationSummary, IntervalMetrics, PillarScores, SeedEvaluationSummary};
 use anyhow::Result;
 use chrono::Utc;
 use std::path::Path;
@@ -32,17 +28,14 @@ pub struct AnalysisOptions {
 pub struct AnalysisOutput {
     pub timeseries: Vec<IntervalMetrics>,
     pub pillars: PillarScores,
-    pub demographics: DemographicAnalytics,
 }
 
 pub fn analyze(dataset: &DatasetReader, options: &AnalysisOptions) -> AnalysisOutput {
     let timeseries = derive_interval_metrics(dataset, options.report_every, options.total_ticks);
     let pillars = compute_pillar_scores(&timeseries);
-    let demographics = compute_demographic_analytics(dataset, options.total_ticks);
     AnalysisOutput {
         timeseries,
         pillars,
-        demographics,
     }
 }
 
@@ -92,8 +85,9 @@ pub fn write_aggregate_artifacts(
             seed: seed_summary.seed,
             total_time_seconds: seed_summary.total_time_seconds,
             foraging_pillar: seed_summary.pillars.foraging_pillar,
+            predation_pillar: seed_summary.pillars.predation_pillar,
             intelligence_pillar: seed_summary.pillars.intelligence_pillar,
-            competition_pillar: seed_summary.pillars.competition_pillar,
+            learning_pillar: seed_summary.pillars.learning_pillar,
             report_href: format!("seed_{}/report.html", seed_summary.seed),
         })
         .collect();

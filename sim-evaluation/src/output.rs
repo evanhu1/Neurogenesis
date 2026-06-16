@@ -20,31 +20,19 @@ pub(crate) fn write_timeseries_csv(out_dir: &Path, rows: &[IntervalMetrics]) -> 
     let mut csv = BufWriter::new(File::create(csv_path)?);
     writeln!(
         csv,
-        "tick,pop,births,deaths,food,max_generation,attack_attempt_rate,attack_success_rate,failed_action_rate,ate_pct,cons_mean,neurons,synapses,p_fwd_food,mi_sa,idle_fraction,util,generation_time,age_correlated_competence"
+        "tick,pop,action_effectiveness,plant_consumption_rate,prey_consumption_rate,mi_sa,learning_slope"
     )?;
     for metrics in rows {
         writeln!(
             csv,
-            "{tick},{pop},{births},{deaths},{food},{max_generation},{attack_attempt_rate},{attack_success_rate},{failed_action_rate},{ate_pct},{cons_mean},{neurons},{synapses},{p_fwd_food},{mi_sa},{idle_fraction},{util},{generation_time},{age_correlated_competence}",
+            "{tick},{pop},{action_effectiveness},{plant_consumption_rate},{prey_consumption_rate},{mi_sa},{learning_slope}",
             tick = metrics.tick,
             pop = metrics.pop,
-            births = metrics.births,
-            deaths = metrics.deaths,
-            food = metrics.food,
-            max_generation = csv_opt_u64(metrics.max_generation),
-            attack_attempt_rate = csv_opt(metrics.attack_attempt_rate),
-            attack_success_rate = csv_opt(metrics.attack_success_rate),
-            failed_action_rate = csv_opt(metrics.failed_action_rate),
-            ate_pct = csv_opt(metrics.ate_pct),
-            cons_mean = csv_opt(metrics.cons_mean),
-            neurons = csv_opt(metrics.neurons),
-            synapses = csv_opt(metrics.synapses),
-            p_fwd_food = csv_opt(metrics.p_fwd_food),
+            action_effectiveness = csv_opt(metrics.action_effectiveness),
+            plant_consumption_rate = csv_opt(metrics.plant_consumption_rate),
+            prey_consumption_rate = csv_opt(metrics.prey_consumption_rate),
             mi_sa = csv_opt(metrics.mi_sa),
-            idle_fraction = csv_opt(metrics.idle_fraction),
-            util = csv_opt(metrics.util),
-            generation_time = csv_opt(metrics.generation_time),
-            age_correlated_competence = csv_opt(metrics.age_correlated_competence),
+            learning_slope = csv_opt(metrics.learning_slope),
         )?;
     }
     csv.flush()?;
@@ -52,10 +40,6 @@ pub(crate) fn write_timeseries_csv(out_dir: &Path, rows: &[IntervalMetrics]) -> 
 }
 
 fn csv_opt(value: Option<f64>) -> String {
-    value.map(|v| v.to_string()).unwrap_or_default()
-}
-
-fn csv_opt_u64(value: Option<u64>) -> String {
     value.map(|v| v.to_string()).unwrap_or_default()
 }
 
@@ -123,28 +107,35 @@ pub(crate) fn print_evaluation_summary(out_dir: &Path, summary: &EvaluationSumma
     println!("worker_threads: {}", summary.worker_threads);
     let pillars = &summary.pillars;
     println!(
-        "foraging_pillar: {:.3} [p_fwd_food={:.3}]",
-        pillars.foraging_pillar, pillars.foraging_p_fwd_food_component,
+        "foraging_pillar: {:.3} [plant_consumption_rate={}]",
+        pillars.foraging_pillar,
+        fmt_option(pillars.mean_plant_consumption_rate, 4),
     );
     println!(
-        "intelligence_pillar: {:.3} [effectiveness={:.3} mi={:.3} anti_idle={:.3} util={:.3}]",
+        "predation_pillar: {:.3} [prey_consumption_rate={}]",
+        pillars.predation_pillar,
+        fmt_option(pillars.mean_prey_consumption_rate, 4),
+    );
+    println!(
+        "intelligence_pillar: {:.3} [effectiveness={:.3} mi={:.3}]",
         pillars.intelligence_pillar,
-        pillars.intelligence_action_effectiveness_component,
+        pillars.intelligence_effectiveness_component,
         pillars.intelligence_mi_component,
-        pillars.intelligence_anti_idle_component,
-        pillars.intelligence_util_component,
     );
     println!(
-        "competition_pillar: {:.3} [attack_success={:.3} attack_attempts={:.3}]",
-        pillars.competition_pillar,
-        pillars.competition_attack_success_component,
-        pillars.competition_attack_attempt_component,
+        "learning_pillar: {:.3} [mean_slope={}]",
+        pillars.learning_pillar,
+        fmt_option(pillars.mean_learning_slope, 6),
     );
     for seed_summary in &summary.seed_summaries {
         let p = &seed_summary.pillars;
         println!(
-            "seed[{}]: foraging={:.3} intelligence={:.3} competition={:.3}",
-            seed_summary.seed, p.foraging_pillar, p.intelligence_pillar, p.competition_pillar,
+            "seed[{}]: foraging={:.3} predation={:.3} intelligence={:.3} learning={:.3}",
+            seed_summary.seed,
+            p.foraging_pillar,
+            p.predation_pillar,
+            p.intelligence_pillar,
+            p.learning_pillar,
         );
     }
     println!("total_time_seconds: {:.3}", summary.total_time_seconds);
@@ -186,15 +177,6 @@ pub(crate) fn mean_option(values: impl Iterator<Item = Option<f64>>) -> Option<f
     } else {
         Some(sum / count as f64)
     }
-}
-
-pub(crate) fn mean_option_u64(values: impl Iterator<Item = Option<u64>>) -> Option<u64> {
-    mean_option(values.map(|value| value.map(|inner| inner as f64)))
-        .map(|value| value.round() as u64)
-}
-
-pub(crate) fn mean_round_u64(values: impl Iterator<Item = u64>) -> u64 {
-    mean_f64(values.map(|value| value as f64)).round() as u64
 }
 
 pub(crate) fn mean_round_u32(values: impl Iterator<Item = u32>) -> u32 {

@@ -5,12 +5,11 @@
 //! dataset.
 
 use crate::analysis::{
-    analyze, average_demographic_analytics, average_pillar_scores, average_timeseries,
-    write_aggregate_artifacts, write_per_seed_artifacts, AnalysisOptions,
+    analyze, average_pillar_scores, average_timeseries, write_aggregate_artifacts,
+    write_per_seed_artifacts, AnalysisOptions,
 };
 use crate::dataset::{
-    DatasetReader, Manifest, PartitionedParquetWriter, ReproductionOutcome, TickSummaryRow,
-    DESCENDANT_CODE, SCHEMA_VERSION,
+    DatasetReader, Manifest, PartitionedParquetWriter, TickSummaryRow, SCHEMA_VERSION,
 };
 use crate::ledger::Ledger;
 use crate::types::{
@@ -153,7 +152,6 @@ pub(crate) fn run_evaluation_across_seeds(
 
     let averaged_timeseries = average_timeseries(&seed_summaries);
     let pillars = average_pillar_scores(&seed_summaries);
-    let demographics = average_demographic_analytics(&seed_summaries);
     let total_time_seconds = run_started.elapsed().as_secs_f64();
     let generated_at_utc = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
 
@@ -164,7 +162,6 @@ pub(crate) fn run_evaluation_across_seeds(
             out_dir: PathBuf::from(format!("seed_{}", summary.seed)),
             total_time_seconds: summary.total_time_seconds,
             pillars: summary.pillars.clone(),
-            demographics: summary.demographics.clone(),
             state_hash: summary.state_hash.clone(),
         })
         .collect::<Vec<_>>();
@@ -177,7 +174,6 @@ pub(crate) fn run_evaluation_across_seeds(
         worker_threads,
         total_time_seconds,
         pillars,
-        demographics,
         seed_summaries: seed_run_summaries,
         timeseries: averaged_timeseries,
     };
@@ -205,25 +201,8 @@ fn run_single_seed_evaluation(
     let mut writer = PartitionedParquetWriter::new(&options.out_dir)?;
 
     for organism in sim.organisms() {
-        ledger.birth(
-            organism.id,
-            organism.species_id.0,
-            organism.generation,
-            0,
-            organism.genome.lifecycle.age_of_maturity,
-        );
+        ledger.birth(organism.id, 0);
     }
-
-    // Running max across all organisms ever observed. Generation is monotonic
-    // in reproduction order, so folding over `delta.spawned` is sufficient —
-    // iterating every living organism each tick would be O(population) for
-    // the same answer.
-    let mut max_generation = sim
-        .organisms()
-        .iter()
-        .map(|o| o.generation)
-        .max()
-        .unwrap_or(0);
 
     for tick in 1..=options.ticks {
         let delta = sim.tick();
@@ -231,79 +210,29 @@ fn run_single_seed_evaluation(
         for record in sim.action_records().iter().flatten() {
             ledger.record_action(record);
         }
-        let mut descendant_births = 0_u32;
-        for event in delta.reproduction_events.iter().copied() {
-            let row = ledger.record_reproduction(tick, event);
-            if row.outcome == ReproductionOutcome::Success.code() {
-                descendant_births = descendant_births.saturating_add(1);
-            }
-            writer.emit_reproduction_event(row);
+        for event in &delta.reproduction_events {
+            ledger.record_reproduction(event);
         }
-
-        let births = delta.spawned.len() as u32;
         for spawned in &delta.spawned {
-            max_generation = max_generation.max(spawned.generation);
-            ledger.birth(
-                spawned.id,
-                spawned.species_id.0,
-                spawned.generation,
-                tick,
-                spawned.genome.lifecycle.age_of_maturity,
-            );
+            ledger.birth(spawned.id, tick);
         }
-
-        let mut deaths = 0_u32;
-        let mut descendant_deaths = 0_u32;
         for removed in &delta.removed_positions {
-            match removed.entity_id {
-                EntityId::Organism(id) => {
-                    deaths = deaths.saturating_add(1);
-                    if let Some(row) = ledger.death(id, tick) {
-                        if row.origin == DESCENDANT_CODE {
-                            descendant_deaths = descendant_deaths.saturating_add(1);
-                        }
-                        writer.emit_organism_lifetime(row);
-                    }
+            if let EntityId::Organism(id) = removed.entity_id {
+                if let Some(row) = ledger.death(id, tick) {
+                    writer.emit_organism_lifetime(row);
                 }
-                EntityId::Food(_) => {}
             }
         }
-        let food_spawned = delta.food_spawned.len() as u32;
-
-        let population = delta.metrics.organisms;
-        let descendant_population = ledger.descendant_population();
 
         writer.emit_tick(TickSummaryRow {
             tick,
-            population,
-            descendant_population,
-            max_generation: if population > 0 {
-                Some(max_generation)
-            } else {
-                None
-            },
-            births,
-            descendant_births,
-            deaths,
-            descendant_deaths,
-            food_count: sim.foods().len() as u32,
-            consumptions: delta.metrics.consumptions_last_turn as u32,
-            predations: delta.metrics.predations_last_turn as u32,
-            food_spawned,
+            descendant_population: ledger.descendant_population(),
         });
-
-        for row in ledger.take_tick_aggregates().into_rows(tick) {
-            writer.emit_action_count(row);
-        }
 
         let flush_tick = tick % options.report_every == 0 || tick == options.ticks;
         if flush_tick {
-            // Population-wide snapshot (brain stats, lineage diversity) only at
-            // flush boundaries — iterating every organism is expensive.
-            for row in ledger.population_snapshot_rows(tick, sim.organisms()) {
-                writer.emit_population_snapshot(row);
-            }
-
+            // Genome snapshot of the top reproducer only at flush boundaries —
+            // iterating every organism is expensive.
             if let Some(top) = ledger.top_reproducer() {
                 if let Ok(idx) = sim
                     .organisms()
@@ -366,7 +295,6 @@ fn run_single_seed_evaluation(
         control: options.control,
         total_time_seconds,
         pillars: analysis.pillars.clone(),
-        demographics: analysis.demographics.clone(),
         state_hash,
         timeseries: analysis.timeseries.clone(),
     };

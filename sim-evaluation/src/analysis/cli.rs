@@ -1,7 +1,7 @@
-//! `sim-evaluation analyze <run>` entrypoint. Re-derives metrics, pillars and
-//! demographic analytics from a persisted dataset and rewrites the
-//! human-readable artifacts (`summary.json`, `timeseries.csv`, `report.html`)
-//! without re-running the simulation.
+//! `sim-evaluation analyze <run>` entrypoint. Re-derives metrics and pillars
+//! from a persisted dataset and rewrites the human-readable artifacts
+//! (`summary.json`, `timeseries.csv`, `report.html`) without re-running the
+//! simulation.
 //!
 //! The argument can be any of:
 //! - a path to a run root (containing `seed_*` subdirs) — re-analyzes every
@@ -12,8 +12,8 @@
 //! - the literal `latest`, selecting the newest run with persisted datasets
 
 use super::{
-    analyze, average_demographic_analytics, average_pillar_scores, average_timeseries,
-    write_aggregate_artifacts, write_per_seed_artifacts, AnalysisOptions,
+    analyze, average_pillar_scores, average_timeseries, write_aggregate_artifacts,
+    write_per_seed_artifacts, AnalysisOptions,
 };
 use crate::dataset::{DatasetReader, Manifest};
 use crate::output::print_evaluation_summary;
@@ -86,7 +86,6 @@ fn analyze_run_root(run_dir: &Path) -> Result<EvaluationSummary> {
         worker_threads: 0,
         total_time_seconds: 0.0,
         pillars: average_pillar_scores(&seed_summaries),
-        demographics: average_demographic_analytics(&seed_summaries),
         seed_summaries: seed_summaries
             .iter()
             .map(|summary| SeedRunSummary {
@@ -94,7 +93,6 @@ fn analyze_run_root(run_dir: &Path) -> Result<EvaluationSummary> {
                 out_dir: PathBuf::from(format!("seed_{}", summary.seed)),
                 total_time_seconds: summary.total_time_seconds,
                 pillars: summary.pillars.clone(),
-                demographics: summary.demographics.clone(),
                 state_hash: summary.state_hash.clone(),
             })
             .collect(),
@@ -117,7 +115,6 @@ fn wrap_single_seed(summary: SeedEvaluationSummary) -> EvaluationSummary {
         out_dir: PathBuf::new(),
         total_time_seconds: summary.total_time_seconds,
         pillars: summary.pillars.clone(),
-        demographics: summary.demographics.clone(),
         state_hash: summary.state_hash.clone(),
     };
     EvaluationSummary {
@@ -128,7 +125,6 @@ fn wrap_single_seed(summary: SeedEvaluationSummary) -> EvaluationSummary {
         worker_threads: 0,
         total_time_seconds: summary.total_time_seconds,
         pillars: summary.pillars,
-        demographics: summary.demographics,
         seed_summaries: vec![seed_run_summary],
         timeseries: summary.timeseries,
     }
@@ -151,7 +147,6 @@ fn reanalyze_seed(dataset_dir: &Path) -> Result<(SeedEvaluationSummary, Manifest
         control: manifest.world_config.force_random_actions,
         total_time_seconds: 0.0,
         pillars: analysis.pillars,
-        demographics: analysis.demographics,
         state_hash: String::new(),
         timeseries: analysis.timeseries,
     };

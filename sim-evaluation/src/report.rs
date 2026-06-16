@@ -1,5 +1,4 @@
 use crate::{
-    analysis::intervals::action_baseline_probability,
     output::fmt_option,
     types::{IntervalMetrics, PillarScores},
 };
@@ -24,8 +23,9 @@ pub struct PerSeedReportRow {
     pub seed: u64,
     pub total_time_seconds: f64,
     pub foraging_pillar: f64,
+    pub predation_pillar: f64,
     pub intelligence_pillar: f64,
-    pub competition_pillar: f64,
+    pub learning_pillar: f64,
     pub report_href: String,
 }
 
@@ -132,7 +132,19 @@ pub fn write_html_report(
         &mut html,
         "Foraging",
         &format!("{:.3}", pillars.foraging_pillar),
-        &[("P(Fwd|food)", pillars.foraging_p_fwd_food_component)],
+        &[(
+            "plant consumptions / action",
+            pillars.mean_plant_consumption_rate.unwrap_or(0.0),
+        )],
+    );
+    pillar_card(
+        &mut html,
+        "Predation",
+        &format!("{:.3}", pillars.predation_pillar),
+        &[(
+            "prey consumptions / action",
+            pillars.mean_prey_consumption_rate.unwrap_or(0.0),
+        )],
     );
     pillar_card(
         &mut html,
@@ -141,27 +153,19 @@ pub fn write_html_report(
         &[
             (
                 "Action effectiveness",
-                pillars.intelligence_action_effectiveness_component,
+                pillars.intelligence_effectiveness_component,
             ),
             ("MI(S;A)", pillars.intelligence_mi_component),
-            ("Anti-idle", pillars.intelligence_anti_idle_component),
-            ("Util", pillars.intelligence_util_component),
         ],
     );
     pillar_card(
         &mut html,
-        "Competition",
-        &format!("{:.3}", pillars.competition_pillar),
-        &[
-            (
-                "Attack success",
-                pillars.competition_attack_success_component,
-            ),
-            (
-                "Attack attempts",
-                pillars.competition_attack_attempt_component,
-            ),
-        ],
+        "Learning",
+        &format!("{:.3}", pillars.learning_pillar),
+        &[(
+            "mean success-vs-age slope",
+            pillars.mean_learning_slope.unwrap_or(0.0),
+        )],
     );
     html.push_str("</div></div>");
 
@@ -171,8 +175,9 @@ pub fn write_html_report(
             "seed",
             "time_s",
             "foraging",
+            "predation",
             "intelligence",
-            "competition",
+            "learning",
             "report",
         ] {
             let _ = write!(html, "<th>{header}</th>");
@@ -181,12 +186,13 @@ pub fn write_html_report(
         for row in &ctx.per_seed_rows {
             let _ = write!(
                 html,
-                "<tr><td>{}</td><td>{:.3}</td><td>{:.3}</td><td>{:.3}</td><td>{:.3}</td><td><a href=\"{}\">open</a></td></tr>",
+                "<tr><td>{}</td><td>{:.3}</td><td>{:.3}</td><td>{:.3}</td><td>{:.3}</td><td>{:.3}</td><td><a href=\"{}\">open</a></td></tr>",
                 row.seed,
                 row.total_time_seconds,
                 row.foraging_pillar,
+                row.predation_pillar,
                 row.intelligence_pillar,
-                row.competition_pillar,
+                row.learning_pillar,
                 row.report_href
             );
         }
@@ -198,85 +204,34 @@ pub fn write_html_report(
         "<div class=\"panel\"><h2>Timeseries</h2><p class=\"note\">{}</p><div class=\"table-scroll\"><table><thead><tr>",
         escape_html(&ctx.timeseries_label)
     );
-    let baseline_probability = action_baseline_probability();
     let timeseries_headers = [
         (
             "tick",
-            "End tick of this reporting interval. Each row summarizes the ticks after the previous boundary and up to this tick.".to_owned(),
+            "End tick of this reporting interval. Each row pools the descendant organisms that died in the interval.".to_owned(),
         ),
         (
             "pop",
-            "Population at the final tick of the interval, not an interval average.".to_owned(),
+            "Descendant population near the interval end (viability context, not a competence score).".to_owned(),
         ),
         (
-            "births",
-            "Total births during the interval, summed across ticks.".to_owned(),
+            "action_effectiveness",
+            "Successful contingent actions / total actions taken, pooled over the interval's deceased descendants. Idling and spinning lower it (they inflate the denominator without succeeding).".to_owned(),
         ),
         (
-            "deaths",
-            "Total deaths during the interval, summed across ticks.".to_owned(),
+            "plant_consumption_rate",
+            "Plant consumptions / total actions — foraging 'consume success'. Eating an empty cell raises the denominator, not the numerator.".to_owned(),
         ),
         (
-            "food",
-            "Food items present on the grid at the final tick of the interval.".to_owned(),
-        ),
-        (
-            "max_generation",
-            "Highest generation present at the end of the interval, taken from the latest tick summary in the window.".to_owned(),
-        ),
-        (
-            "attack_attempt_rate",
-            "Attack selections per unit population exposure: total Attack actions in the interval divided by the sum of population counts over ticks.".to_owned(),
-        ),
-        (
-            "attack_success_rate",
-            "Share of Attack selections that did not fail: successful attacks divided by total attack attempts in the interval.".to_owned(),
-        ),
-        (
-            "failed_action_rate",
-            "Share of contingent actions that failed. Counts Forward, Eat, Attack, and Reproduce failures; excludes Idle and turning.".to_owned(),
-        ),
-        (
-            "ate_pct",
-            "Percent of sampled organisms in this interval's lifetime cohort that consumed food at least once. Uses organisms that died in the interval.".to_owned(),
-        ),
-        (
-            "cons_mean",
-            "Mean lifetime food consumptions for the interval's deceased-organism cohort.".to_owned(),
-        ),
-        (
-            "neurons",
-            "Mean inter-neuron count per living organism at the latest flush snapshot at or before the interval end.".to_owned(),
-        ),
-        (
-            "synapses",
-            "Mean synapse count per living organism at the latest flush snapshot at or before the interval end.".to_owned(),
-        ),
-        (
-            "p_fwd_food",
-            format!(
-                "Among recorded action ticks where food was visible straight ahead, the fraction that chose Forward. Random-choice baseline is {baseline_probability:.4}."
-            ),
+            "prey_consumption_rate",
+            "Prey/corpse consumptions / total actions — predation competence (the full sense→approach→kill/scavenge→eat loop; the only predation path that yields energy).".to_owned(),
         ),
         (
             "mi_sa",
-            "Miller-Madow-corrected mutual information between coarse food-visibility context and selected action, pooled from deceased-organism lifetime histograms.".to_owned(),
+            "Miller-Madow-corrected mutual information between coarse food-visibility context and selected action, pooled from deceased-descendant lifetime histograms. Measures whether sensing conditions behaviour.".to_owned(),
         ),
         (
-            "idle_fraction",
-            "Share of all selected actions in the interval that were Idle.".to_owned(),
-        ),
-        (
-            "util",
-            "Mean inter-neuron utilization across the interval's deceased-organism cohort. This is the per-organism fraction of inter neurons with sustained nonzero activation.".to_owned(),
-        ),
-        (
-            "generation_time",
-            "Mean parent age (in ticks) across every successful reproduction event in the interval. Shorter = faster generational turnover. Interpret alongside lifetime — generation_time ~ life_mean is a knife-edge regime where each parent reproduces roughly once before dying.".to_owned(),
-        ),
-        (
-            "age_corr_competence",
-            "Junior failure rate / Senior failure rate. Juniors = organisms in the bottom 25% of their lifespan, Seniors = top 25%. Values > 1 indicate seniors fail less often than juniors — evidence of within-lifetime learning via plasticity.".to_owned(),
+            "learning_slope",
+            "Mean within-life OLS slope of action success vs age over non-Reproduce contingent actions. Positive ⇒ organisms got better at acting over their own lives (in-life learning). Should be ≈0 under the random-action control.".to_owned(),
         ),
     ];
     for (header, tooltip) in timeseries_headers {
@@ -288,23 +243,11 @@ pub fn write_html_report(
         for cell in [
             row.tick.to_string(),
             row.pop.to_string(),
-            row.births.to_string(),
-            row.deaths.to_string(),
-            row.food.to_string(),
-            fmt_opt_u64(row.max_generation),
-            fmt_option(row.attack_attempt_rate, 6),
-            fmt_option(row.attack_success_rate, 4),
-            fmt_option(row.failed_action_rate, 4),
-            fmt_option(row.ate_pct, 2),
-            fmt_option(row.cons_mean, 2),
-            fmt_option(row.neurons, 2),
-            fmt_option(row.synapses, 2),
-            fmt_option(row.p_fwd_food, 4),
+            fmt_option(row.action_effectiveness, 4),
+            fmt_option(row.plant_consumption_rate, 4),
+            fmt_option(row.prey_consumption_rate, 4),
             fmt_option(row.mi_sa, 4),
-            fmt_option(row.idle_fraction, 4),
-            fmt_option(row.util, 4),
-            fmt_option(row.generation_time, 2),
-            fmt_option(row.age_correlated_competence, 4),
+            fmt_option(row.learning_slope, 6),
         ] {
             let _ = write!(html, "<td>{cell}</td>");
         }
@@ -314,77 +257,28 @@ pub fn write_html_report(
 
     let charts = [
         (
-            "Population",
+            "Descendant Population",
             metric_series(rows, |r| Some(r.pop as f64)),
             None,
             "#0f766e",
         ),
         (
-            "Births",
-            metric_series(rows, |r| Some(r.births as f64)),
-            None,
-            "#2563eb",
-        ),
-        (
-            "Deaths",
-            metric_series(rows, |r| Some(r.deaths as f64)),
-            None,
-            "#dc2626",
-        ),
-        (
-            "Food",
-            metric_series(rows, |r| Some(r.food as f64)),
-            None,
-            "#65a30d",
-        ),
-        (
-            "Max Generation",
-            metric_series(rows, |r| r.max_generation.map(|value| value as f64)),
-            None,
-            "#7e22ce",
-        ),
-        (
-            "Attack Attempt Rate",
-            metric_series(rows, |r| r.attack_attempt_rate),
+            "Action Effectiveness",
+            metric_series(rows, |r| r.action_effectiveness),
             Some(0.0),
-            "#ef4444",
-        ),
-        (
-            "Attack Success Rate",
-            metric_series(rows, |r| r.attack_success_rate),
-            Some(0.0),
-            "#b91c1c",
-        ),
-        (
-            "Failed Action Rate",
-            metric_series(rows, |r| r.failed_action_rate),
-            Some(0.0),
-            "#991b1b",
-        ),
-        ("Ate %", metric_series(rows, |r| r.ate_pct), None, "#c2410c"),
-        (
-            "Consumptions Mean",
-            metric_series(rows, |r| r.cons_mean),
-            None,
             "#0e7490",
         ),
         (
-            "Neurons",
-            metric_series(rows, |r| r.neurons),
-            None,
-            "#0891b2",
+            "Plant Consumption Rate (foraging)",
+            metric_series(rows, |r| r.plant_consumption_rate),
+            Some(0.0),
+            "#65a30d",
         ),
         (
-            "Synapses",
-            metric_series(rows, |r| r.synapses),
-            None,
-            "#7c3aed",
-        ),
-        (
-            "P(Forward | Food Ahead)",
-            metric_series(rows, |r| r.p_fwd_food),
-            Some(action_baseline_probability()),
-            "#0f766e",
+            "Prey Consumption Rate (predation)",
+            metric_series(rows, |r| r.prey_consumption_rate),
+            Some(0.0),
+            "#b91c1c",
         ),
         (
             "MI(S;A)",
@@ -393,27 +287,9 @@ pub fn write_html_report(
             "#9333ea",
         ),
         (
-            "Idle Fraction",
-            metric_series(rows, |r| r.idle_fraction),
-            Some(action_baseline_probability()),
-            "#f97316",
-        ),
-        (
-            "Inter Utilization",
-            metric_series(rows, |r| r.util),
-            None,
-            "#334155",
-        ),
-        (
-            "Generation Time (ticks)",
-            metric_series(rows, |r| r.generation_time),
-            None,
-            "#be185d",
-        ),
-        (
-            "Age-Correlated Competence",
-            metric_series(rows, |r| r.age_correlated_competence),
-            Some(1.0),
+            "Learning Slope (success vs age)",
+            metric_series(rows, |r| r.learning_slope),
+            Some(0.0),
             "#4f46e5",
         ),
     ];
@@ -544,12 +420,6 @@ pub fn write_comparison_html_report(out_dir: &Path, meta: &ComparisonHtmlReportM
     html.push_str("</div></body></html>");
     std::fs::write(report_path, html)?;
     Ok(())
-}
-
-fn fmt_opt_u64(value: Option<u64>) -> String {
-    value
-        .map(|v| v.to_string())
-        .unwrap_or_else(|| "NA".to_owned())
 }
 
 fn kv(html: &mut String, key: &str, value: &str) {

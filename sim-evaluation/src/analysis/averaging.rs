@@ -1,11 +1,9 @@
 //! Cross-seed averaging of analysis outputs. Multi-seed runs fold per-seed
-//! `IntervalMetrics` / `PillarScores` / `DemographicAnalytics` into a single
-//! "mean across seeds" view for reports.
+//! `IntervalMetrics` / `PillarScores` into a single "mean across seeds" view
+//! for reports.
 
-use crate::output::{
-    mean_f64, mean_histogram, mean_option, mean_option_u64, mean_round_u32, mean_round_u64,
-};
-use crate::types::{DemographicAnalytics, IntervalMetrics, PillarScores, SeedEvaluationSummary};
+use crate::output::{mean_f64, mean_histogram, mean_option, mean_round_u32};
+use crate::types::{IntervalMetrics, PillarScores, SeedEvaluationSummary};
 
 pub fn average_pillar_scores(seed_summaries: &[SeedEvaluationSummary]) -> PillarScores {
     let Some(first) = seed_summaries.first() else {
@@ -15,86 +13,20 @@ pub fn average_pillar_scores(seed_summaries: &[SeedEvaluationSummary]) -> Pillar
     PillarScores {
         window_start_tick: first.pillars.window_start_tick,
         window_end_tick: first.pillars.window_end_tick,
-        mean_p_fwd_food: mean_option(pillars().map(|p| p.mean_p_fwd_food)),
+        mean_action_effectiveness: mean_option(pillars().map(|p| p.mean_action_effectiveness)),
         mean_mi_sa: mean_option(pillars().map(|p| p.mean_mi_sa)),
-        mean_attack_attempt_rate: mean_option(pillars().map(|p| p.mean_attack_attempt_rate)),
-        mean_attack_success_rate: mean_option(pillars().map(|p| p.mean_attack_success_rate)),
-        mean_failed_action_rate: mean_option(pillars().map(|p| p.mean_failed_action_rate)),
-        mean_idle_fraction: mean_option(pillars().map(|p| p.mean_idle_fraction)),
-        mean_util: mean_option(pillars().map(|p| p.mean_util)),
+        mean_plant_consumption_rate: mean_option(pillars().map(|p| p.mean_plant_consumption_rate)),
+        mean_prey_consumption_rate: mean_option(pillars().map(|p| p.mean_prey_consumption_rate)),
+        mean_learning_slope: mean_option(pillars().map(|p| p.mean_learning_slope)),
         mean_action_histogram: mean_histogram(pillars().map(|p| p.mean_action_histogram)),
-        mean_age_correlated_competence: mean_option(
-            pillars().map(|p| p.mean_age_correlated_competence),
+        intelligence_effectiveness_component: mean_f64(
+            pillars().map(|p| p.intelligence_effectiveness_component),
         ),
-        foraging_p_fwd_food_component: mean_f64(pillars().map(|p| p.foraging_p_fwd_food_component)),
         intelligence_mi_component: mean_f64(pillars().map(|p| p.intelligence_mi_component)),
-        intelligence_action_effectiveness_component: mean_f64(
-            pillars().map(|p| p.intelligence_action_effectiveness_component),
-        ),
-        intelligence_anti_idle_component: mean_f64(
-            pillars().map(|p| p.intelligence_anti_idle_component),
-        ),
-        intelligence_util_component: mean_f64(pillars().map(|p| p.intelligence_util_component)),
-        competition_attack_success_component: mean_f64(
-            pillars().map(|p| p.competition_attack_success_component),
-        ),
-        competition_attack_attempt_component: mean_f64(
-            pillars().map(|p| p.competition_attack_attempt_component),
-        ),
         foraging_pillar: mean_f64(pillars().map(|p| p.foraging_pillar)),
+        predation_pillar: mean_f64(pillars().map(|p| p.predation_pillar)),
         intelligence_pillar: mean_f64(pillars().map(|p| p.intelligence_pillar)),
-        competition_pillar: mean_f64(pillars().map(|p| p.competition_pillar)),
-    }
-}
-
-pub fn average_demographic_analytics(
-    seed_summaries: &[SeedEvaluationSummary],
-) -> DemographicAnalytics {
-    DemographicAnalytics {
-        successful_births: mean_round_u64(
-            seed_summaries
-                .iter()
-                .map(|summary| summary.demographics.successful_births),
-        ),
-        blocked_births: mean_round_u64(
-            seed_summaries
-                .iter()
-                .map(|summary| summary.demographics.blocked_births),
-        ),
-        parent_died_during_reproduction: mean_round_u64(
-            seed_summaries
-                .iter()
-                .map(|summary| summary.demographics.parent_died_during_reproduction),
-        ),
-        survived_to_30: mean_round_u64(
-            seed_summaries
-                .iter()
-                .map(|summary| summary.demographics.survived_to_30),
-        ),
-        survived_to_maturity: mean_round_u64(
-            seed_summaries
-                .iter()
-                .map(|summary| summary.demographics.survived_to_maturity),
-        ),
-        mean_parent_energy_after_successful_birth: mean_option(seed_summaries.iter().map(
-            |summary| {
-                summary
-                    .demographics
-                    .mean_parent_energy_after_successful_birth
-            },
-        )),
-        mean_age_at_first_successful_reproduction: mean_option(seed_summaries.iter().map(
-            |summary| {
-                summary
-                    .demographics
-                    .mean_age_at_first_successful_reproduction
-            },
-        )),
-        mean_successful_birth_interval: mean_option(
-            seed_summaries
-                .iter()
-                .map(|summary| summary.demographics.mean_successful_birth_interval),
-        ),
+        learning_pillar: mean_f64(pillars().map(|p| p.learning_pillar)),
     }
 }
 
@@ -135,90 +67,30 @@ pub fn average_timeseries(seed_summaries: &[SeedEvaluationSummary]) -> Vec<Inter
                     .iter()
                     .map(|summary| summary.timeseries[row_idx].pop),
             ),
-            births: mean_round_u64(
+            action_effectiveness: mean_option(
                 seed_summaries
                     .iter()
-                    .map(|summary| summary.timeseries[row_idx].births),
+                    .map(|summary| summary.timeseries[row_idx].action_effectiveness),
             ),
-            deaths: mean_round_u64(
+            plant_consumption_rate: mean_option(
                 seed_summaries
                     .iter()
-                    .map(|summary| summary.timeseries[row_idx].deaths),
+                    .map(|summary| summary.timeseries[row_idx].plant_consumption_rate),
             ),
-            food: mean_round_u64(
+            prey_consumption_rate: mean_option(
                 seed_summaries
                     .iter()
-                    .map(|summary| summary.timeseries[row_idx].food),
-            ),
-            max_generation: mean_option_u64(
-                seed_summaries
-                    .iter()
-                    .map(|summary| summary.timeseries[row_idx].max_generation),
-            ),
-            attack_attempt_rate: mean_option(
-                seed_summaries
-                    .iter()
-                    .map(|summary| summary.timeseries[row_idx].attack_attempt_rate),
-            ),
-            attack_success_rate: mean_option(
-                seed_summaries
-                    .iter()
-                    .map(|summary| summary.timeseries[row_idx].attack_success_rate),
-            ),
-            failed_action_rate: mean_option(
-                seed_summaries
-                    .iter()
-                    .map(|summary| summary.timeseries[row_idx].failed_action_rate),
-            ),
-            ate_pct: mean_option(
-                seed_summaries
-                    .iter()
-                    .map(|summary| summary.timeseries[row_idx].ate_pct),
-            ),
-            cons_mean: mean_option(
-                seed_summaries
-                    .iter()
-                    .map(|summary| summary.timeseries[row_idx].cons_mean),
-            ),
-            neurons: mean_option(
-                seed_summaries
-                    .iter()
-                    .map(|summary| summary.timeseries[row_idx].neurons),
-            ),
-            synapses: mean_option(
-                seed_summaries
-                    .iter()
-                    .map(|summary| summary.timeseries[row_idx].synapses),
-            ),
-            p_fwd_food: mean_option(
-                seed_summaries
-                    .iter()
-                    .map(|summary| summary.timeseries[row_idx].p_fwd_food),
+                    .map(|summary| summary.timeseries[row_idx].prey_consumption_rate),
             ),
             mi_sa: mean_option(
                 seed_summaries
                     .iter()
                     .map(|summary| summary.timeseries[row_idx].mi_sa),
             ),
-            idle_fraction: mean_option(
+            learning_slope: mean_option(
                 seed_summaries
                     .iter()
-                    .map(|summary| summary.timeseries[row_idx].idle_fraction),
-            ),
-            util: mean_option(
-                seed_summaries
-                    .iter()
-                    .map(|summary| summary.timeseries[row_idx].util),
-            ),
-            generation_time: mean_option(
-                seed_summaries
-                    .iter()
-                    .map(|summary| summary.timeseries[row_idx].generation_time),
-            ),
-            age_correlated_competence: mean_option(
-                seed_summaries
-                    .iter()
-                    .map(|summary| summary.timeseries[row_idx].age_correlated_competence),
+                    .map(|summary| summary.timeseries[row_idx].learning_slope),
             ),
             action_histogram: mean_histogram(
                 seed_summaries

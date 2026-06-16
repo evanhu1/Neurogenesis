@@ -1,11 +1,25 @@
-//! Pillar scoring — the niche-agnostic competence axes printed on the
-//! report card. Reads a derived `Vec<IntervalMetrics>` (no direct dataset
-//! dependency) so it can be run on any analysis output.
+//! Pillar scoring — the niche-agnostic competence axes printed on the report
+//! card. Reads a derived `Vec<IntervalMetrics>` (no direct dataset dependency)
+//! so it can be run on any analysis output.
+//!
+//! Saturation constants below map a raw rate onto [0, 1]; they are deliberate,
+//! tunable anchors (calibrate against the `--control` random-action baseline,
+//! which should score ≈0 on every axis).
 
 use crate::output::{mean_histogram, mean_option};
 use crate::types::{IntervalMetrics, PillarScores};
 
+/// MI(S;A) at which the intelligence MI component saturates to 1.0.
 const MEAN_MI_SATURATION: f64 = 0.16;
+/// Plant consumptions per action at which foraging saturates (≈ eat once per
+/// five actions = excellent forager).
+const FORAGE_SATURATION: f64 = 0.20;
+/// Prey consumptions per action at which predation saturates (predation is
+/// rarer than foraging, so the bar is lower).
+const PREDATION_SATURATION: f64 = 0.05;
+/// Within-life success-probability gain per tick of age at which the learning
+/// pillar saturates. Negative slopes (forgetting) clamp to 0.
+const LEARNING_SATURATION: f64 = 0.001;
 
 /// Fraction of the timeseries (taken from the end) that feeds pillar
 /// computation: the last 10% of the run.
@@ -27,72 +41,49 @@ pub fn compute_pillar_scores(timeseries: &[IntervalMetrics]) -> PillarScores {
     let window_start_tick = slice.first().map(|row| row.tick).unwrap_or(0);
     let window_end_tick = slice.last().map(|row| row.tick).unwrap_or(0);
 
-    let mean_p_fwd_food = mean_option(slice.iter().map(|row| row.p_fwd_food));
+    let mean_action_effectiveness = mean_option(slice.iter().map(|row| row.action_effectiveness));
     let mean_mi_sa = mean_option(slice.iter().map(|row| row.mi_sa));
-    let mean_attack_attempt_rate = mean_option(slice.iter().map(|row| row.attack_attempt_rate));
-    let mean_attack_success_rate = mean_option(slice.iter().map(|row| row.attack_success_rate));
-    let mean_failed_action_rate = mean_option(slice.iter().map(|row| row.failed_action_rate));
-    let mean_idle_fraction = mean_option(slice.iter().map(|row| row.idle_fraction));
-    let mean_util = mean_option(slice.iter().map(|row| row.util));
+    let mean_plant_consumption_rate =
+        mean_option(slice.iter().map(|row| row.plant_consumption_rate));
+    let mean_prey_consumption_rate = mean_option(slice.iter().map(|row| row.prey_consumption_rate));
+    let mean_learning_slope = mean_option(slice.iter().map(|row| row.learning_slope));
     let mean_action_histogram = mean_histogram(slice.iter().map(|row| row.action_histogram));
-    let mean_age_correlated_competence =
-        mean_option(slice.iter().map(|row| row.age_correlated_competence));
 
-    let p_baseline = super::intervals::action_baseline_probability();
-    let p_fwd_food_component = mean_p_fwd_food
-        .map(|value| clamp01((value - p_baseline) / (0.55 - p_baseline).max(f64::EPSILON)))
-        .unwrap_or(0.0);
-    let mean_mi_component = mean_mi_sa
+    let intelligence_effectiveness_component =
+        mean_action_effectiveness.map(clamp01).unwrap_or(0.0);
+    let intelligence_mi_component = mean_mi_sa
         .map(|value| clamp01(value / MEAN_MI_SATURATION))
         .unwrap_or(0.0);
-    let action_effectiveness_component = mean_failed_action_rate
-        .map(|value| clamp01(1.0 - value))
-        .unwrap_or(0.0);
-    let anti_idle_component = mean_idle_fraction
-        .map(|value| clamp01(1.0 - value / 0.60))
-        .unwrap_or(0.0);
-    let util_component = mean_util.map(clamp01).unwrap_or(0.0);
-    let attack_success_component = mean_attack_success_rate
-        .map(|value| clamp01(value / 0.35))
-        .unwrap_or(0.0);
-    let attack_attempt_component = mean_attack_attempt_rate
-        .map(|value| clamp01(value / 0.01))
-        .unwrap_or(0.0);
 
-    let foraging_pillar = p_fwd_food_component;
+    let foraging_pillar = mean_plant_consumption_rate
+        .map(|value| clamp01(value / FORAGE_SATURATION))
+        .unwrap_or(0.0);
+    let predation_pillar = mean_prey_consumption_rate
+        .map(|value| clamp01(value / PREDATION_SATURATION))
+        .unwrap_or(0.0);
     let intelligence_pillar = weighted_geometric_mean(&[
-        (action_effectiveness_component, 0.50),
-        (mean_mi_component, 0.28),
-        (anti_idle_component, 0.11),
-        (util_component, 0.11),
+        (intelligence_effectiveness_component, 0.5),
+        (intelligence_mi_component, 0.5),
     ]);
-    let competition_pillar = weighted_geometric_mean(&[
-        (attack_success_component, 0.60),
-        (attack_attempt_component, 0.40),
-    ]);
+    let learning_pillar = mean_learning_slope
+        .map(|value| clamp01(value / LEARNING_SATURATION))
+        .unwrap_or(0.0);
 
     PillarScores {
         window_start_tick,
         window_end_tick,
-        mean_p_fwd_food,
+        mean_action_effectiveness,
         mean_mi_sa,
-        mean_attack_attempt_rate,
-        mean_attack_success_rate,
-        mean_failed_action_rate,
-        mean_idle_fraction,
-        mean_util,
+        mean_plant_consumption_rate,
+        mean_prey_consumption_rate,
+        mean_learning_slope,
         mean_action_histogram,
-        mean_age_correlated_competence,
-        foraging_p_fwd_food_component: p_fwd_food_component,
-        intelligence_mi_component: mean_mi_component,
-        intelligence_action_effectiveness_component: action_effectiveness_component,
-        intelligence_anti_idle_component: anti_idle_component,
-        intelligence_util_component: util_component,
-        competition_attack_success_component: attack_success_component,
-        competition_attack_attempt_component: attack_attempt_component,
+        intelligence_effectiveness_component,
+        intelligence_mi_component,
         foraging_pillar,
+        predation_pillar,
         intelligence_pillar,
-        competition_pillar,
+        learning_pillar,
     }
 }
 
