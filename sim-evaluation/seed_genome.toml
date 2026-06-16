@@ -1,7 +1,6 @@
 # Topology
 num_neurons = 0
 num_synapses = 10
-spatial_prior_sigma = 3.0
 vision_distance = 5
 
 # Lifecycle
@@ -27,11 +26,9 @@ mutation_rate_inter_bias = 0.1
 mutation_rate_inter_update_rate = 0.1
 mutation_rate_eligibility_retention = 0.1
 mutation_rate_synapse_prune_threshold = 0.05
-mutation_rate_neuron_location = 0.1
 mutation_rate_synapse_weight_perturbation = 0.5
 mutation_rate_add_synapse = 0.1
 mutation_rate_remove_synapse = 0.1
 mutation_rate_remove_neuron = 0.05
 mutation_rate_add_neuron_split_edge = 0.1
-mutation_rate_spatial_prior_sigma = 0.1
 mutation_rate_max_weight_delta_per_tick = 0.1

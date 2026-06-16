@@ -11,15 +11,6 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
     let inter_log_time_constants = (0..num_neurons)
         .map(|_| sample_initial_log_time_constant(rng))
         .collect();
-    let inter_locations = (0..num_neurons)
-        .map(|_| sample_uniform_location(rng))
-        .collect();
-    let sensory_locations = (0..SENSORY_COUNT)
-        .map(|_| sample_uniform_location(rng))
-        .collect();
-    let action_locations = (0..ACTION_COUNT)
-        .map(|_| sample_uniform_location(rng))
-        .collect();
     let action_biases = (0..ACTION_COUNT)
         .map(|_| sample_initial_bias(rng))
         .collect();
@@ -28,7 +19,6 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
         topology: TopologyGenes {
             num_neurons,
             num_synapses: config.num_synapses.min(max_synapses),
-            spatial_prior_sigma: config.spatial_prior_sigma.max(0.01),
             vision_distance: config.vision_distance,
         },
         lifecycle: LifecycleGenes {
@@ -55,21 +45,16 @@ pub(crate) fn generate_seed_genome<R: Rng + ?Sized>(
             inter_update_rate: config.mutation_rate_inter_update_rate,
             eligibility_retention: config.mutation_rate_eligibility_retention,
             synapse_prune_threshold: config.mutation_rate_synapse_prune_threshold,
-            neuron_location: config.mutation_rate_neuron_location,
             synapse_weight_perturbation: config.mutation_rate_synapse_weight_perturbation,
             add_synapse: config.mutation_rate_add_synapse,
             remove_synapse: config.mutation_rate_remove_synapse,
             remove_neuron: config.mutation_rate_remove_neuron,
             add_neuron_split_edge: config.mutation_rate_add_neuron_split_edge,
-            spatial_prior_sigma: config.mutation_rate_spatial_prior_sigma,
             max_weight_delta_per_tick: config.mutation_rate_max_weight_delta_per_tick,
         },
         brain: BrainTopology {
             inter_biases,
             inter_log_time_constants,
-            sensory_locations,
-            inter_locations,
-            action_locations,
             action_biases,
             edges: Vec::new(),
         },

@@ -975,15 +975,9 @@ async fn get_session(state: &AppState, id: Uuid) -> Result<Arc<Session>, AppErro
 mod tests {
     use super::*;
     use sim_types::{
-        inter_neuron_id, ActionType, BrainLocation, BrainState, FacingDirection, OrganismId,
-        SensoryReceptor, SpeciesId, SynapseGene,
+        inter_neuron_id, ActionType, BrainState, FacingDirection, OrganismId, SensoryReceptor,
+        SpeciesId, SynapseGene,
     };
-
-    fn action_type_index(action_type: ActionType) -> Option<usize> {
-        ActionType::ALL
-            .iter()
-            .position(|candidate| *candidate == action_type)
-    }
 
     fn make_record(
         generation: u64,
@@ -997,10 +991,6 @@ mod tests {
         genome.topology.vision_distance = generation as u32 + 2;
         genome.brain.inter_biases = vec![generation as f32];
         genome.brain.inter_log_time_constants = vec![generation as f32 * 0.1];
-        genome.brain.inter_locations = vec![sim_types::BrainLocation {
-            x: generation as f32,
-            y: generation as f32,
-        }];
 
         ChampionGenomeRecord {
             genome,
@@ -1117,20 +1107,6 @@ mod tests {
         record.genome.topology.num_neurons = 2;
         record.genome.brain.inter_biases = vec![0.1, -0.2];
         record.genome.brain.inter_log_time_constants = vec![0.0, 0.3];
-        record.genome.brain.inter_locations = vec![
-            BrainLocation { x: 1.0, y: 2.0 },
-            BrainLocation { x: 3.0, y: 4.0 },
-        ];
-        record.genome.brain.sensory_locations =
-            vec![BrainLocation { x: 0.0, y: 0.0 }; SensoryReceptor::ordered().count()];
-        record.genome.brain.sensory_locations[food_receptor.current_index().unwrap()] =
-            BrainLocation { x: 7.0, y: 8.0 };
-        record.genome.brain.sensory_locations[blue_receptor.current_index().unwrap()] =
-            BrainLocation { x: 9.0, y: 1.5 };
-        record.genome.brain.action_locations[action_type_index(forward_action).unwrap()] =
-            BrainLocation { x: 6.0, y: 6.5 };
-        record.genome.brain.action_locations[action_type_index(attack_action).unwrap()] =
-            BrainLocation { x: 8.0, y: 3.5 };
         record.genome.brain.edges = vec![
             SynapseGene {
                 pre_neuron_id: food_receptor.neuron_id().unwrap(),

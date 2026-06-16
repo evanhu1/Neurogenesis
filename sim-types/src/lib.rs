@@ -170,12 +170,6 @@ impl VisualProperties {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
-pub struct BrainLocation {
-    pub x: f32,
-    pub y: f32,
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum EntityType {
     Food,
@@ -378,7 +372,6 @@ pub fn offspring_transfer_energy(gestation_ticks: u8) -> f32 {
 pub struct TopologyGenes {
     pub num_neurons: u32,
     pub num_synapses: u32,
-    pub spatial_prior_sigma: f32,
     pub vision_distance: u32,
 }
 
@@ -430,8 +423,6 @@ pub struct MutationRateGenes {
     #[serde(default)]
     pub synapse_prune_threshold: f32,
     #[serde(default)]
-    pub neuron_location: f32,
-    #[serde(default)]
     pub synapse_weight_perturbation: f32,
     #[serde(default)]
     pub add_synapse: f32,
@@ -442,8 +433,6 @@ pub struct MutationRateGenes {
     #[serde(default)]
     pub add_neuron_split_edge: f32,
     #[serde(default)]
-    pub spatial_prior_sigma: f32,
-    #[serde(default)]
     pub max_weight_delta_per_tick: f32,
 }
 
@@ -451,9 +440,6 @@ pub struct MutationRateGenes {
 pub struct BrainTopology {
     pub inter_biases: Vec<f32>,
     pub inter_log_time_constants: Vec<f32>,
-    pub sensory_locations: Vec<BrainLocation>,
-    pub inter_locations: Vec<BrainLocation>,
-    pub action_locations: Vec<BrainLocation>,
     #[serde(default)]
     pub action_biases: Vec<f32>,
     pub edges: Vec<SynapseGene>,
@@ -474,14 +460,11 @@ impl OrganismGenome {
     /// Callers mutate specific fields after construction as needed. Adding a new field on
     /// `OrganismGenome` means updating only this one builder.
     pub fn test_fixture() -> Self {
-        let default_loc = BrainLocation { x: 5.0, y: 5.0 };
-        let sensory_count = SensoryReceptor::ordered().count();
         let action_count = ActionType::ALL.len();
         Self {
             topology: TopologyGenes {
                 num_neurons: 1,
                 num_synapses: 0,
-                spatial_prior_sigma: 3.5,
                 vision_distance: 2,
             },
             lifecycle: LifecycleGenes {
@@ -501,9 +484,6 @@ impl OrganismGenome {
             brain: BrainTopology {
                 inter_biases: vec![0.0],
                 inter_log_time_constants: vec![0.0],
-                sensory_locations: vec![default_loc; sensory_count],
-                inter_locations: vec![default_loc],
-                action_locations: vec![default_loc; action_count],
                 action_biases: vec![0.0; action_count],
                 edges: Vec::new(),
             },
@@ -563,8 +543,6 @@ pub struct NeuronState {
     pub neuron_id: NeuronId,
     pub neuron_type: NeuronType,
     pub bias: f32,
-    pub x: f32,
-    pub y: f32,
     pub activation: f32,
 }
 
@@ -595,8 +573,6 @@ pub struct InterNeuronState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ActionNeuronState {
     pub neuron_id: NeuronId,
-    pub x: f32,
-    pub y: f32,
     pub logit: f32,
     pub action_type: ActionType,
 }

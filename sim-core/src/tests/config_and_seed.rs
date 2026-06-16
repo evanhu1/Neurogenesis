@@ -30,21 +30,12 @@ fn champion_pool_init_reset_and_replay_are_deterministic() {
     champion_a.topology.vision_distance = 7;
     champion_a.brain.inter_biases = vec![0.1, -0.2];
     champion_a.brain.inter_log_time_constants = vec![0.0, 0.2];
-    champion_a.brain.inter_locations = vec![
-        BrainLocation { x: 1.0, y: 1.0 },
-        BrainLocation { x: 2.0, y: 2.0 },
-    ];
 
     let mut champion_b = champion_a.clone();
     champion_b.topology.num_neurons = 3;
     champion_b.topology.vision_distance = 9;
     champion_b.brain.inter_biases = vec![0.3, -0.4, 0.5];
     champion_b.brain.inter_log_time_constants = vec![0.0, 0.1, 0.2];
-    champion_b.brain.inter_locations = vec![
-        BrainLocation { x: 3.0, y: 3.0 },
-        BrainLocation { x: 4.0, y: 4.0 },
-        BrainLocation { x: 5.0, y: 5.0 },
-    ];
 
     let champion_pool = vec![champion_a.clone(), champion_b.clone()];
     let mut run = Simulation::new_with_champion_pool(cfg.clone(), 2026, champion_pool.clone())
@@ -82,12 +73,6 @@ fn reset_preserves_champion_pool_bootstrap_behavior() {
     champion.topology.vision_distance = 10;
     champion.brain.inter_biases = vec![0.0, 0.1, 0.2, 0.3];
     champion.brain.inter_log_time_constants = vec![0.0, 0.1, 0.2, 0.3];
-    champion.brain.inter_locations = vec![
-        BrainLocation { x: 1.0, y: 1.0 },
-        BrainLocation { x: 2.0, y: 2.0 },
-        BrainLocation { x: 3.0, y: 3.0 },
-        BrainLocation { x: 4.0, y: 4.0 },
-    ];
 
     let mut sim = Simulation::new_with_champion_pool(cfg, 99, vec![champion.clone()])
         .expect("simulation should initialize");

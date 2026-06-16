@@ -1,4 +1,4 @@
-use super::spatial_prior::add_synapse_genes_with_spatial_prior;
+use super::synapse_creation::add_synapse_genes;
 use super::*;
 
 pub(crate) fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
@@ -7,7 +7,6 @@ pub(crate) fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome,
         .topology
         .num_synapses
         .min(max_possible_synapses(genome.topology.num_neurons));
-    genome.topology.spatial_prior_sigma = genome.topology.spatial_prior_sigma.max(0.01);
 
     let target_inter_len = genome.topology.num_neurons as usize;
     align_vec_to(&mut genome.brain.inter_biases, target_inter_len, || {
@@ -18,27 +17,16 @@ pub(crate) fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome,
         target_inter_len,
         || sample_initial_log_time_constant(rng),
     );
-    align_vec_to(&mut genome.brain.inter_locations, target_inter_len, || {
-        sample_uniform_location(rng)
-    });
-    align_vec_to(
-        &mut genome.brain.sensory_locations,
-        SENSORY_COUNT as usize,
-        || sample_uniform_location(rng),
-    );
-    align_vec_to(&mut genome.brain.action_locations, ACTION_COUNT, || {
-        sample_uniform_location(rng)
-    });
     align_vec_to(&mut genome.brain.action_biases, ACTION_COUNT, || {
         sample_initial_bias(rng)
     });
 
     // Padding fixes lengths but leaves existing entries untouched; a NaN
-    // bias/log-tau/location from malformed intake would flow through
-    // `express_genome` and poison activations exactly like a NaN synapse
-    // weight (see `sanitize_synapse_genes`), and `perturb_clamped` propagates
-    // NaN, so it would persist heritably. Resample non-finite entries;
-    // well-formed genomes draw no RNG, preserving bit-for-bit determinism.
+    // bias/log-tau from malformed intake would flow through `express_genome`
+    // and poison activations exactly like a NaN synapse weight (see
+    // `sanitize_synapse_genes`), and `perturb_clamped` propagates NaN, so it
+    // would persist heritably. Resample non-finite entries; well-formed
+    // genomes draw no RNG, preserving bit-for-bit determinism.
     for bias in genome
         .brain
         .inter_biases
@@ -52,17 +40,6 @@ pub(crate) fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome,
     for log_tau in genome.brain.inter_log_time_constants.iter_mut() {
         if !log_tau.is_finite() {
             *log_tau = sample_initial_log_time_constant(rng);
-        }
-    }
-    for location in genome
-        .brain
-        .sensory_locations
-        .iter_mut()
-        .chain(genome.brain.inter_locations.iter_mut())
-        .chain(genome.brain.action_locations.iter_mut())
-    {
-        if !(location.x.is_finite() && location.y.is_finite()) {
-            *location = sample_uniform_location(rng);
         }
     }
 
@@ -87,16 +64,12 @@ pub(super) fn debug_assert_genome_well_formed(genome: &OrganismGenome) {
     debug_assert!(
         genome.topology.num_synapses <= max_possible_synapses(genome.topology.num_neurons)
     );
-    debug_assert!(genome.topology.spatial_prior_sigma >= 0.01);
     let target_inter_len = genome.topology.num_neurons as usize;
     debug_assert_eq!(genome.brain.inter_biases.len(), target_inter_len);
     debug_assert_eq!(
         genome.brain.inter_log_time_constants.len(),
         target_inter_len
     );
-    debug_assert_eq!(genome.brain.inter_locations.len(), target_inter_len);
-    debug_assert_eq!(genome.brain.sensory_locations.len(), SENSORY_COUNT as usize);
-    debug_assert_eq!(genome.brain.action_locations.len(), ACTION_COUNT);
     debug_assert_eq!(genome.brain.action_biases.len(), ACTION_COUNT);
     debug_assert_eq!(
         genome.brain.edges.len() as u32,
@@ -134,7 +107,7 @@ pub(super) fn reconcile_synapse_count<R: Rng + ?Sized>(genome: &mut OrganismGeno
 
     let target = genome.topology.num_synapses as usize;
     if genome.brain.edges.len() < target {
-        add_synapse_genes_with_spatial_prior(genome, target - genome.brain.edges.len(), rng);
+        add_synapse_genes(genome, target - genome.brain.edges.len(), rng);
         sort_synapse_genes(&mut genome.brain.edges);
     }
 

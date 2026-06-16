@@ -4,22 +4,13 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
     // `align_genome_vectors` forces every genome vector to its exact target
     // length on all paths into expression (seed generation, mutation,
     // external-genome intake) — fail fast instead of silently expressing
-    // zero-bias / default-alpha / center-located neurons.
+    // zero-bias / default-alpha neurons.
     let num_inter = genome.topology.num_neurons as usize;
     debug_assert_eq!(genome.brain.inter_biases.len(), num_inter);
     debug_assert_eq!(genome.brain.inter_log_time_constants.len(), num_inter);
-    debug_assert_eq!(genome.brain.inter_locations.len(), num_inter);
-    debug_assert_eq!(genome.brain.sensory_locations.len(), SENSORY_COUNT as usize);
-    debug_assert_eq!(genome.brain.action_locations.len(), ACTION_COUNT);
 
     let sensory = sensory_receptors_in_order()
-        .map(|(sensory_id, receptor)| {
-            make_sensory_neuron(
-                sensory_id,
-                receptor,
-                genome.brain.sensory_locations[sensory_id as usize],
-            )
-        })
+        .map(|(sensory_id, receptor)| make_sensory_neuron(sensory_id, receptor))
         .collect::<Vec<_>>();
 
     let mut inter = Vec::with_capacity(num_inter);
@@ -29,12 +20,7 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
         let log_time_constant = genome.brain.inter_log_time_constants[idx];
         let alpha = inter_alpha_from_log_time_constant(log_time_constant);
         inter.push(InterNeuronState {
-            neuron: make_neuron(
-                inter_neuron_id(i),
-                NeuronType::Inter,
-                bias,
-                genome.brain.inter_locations[idx],
-            ),
+            neuron: make_neuron(inter_neuron_id(i), NeuronType::Inter, bias),
             state: 0.0,
             alpha,
             synapses: Vec::new(),
@@ -44,11 +30,7 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
 
     let mut action = Vec::with_capacity(ACTION_COUNT);
     for (idx, action_type) in ActionType::ALL.iter().copied().enumerate() {
-        action.push(make_action_neuron(
-            action_neuron_id(idx).0,
-            action_type,
-            genome.brain.action_locations[idx],
-        ));
+        action.push(make_action_neuron(action_neuron_id(idx).0, action_type));
     }
 
     let num_sensory = sensory.len();
@@ -68,28 +50,18 @@ pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
     brain
 }
 
-pub(crate) fn make_sensory_neuron(
-    id: u32,
-    receptor: SensoryReceptor,
-    location: BrainLocation,
-) -> SensoryNeuronState {
+pub(crate) fn make_sensory_neuron(id: u32, receptor: SensoryReceptor) -> SensoryNeuronState {
     SensoryNeuronState {
-        neuron: make_neuron(NeuronId(id), NeuronType::Sensory, 0.0, location),
+        neuron: make_neuron(NeuronId(id), NeuronType::Sensory, 0.0),
         receptor,
         synapses: Vec::new(),
         action_synapse_start: 0,
     }
 }
 
-pub(crate) fn make_action_neuron(
-    id: u32,
-    action_type: ActionType,
-    location: BrainLocation,
-) -> ActionNeuronState {
+pub(crate) fn make_action_neuron(id: u32, action_type: ActionType) -> ActionNeuronState {
     ActionNeuronState {
         neuron_id: NeuronId(id),
-        x: location.x,
-        y: location.y,
         logit: 0.0,
         action_type,
     }
@@ -166,18 +138,11 @@ fn runtime_edge_from_gene(gene: &SynapseGene) -> SynapseEdge {
     }
 }
 
-fn make_neuron(
-    id: NeuronId,
-    neuron_type: NeuronType,
-    bias: f32,
-    location: BrainLocation,
-) -> NeuronState {
+fn make_neuron(id: NeuronId, neuron_type: NeuronType, bias: f32) -> NeuronState {
     NeuronState {
         neuron_id: id,
         neuron_type,
         bias,
-        x: location.x,
-        y: location.y,
         activation: 0.0,
     }
 }

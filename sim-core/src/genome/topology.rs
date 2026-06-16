@@ -8,7 +8,7 @@ pub(crate) fn mutate_add_synapse<R: Rng + ?Sized>(genome: &mut OrganismGenome, r
     }
 
     let before_len = genome.brain.edges.len();
-    super::spatial_prior::add_synapse_genes_with_spatial_prior(genome, 1, rng);
+    super::synapse_creation::add_synapse_genes(genome, 1, rng);
     if genome.brain.edges.len() > before_len {
         genome.topology.num_synapses = genome.topology.num_synapses.saturating_add(1);
         // The new edge was appended at the end; move it to its sorted
@@ -46,7 +46,6 @@ pub(crate) fn mutate_remove_neuron<R: Rng + ?Sized>(genome: &mut OrganismGenome,
     let removed_idx = removed_inter_idx as usize;
     genome.brain.inter_biases.remove(removed_idx);
     genome.brain.inter_log_time_constants.remove(removed_idx);
-    genome.brain.inter_locations.remove(removed_idx);
 
     genome.brain.edges.retain_mut(|edge| {
         if edge.pre_neuron_id == removed_neuron_id || edge.post_neuron_id == removed_neuron_id {
@@ -92,10 +91,6 @@ pub(crate) fn mutate_add_neuron_split_edge<R: Rng + ?Sized>(
         genome.brain.inter_log_time_constants.len(),
         genome.topology.num_neurons as usize
     );
-    debug_assert_eq!(
-        genome.brain.inter_locations.len(),
-        genome.topology.num_neurons as usize
-    );
 
     let selected_idx = select_weighted_edge_index(&genome.brain.edges, rng);
     // Ordered remove: `swap_remove` would break the sorted-by-(pre, post)
@@ -103,13 +98,11 @@ pub(crate) fn mutate_add_neuron_split_edge<R: Rng + ?Sized>(
     let selected_edge = genome.brain.edges.remove(selected_idx);
     let new_inter_id = inter_neuron_id(genome.topology.num_neurons);
 
-    let (new_bias, new_log_tau, new_location) =
-        derive_split_neuron_params(&selected_edge, genome, rng);
+    let (new_bias, new_log_tau) = derive_split_neuron_params(&selected_edge, genome, rng);
 
     genome.topology.num_neurons = genome.topology.num_neurons.saturating_add(1);
     genome.brain.inter_biases.push(new_bias);
     genome.brain.inter_log_time_constants.push(new_log_tau);
-    genome.brain.inter_locations.push(new_location);
 
     insert_split_edges(genome, &selected_edge, new_inter_id);
 
@@ -122,7 +115,7 @@ fn derive_split_neuron_params<R: Rng + ?Sized>(
     edge: &SynapseGene,
     genome: &OrganismGenome,
     rng: &mut R,
-) -> (f32, f32, BrainLocation) {
+) -> (f32, f32) {
     let pre_tau = inter_log_time_constant_for_neuron(edge.pre_neuron_id, genome);
     let post_tau = inter_log_time_constant_for_neuron(edge.post_neuron_id, genome);
     let base_tau = match (pre_tau, post_tau) {
@@ -145,30 +138,7 @@ fn derive_split_neuron_params<R: Rng + ?Sized>(
         rng,
     );
 
-    let pre_loc = location_for_neuron(edge.pre_neuron_id, genome);
-    let post_loc = location_for_neuron(edge.post_neuron_id, genome);
-    let midpoint = BrainLocation {
-        x: 0.5 * (pre_loc.x + post_loc.x),
-        y: 0.5 * (pre_loc.y + post_loc.y),
-    };
-    let new_location = BrainLocation {
-        x: perturb_clamped(
-            midpoint.x,
-            LOCATION_PERTURBATION_STDDEV * NEW_NEURON_PERTURBATION_SCALE,
-            BRAIN_SPACE_MIN,
-            BRAIN_SPACE_MAX,
-            rng,
-        ),
-        y: perturb_clamped(
-            midpoint.y,
-            LOCATION_PERTURBATION_STDDEV * NEW_NEURON_PERTURBATION_SCALE,
-            BRAIN_SPACE_MIN,
-            BRAIN_SPACE_MAX,
-            rng,
-        ),
-    };
-
-    (new_bias, new_log_tau, new_location)
+    (new_bias, new_log_tau)
 }
 
 fn insert_split_edges(
@@ -241,26 +211,4 @@ pub(super) fn inter_log_time_constant_for_neuron(
         .inter_log_time_constants
         .get(inter_idx)
         .copied()
-}
-
-pub(super) fn location_for_neuron(neuron_id: NeuronId, genome: &OrganismGenome) -> BrainLocation {
-    if is_sensory_id(neuron_id) {
-        return genome
-            .brain
-            .sensory_locations
-            .get(neuron_id.0 as usize)
-            .copied()
-            .unwrap_or(DEFAULT_BRAIN_LOCATION);
-    }
-    if is_inter_id(neuron_id, genome.topology.num_neurons) {
-        return inter_index(neuron_id, genome.topology.num_neurons as usize)
-            .and_then(|idx| genome.brain.inter_locations.get(idx).copied())
-            .unwrap_or(DEFAULT_BRAIN_LOCATION);
-    }
-    if is_action_id(neuron_id) {
-        return action_array_index(neuron_id)
-            .and_then(|idx| genome.brain.action_locations.get(idx).copied())
-            .unwrap_or(DEFAULT_BRAIN_LOCATION);
-    }
-    DEFAULT_BRAIN_LOCATION
 }

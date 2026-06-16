@@ -50,7 +50,6 @@ export type FacingDirection =
 export type TopologyGenes = {
   num_neurons: number;
   num_synapses: number;
-  spatial_prior_sigma: number;
   vision_distance: number;
 };
 
@@ -80,13 +79,11 @@ export type MutationRateGenes = {
   inter_update_rate: number;
   eligibility_retention: number;
   synapse_prune_threshold: number;
-  neuron_location: number;
   synapse_weight_perturbation: number;
   add_synapse: number;
   remove_synapse: number;
   remove_neuron: number;
   add_neuron_split_edge: number;
-  spatial_prior_sigma: number;
   max_weight_delta_per_tick: number;
 };
 
@@ -94,7 +91,6 @@ export type MutationRateGenes = {
 export type SeedGenomeConfig = {
   num_neurons: number;
   num_synapses: number;
-  spatial_prior_sigma: number;
   vision_distance: number;
   body_color: RgbColor;
   age_of_maturity: number;
@@ -115,13 +111,11 @@ export type SeedGenomeConfig = {
   mutation_rate_inter_update_rate: number;
   mutation_rate_eligibility_retention: number;
   mutation_rate_synapse_prune_threshold: number;
-  mutation_rate_neuron_location: number;
   mutation_rate_synapse_weight_perturbation: number;
   mutation_rate_add_synapse: number;
   mutation_rate_remove_synapse: number;
   mutation_rate_remove_neuron: number;
   mutation_rate_add_neuron_split_edge: number;
-  mutation_rate_spatial_prior_sigma: number;
   mutation_rate_max_weight_delta_per_tick: number;
 };
 
@@ -147,11 +141,6 @@ export type WorldConfig = {
   seed_genome_config: SeedGenomeConfig;
 };
 
-export type BrainLocation = {
-  x: number;
-  y: number;
-};
-
 type SynapseEdgeOf<Id> = {
   pre_neuron_id: Id;
   post_neuron_id: Id;
@@ -175,9 +164,6 @@ export type SynapseGene = SynapseGeneOf<NeuronId>;
 type BrainTopologyGenesOf<Id> = {
   inter_biases: number[];
   inter_log_time_constants: number[];
-  sensory_locations: BrainLocation[];
-  inter_locations: BrainLocation[];
-  action_locations: BrainLocation[];
   action_biases: number[];
   edges: SynapseGeneOf<Id>[];
 };
@@ -197,8 +183,6 @@ type NeuronStateOf<Id> = {
   neuron_id: Id;
   neuron_type: NeuronType;
   bias: number;
-  x: number;
-  y: number;
   activation: number;
 };
 
@@ -230,8 +214,6 @@ export type InterNeuronState = InterNeuronStateOf<NeuronId>;
 
 type ActionNeuronStateOf<Id> = {
   neuron_id: Id;
-  x: number;
-  y: number;
   logit: number;
   action_type: ActionType;
 };

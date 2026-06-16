@@ -1,7 +1,6 @@
 use crate::topology::{
-    action_array_index, action_neuron_id, constrain_weight, inter_index, inter_neuron_id,
-    is_action_id, is_inter_id, is_sensory_id, ACTION_COUNT, ACTION_COUNT_U32, ACTION_ID_BASE,
-    INTER_ID_BASE, SENSORY_COUNT,
+    action_neuron_id, constrain_weight, inter_index, inter_neuron_id, is_action_id, is_inter_id,
+    is_sensory_id, ACTION_COUNT, ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT,
 };
 
 /// Inter-neuron IDs occupy `INTER_ID_BASE..ACTION_ID_BASE`; growing past this
@@ -10,8 +9,8 @@ const MAX_INTER_NEURONS: u32 = ACTION_ID_BASE - INTER_ID_BASE;
 use rand::Rng;
 use rand_distr::{Distribution, StandardNormal};
 use sim_types::{
-    BrainLocation, BrainTopology, LifecycleGenes, MutationRateGenes, NeuronId, OrganismGenome,
-    PlasticityGenes, SeedGenomeConfig, SynapseGene, TopologyGenes,
+    BrainTopology, LifecycleGenes, MutationRateGenes, NeuronId, OrganismGenome, PlasticityGenes,
+    SeedGenomeConfig, SynapseGene, TopologyGenes,
 };
 use std::cmp::Ordering;
 use std::f32::consts::LN_10;
@@ -20,7 +19,7 @@ mod mutation_rates;
 mod sanitization;
 mod scalar;
 mod seed;
-mod spatial_prior;
+mod synapse_creation;
 mod topology;
 
 use mutation_rates::{
@@ -30,8 +29,7 @@ pub(crate) use sanitization::align_genome_vectors;
 use sanitization::{debug_assert_genome_well_formed, reconcile_synapse_count};
 pub(crate) use scalar::inter_alpha_from_log_time_constant;
 use scalar::{
-    mutate_action_biases, mutate_inter_biases, mutate_inter_update_rates,
-    mutate_random_neuron_location, mutate_synapse_weights,
+    mutate_action_biases, mutate_inter_biases, mutate_inter_update_rates, mutate_synapse_weights,
 };
 pub(crate) use seed::generate_seed_genome;
 pub(crate) use topology::{
@@ -46,13 +44,6 @@ const MIN_MUTATED_GESTATION_TICKS: u8 = 0;
 const MAX_MUTATED_GESTATION_TICKS: u8 = 10;
 const MIN_MUTATED_MAX_ORGANISM_AGE: u32 = 1;
 const MAX_MUTATED_MAX_ORGANISM_AGE: u32 = 100_000;
-/// Clamp range for the evolvable `spatial_prior_sigma` gene. The lower bound
-/// matches the `.max(0.05)`-style floor sanitization expects (>= 0.01); the
-/// upper bound is the full brain-space width (`BRAIN_SPACE_MAX -
-/// BRAIN_SPACE_MIN` = 10), beyond which the spatial prior is effectively
-/// flat. The seed default (~3.0–3.5) sits comfortably inside.
-const MIN_MUTATED_SPATIAL_PRIOR_SIGMA: f32 = 0.05;
-const MAX_MUTATED_SPATIAL_PRIOR_SIGMA: f32 = 10.0;
 /// Clamp range for the evolvable `max_weight_delta_per_tick` gene, a sane
 /// positive band around its 0.05 default (one order of magnitude either way,
 /// capped at 0.5 so a single tick cannot swing a weight by a third of
@@ -61,7 +52,7 @@ const MIN_MUTATED_MAX_WEIGHT_DELTA_PER_TICK: f32 = 0.005;
 const MAX_MUTATED_MAX_WEIGHT_DELTA_PER_TICK: f32 = 0.5;
 /// Log-space stddev for multiplicative mutation of strictly-positive
 /// traits spanning wide ranges (e.g. `max_organism_age`, `age_of_maturity`,
-/// `spatial_prior_sigma`, `max_weight_delta_per_tick`).
+/// `max_weight_delta_per_tick`).
 /// `σ = 0.1` corresponds to roughly ±10% per mutation, scale-invariant
 /// across orders of magnitude.
 const LARGE_UNBOUNDED_LOG_STDDEV: f32 = 0.1;
@@ -88,7 +79,6 @@ const INTER_UPDATE_RATE_PERTURB_NEURON_RATE: f32 = 0.8;
 const SYNAPSE_WEIGHT_PERTURBATION_STDDEV: f32 = 0.15;
 const SYNAPSE_WEIGHT_PERTURB_EDGE_RATE: f32 = 0.8;
 const SYNAPSE_WEIGHT_REPLACEMENT_RATE: f32 = 0.1;
-const LOCATION_PERTURBATION_STDDEV: f32 = 0.75;
 const BODY_COLOR_PERTURBATION_STDDEV: f32 = 0.12;
 /// Baseline probability of mutating `body_color` per offspring, matching the
 /// typical per-gene rates in the seed genome. Body color is a sensed phenotype,
@@ -101,23 +91,13 @@ pub(crate) const INTER_TIME_CONSTANT_MAX: f32 = 10.0;
 pub(crate) const INTER_LOG_TIME_CONSTANT_MIN: f32 = -LN_10;
 pub(crate) const INTER_LOG_TIME_CONSTANT_MAX: f32 = LN_10;
 pub(crate) const DEFAULT_INTER_LOG_TIME_CONSTANT: f32 = -1.203_972_8;
-pub(crate) const BRAIN_SPACE_MIN: f32 = 0.0;
-pub(crate) const BRAIN_SPACE_MAX: f32 = 10.0;
-/// Center of the [BRAIN_SPACE_MIN, BRAIN_SPACE_MAX] brain coordinate space.
-const DEFAULT_BRAIN_LOCATION: BrainLocation = BrainLocation { x: 5.0, y: 5.0 };
-/// Perturbation stddev is halved when deriving a new neuron from an edge split,
-/// so the child neuron stays near the parent edge midpoint.
+/// Bias / time-constant perturbation stddev is halved when deriving a new
+/// neuron from an edge split, so the child neuron's traits stay close to the
+/// parents it is spliced between.
 const NEW_NEURON_PERTURBATION_SCALE: f32 = 0.5;
-const SPATIAL_PRIOR_LONG_RANGE_FLOOR: f32 = 0.01;
 const SYNAPSE_WEIGHT_LOG_NORMAL_MU: f32 = -0.5;
 const SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA: f32 = 0.8;
 const INITIAL_SYNAPSE_EXCITATORY_PROBABILITY: f32 = 0.8;
-
-pub(crate) fn distance_sq_between_locations(a: BrainLocation, b: BrainLocation) -> f32 {
-    let dx = a.x - b.x;
-    let dy = a.y - b.y;
-    dx * dx + dy * dy
-}
 
 pub(crate) fn mutate_genome<R: Rng + ?Sized>(
     genome: &mut OrganismGenome,
@@ -219,9 +199,6 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
             rng,
         );
     }
-    if rng.random::<f32>() < inherited_rates.neuron_location {
-        mutate_random_neuron_location(genome, rng);
-    }
     if rng.random::<f32>() < inherited_rates.synapse_weight_perturbation {
         mutate_synapse_weights(genome, rng);
     }
@@ -237,20 +214,10 @@ pub(crate) fn mutate_genome<R: Rng + ?Sized>(
     if rng.random::<f32>() < inherited_rates.add_neuron_split_edge {
         mutate_add_neuron_split_edge(genome, rng);
     }
-    // The two gates below were appended AFTER all pre-existing gates so the
-    // RNG draw prefix consumed by the older operators is unchanged; only the
-    // draws from this point on shift (a sanctioned change to evolution
-    // outcomes). Keep any future gates appended here, before
-    // `reconcile_synapse_count`.
-    if rng.random::<f32>() < inherited_rates.spatial_prior_sigma {
-        genome.topology.spatial_prior_sigma = perturb_multiplicative_f32(
-            genome.topology.spatial_prior_sigma,
-            LARGE_UNBOUNDED_LOG_STDDEV,
-            MIN_MUTATED_SPATIAL_PRIOR_SIGMA,
-            MAX_MUTATED_SPATIAL_PRIOR_SIGMA,
-            rng,
-        );
-    }
+    // The gate below was appended AFTER all pre-existing gates so the RNG draw
+    // prefix consumed by the older operators is unchanged; only the draws from
+    // this point on shift (a sanctioned change to evolution outcomes). Keep any
+    // future gates appended here, before `reconcile_synapse_count`.
     if rng.random::<f32>() < inherited_rates.max_weight_delta_per_tick {
         genome.plasticity.max_weight_delta_per_tick = perturb_multiplicative_f32(
             genome.plasticity.max_weight_delta_per_tick,
@@ -368,13 +335,6 @@ fn sample_initial_log_time_constant<R: Rng + ?Sized>(rng: &mut R) -> f32 {
         INTER_LOG_TIME_CONSTANT_MAX,
         rng,
     )
-}
-
-fn sample_uniform_location<R: Rng + ?Sized>(rng: &mut R) -> BrainLocation {
-    BrainLocation {
-        x: rng.random_range(BRAIN_SPACE_MIN..=BRAIN_SPACE_MAX),
-        y: rng.random_range(BRAIN_SPACE_MIN..=BRAIN_SPACE_MAX),
-    }
 }
 
 fn sample_body_color<R: Rng + ?Sized>(rng: &mut R) -> sim_types::RgbColor {

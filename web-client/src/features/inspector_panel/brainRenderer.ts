@@ -41,6 +41,10 @@ export function computeBrainLayout(
 ): BrainLayout {
   const nodes: BrainNode[] = [];
 
+  // Neurons no longer carry spatial coordinates, so the layout is derived
+  // purely from layer + index: sensory in a left column, inter neurons in a
+  // middle grid, action neurons in a right column. This matches the left→right
+  // sensory→inter→action signal flow; `relaxOverlaps` spreads any collisions.
   brain.sensory.forEach((neuron, sensoryIdx) => {
     nodes.push({
       id: neuron.neuron.neuron_id,
@@ -51,8 +55,8 @@ export function computeBrainLayout(
           : neuron.receptor_type,
       value: neuron.neuron.activation,
       bias: neuron.neuron.bias,
-      gx: finiteOr(neuron.neuron.x, sensoryIdx),
-      gy: finiteOr(neuron.neuron.y, sensoryIdx * 0.9),
+      gx: 0.5,
+      gy: sensoryIdx * 1.1,
       isActive: false,
     });
   });
@@ -63,8 +67,8 @@ export function computeBrainLayout(
       type: 'inter',
       value: neuron.neuron.activation,
       bias: neuron.neuron.bias,
-      gx: finiteOr(neuron.neuron.x, 3.5 + (interIdx % 6) * 0.7),
-      gy: finiteOr(neuron.neuron.y, 1 + Math.floor(interIdx / 6) * 0.9),
+      gx: 3.5 + (interIdx % 6) * 0.7,
+      gy: 1 + Math.floor(interIdx / 6) * 0.9,
       timeConstant: timeConstantFromAlpha(neuron.alpha),
       isActive: false,
     });
@@ -77,8 +81,8 @@ export function computeBrainLayout(
       label: neuron.action_type,
       value: neuron.logit,
       bias: actionBiases[actionIdx],
-      gx: finiteOr(neuron.x, 8.5),
-      gy: finiteOr(neuron.y, actionIdx * 1.2 + 2),
+      gx: 8.5,
+      gy: actionIdx * 1.2 + 2,
       isActive: activeActionNeuronId === neuron.neuron_id,
     });
   });
@@ -120,9 +124,6 @@ export function computeBrainLayout(
   };
 }
 
-function finiteOr(value: number, fallback: number): number {
-  return Number.isFinite(value) ? value : fallback;
-}
 
 function timeConstantFromAlpha(alpha: number): number {
   if (!Number.isFinite(alpha)) return Number.POSITIVE_INFINITY;

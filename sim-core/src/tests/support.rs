@@ -76,7 +76,6 @@ fn forced_brain_with_action(preferred_action: ActionType, confidence: f32) -> Br
             ray_offset: 0,
             channel: sim_types::VisionChannel::Green,
         },
-        BrainLocation { x: 0.0, y: 0.0 },
     )];
     let inter_id = NeuronId(1000);
     let inter_bias = confidence;
@@ -103,8 +102,6 @@ fn forced_brain_with_action(preferred_action: ActionType, confidence: f32) -> Br
             neuron_id: inter_id,
             neuron_type: NeuronType::Inter,
             bias: inter_bias,
-            x: 1.0,
-            y: 1.0,
             activation: confidence,
         },
         state: inter_state,
@@ -116,16 +113,7 @@ fn forced_brain_with_action(preferred_action: ActionType, confidence: f32) -> Br
         .iter()
         .copied()
         .enumerate()
-        .map(|(idx, action_type)| {
-            make_action_neuron(
-                2000 + idx as u32,
-                action_type,
-                BrainLocation {
-                    x: 2.0,
-                    y: idx as f32,
-                },
-            )
-        })
+        .map(|(idx, action_type)| make_action_neuron(2000 + idx as u32, action_type))
         .collect();
 
     BrainState {

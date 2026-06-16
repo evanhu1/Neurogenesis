@@ -1,8 +1,7 @@
 use super::sanitization::is_valid_synapse_pair;
-use super::topology::location_for_neuron;
 use super::*;
 
-pub(super) fn add_synapse_genes_with_spatial_prior<R: Rng + ?Sized>(
+pub(super) fn add_synapse_genes<R: Rng + ?Sized>(
     genome: &mut OrganismGenome,
     add_count: usize,
     rng: &mut R,
@@ -71,8 +70,9 @@ fn candidate_cmp(a: &(f32, NeuronId, NeuronId), b: &(f32, NeuronId, NeuronId)) -
 }
 
 /// Enumerates every valid, not-yet-connected (pre, post) pair, drawing one
-/// weighted-without-replacement priority per candidate (same RNG sequence as
-/// the historical full-sort implementation).
+/// uniform-without-replacement priority per candidate. With no spatial prior,
+/// every candidate is weighted equally, so the `add_count` smallest priorities
+/// are a uniform random sample of the unconnected pairs.
 fn for_each_candidate<R: Rng + ?Sized>(
     genome: &OrganismGenome,
     rng: &mut R,
@@ -83,9 +83,6 @@ fn for_each_candidate<R: Rng + ?Sized>(
         .map(NeuronId)
         .chain((0..num_neurons).map(inter_neuron_id));
 
-    let sigma = genome.topology.spatial_prior_sigma.max(0.01);
-    let sigma_sq = sigma * sigma;
-
     // Candidates are enumerated in strictly ascending (pre, post) order and the
     // edge list is sorted by the same key, so existing-pair membership is a
     // single forward merge cursor instead of a binary search per pair.
@@ -93,7 +90,6 @@ fn for_each_candidate<R: Rng + ?Sized>(
     let mut cursor = 0usize;
 
     for pre_id in all_presynaptic {
-        let pre_location = location_for_neuron(pre_id, genome);
         for post_id in post_ids(num_neurons) {
             // By construction every enumerated pair is valid: pre IDs are
             // exactly the sensory + enabled-inter ranges, post IDs the
@@ -112,8 +108,7 @@ fn for_each_candidate<R: Rng + ?Sized>(
                 cursor += 1;
                 continue;
             }
-            let probability = connection_probability(genome, pre_location, post_id, sigma_sq);
-            let priority = weighted_without_replacement_priority(probability, rng);
+            let priority = uniform_priority(rng);
             visit((priority, pre_id, post_id));
         }
     }
@@ -129,23 +124,9 @@ fn post_ids(num_neurons: u32) -> impl Iterator<Item = NeuronId> {
     inter.chain(actions)
 }
 
-fn connection_probability(
-    genome: &OrganismGenome,
-    pre_location: BrainLocation,
-    post: NeuronId,
-    sigma_sq: f32,
-) -> f32 {
-    let post_location = location_for_neuron(post, genome);
-    let distance_sq = distance_sq_between_locations(pre_location, post_location);
-    let local_bias = (-0.5 * distance_sq / sigma_sq).exp();
-    (SPATIAL_PRIOR_LONG_RANGE_FLOOR + (1.0 - SPATIAL_PRIOR_LONG_RANGE_FLOOR) * local_bias)
-        .clamp(0.0, 1.0)
-}
-
-fn weighted_without_replacement_priority<R: Rng + ?Sized>(weight: f32, rng: &mut R) -> f32 {
-    let clamped_weight = weight.max(f32::MIN_POSITIVE);
+fn uniform_priority<R: Rng + ?Sized>(rng: &mut R) -> f32 {
     let u = rng.random::<f32>().max(f32::MIN_POSITIVE);
-    -u.ln() / clamped_weight
+    -u.ln()
 }
 
 fn sample_synapse_weight<R: Rng + ?Sized>(excitatory_probability: f32, rng: &mut R) -> f32 {

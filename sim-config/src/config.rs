@@ -142,7 +142,6 @@ pub fn food_ecology_policy() -> FoodEcologyPolicy {
 pub struct SeedGenomeConfig {
     pub num_neurons: u32,
     pub num_synapses: u32,
-    pub spatial_prior_sigma: f32,
     pub vision_distance: u32,
     pub age_of_maturity: u32,
     #[serde(default = "default_gestation_ticks")]
@@ -168,7 +167,6 @@ pub struct SeedGenomeConfig {
     pub mutation_rate_inter_update_rate: f32,
     pub mutation_rate_eligibility_retention: f32,
     pub mutation_rate_synapse_prune_threshold: f32,
-    pub mutation_rate_neuron_location: f32,
     #[serde(default)]
     pub mutation_rate_synapse_weight_perturbation: f32,
     #[serde(default)]
@@ -179,8 +177,6 @@ pub struct SeedGenomeConfig {
     pub mutation_rate_remove_neuron: f32,
     #[serde(default)]
     pub mutation_rate_add_neuron_split_edge: f32,
-    #[serde(default)]
-    pub mutation_rate_spatial_prior_sigma: f32,
     #[serde(default)]
     pub mutation_rate_max_weight_delta_per_tick: f32,
 }
@@ -257,7 +253,6 @@ impl WorldConfig {
             seed_genome_config: SeedGenomeConfig {
                 num_neurons: 20,
                 num_synapses: 80,
-                spatial_prior_sigma: 3.5,
                 vision_distance: 10,
                 age_of_maturity: 0,
                 gestation_ticks: 2,
@@ -277,13 +272,11 @@ impl WorldConfig {
                 mutation_rate_inter_update_rate: 0.12,
                 mutation_rate_eligibility_retention: 0.05,
                 mutation_rate_synapse_prune_threshold: 0.05,
-                mutation_rate_neuron_location: 0.02,
                 mutation_rate_synapse_weight_perturbation: 0.1,
                 mutation_rate_add_synapse: 0.05,
                 mutation_rate_remove_synapse: 0.05,
                 mutation_rate_remove_neuron: 0.02,
                 mutation_rate_add_neuron_split_edge: 0.05,
-                mutation_rate_spatial_prior_sigma: 0.05,
                 mutation_rate_max_weight_delta_per_tick: 0.05,
             },
         }
@@ -316,7 +309,6 @@ impl WorldConfig {
             seed_genome_config: SeedGenomeConfig {
                 num_neurons: 1,
                 num_synapses: 0,
-                spatial_prior_sigma: 3.5,
                 vision_distance: 2,
                 age_of_maturity: 0,
                 gestation_ticks: 2,
@@ -336,13 +328,11 @@ impl WorldConfig {
                 mutation_rate_inter_update_rate: 0.0,
                 mutation_rate_eligibility_retention: 0.0,
                 mutation_rate_synapse_prune_threshold: 0.0,
-                mutation_rate_neuron_location: 0.0,
                 mutation_rate_synapse_weight_perturbation: 0.0,
                 mutation_rate_add_synapse: 0.0,
                 mutation_rate_remove_synapse: 0.0,
                 mutation_rate_remove_neuron: 0.0,
                 mutation_rate_add_neuron_split_edge: 0.0,
-                mutation_rate_spatial_prior_sigma: 0.0,
                 mutation_rate_max_weight_delta_per_tick: 0.0,
             },
         }

@@ -7,7 +7,7 @@ const META_MUTATION_BASELINE_PULL: f32 = 0.15;
 const META_MUTATION_SECOND_GENE_PROBABILITY: f32 = 0.35;
 const META_MUTATION_THIRD_GENE_PROBABILITY: f32 = 0.1;
 const MUTATION_RATE_BASELINE_FLOOR_FRACTION: f32 = 0.05;
-const MUTATION_RATE_GENE_COUNT: usize = 18;
+const MUTATION_RATE_GENE_COUNT: usize = 16;
 const MUTATION_RATE_MIN: f32 = 1.0e-4;
 const MUTATION_RATE_MAX: f32 = 0.5;
 const MUTATION_RATE_LOGIT_EPSILON: f32 = 1.0e-6;
@@ -76,13 +76,11 @@ define_mutation_rate_ops! {
     inter_update_rate:           mutation_rate_inter_update_rate,
     eligibility_retention:       mutation_rate_eligibility_retention,
     synapse_prune_threshold:     mutation_rate_synapse_prune_threshold,
-    neuron_location:             mutation_rate_neuron_location,
     synapse_weight_perturbation: mutation_rate_synapse_weight_perturbation,
     add_synapse:                 mutation_rate_add_synapse,
     remove_synapse:              mutation_rate_remove_synapse,
     remove_neuron:               mutation_rate_remove_neuron,
     add_neuron_split_edge:       mutation_rate_add_neuron_split_edge,
-    spatial_prior_sigma:         mutation_rate_spatial_prior_sigma,
     max_weight_delta_per_tick:   mutation_rate_max_weight_delta_per_tick,
 }
 

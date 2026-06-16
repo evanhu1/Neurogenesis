@@ -1,47 +1,5 @@
 use super::*;
 
-pub(crate) fn mutate_random_neuron_location<R: Rng + ?Sized>(
-    genome: &mut OrganismGenome,
-    rng: &mut R,
-) {
-    let enabled_inter = genome.topology.num_neurons as usize;
-    // SENSORY_COUNT and ACTION_COUNT are nonzero compile-time constants, so
-    // `total` is always positive and the range below is never empty.
-    let total = SENSORY_COUNT as usize + enabled_inter + ACTION_COUNT;
-
-    let idx = rng.random_range(0..total);
-    let location = if idx < SENSORY_COUNT as usize {
-        genome.brain.sensory_locations.get_mut(idx)
-    } else if idx < SENSORY_COUNT as usize + enabled_inter {
-        genome
-            .brain
-            .inter_locations
-            .get_mut(idx - SENSORY_COUNT as usize)
-    } else {
-        genome
-            .brain
-            .action_locations
-            .get_mut(idx - SENSORY_COUNT as usize - enabled_inter)
-    };
-
-    if let Some(location) = location {
-        location.x = perturb_clamped(
-            location.x,
-            LOCATION_PERTURBATION_STDDEV,
-            BRAIN_SPACE_MIN,
-            BRAIN_SPACE_MAX,
-            rng,
-        );
-        location.y = perturb_clamped(
-            location.y,
-            LOCATION_PERTURBATION_STDDEV,
-            BRAIN_SPACE_MIN,
-            BRAIN_SPACE_MAX,
-            rng,
-        );
-    }
-}
-
 pub(crate) fn mutate_synapse_weights<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
     mutate_many_or_one(
         &mut genome.brain.edges,
@@ -49,7 +7,7 @@ pub(crate) fn mutate_synapse_weights<R: Rng + ?Sized>(genome: &mut OrganismGenom
         rng,
         |edge, rng| {
             if rng.random::<f32>() < SYNAPSE_WEIGHT_REPLACEMENT_RATE {
-                edge.weight = super::spatial_prior::sample_lognormal_weight(rng);
+                edge.weight = super::synapse_creation::sample_lognormal_weight(rng);
             } else {
                 let magnitude_scale =
                     (SYNAPSE_WEIGHT_PERTURBATION_STDDEV * standard_normal(rng)).exp();

@@ -10,9 +10,9 @@ use crate::topology::{
     refresh_action_synapse_starts_and_count,
 };
 use sim_types::{
-    ActionNeuronState, ActionType, BrainLocation, BrainState, InterNeuronState, NeuronId,
-    NeuronState, NeuronType, Occupant, OrganismGenome, OrganismId, OrganismState,
-    SensoryNeuronState, SensoryReceptor, SynapseEdge, SynapseGene, VisionChannel, VisualProperties,
+    ActionNeuronState, ActionType, BrainState, InterNeuronState, NeuronId, NeuronState, NeuronType,
+    Occupant, OrganismGenome, OrganismId, OrganismState, SensoryNeuronState, SensoryReceptor,
+    SynapseEdge, SynapseGene, VisionChannel, VisualProperties,
 };
 #[cfg(feature = "profiling")]
 use std::time::Instant;

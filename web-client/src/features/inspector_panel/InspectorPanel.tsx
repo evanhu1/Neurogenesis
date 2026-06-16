@@ -101,7 +101,6 @@ export function InspectorPanel({
       { key: 'age_of_maturity', label: 'Age Mat', value: genome.mutation_rates.age_of_maturity },
       { key: 'gestation_ticks', label: 'Gest', value: genome.mutation_rates.gestation_ticks },
       { key: 'vision_distance', label: 'Vision', value: genome.mutation_rates.vision_distance },
-      { key: 'neuron_location', label: 'Neuron Loc', value: genome.mutation_rates.neuron_location },
       { key: 'inter_bias', label: 'Bias', value: genome.mutation_rates.inter_bias },
       { key: 'inter_update_rate', label: 'Update', value: genome.mutation_rates.inter_update_rate },
       {
