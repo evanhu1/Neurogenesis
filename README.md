@@ -129,12 +129,17 @@ Things to try:
 
 `sim-evaluation` runs multi-seed, hundreds-of-thousands-of-ticks benchmarks
 where the sim emits raw facts to partitioned Parquet and every metric is derived
-post-hoc: foraging skill, Miller-Madow-corrected mutual information between
-sensed state and action MI(S;A), competition stats, and population dynamics.
-Change the analysis and re-derive every report without re-running the
-experiment. A random-action control (`--baseline`) keeps the numbers honest.
+post-hoc. The report card is four deliberately hard-to-game competence axes,
+each pooled from descendant lifetimes: **foraging** and **predation**
+(plant/prey consumptions per action), **intelligence** (successful action rate ×
+Miller-Madow mutual information MI(S;A) between sensed state and action), and
+**learning** (within-life slope of action success vs age — does the organism
+improve over its own lifetime?). Change the analysis and re-derive every report
+without re-running the experiment. A random-action control (`--control`) keeps
+the numbers honest — it should score ≈0 on every axis (MI and the learning slope
+both collapse to zero under random behaviour).
 
-![Evaluation report with pillar scores for foraging, intelligence, and competition](docs/evaluation.png)
+![Evaluation report with pillar scores for foraging, predation, intelligence, and learning](docs/evaluation.png)
 
 ```bash
 # Default 8-seed evolution-loop benchmark → report.html / timeseries.csv / summary.json
@@ -143,8 +148,8 @@ cargo run -p sim-evaluation --release --
 # Custom seeds
 cargo run -p sim-evaluation --release -- --seed 42,123,7
 
-# Random-action control baseline
-cargo run -p sim-evaluation --release -- --baseline
+# Random-action control (should score ~0 on every pillar)
+cargo run -p sim-evaluation --release -- --control
 
 # Quick smoke run
 cargo run -p sim-evaluation --release -- --ticks 1000 --report-every 250
