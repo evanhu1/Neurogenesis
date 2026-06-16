@@ -2,7 +2,8 @@
 web-client/node_modules/
 web-client/dist/
 .DS_Store
-.claude/
+.claude/*
+!.claude/skills/
 .vscode/
 sim-server/champion_pool.json
 sim-server/worlds/
