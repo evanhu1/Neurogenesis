@@ -91,11 +91,11 @@ systems be a path to AGI? This project is an attempt to find out.
 
 - A 250×250 toroidal hex grid with Perlin-noise terrain walls, a hidden
   fertility map, and event-driven plant regrowth. One entity per cell.
-- Energy is conserved, and lossy digestion is the ecosystem's only sink: plants
-  return 20% of stored energy, corpses 80%. There is no population cap —
-  thermodynamics regulates the population.
+- Energy enters only as plants (a fixed yield each) and drains through
+  metabolism; eating transfers an item's energy in full. There is no population
+  cap — thermodynamics regulates the population.
 - Predation is real and every kill leaves a corpse worth eating, so death feeds
-  the food web.
+  the food web — a corpse carries 80% of its owner's leftover energy.
 - No species registry, no speciation bookkeeping, no hand-written fitness
   target. Selection pressure comes from the ecology itself.
 
