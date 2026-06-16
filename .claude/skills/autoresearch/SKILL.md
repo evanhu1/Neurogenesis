@@ -80,9 +80,19 @@ canonical eval. Metrics are raw (no [0,1] interpretation):
 
 ## The iteration loop
 
-### Bootstrap (first run only)
-If `autoresearch/best` doesn't exist: `git branch autoresearch/best main`. Then
-`git checkout autoresearch/best` and stay on it for the whole session.
+### Bootstrap
+- **If `autoresearch/best` does not exist:** `git branch autoresearch/best main`,
+  then run the baseline canonical sweep (below) to seed `best-program.md` +
+  `STATE.md`.
+- **If it already exists** (a prior session created it): reuse it. Reconcile —
+  fast-forward it onto the latest `main` if `main` moved and there's no conflict
+  (`git merge --ff-only main` from a worktree on `autoresearch/best`), or note
+  the divergence in `STATE.md` and keep going from `autoresearch/best`.
+- Operate via a **worktree** on `autoresearch/best` (`git worktree add … autoresearch/best`)
+  rather than `git checkout` in the main repo, so the user's checkout is undisturbed.
+- **Ignore the pre-existing stale `autoresearch/*` branches** (`high`, `mar26*`,
+  `mar27`, etc.) — they are unrelated prior work, not part of this loop. Your
+  branches are exactly `autoresearch/best` and `autoresearch/exp-*`.
 Run the baseline canonical sweep to fill `best-program.md` + `STATE.md` metrics:
 ```
 sim-cli new --seed 7 --out artifacts/runs/base.bin     # (per seed, or use sweep)

@@ -111,11 +111,25 @@ lineage: [experiments/..., ...]     # the accepted experiments that built it, in
 1. **Every experiment persists its code as a git branch** `autoresearch/exp-*`
    *before* the agent returns (worktrees are ephemeral). The `Experiment`
    concept records `git_ref` + `base_ref`.
-2. **Every claim links to evidence.** Findings/Directions/Mechanisms link the
-   Experiments that support them; Experiments cite the sweep result file.
-3. **The champion's lineage is a link chain.** `best-program.md` lists every
+2. **Durable evidence = the concept itself, not external files.** The raw sweep
+   JSON lives in gitignored `artifacts/runs/` *inside an ephemeral worktree*, so
+   it does **not** survive — never rely on a citation to it. An experiment's
+   durable, reproducible evidence is:
+   - the **`metrics` frontmatter** (the numbers, embedded), and
+   - the **`git_ref`** (the diff — `git show <git_ref>`), and
+   - a **`# Reproduce`** line: the exact `sim-cli` command + seeds + base_ref, so
+     anyone can regenerate the numbers from the committed code.
+   Cite the diff, not the transient JSON. (If you truly want to keep a result
+   file, copy it into the committed `references/` — but the embedded metrics are
+   normally enough.)
+3. **Every claim links to evidence.** Findings/Directions/Mechanisms link the
+   Experiments that support them.
+4. **The champion's lineage is a link chain.** `best-program.md` lists every
    accepted experiment in order — you can replay how the best program was built.
-4. **`log.md` is append-only** (one entry per iteration). `STATE.md` is
+5. **`log.md` is append-only** (one entry per iteration). `STATE.md` is
    rewritten/compacted each iteration but never loses anything that isn't already
    in the append-only layer.
-5. **IDs are stable paths.** Prefer absolute links (`/experiments/0007-...md`).
+6. **IDs are stable paths.** Prefer absolute links (`/experiments/0007-...md`).
+   Experiment files are named `experiments/<iter4>-<coordinator>-<id>.md`
+   (e.g. `experiments/0007-metabolism-lower-floor.md`), matching the
+   `autoresearch/exp-<iter4>-<coordinator>-<id>` branch.

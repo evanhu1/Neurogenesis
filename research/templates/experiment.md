@@ -33,6 +33,14 @@ timestamp: <ISO 8601>
 # Concerns
 <confounds, instability, determinism, eval-time cost, suspected artifacts>
 
+# Reproduce
+```
+git checkout <git_ref>   # or: git show <git_ref> for the diff
+cargo build -p sim-cli --release
+./target/release/sim-cli sweep --grid <baseline cell> --seeds 7,42,123,2026 --to 500000
+```
+(The metrics above are the durable evidence; the raw sweep JSON in
+`artifacts/runs/` is transient and is not relied upon.)
+
 # Citations
-[1] [sweep result](/../artifacts/runs/sweep-<...>.json)
-[2] [diff](<git_ref>)
+[1] diff: `git show <git_ref>`
