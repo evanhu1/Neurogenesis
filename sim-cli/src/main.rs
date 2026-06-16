@@ -12,56 +12,344 @@
 mod dashboards;
 mod inspect_ext;
 mod output;
+mod sweep;
 
 use anyhow::{anyhow, bail, Result};
 use output::{opt, opt_json, Format, Stats};
 use serde_json::json;
-use sim_config::load_world_config_from_path;
+use sim_config::{load_world_config_from_path, world_config_from_toml_parts};
 use sim_core::Simulation;
 use sim_metrics::{
     compute_pillar_scores, derive_interval_metrics, ingest_tick, register_existing,
     register_founders, Ledger, OrganismLifetimeRow, PillarScores, TickSummaryRow,
 };
 use sim_types::EntityId;
-use std::io::{self, BufRead, Write};
-use std::path::Path;
+use std::fs::File;
+use std::io::{self, BufRead, BufReader, BufWriter, Write};
+use std::path::{Path, PathBuf};
 
 const DEFAULT_CONFIG: &str = "sim-evaluation/config.toml";
-/// Default reporting-interval width (matches the eval; override at `load`).
+/// Default reporting-interval width (matches the eval; override at `new`).
 const REPORT_EVERY: u64 = 10_000;
+/// Default directory for run-mode result files (sweep, etc.). Override with the
+/// global `--out-dir` flag. Under `artifacts/` so results survive a session.
+const DEFAULT_OUT_DIR: &str = "artifacts/runs";
 
-fn main() -> Result<()> {
+/// Build a timestamped result-file path under `out_dir`, creating the directory.
+/// Run modes (sweep, …) write their result artifact here so output is durable
+/// and discoverable rather than scrolled past in stdout.
+fn run_output_path(out_dir: &str, prefix: &str) -> Result<PathBuf> {
+    std::fs::create_dir_all(out_dir)
+        .map_err(|e| anyhow!("cannot create out-dir `{out_dir}`: {e}"))?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    Ok(PathBuf::from(out_dir).join(format!("{prefix}-{stamp}.json")))
+}
+
+/// Commands that advance / create a world and therefore persist it (`--out`,
+/// defaulting to `--in`). Everything else is a pure read.
+fn is_mutating(cmd: &str) -> bool {
+    matches!(cmd, "new" | "step" | "run-to" | "watch")
+}
+
+/// Pure-read commands: read the loaded world, write only stdout, never `--out`.
+/// These are the commands allowed inside `query` batch mode.
+fn is_read_only(cmd: &str) -> bool {
+    matches!(
+        cmd,
+        "turn"
+            | "pillars"
+            | "state"
+            | "eco"
+            | "lineage"
+            | "genome"
+            | "timeseries"
+            | "food"
+            | "inspect"
+            | "top"
+            | "hist"
+            | "find"
+            | "brain"
+            | "decide"
+    )
+}
+
+fn print_help(out: &mut impl Write) -> Result<()> {
+    writeln!(
+        out,
+        "sim-cli — stateless world-as-file research CLI (agent-facing). JSON output by default; `--text` to override.\n\
+         \n\
+         WORLD I/O\n\
+         \x20 --in <world.bin>     read a world (required by every command except `new`)\n\
+         \x20 --out <world.bin>    write the advanced world (mutating cmds; defaults to --in = advance in place)\n\
+         \x20 --metrics <path>     metric sidecar (defaults to the `<world>.metrics` sibling; --no-metrics to disable)\n\
+         \n\
+         MUTATING (persist the world)\n\
+         \x20 new [--config P] [--seed N] [--set k=v]... [--scale W,POP] [--threads K] [--report-every R] --out w.bin\n\
+         \x20 step [N] --in w.bin [--out w.bin]            advance N ticks (default 1)\n\
+         \x20 run-to T --in w.bin [--out w.bin]            advance until turn == T\n\
+         \x20 watch T [--every E] --in w.bin [--out w.bin] advance to T, emitting a metrics row every E ticks\n\
+         \x20 bench [N] --in w.bin                         time N ticks (world discarded)\n\
+         \n\
+         READS (stdout only)\n\
+         \x20 turn | state | pillars | eco | lineage | genome [--gene G] | food --in w.bin\n\
+         \x20 timeseries [--cols LIST] [--last K] --in w.bin\n\
+         \x20 inspect ID | top FIELD [N] | hist FIELD | find EXPR | brain ID [--view V] | decide ID --in w.bin\n\
+         \x20 query --in w.bin                             read-only commands from stdin (one per line), one load\n\
+         \n\
+         pillars/eco-trajectory/timeseries need a metric sidecar (minted by `new`, follows the world).\n\
+         Snapshot/fork a world with `cp`; full reference in docs/sim-cli.md."
+    )
+    .map_err(Into::into)
+}
+
+/// On-disk metric sidecar: the recorder accumulators plus the `report_every`
+/// the interval layer needs. Lives beside the world as `<world>.metrics`.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Sidecar {
+    report_every: u64,
+    recorder: Recorder,
+}
+
+fn main() {
+    if let Err(e) = run() {
+        // Structured, single-line error for the agent driving us over the shell.
+        eprintln!("{}", json!({ "error": e.to_string() }));
+        std::process::exit(1);
+    }
+}
+
+/// One-shot entry point. Parses `argv` into `<command> [global flags] [command
+/// args]`, loads the world (and auto-following metric sidecar), runs the single
+/// command, then persists the world + sidecar for mutating commands.
+fn run() -> Result<()> {
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let cmd: String = argv.first().cloned().unwrap_or_default();
+    if cmd.is_empty() || cmd == "help" || cmd == "--help" || cmd == "-h" {
+        let mut out = io::stdout().lock();
+        print_help(&mut out)?;
+        return Ok(());
+    }
+    let cmd = cmd.as_str();
+
+    // Pull global flags (orthogonal to every command) out of the arg stream.
+    let mut in_path: Option<String> = None;
+    let mut out_path: Option<String> = None;
+    let mut metrics_flag: Option<String> = None;
+    let mut out_dir: String = DEFAULT_OUT_DIR.to_string();
+    let mut no_metrics = false;
+    let mut rest: Vec<String> = Vec::new();
+    let mut it = argv.into_iter().skip(1);
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--in" => in_path = Some(it.next().ok_or_else(|| anyhow!("--in needs a path"))?),
+            "--out" => out_path = Some(it.next().ok_or_else(|| anyhow!("--out needs a path"))?),
+            "--metrics" => {
+                metrics_flag = Some(it.next().ok_or_else(|| anyhow!("--metrics needs a path"))?)
+            }
+            "--out-dir" => {
+                out_dir = it.next().ok_or_else(|| anyhow!("--out-dir needs a path"))?
+            }
+            "--no-metrics" => no_metrics = true,
+            _ => rest.push(a),
+        }
+    }
+    let cmd_args: Vec<&str> = rest.iter().map(String::as_str).collect();
+
+    // Run modes that own their world(s) and emit a result file, not --in/--out.
+    if cmd == "sweep" {
+        let mut out = io::stdout().lock();
+        return sweep::run_sweep(&cmd_args, &out_dir, &mut out);
+    }
+
     let mut app = App {
         sim: None,
         recorder: None,
         report_every: REPORT_EVERY,
-        format: Format::default(),
+        format: Format::Json, // JSON by default for the agent CLI; `--text` overrides.
         scaled: false,
     };
-    let stdin = io::stdin();
-    let mut out = io::stdout();
-    writeln!(
-        out,
-        "sim-cli ready. `help` for commands, `quit` to exit.\n\
-         Commands are read from stdin, one per line."
-    )?;
-    out.flush()?;
+    let mut out = io::stdout().lock();
+    let mutating = is_mutating(cmd);
 
-    for line in stdin.lock().lines() {
-        let line = line?;
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
+    if cmd == "new" {
+        // Constructor: build the world from config + overrides; mint a sidecar
+        // unless suppressed. Persisted below.
+        app.build_world(&cmd_args, &mut out)?;
+        if !no_metrics {
+            app.start_recording()?;
         }
-        if line == "quit" || line == "exit" {
-            break;
+    } else {
+        let world_path = in_path
+            .clone()
+            .ok_or_else(|| anyhow!("`{cmd}` needs --in <world.bin>"))?;
+        app.sim = Some(load_world(&world_path)?);
+
+        // The metric sidecar follows the world: explicit --metrics, else the
+        // `<world>.metrics` sibling if present. Mutating commands without an
+        // existing sidecar mint a fresh one (back-registering live organisms)
+        // so recording is on by default; --no-metrics opts out.
+        let metrics_path = resolve_metrics_path(&world_path, metrics_flag.as_deref(), no_metrics);
+        if let Some(mp) = metrics_path.as_ref() {
+            if Path::new(mp).exists() {
+                let sidecar = load_sidecar(mp)?;
+                app.report_every = sidecar.report_every;
+                app.recorder = Some(sidecar.recorder);
+            } else if mutating {
+                app.start_recording()?;
+            }
         }
-        if let Err(e) = app.dispatch(line, &mut out) {
-            writeln!(out, "error: {e}")?;
-        }
+
+        app.run_oneshot(cmd, &cmd_args, &mut out)?;
         out.flush()?;
+
+        if mutating {
+            let dest = out_path.clone().unwrap_or(world_path.clone());
+            save_world(app.sim.as_ref().expect("world loaded"), &dest)?;
+            if let (Some(rec), Some(mp)) = (app.recorder.as_ref(), metrics_path.as_ref()) {
+                // Sidecar follows the written world (so `--out fork.bin` forks
+                // its metrics to `fork.metrics` too).
+                let mp = if out_path.is_some() {
+                    resolve_metrics_path(&dest, metrics_flag.as_deref(), no_metrics)
+                        .unwrap_or_else(|| mp.clone())
+                } else {
+                    mp.clone()
+                };
+                save_sidecar(&app, rec, &mp)?;
+            }
+        }
+        return Ok(());
+    }
+
+    // `new` persistence (world + minted sidecar).
+    out.flush()?;
+    let dest = out_path
+        .clone()
+        .ok_or_else(|| anyhow!("`new` needs --out <world.bin>"))?;
+    save_world(app.sim.as_ref().expect("world built"), &dest)?;
+    if let Some(rec) = app.recorder.as_ref() {
+        let mp = resolve_metrics_path(&dest, metrics_flag.as_deref(), no_metrics)
+            .expect("recorder present implies metrics enabled");
+        save_sidecar(&app, rec, &mp)?;
     }
     Ok(())
+}
+
+/// Resolve the metric sidecar path: `None` when `--no-metrics`; the explicit
+/// `--metrics` path when given; otherwise the `<world>.metrics` sibling.
+fn resolve_metrics_path(world_path: &str, explicit: Option<&str>, no_metrics: bool) -> Option<String> {
+    if no_metrics {
+        return None;
+    }
+    if let Some(p) = explicit {
+        return Some(p.to_string());
+    }
+    Some(
+        PathBuf::from(world_path)
+            .with_extension("metrics")
+            .to_string_lossy()
+            .into_owned(),
+    )
+}
+
+fn load_world(path: &str) -> Result<Simulation> {
+    let file =
+        File::open(path).map_err(|e| anyhow!("cannot open world `{path}`: {e}"))?;
+    Simulation::load(BufReader::new(file)).map_err(|e| anyhow!("loading world `{path}`: {e}"))
+}
+
+fn save_world(sim: &Simulation, path: &str) -> Result<()> {
+    if let Some(parent) = Path::new(path).parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).ok();
+        }
+    }
+    let file = File::create(path).map_err(|e| anyhow!("cannot write world `{path}`: {e}"))?;
+    sim.save(BufWriter::new(file))
+        .map_err(|e| anyhow!("saving world `{path}`: {e}"))
+}
+
+fn load_sidecar(path: &str) -> Result<Sidecar> {
+    let file =
+        File::open(path).map_err(|e| anyhow!("cannot open metrics `{path}`: {e}"))?;
+    ciborium::from_reader(BufReader::new(file))
+        .map_err(|e| anyhow!("loading metrics `{path}`: {e}"))
+}
+
+fn save_sidecar(app: &App, recorder: &Recorder, path: &str) -> Result<()> {
+    if let Some(parent) = Path::new(path).parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).ok();
+        }
+    }
+    let sidecar = SidecarRef {
+        report_every: app.report_every,
+        recorder,
+    };
+    let file = File::create(path).map_err(|e| anyhow!("cannot write metrics `{path}`: {e}"))?;
+    ciborium::into_writer(&sidecar, BufWriter::new(file))
+        .map_err(|e| anyhow!("saving metrics `{path}`: {e}"))
+}
+
+/// Borrowed mirror of [`Sidecar`] so we can serialize without cloning the
+/// recorder. Field order/names must match `Sidecar`.
+#[derive(serde::Serialize)]
+struct SidecarRef<'a> {
+    report_every: u64,
+    recorder: &'a Recorder,
+}
+
+/// Patch a world-config TOML document with `key=value` overrides before parsing.
+/// Keys are matched against any `[section]` table first (the eval config keys are
+/// section-unique, e.g. `food_energy` under `[food]`), then the top level.
+/// Values are coerced to int/float/bool, falling back to string.
+fn apply_config_overrides(world_raw: &str, sets: &[(String, String)]) -> Result<String> {
+    if sets.is_empty() {
+        return Ok(world_raw.to_string());
+    }
+    let mut doc: toml::Table = world_raw
+        .parse()
+        .map_err(|e| anyhow!("config TOML parse failed: {e}"))?;
+    for (key, val) in sets {
+        let value = coerce_toml_value(val);
+        if !set_in_tables(&mut doc, key, &value) {
+            doc.insert(key.clone(), value);
+        }
+    }
+    toml::to_string(&doc).map_err(|e| anyhow!("re-serializing config failed: {e}"))
+}
+
+/// Set `key` in the first `[section]` sub-table that already contains it.
+/// Returns true if a home was found.
+fn set_in_tables(doc: &mut toml::Table, key: &str, value: &toml::Value) -> bool {
+    if doc.contains_key(key) {
+        doc.insert(key.to_string(), value.clone());
+        return true;
+    }
+    for (_, v) in doc.iter_mut() {
+        if let toml::Value::Table(section) = v {
+            if section.contains_key(key) {
+                section.insert(key.to_string(), value.clone());
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn coerce_toml_value(raw: &str) -> toml::Value {
+    if let Ok(i) = raw.parse::<i64>() {
+        return toml::Value::Integer(i);
+    }
+    if let Ok(f) = raw.parse::<f64>() {
+        return toml::Value::Float(f);
+    }
+    if let Ok(b) = raw.parse::<bool>() {
+        return toml::Value::Boolean(b);
+    }
+    toml::Value::String(raw.to_string())
 }
 
 struct App {
@@ -84,6 +372,7 @@ struct App {
 /// the per-tick descendant-population line and the lifetime rows of organisms
 /// that died while recording. Survivors are intentionally absent — the interval
 /// layer skips `death_tick == None` rows, exactly as the eval does.
+#[derive(serde::Serialize, serde::Deserialize)]
 struct Recorder {
     ledger: Ledger,
     tick_summary: Vec<TickSummaryRow>,
@@ -98,7 +387,7 @@ struct Recorder {
 
 /// One per recorded tick: a cheap, whole-world ecology snapshot from the
 /// `TickDelta` metrics (no extra organism scans), powering `eco`/`timeseries`.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub(crate) struct EcoSample {
     pub population: u32,
     pub descendants: u32,
@@ -183,38 +472,91 @@ impl App {
         Some((scores, intervals.len(), rec.started_turn > 0))
     }
 
-    fn dispatch(&mut self, line: &str, out: &mut impl Write) -> Result<()> {
-        let mut parts = line.split_whitespace();
-        let cmd = parts.next().unwrap_or("");
-        let args: Vec<&str> = parts.collect();
+    /// The full per-interval metric series behind the pillar scores — the
+    /// granular data `pillars` reports alongside the windowed means.
+    fn live_intervals(&self) -> Option<Vec<sim_metrics::IntervalMetrics>> {
+        let rec = self.recorder.as_ref()?;
+        let total_ticks = self.sim.as_ref()?.turn();
+        Some(derive_interval_metrics(
+            &rec.tick_summary,
+            &rec.lifetimes,
+            self.report_every,
+            total_ticks,
+        ))
+    }
+
+    /// Run one command against the already-loaded world. `new` is handled by
+    /// the orchestrator (it constructs rather than reads), so it is not here.
+    fn run_oneshot(&mut self, cmd: &str, args: &[&str], out: &mut impl Write) -> Result<()> {
+        if is_read_only(cmd) {
+            return self.run_read(cmd, args, out);
+        }
         match cmd {
-            "help" => self.help(out),
-            "load" => self.load(&args, out),
-            "step" => self.step(&args, out),
-            "run-to" => self.run_to(&args, out),
-            "bench" => self.bench(&args, out),
-            "turn" => {
-                let t = self.sim()?.turn();
-                writeln!(out, "turn = {t}").map_err(Into::into)
-            }
-            "record" => self.record(&args, out),
-            "format" => self.set_format(&args, out),
-            "pillars" => self.pillars(&args, out),
-            "state" => self.state(&args, out),
-            "eco" => self.eco(&args, out),
-            "lineage" => self.lineage(&args, out),
-            "genome" => self.genome(&args, out),
-            "timeseries" => self.timeseries(&args, out),
-            "watch" => self.watch(&args, out),
-            "food" => self.food(&args, out),
-            "inspect" => self.inspect(&args, out),
-            "top" => self.top(&args, out),
-            "hist" => self.hist(&args, out),
-            "find" => self.find(&args, out),
-            "brain" => self.brain(&args, out),
-            "decide" => self.decide(&args, out),
+            "step" => self.step(args, out),
+            "run-to" => self.run_to(args, out),
+            "bench" => self.bench(args, out),
+            "watch" => self.watch(args, out),
+            "query" => self.query(out),
             other => bail!("unknown command `{other}` (try `help`)"),
         }
+    }
+
+    /// Dispatch a pure-read command (no world mutation, no `--out`).
+    fn run_read(&mut self, cmd: &str, args: &[&str], out: &mut impl Write) -> Result<()> {
+        match cmd {
+            "turn" => {
+                let (fmt, _) = self.take_format(args);
+                let t = self.sim()?.turn();
+                if fmt.is_json() {
+                    writeln!(out, "{}", json!({ "turn": t })).map_err(Into::into)
+                } else {
+                    writeln!(out, "turn = {t}").map_err(Into::into)
+                }
+            }
+            "pillars" => self.pillars(args, out),
+            "state" => self.state(args, out),
+            "eco" => self.eco(args, out),
+            "lineage" => self.lineage(args, out),
+            "genome" => self.genome(args, out),
+            "timeseries" => self.timeseries(args, out),
+            "food" => self.food(args, out),
+            "inspect" => self.inspect(args, out),
+            "top" => self.top(args, out),
+            "hist" => self.hist(args, out),
+            "find" => self.find(args, out),
+            "brain" => self.brain(args, out),
+            "decide" => self.decide(args, out),
+            other => bail!("unknown read command `{other}` (try `help`)"),
+        }
+    }
+
+    /// Batch-read mode: load the world once, then run many pure-read commands
+    /// from stdin (one per line), so a burst of probes pays a single
+    /// deserialize. Each line emits its own result; a failing line emits an
+    /// `{"error": …}` line and the batch continues. Mutating commands are
+    /// rejected (use a real `step`/`run-to` invocation for those).
+    fn query(&mut self, out: &mut impl Write) -> Result<()> {
+        let stdin = io::stdin();
+        for line in stdin.lock().lines() {
+            let line = line?;
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let mut parts = line.split_whitespace();
+            let sub = parts.next().unwrap_or("");
+            let sub_args: Vec<&str> = parts.collect();
+            let result = if is_read_only(sub) {
+                self.run_read(sub, &sub_args, out)
+            } else {
+                Err(anyhow!("`{sub}` is not a read command (not allowed in query)"))
+            };
+            if let Err(e) = result {
+                writeln!(out, "{}", json!({ "error": e.to_string(), "command": line }))?;
+            }
+            out.flush()?;
+        }
+        Ok(())
     }
 
     /// Strip `--json` / `--text` from `args`, returning the effective format
@@ -232,58 +574,21 @@ impl App {
         (fmt, rest)
     }
 
-    fn set_format(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
-        match args.first().copied() {
-            Some("json") => self.format = Format::Json,
-            Some("text") => self.format = Format::Text,
-            None => {}
-            Some(other) => bail!("unknown format `{other}` (json|text)"),
-        }
-        writeln!(
-            out,
-            "format = {}",
-            if self.format.is_json() { "json" } else { "text" }
-        )
-        .map_err(Into::into)
-    }
+    // (REPL-era `record`/`format`/`help` removed: recording is now the metric
+    // sidecar's presence, format is the global `--json`/`--text` flag, and help
+    // is the free `print_help`.)
 
-    fn help(&self, out: &mut impl Write) -> Result<()> {
-        writeln!(
-            out,
-            "commands (most accept --json | --text):\n\
-             \x20 load [--config PATH] [--seed N] [--report-every R] [--threads K] [--scale W,POP]  build Simulation::new (defaults: config {DEFAULT_CONFIG}, seed 0, report-every 10000)\n\
-             \x20 step [N]                          advance N ticks (default 1)\n\
-             \x20 run-to T                          advance until turn == T\n\
-             \x20 bench [N]                         time N ticks (default 100000); report ticks/sec\n\
-             \x20 watch T [--every E]               advance to T, emitting a metrics row every E ticks\n\
-             \x20 turn                              print current turn\n\
-             \x20 record on|off|status             toggle live metric recording (required for pillars/eco/lineage history)\n\
-             \x20 format json|text                  set the default output format\n\
-             \x20 pillars                           foraging/predation/intelligence/learning pillars + sub-signals (needs recording)\n\
-             \x20 state                             population / energy / food / last-turn metrics (+ pillars if recording)\n\
-             \x20 eco                               ecological dynamics: population/food trajectory, deaths-by-cause, rates\n\
-             \x20 lineage                           generation distribution + founder-lineage (species) composition\n\
-             \x20 genome [--gene G] [--drift]       population genome-gene distribution (what evolution is selecting for)\n\
-             \x20 timeseries [--cols LIST] [--last K]  recorded metric columns as sparklines\n\
-             \x20 food                              food (plant/corpse) summary\n\
-             \x20 inspect ID                        full dump of one organism\n\
-             \x20 top FIELD [N]                     top-N organisms by a field\n\
-             \x20 hist FIELD                        histogram of a scalar field\n\
-             \x20 find EXPR [--fields LIST] [--limit N]  filter organisms by a predicate (and/or evaluated left-to-right, no precedence)\n\
-             \x20 brain ID [--view summary|synapses|activations|dot]  neural inspection\n\
-             \x20 decide ID                         explain one organism's current-tick decision\n\
-             \x20 quit\n\
-             field/column/gene vocabularies: invalid args list valid values; full reference in docs/sim-cli.md"
-        )
-        .map_err(Into::into)
-    }
-
-    fn load(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
+    /// `new`: construct a world from a config file + inline `--set k=v`
+    /// overrides + optional `--scale`/`--threads`. Sets `self.sim` and reports;
+    /// the orchestrator persists it to `--out`.
+    fn build_world(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
         let mut config_path = DEFAULT_CONFIG.to_string();
         let mut seed: u64 = 0;
         let mut report_every: u64 = REPORT_EVERY;
         let mut threads: Option<u32> = None;
         let mut scale: Option<(u32, u32)> = None;
+        let mut sets: Vec<(String, String)> = Vec::new();
+        let (fmt, args) = self.take_format(args);
         let mut i = 0;
         while i < args.len() {
             match args[i] {
@@ -337,10 +642,32 @@ impl App {
                     scale = Some((w, p));
                     i += 2;
                 }
-                other => bail!("unknown load arg `{other}`"),
+                "--set" => {
+                    let kv = args
+                        .get(i + 1)
+                        .ok_or_else(|| anyhow!("--set needs key=value"))?;
+                    let (k, v) = kv
+                        .split_once('=')
+                        .ok_or_else(|| anyhow!("--set wants key=value (e.g. food_energy=12)"))?;
+                    sets.push((k.trim().to_string(), v.trim().to_string()));
+                    i += 2;
+                }
+                other => bail!("unknown new arg `{other}`"),
             }
         }
-        let mut config = load_world_config_from_path(Path::new(&config_path))?;
+
+        let mut config = if sets.is_empty() {
+            load_world_config_from_path(Path::new(&config_path))?
+        } else {
+            let world_raw = std::fs::read_to_string(&config_path)
+                .map_err(|e| anyhow!("reading config `{config_path}`: {e}"))?;
+            let seed_genome_path = Path::new(&config_path).with_file_name("seed_genome.toml");
+            let seed_genome_raw = std::fs::read_to_string(&seed_genome_path)
+                .map_err(|e| anyhow!("reading {}: {e}", seed_genome_path.display()))?;
+            let patched = apply_config_overrides(&world_raw, &sets)?;
+            world_config_from_toml_parts(&patched, &seed_genome_raw)
+                .map_err(|e| anyhow!("config after --set failed schema validation: {e}"))?
+        };
         if let Some(t) = threads {
             config.intent_parallel_threads = t;
         }
@@ -349,24 +676,41 @@ impl App {
             config.num_organisms = p;
         }
         let sim = Simulation::new(config, seed).map_err(|e| anyhow!("{e}"))?;
-        let scaled_tag = if scale.is_some() {
-            "  [scaled: non-canonical]"
+        let scaled = scale.is_some();
+        if fmt.is_json() {
+            writeln!(
+                out,
+                "{}",
+                json!({
+                    "config": config_path,
+                    "seed": seed,
+                    "report_every": report_every,
+                    "threads": sim.config().intent_parallel_threads,
+                    "world_width": sim.config().world_width,
+                    "num_organisms": sim.config().num_organisms,
+                    "food_energy": sim.config().food_energy,
+                    "overrides": sets.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>(),
+                    "turn": 0,
+                    "population": sim.organisms().len(),
+                    "scaled": scaled,
+                })
+            )?;
         } else {
-            ""
-        };
-        writeln!(
-            out,
-            "loaded config={config_path} seed={seed} report_every={report_every} threads={}: world_width={} num_organisms={} food_energy={} turn=0 population={}{scaled_tag}",
-            sim.config().intent_parallel_threads,
-            sim.config().world_width,
-            sim.config().num_organisms,
-            sim.config().food_energy,
-            sim.organisms().len(),
-        )?;
+            let scaled_tag = if scaled { "  [scaled: non-canonical]" } else { "" };
+            writeln!(
+                out,
+                "created config={config_path} seed={seed} report_every={report_every} threads={}: world_width={} num_organisms={} food_energy={} turn=0 population={}{scaled_tag}",
+                sim.config().intent_parallel_threads,
+                sim.config().world_width,
+                sim.config().num_organisms,
+                sim.config().food_energy,
+                sim.organisms().len(),
+            )?;
+        }
         self.sim = Some(sim);
         self.recorder = None;
         self.report_every = report_every;
-        self.scaled = scale.is_some();
+        self.scaled = scaled;
         Ok(())
     }
 
@@ -420,13 +764,15 @@ impl App {
     }
 
     fn step(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
-        let n: u64 = args.first().map(|s| s.parse()).transpose()?.unwrap_or(1);
+        let (fmt, rest) = self.take_format(args);
+        let n: u64 = rest.first().map(|s| s.parse()).transpose()?.unwrap_or(1);
         self.advance(n)?;
-        writeln!(out, "turn = {}", self.sim()?.turn()).map_err(Into::into)
+        self.emit_turn(fmt, out)
     }
 
     fn run_to(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
-        let target: u64 = args
+        let (fmt, rest) = self.take_format(args);
+        let target: u64 = rest
             .first()
             .ok_or_else(|| anyhow!("run-to needs a target turn"))?
             .parse()?;
@@ -434,80 +780,62 @@ impl App {
         if target > current {
             self.advance(target - current)?;
         }
-        writeln!(out, "turn = {}", self.sim()?.turn()).map_err(Into::into)
+        self.emit_turn(fmt, out)
     }
 
-    fn record(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
-        match args.first().copied() {
-            Some("on") => {
-                let sim = self
-                    .sim
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("no simulation loaded; run `load` first"))?;
-                let mut ledger = Ledger::new();
-                let started_turn = sim.turn();
-                if started_turn == 0 {
-                    register_founders(&mut ledger, sim.organisms());
-                } else {
-                    register_existing(&mut ledger, sim.organisms());
-                }
-                self.recorder = Some(Recorder {
-                    ledger,
-                    tick_summary: Vec::new(),
-                    lifetimes: Vec::new(),
-                    samples: Vec::new(),
-                    started_turn,
-                });
-                let mode = if started_turn == 0 {
-                    "exact from turn 0"
-                } else {
-                    "partial (back-registered live population)"
-                };
-                writeln!(
-                    out,
-                    "recording ON at turn {started_turn} ({mode}); report_every={}",
-                    self.report_every
-                )
-                .map_err(Into::into)
-            }
-            Some("off") => {
-                let was = self.recorder.is_some();
-                self.recorder = None;
-                writeln!(
-                    out,
-                    "recording OFF{}",
-                    if was { "" } else { " (was already off)" }
-                )
-                .map_err(Into::into)
-            }
-            Some("status") | None => match self.recorder.as_ref() {
-                None => writeln!(out, "recording: off").map_err(Into::into),
-                Some(rec) => {
-                    let turn = self.sim.as_ref().map(|s| s.turn()).unwrap_or(0);
-                    writeln!(
-                        out,
-                        "recording: on  started_turn={} now={} ticks_recorded={} deaths_captured={} {}",
-                        rec.started_turn,
-                        turn,
-                        rec.tick_summary.len(),
-                        rec.lifetimes.len(),
-                        if rec.started_turn > 0 { "[PARTIAL]" } else { "[exact]" },
-                    )
-                    .map_err(Into::into)
-                }
-            },
-            Some(other) => bail!("unknown record arg `{other}` (on|off|status)"),
+    fn emit_turn(&mut self, fmt: Format, out: &mut impl Write) -> Result<()> {
+        let t = self.sim()?.turn();
+        if fmt.is_json() {
+            writeln!(out, "{}", json!({ "turn": t })).map_err(Into::into)
+        } else {
+            writeln!(out, "turn = {t}").map_err(Into::into)
         }
+    }
+
+    /// Begin recording on the current world: build a fresh ledger and
+    /// back-register the live population (founders exactly at turn 0, otherwise
+    /// a partial window). Used when `new` mints a sidecar and when a mutating
+    /// command finds no existing sidecar to extend.
+    fn start_recording(&mut self) -> Result<()> {
+        let sim = self
+            .sim
+            .as_ref()
+            .ok_or_else(|| anyhow!("no world loaded to record"))?;
+        let mut ledger = Ledger::new();
+        let started_turn = sim.turn();
+        if started_turn == 0 {
+            register_founders(&mut ledger, sim.organisms());
+        } else {
+            register_existing(&mut ledger, sim.organisms());
+        }
+        self.recorder = Some(Recorder {
+            ledger,
+            tick_summary: Vec::new(),
+            lifetimes: Vec::new(),
+            samples: Vec::new(),
+            started_turn,
+        });
+        Ok(())
     }
 
     fn pillars(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
         let (fmt, _) = self.take_format(args);
         let Some((p, n_intervals, partial)) = self.live_pillars() else {
-            bail!("recording is off; `record on` then advance before `pillars`");
+            bail!("recording is off; advance a world with a metric sidecar before `pillars`");
         };
+        let intervals = self.live_intervals().unwrap_or_default();
         if fmt.is_json() {
             let mut v = pillars_value(&p, n_intervals, partial);
             v["scaled"] = json!(self.scaled);
+            // All the granular data behind the scores: the full per-interval
+            // series (each interval's sub-signals), so the windowed pillar means
+            // can be read against their underlying trajectory.
+            v["granular"] = json!({
+                "report_every": self.report_every,
+                "window_start_tick": p.window_start_tick,
+                "window_end_tick": p.window_end_tick,
+                "intervals": serde_json::to_value(&intervals).unwrap_or(serde_json::Value::Null),
+            });
             return writeln!(out, "{v}").map_err(Into::into);
         }
         let tag = match (partial, self.scaled) {
@@ -545,8 +873,27 @@ impl App {
             "  learning      {:.3}   learning_slope {}",
             p.learning_pillar,
             opt(p.mean_learning_slope, 6),
-        )
-        .map_err(Into::into)
+        )?;
+        // Granular per-interval series behind the scores (the window marked *).
+        writeln!(
+            out,
+            "  granular intervals (tick: eff plant prey mi slope):"
+        )?;
+        for m in &intervals {
+            let in_window = m.tick > p.window_start_tick && m.tick <= p.window_end_tick;
+            writeln!(
+                out,
+                "  {}{:>7}: {} {} {} {} {}",
+                if in_window { "*" } else { " " },
+                m.tick,
+                opt(m.action_effectiveness, 3),
+                opt(m.plant_consumption_rate, 4),
+                opt(m.prey_consumption_rate, 4),
+                opt(m.mi_sa, 3),
+                opt(m.learning_slope, 6),
+            )?;
+        }
+        Ok(())
     }
 
     fn state(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {

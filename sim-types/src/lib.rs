@@ -560,7 +560,12 @@ pub struct SensoryNeuronState {
     /// Cached index of the first action-targeting edge in `synapses` (which
     /// stay sorted by post neuron ID). Maintained by
     /// `refresh_action_synapse_starts_and_count` at birth and after pruning.
-    #[serde(default, skip)]
+    //
+    // `default` (not `skip`): persisted in the world blob so the post-load
+    // edge split is correct without a rehydrate pass (the value is a pure
+    // function of `synapses`, saved in a consistent between-tick state). Legacy
+    // payloads that omit it default to 0; such a payload must be re-expressed.
+    #[serde(default)]
     pub action_synapse_start: usize,
 }
 
@@ -571,7 +576,7 @@ pub struct InterNeuronState {
     pub state: f32,
     pub alpha: f32,
     pub synapses: Vec<SynapseEdge>,
-    #[serde(default, skip)]
+    #[serde(default)]
     pub action_synapse_start: usize,
 }
 
@@ -590,20 +595,26 @@ pub struct BrainState {
     pub synapse_count: u32,
     /// Per-sensory-neuron EMA of activation used to center pending
     /// coactivations (covariance rule). Length tracks `sensory.len()`.
-    #[serde(skip)]
+    //
+    // `default` (not `skip`): this is live plasticity state that carries across
+    // ticks, so a world blob must persist it for a byte-identical reload. The
+    // default keeps any legacy payload that omits it loadable (bootstrap will
+    // re-seed). Means appear in the server wire too — additive, ignored by the
+    // web client's brain normalizer.
+    #[serde(default)]
     pub sensory_mean_activation: Vec<f32>,
     /// Per-inter-neuron EMA of activation. Length tracks `inter.len()`.
-    #[serde(skip)]
+    #[serde(default)]
     pub inter_mean_activation: Vec<f32>,
     /// Per-action-neuron EMA of the squashed action logit, used to center the
     /// covariance rule on inter→action edges. Length tracks `action.len()`.
-    #[serde(skip)]
+    #[serde(default)]
     pub action_mean_activation: Vec<f32>,
     /// True once the activation means have been bootstrapped to the live
     /// activations on the brain's first plasticity pass. Neurons are never
     /// added or removed after birth, so every mean initializes on the same
     /// tick and one flag covers the whole brain.
-    #[serde(skip)]
+    #[serde(default)]
     pub means_initialized: bool,
 }
 

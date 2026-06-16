@@ -1,131 +1,137 @@
 # sim-cli — usage reference
 
 `sim-cli` is the **agent-facing research cockpit** for the NeuroGenesis engine:
-a headless, stateful stdin REPL that holds one `Simulation` in memory so a world
-can be scrubbed forward and interrogated repeatedly without rebuilding. It is
-optimized for signal-dense, token-efficient, machine-parseable output.
+a **stateless, one-shot CLI** where a simulation world is an explicit file
+artifact. Each invocation reads a world from `--in`, runs one command, and (for
+mutating commands) writes the advanced world to `--out`. Output is **JSON by
+default**, optimized for an agent driving it over the shell.
 
-The in-REPL `help` command is the always-current source of truth; this file is
-the fuller reference (vocabularies, semantics). Design rationale lives in
-`SPEC.md`.
+Design rationale lives in `SPEC.md` and `docs/sim-cli-stateless-spec.md`. The
+in-CLI `help` (`sim-cli help`) is the always-current command list.
+
+> **Why a file, not a REPL?** State on disk means: snapshot/fork a world with
+> `cp`, fan out parallel runs by backgrounding invocations, and never lose work
+> to a crashed long-lived process. The process exiting is the completion signal;
+> stdout is the framed result.
 
 ## Run
 
 ```bash
-cargo run -p sim-cli --release            # --release strongly recommended
-```
-
-Reads commands from stdin, one per line. `#`-prefixed and blank lines are
-ignored; `quit`/`exit`/EOF exits. Errors print `error: …` and continue. Drive it
-from a heredoc:
-
-```bash
-cargo run -p sim-cli --release <<'EOF'
-load --seed 7 --report-every 10000
-record on
-run-to 500000
-pillars
-state
-EOF
+cargo build -p sim-cli --release        # --release strongly recommended
+./target/release/sim-cli <command> [global flags] [command args]
 ```
 
 ## Core model
 
-- **Stateful**: one `Simulation`, advanced only forward (`step`, `run-to`). To
-  restart, `load` again (there is no backward scrub).
-- **Recording**: metrics that need history (`pillars`, `eco` trajectories,
-  `timeseries`, `lineage` generation-time) require `record on` first. The
-  recorder is built on the shared `sim-metrics` crate, so live `pillars` are
-  **byte-identical** to the offline `sim-evaluation` harness. Point-in-time
-  queries (`state`, `food`, `inspect`, `top`, `hist`, `find`, `brain`, `decide`,
-  `genome`, `lineage` distribution) work without recording.
-  - `record on` at turn 0 reproduces the eval exactly; mid-run it back-registers
-    the live population with partial lifetime counters and labels windows
-    `[PARTIAL]`.
-- **Output format**: compact text by default. `format json` flips the global
-  default; any command also takes `--json` / `--text` to override per call.
-- **Canonical vs scaled**: a default `load` reproduces the eval world. `--scale`
-  (or `--champions`, future interventions) marks the session
-  `[scaled: non-canonical]` in `state`/`pillars`/json so metrics aren't mistaken
-  for eval-comparable.
+- **A world is a file** (`world.bin`, CBOR). Built by `new`, advanced by
+  `step`/`run-to`/`watch`. Forward-only; to branch, `cp` it.
+- **Metrics are a sidecar file** (`<world>.metrics`) holding the recorder
+  accumulators. It **follows the world automatically**: `new` mints it, and
+  mutating/reading commands pick up the `<world>.metrics` sibling unless you pass
+  an explicit `--metrics PATH` or `--no-metrics`. Live pillars are
+  **byte-identical** to the offline `sim-evaluation` harness (shared
+  `sim-metrics` crate).
+- **Determinism:** save→load→advance is byte-identical to advancing in RAM (RNG
+  + plasticity state persist exactly). Two `cp` forks advanced identically are
+  bit-for-bit equal.
+
+## Global flags
+
+- `--in <world.bin>` — world to read (required by every command except `new`).
+- `--out <world.bin>` — where a mutating command writes the advanced world.
+  **Defaults to `--in`** (advance in place); pass a different path to fork.
+- `--metrics <path>` — explicit sidecar (default: the `<world>.metrics` sibling).
+- `--no-metrics` — disable recording for this call (fast scrub path).
+- `--out-dir <dir>` — directory for run-mode result files (default
+  `artifacts/runs`). Used by `sweep`.
+- `--json` / `--text` — output format (JSON is the default).
 
 ## Commands
 
-### Session & control
-- `load [--config PATH] [--seed N] [--report-every R] [--threads K] [--scale W,POP]`
-  — build `Simulation::new`. Defaults: config `sim-evaluation/config.toml`,
-  seed 0, report-every 10000. `--threads` → `config.intent_parallel_threads`.
-  `--scale W,POP` overrides `world_width,num_organisms` for fast iteration
-  (non-canonical). Clears any recorder.
-- `record on|off|status` — toggle the metric recorder.
-- `format json|text` — set the default output format.
-- `help`, `quit`/`exit`.
+### Mutating (persist the world)
+- `new [--config P] [--seed N] [--set k=v]… [--scale W,POP] [--threads K] [--report-every R] --out w.bin [--no-metrics]`
+  — construct a world. `--set` patches config fields inline (e.g.
+  `--set food_energy=12 --set passive_metabolism_cost_per_unit=0.0035`), no temp
+  config files. `--scale W,POP` overrides world_width,num_organisms (marks the
+  world non-canonical). Mints the metric sidecar unless `--no-metrics`.
+- `step [N] --in w.bin [--out w.bin]` — advance N ticks (default 1).
+- `run-to T --in w.bin [--out w.bin]` — advance until turn == T (no backward).
+- `watch T [--every E] --in w.bin [--out w.bin]` — advance to T, emitting a
+  metrics row every E ticks (JSONL progress log).
+- `bench [N] --in w.bin` — time N ticks; the advanced world is discarded
+  (no `--out`).
 
-### Time
-- `step [N]` — advance N ticks (default 1).
-- `run-to T` — advance until turn == T (no-op if already ≥ T; no backward).
-- `watch T [--every E]` — advance to T, emitting a compact metrics row every E
-  ticks (default E = report_every). One-shot evolution graph.
-- `turn` — print current turn.
-- `bench [N]` — time N ticks (default 100000) through the current advance path
-  (respects recording); reports ticks/sec + ns/tick. Use `--release` for real
-  numbers.
+### Reads (stdout only, no `--out`)
+- `turn` — current turn.
+- `state` — population, energy/health/age/generation summaries, food, last-turn
+  ecology (+ a pillars line if a sidecar is present).
+- `pillars` — foraging/predation/intelligence/learning + sub-signals, **plus a
+  `granular` section** with the full per-interval metric series behind the
+  windowed scores (each interval's action_effectiveness, plant/prey rates, mi_sa,
+  learning_slope; the scoring window is marked). **Needs a sidecar.**
+- `eco` — population/food trajectory, deaths-by-cause, rates (trajectory needs a
+  sidecar; point-in-time works without).
+- `lineage` — generation distribution + founder-lineage composition.
+- `genome [--gene G] [--drift]` — per-gene population distributions.
+- `timeseries [--cols LIST] [--last K]` — recorded columns as sparklines.
+  **Needs a sidecar.** Columns: per-tick `population descendants food births
+  deaths consumptions predations reproductions`; per-interval
+  `action_effectiveness plant_consumption_rate prey_consumption_rate mi_sa
+  learning_slope pop`.
+- `food` — plant/corpse counts, energy, coverage.
+- `inspect ID` · `top FIELD [N]` · `hist FIELD` · `find EXPR [--fields LIST]
+  [--limit N]` · `brain ID [--view summary|synapses|activations|dot]` ·
+  `decide ID` — per-organism inspection. Fields/vocabularies: invalid args print
+  the valid set.
+- `query --in w.bin` — **batch reads**: read read-only commands from stdin (one
+  per line) against a single world load. Use for a burst of probes so you pay one
+  deserialize, not one per command. Mutating commands are rejected.
 
-### Aggregate readouts
-- `pillars` — the four competence axes with sub-signals: **foraging**
-  ←plant_consumption_rate, **predation** ←prey_consumption_rate,
-  **intelligence** ←action_effectiveness + mi_sa, **learning** ←learning_slope.
-  Needs recording. (Saturation anchors / formulas: `sim-metrics/src/pillars.rs`.)
-- `state` — turn; population (total/descendant/founder); energy·health·age·
-  generation five-number summaries; food; last-turn ecology; + a pillars line if
-  recording.
-- `eco` — population & food sparklines, birth/death rates, deaths-by-cause
-  (starvation/age/predation/other), consumption/predation rates, carrying-
-  capacity estimate. Trajectories need recording.
-- `lineage` — generation distribution + founder-lineage (`species_id`)
-  composition (top lineages by share, distinct-lineage diversity).
-- `genome [--gene NAME] [--drift]` — population per-gene five-number summaries +
-  mutation-rate hot/cold. Genes: `num_neurons num_synapses vision_distance
-  age_of_maturity gestation_ticks max_organism_age hebb_eta_gain
-  juvenile_eta_scale eligibility_retention max_weight_delta_per_tick
-  synapse_prune_threshold` (plus the 16 mutation-rate genes shown in the
-  mutation-rate section).
-- `timeseries [--cols LIST] [--last K]` — recorded columns as sparklines. Needs
-  recording. Columns: per-tick `population descendants food births deaths
-  consumptions predations reproductions`; per-interval `action_effectiveness
-  plant_consumption_rate prey_consumption_rate mi_sa learning_slope pop`.
-- `food` — plant/corpse counts, energy, grid coverage.
+### Run modes (own their worlds, write a result file)
+- `sweep --grid KEY=v1,v2[,…] [KEY2=…] --seeds N[,N…] --to TICK [--config P]
+  [--baseline KEY=v,…] [--report-every R] [--threads K] [--jobs J] [--out-dir D]`
+  — run the cartesian product of config overrides × seeds, score each cell's
+  pillars (mean/min/max across the seed cohort), and write a JSON result file to
+  `--out-dir` (default `artifacts/runs/sweep-<ts>.json`). Prints the file path
+  and a compact ranking table (with Δ vs the `--baseline` cell) to stdout.
+  `KEY`s are config field names (same vocabulary as `new --set`). Jobs run in
+  parallel (bounded to `--jobs`, default = CPU count; each run uses `--threads`
+  intent threads, default 1, so parallelism comes from running many worlds at
+  once). Example:
+  `sweep --grid food_energy=10,12,14 --seeds 7,42,123,2026 --to 500000
+  --baseline food_energy=12`.
 
-### Per-organism
-- `top FIELD [N]` — top-N by `energy|health|age|generation|consumptions|reproductions`.
-- `hist FIELD` — histogram of `energy|health|age|generation`.
-- `find EXPR [--fields LIST] [--limit N]` — filter by a predicate. Comparisons
-  `field OP value` (OP ∈ `< <= > >= == !=`) joined by `and`/`or`, evaluated
-  **strictly left-to-right (no precedence, no parentheses)**. Fields:
-  `id energy health max_health age generation species consumptions plant prey
-  reproductions neurons synapses vision hebb_eta gestating`. `--fields` selects
-  output columns (same names; default id,energy,age,generation,consumptions,
-  reproductions); `--limit` caps rows (default 20).
-- `inspect ID` — one-organism dump (pos, energy/health/age/gen/species, counts,
-  genome summary, action logits, this-tick instrumentation).
-- `brain ID [--view summary|synapses|activations|dot]` — neural inspection.
-  summary: layer counts, top synapses by |weight|, plasticity genes + effective
-  learning rate, utilization. synapses: full edge list. activations: current
-  sensory/inter/action. dot: graphviz adjacency.
-- `decide ID` — explain the organism's current decision: sensory inputs → action
-  logits → softmax probabilities (exact reproduction of the engine) → selected
-  action. Note: logits/probs reflect the post-tick brain state, while
-  `selected`/`food_visible` are from the decision tick just executed.
+## Workflows
 
-## Sweeps (agent-orchestrated)
+**Warm once, fork, run only the scored window** (pillars read tick 460k–500k of
+500k, so don't re-warm per config):
 
-No built-in sweep runner. Drive multiple seeds/configs by scripting stdin
-(`load … / record on / run-to … / pillars --json / load --seed …`) or launching
-multiple processes, and collect the `--json` output.
+```bash
+sim-cli new --seed 7 --out artifacts/cli/warm.bin
+sim-cli run-to 400000 --in artifacts/cli/warm.bin
+for e in 10 12 14; do
+  cp artifacts/cli/warm.bin     artifacts/cli/e$e.bin
+  cp artifacts/cli/warm.metrics artifacts/cli/e$e.metrics    # fork metrics too
+  sim-cli run-to 500000 --in artifacts/cli/e$e.bin &         # parallel
+done; wait
+for e in 10 12 14; do sim-cli pillars --in artifacts/cli/e$e.bin; done
+```
+
+**Burst of probes on one state:**
+```bash
+sim-cli query --in artifacts/cli/warm.bin <<'EOF'
+find energy < 5 and age > 400 --limit 10
+inspect 8123
+decide 8123
+brain 8123 --view summary
+EOF
+```
 
 ## Notes
 
-- Determinism: same config + seed = identical results; recording is read-only and
-  draws no RNG, so a `sim-cli` run reproduces the eval trajectory exactly.
-- Architecture: metric computation is shared via the `sim-metrics` crate
-  (`ledger`/`ingest`/`intervals`/`pillars`); the CLI's `Recorder` feeds it live.
+- Put worlds/sidecars under `artifacts/` (not `/tmp`) so they survive a session.
+- Determinism: same config + seed + tick count = identical world bytes;
+  recording is read-only and draws no RNG, so a `sim-cli` run reproduces the eval
+  trajectory exactly.
+- A `--config` with `--set` overrides reparses the world TOML; `--set` keys are
+  the config field names (section-unique, e.g. `food_energy` under `[food]`).

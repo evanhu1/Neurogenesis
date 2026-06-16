@@ -8,6 +8,7 @@
 //! can pick the top reproducer at each flush boundary.
 
 use crate::schema::{OrganismLifetimeRow, OrganismOrigin, ACTION_COUNT, JOINT_LEN};
+use serde::{Deserialize, Serialize};
 use sim_types::{ActionRecord, ActionType, OrganismId, ReproductionEvent};
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
@@ -39,7 +40,7 @@ type IdHashMap<K, V> = HashMap<K, V, BuildHasherDefault<IdHasher>>;
 /// Online accumulator for the regression slope of action success vs age.
 /// Tracks the five running sums needed for an ordinary-least-squares slope
 /// without storing per-action samples or needing to know the lifespan up front.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct LearningAccumulator {
     n: u64,
     sum_age: f64,
@@ -73,7 +74,7 @@ impl LearningAccumulator {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct OrganismEntry {
     pub id: u64,
     origin: OrganismOrigin,
@@ -121,7 +122,7 @@ impl OrganismEntry {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Ledger {
     sidecar: IdHashMap<OrganismId, OrganismEntry>,
     /// Child id → parent id, captured when a successful `ReproductionEvent`

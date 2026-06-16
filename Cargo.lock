@@ -2297,11 +2297,14 @@ name = "sim-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ciborium",
+ "serde",
  "serde_json",
  "sim-config",
  "sim-core",
  "sim-metrics",
  "sim-types",
+ "toml",
 ]
 
 [[package]]
@@ -2317,6 +2320,7 @@ dependencies = [
 name = "sim-core"
 version = "0.1.0"
 dependencies = [
+ "ciborium",
  "criterion",
  "rand",
  "rand_chacha",

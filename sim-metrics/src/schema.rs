@@ -17,7 +17,7 @@ pub const ACTION_COUNT: usize = ActionType::ALL.len() + 1;
 /// `Descendant` so that founder behaviour and periodic-injection bursts don't
 /// contaminate evolution metrics; the other two variants remain in the dataset
 /// for completeness.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum OrganismOrigin {
     /// Part of the population spawned at tick 0.

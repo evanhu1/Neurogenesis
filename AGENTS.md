@@ -36,18 +36,27 @@ evaluation assumptions.
   `summary.json`/`timeseries.csv`/`report.html` from a persisted dataset without
   re-running the sim. `<run>` accepts a path (run root or seed dir), a timestamp
   prefix resolved under `artifacts/evaluation/`, or `latest`.
-- `cargo run -p sim-cli` (add `--release` for speed): the agent-facing research
-  cockpit — an interactive stdin REPL that holds one `Simulation` in memory so a
-  world can be scrubbed forward and inspected repeatedly. Type `help` for the
-  full command list (it is the source of truth and stays current); every command
-  accepts `--json`, and invalid arguments print the valid options. Typical flow:
-  `load [--seed N] [--report-every R] [--scale W,POP] [--threads K]` →
-  `record on` → `run-to T` → read `pillars` (live foraging/predation/
-  intelligence/learning — byte-identical to the eval via the shared `sim-metrics`
-  crate), `state`, `eco`, `lineage`, `genome`, `timeseries`, and per-organism
-  `find`/`top`/`hist`/`inspect`/`brain`/`decide`; `bench [N]` for throughput.
-  Pillars/eco/timeseries history require `record on` first; point-in-time queries
-  do not. See `docs/sim-cli.md` (usage) and `SPEC.md` (design).
+- `cargo build -p sim-cli --release` then `./target/release/sim-cli <command>`:
+  the agent-facing research cockpit — a **stateless one-shot CLI** where a world
+  is an explicit file. **You MUST read `docs/sim-cli.md` in full before using
+  sim-cli** — it documents the world-as-file model, the metric sidecar, command
+  vocabularies, and semantics you will otherwise misuse. Output is JSON by
+  default (`--text` to override); invalid args print the valid options. Each call
+  reads `--in <world.bin>`, runs one command, and (for mutating commands) writes
+  `--out <world.bin>` (defaults to `--in` = advance in place). Typical flow:
+  `new [--seed N] [--set k=v]… --out w.bin` → `run-to T --in w.bin` → read
+  `pillars` (live foraging/predation/intelligence/learning — byte-identical to
+  the eval via the shared `sim-metrics` crate), `state`, `eco`, `lineage`,
+  `genome`, `timeseries`, and per-organism `find`/`top`/`hist`/`inspect`/`brain`/
+  `decide`; `bench [N]` for throughput; `query` for batch reads off one load;
+  `sweep --grid k=v,v --seeds N,N --to T` for parallel grid×seed experiments
+  (writes a result file under `--out-dir`, default `artifacts/runs/`). `pillars`
+  includes a `granular` per-interval series behind the windowed scores.
+  The metric sidecar (`<world>.metrics`) is minted by `new` and follows the
+  world; `pillars`/`eco`-trajectory/`timeseries` need it. **Snapshot/fork a world
+  with `cp`; fan out parallel runs by backgrounding invocations.** Put worlds
+  under `artifacts/`, not `/tmp`. See `docs/sim-cli.md` (usage),
+  `docs/sim-cli-stateless-spec.md` + `SPEC.md` (design).
 - `cargo run -p sim-server`: start backend on `127.0.0.1:8080`. Flags:
   - `--champion-pool-path <path>`: override the default `champion_pool.json`
     location used for read-back and persistence of saved champions.

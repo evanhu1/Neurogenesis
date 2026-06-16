@@ -83,9 +83,11 @@ pub enum SimError {
     InvalidConfig(String),
     #[error("invalid simulation state: {0}")]
     InvalidState(String),
+    #[error("world serialization failed: {0}")]
+    Serialization(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct Simulation {
     config: WorldConfig,
     turn: u64,
@@ -110,15 +112,22 @@ pub struct Simulation {
     /// world generation, so this is built once per reset and cloned per
     /// snapshot instead of being rebuilt and re-sorted on every call.
     terrain_cells: Vec<TerrainCell>,
+    // Instrumentation-only; not behavior-affecting and `ActionRecord` is not
+    // serde-able. Skipped from the world blob and rebuilt empty on load.
     #[cfg(feature = "instrumentation")]
+    #[serde(skip)]
     action_records: Vec<Option<ActionRecord>>,
     /// Per-simulation rayon pool. Using a dedicated pool avoids the shared-pool
     /// bottleneck when many seed simulations run concurrently in the evaluation
     /// harness — each sim's `par_iter_mut` work actually runs in parallel on
     /// its own workers instead of serializing through one global pool.
+    // Not serializable and not behavior-affecting (parallelism only); a loaded
+    // sim lazily rebuilds its own pool.
+    #[serde(skip)]
     pub(crate) cached_thread_pool: std::sync::OnceLock<std::sync::Arc<rayon::ThreadPool>>,
     /// Reusable per-tick scratch buffers (see `turn::TurnScratch`). Transient:
     /// always cleared + resized before use, so contents never affect behavior.
+    #[serde(skip)]
     turn_scratch: turn::TurnScratch,
     metrics: MetricsSnapshot,
 }
@@ -347,6 +356,27 @@ impl Simulation {
         for _ in 0..count {
             let _ = self.tick();
         }
+    }
+
+    /// Serialize the full world to a writer as CBOR (self-describing binary).
+    /// Round-trips deterministically: `save` then [`Simulation::load`] yields a
+    /// world that advances byte-identically to the original (the RNG state and
+    /// all id counters are persisted exactly). Transient/parallelism fields
+    /// (`turn_scratch`, `cached_thread_pool`, instrumentation `action_records`)
+    /// are not written and start empty on load.
+    pub fn save<W: std::io::Write>(&self, writer: W) -> Result<(), SimError> {
+        ciborium::into_writer(self, writer).map_err(|e| SimError::Serialization(e.to_string()))
+    }
+
+    /// Deserialize a world previously written by [`Simulation::save`]. Runs
+    /// [`Simulation::validate_state`] as an integrity gate before returning, so
+    /// a corrupt or incompatible blob fails loudly rather than ticking into
+    /// undefined behavior.
+    pub fn load<R: std::io::Read>(reader: R) -> Result<Self, SimError> {
+        let sim: Self =
+            ciborium::from_reader(reader).map_err(|e| SimError::Serialization(e.to_string()))?;
+        sim.validate_state()?;
+        Ok(sim)
     }
 
     pub fn focused_organism(&self, id: OrganismId) -> Option<OrganismState> {
