@@ -513,7 +513,12 @@ pub struct SynapseEdge {
     pub weight: f32,
     #[serde(default)]
     pub eligibility: f32,
-    #[serde(skip)]
+    // `default` (not `skip`): normally consumed+zeroed the same tick it is set,
+    // but a gestating organism's post-commit plasticity is skipped, so a nonzero
+    // pending coactivation is frozen across its gestation ticks (see the
+    // gestation note in turn/mod.rs). A world saved mid-gestation must persist it
+    // or the reloaded run drops it into eligibility differently → divergence.
+    #[serde(default)]
     pub pending_coactivation: f32,
 }
 

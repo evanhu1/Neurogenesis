@@ -536,6 +536,20 @@ impl Simulation {
         }
 
         for organism in &self.organisms {
+            // Plasticity indexes these per-neuron buffers directly (no length-safe
+            // zip) and `bootstrap_means` only re-seeds when `means_initialized`
+            // is false — so a loaded blob whose buffers don't match the layer
+            // sizes would panic out-of-bounds in release. Reject it here instead.
+            let brain = &organism.brain;
+            if brain.sensory_mean_activation.len() != brain.sensory.len()
+                || brain.inter_mean_activation.len() != brain.inter.len()
+                || brain.action_mean_activation.len() != brain.action.len()
+            {
+                return Err(SimError::InvalidState(format!(
+                    "organism {:?} brain mean-activation buffers do not match layer sizes",
+                    organism.id
+                )));
+            }
             if organism.q < 0 || organism.r < 0 || organism.q >= width || organism.r >= width {
                 return Err(SimError::InvalidState(format!(
                     "organism {:?} uses non-canonical coordinates ({}, {})",

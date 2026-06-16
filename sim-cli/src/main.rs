@@ -1,13 +1,13 @@
-//! sim-cli — headless, stateful research client for the NeuroGenesis engine.
+//! sim-cli — stateless, world-as-file research CLI for the NeuroGenesis engine.
 //!
-//! Reads commands from stdin (one per line), holding a single `Simulation` in
-//! memory so the world can be scrubbed forward and inspected repeatedly without
-//! rebuilding. Live metrics (pillars, ecology, lineage, genome drift) are
-//! computed from the shared `sim-metrics` crate, so they match the offline eval
-//! byte-for-byte. Output defaults to compact text; `--json` (or the `format`
-//! command) emits machine-parseable JSON.
+//! Each invocation reads a world from `--in`, runs one command, and (for
+//! mutating commands) writes the advanced world to `--out` (default `--in`).
+//! Metrics live in a `<world>.metrics` sidecar that follows the world. Live
+//! metrics (pillars, ecology, lineage, genome drift) are computed from the
+//! shared `sim-metrics` crate, so they match the offline eval. Output is JSON by
+//! default; `--text` overrides per call.
 //!
-//! See docs/sim-cli-design.md and SPEC.md.
+//! See docs/sim-cli.md (usage) and docs/sim-cli-stateless-spec.md + SPEC.md.
 
 mod dashboards;
 mod inspect_ext;
@@ -17,7 +17,7 @@ mod sweep;
 use anyhow::{anyhow, bail, Result};
 use output::{opt, opt_json, Format, Stats};
 use serde_json::json;
-use sim_config::{load_world_config_from_path, world_config_from_toml_parts};
+use sim_config::{load_world_config_from_path, world_config_from_toml_parts, WorldConfig};
 use sim_core::Simulation;
 use sim_metrics::{
     compute_pillar_scores, derive_interval_metrics, ingest_tick, register_existing,
@@ -45,7 +45,8 @@ fn run_output_path(out_dir: &str, prefix: &str) -> Result<PathBuf> {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
-    Ok(PathBuf::from(out_dir).join(format!("{prefix}-{stamp}.json")))
+    // PID suffix so two sweeps started in the same millisecond don't collide.
+    Ok(PathBuf::from(out_dir).join(format!("{prefix}-{stamp}-{}.json", std::process::id())))
 }
 
 /// Commands that advance / create a world and therefore persist it (`--out`,
@@ -103,14 +104,6 @@ fn print_help(out: &mut impl Write) -> Result<()> {
          Snapshot/fork a world with `cp`; full reference in docs/sim-cli.md."
     )
     .map_err(Into::into)
-}
-
-/// On-disk metric sidecar: the recorder accumulators plus the `report_every`
-/// the interval layer needs. Lives beside the world as `<world>.metrics`.
-#[derive(serde::Serialize, serde::Deserialize)]
-struct Sidecar {
-    report_every: u64,
-    recorder: Recorder,
 }
 
 fn main() {
@@ -194,9 +187,28 @@ fn run() -> Result<()> {
         let metrics_path = resolve_metrics_path(&world_path, metrics_flag.as_deref(), no_metrics);
         if let Some(mp) = metrics_path.as_ref() {
             if Path::new(mp).exists() {
-                let sidecar = load_sidecar(mp)?;
-                app.report_every = sidecar.report_every;
-                app.recorder = Some(sidecar.recorder);
+                let (report_every, recorder) = load_sidecar(mp)?;
+                app.report_every = report_every;
+                // Warn (on stderr, so stdout JSON stays clean) if the sidecar's
+                // recorded span doesn't reach the world's turn — e.g. the world
+                // was advanced under `--no-metrics`. Pillars/eco are then
+                // computed only over what was recorded, which is easy to misread.
+                let world_turn = app.sim.as_ref().map(|s| s.turn()).unwrap_or(0);
+                let sidecar_last = recorder
+                    .tick_summary
+                    .last()
+                    .map(|r| r.tick)
+                    .unwrap_or(recorder.started_turn);
+                if sidecar_last < world_turn {
+                    eprintln!(
+                        "{}",
+                        json!({ "warning": format!(
+                            "metric sidecar is stale: covers ticks <= {sidecar_last} but world is at turn {world_turn}; \
+                             history-based reads use the recorded span only"
+                        ) })
+                    );
+                }
+                app.recorder = Some(recorder);
             } else if mutating {
                 app.start_recording()?;
             }
@@ -206,18 +218,20 @@ fn run() -> Result<()> {
         out.flush()?;
 
         if mutating {
-            let dest = out_path.clone().unwrap_or(world_path.clone());
+            let dest = out_path.clone().unwrap_or_else(|| world_path.clone());
             save_world(app.sim.as_ref().expect("world loaded"), &dest)?;
-            if let (Some(rec), Some(mp)) = (app.recorder.as_ref(), metrics_path.as_ref()) {
-                // Sidecar follows the written world (so `--out fork.bin` forks
-                // its metrics to `fork.metrics` too).
-                let mp = if out_path.is_some() {
-                    resolve_metrics_path(&dest, metrics_flag.as_deref(), no_metrics)
-                        .unwrap_or_else(|| mp.clone())
+            if let Some(rec) = app.recorder.as_ref() {
+                // The sidecar follows the WRITTEN world. On a fork (--out != --in)
+                // it lands beside the fork, so the source world's sidecar is never
+                // overwritten with a higher turn count (which would desync it).
+                let sidecar_dest = if dest != world_path {
+                    sibling_metrics_path(&dest)
                 } else {
-                    mp.clone()
+                    metrics_path
+                        .clone()
+                        .expect("recorder present implies a metrics path")
                 };
-                save_sidecar(&app, rec, &mp)?;
+                save_sidecar(&app, rec, &sidecar_dest)?;
             }
         }
         return Ok(());
@@ -246,12 +260,39 @@ fn resolve_metrics_path(world_path: &str, explicit: Option<&str>, no_metrics: bo
     if let Some(p) = explicit {
         return Some(p.to_string());
     }
-    Some(
-        PathBuf::from(world_path)
-            .with_extension("metrics")
-            .to_string_lossy()
-            .into_owned(),
-    )
+    Some(sibling_metrics_path(world_path))
+}
+
+/// The `<world>.metrics` sibling path for a world file.
+fn sibling_metrics_path(world_path: &str) -> String {
+    PathBuf::from(world_path)
+        .with_extension("metrics")
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// Write to `<path>.tmp` then atomically rename into place, so a crash or
+/// write error mid-save can't truncate an existing file — worlds are often
+/// advanced in place (`--out` defaults to `--in`), so the input is the only
+/// copy. Creates the parent directory and flushes before the rename.
+fn atomic_write(
+    path: &str,
+    write: impl FnOnce(&mut BufWriter<File>) -> Result<()>,
+) -> Result<()> {
+    if let Some(parent) = Path::new(path).parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).ok();
+        }
+    }
+    let tmp = format!("{path}.tmp");
+    {
+        let mut w = BufWriter::new(
+            File::create(&tmp).map_err(|e| anyhow!("cannot write `{tmp}`: {e}"))?,
+        );
+        write(&mut w)?;
+        w.flush().map_err(|e| anyhow!("flushing `{tmp}`: {e}"))?;
+    }
+    std::fs::rename(&tmp, path).map_err(|e| anyhow!("renaming `{tmp}` -> `{path}`: {e}"))
 }
 
 fn load_world(path: &str) -> Result<Simulation> {
@@ -261,17 +302,14 @@ fn load_world(path: &str) -> Result<Simulation> {
 }
 
 fn save_world(sim: &Simulation, path: &str) -> Result<()> {
-    if let Some(parent) = Path::new(path).parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).ok();
-        }
-    }
-    let file = File::create(path).map_err(|e| anyhow!("cannot write world `{path}`: {e}"))?;
-    sim.save(BufWriter::new(file))
-        .map_err(|e| anyhow!("saving world `{path}`: {e}"))
+    atomic_write(path, |w| {
+        sim.save(w).map_err(|e| anyhow!("saving world `{path}`: {e}"))
+    })
 }
 
-fn load_sidecar(path: &str) -> Result<Sidecar> {
+/// Load a metric sidecar: `(report_every, recorder)`, serialized as a CBOR
+/// 2-tuple by [`save_sidecar`].
+fn load_sidecar(path: &str) -> Result<(u64, Recorder)> {
     let file =
         File::open(path).map_err(|e| anyhow!("cannot open metrics `{path}`: {e}"))?;
     ciborium::from_reader(BufReader::new(file))
@@ -279,26 +317,40 @@ fn load_sidecar(path: &str) -> Result<Sidecar> {
 }
 
 fn save_sidecar(app: &App, recorder: &Recorder, path: &str) -> Result<()> {
-    if let Some(parent) = Path::new(path).parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).ok();
-        }
-    }
-    let sidecar = SidecarRef {
-        report_every: app.report_every,
-        recorder,
-    };
-    let file = File::create(path).map_err(|e| anyhow!("cannot write metrics `{path}`: {e}"))?;
-    ciborium::into_writer(&sidecar, BufWriter::new(file))
-        .map_err(|e| anyhow!("saving metrics `{path}`: {e}"))
+    atomic_write(path, |w| {
+        // Serialize a borrowed `(report_every, recorder)` tuple — no clone of
+        // the (large) recorder, and no hand-mirrored struct to keep in sync.
+        ciborium::into_writer(&(app.report_every, recorder), w)
+            .map_err(|e| anyhow!("saving metrics `{path}`: {e}"))
+    })
 }
 
-/// Borrowed mirror of [`Sidecar`] so we can serialize without cloning the
-/// recorder. Field order/names must match `Sidecar`.
-#[derive(serde::Serialize)]
-struct SidecarRef<'a> {
-    report_every: u64,
-    recorder: &'a Recorder,
+/// Build a `WorldConfig` from a config file path + inline `--set` overrides.
+/// Shared by `new` (and indirectly by `sweep`) so the read+patch+reparse logic
+/// lives in one place. No overrides → the plain loader.
+fn world_config_with_overrides(config_path: &str, sets: &[(String, String)]) -> Result<WorldConfig> {
+    if sets.is_empty() {
+        return load_world_config_from_path(Path::new(config_path));
+    }
+    let world_raw = std::fs::read_to_string(config_path)
+        .map_err(|e| anyhow!("reading config `{config_path}`: {e}"))?;
+    let seed_genome_path = Path::new(config_path).with_file_name("seed_genome.toml");
+    let seed_genome_raw = std::fs::read_to_string(&seed_genome_path)
+        .map_err(|e| anyhow!("reading {}: {e}", seed_genome_path.display()))?;
+    world_config_from_raw_overrides(&world_raw, &seed_genome_raw, sets)
+}
+
+/// The patch+reparse half of [`world_config_with_overrides`], taking raw TOML so
+/// a caller (`sweep`) can read the config files once and reuse them across many
+/// override-sets.
+pub(crate) fn world_config_from_raw_overrides(
+    world_raw: &str,
+    seed_genome_raw: &str,
+    sets: &[(String, String)],
+) -> Result<WorldConfig> {
+    let patched = apply_config_overrides(world_raw, sets)?;
+    world_config_from_toml_parts(&patched, seed_genome_raw)
+        .map_err(|e| anyhow!("config after --set failed schema validation: {e}"))
 }
 
 /// Patch a world-config TOML document with `key=value` overrides before parsing.
@@ -405,7 +457,7 @@ impl App {
     fn sim(&mut self) -> Result<&mut Simulation> {
         self.sim
             .as_mut()
-            .ok_or_else(|| anyhow!("no simulation loaded; run `load` first"))
+            .ok_or_else(|| anyhow!("no world loaded (use --in <world.bin>)"))
     }
 
     /// Advance `n` ticks. When recording is active each tick's delta is fed to
@@ -415,7 +467,7 @@ impl App {
         let sim = self
             .sim
             .as_mut()
-            .ok_or_else(|| anyhow!("no simulation loaded; run `load` first"))?;
+            .ok_or_else(|| anyhow!("no world loaded (use --in <world.bin>)"))?;
         match self.recorder.as_mut() {
             None => {
                 for _ in 0..n {
@@ -656,18 +708,7 @@ impl App {
             }
         }
 
-        let mut config = if sets.is_empty() {
-            load_world_config_from_path(Path::new(&config_path))?
-        } else {
-            let world_raw = std::fs::read_to_string(&config_path)
-                .map_err(|e| anyhow!("reading config `{config_path}`: {e}"))?;
-            let seed_genome_path = Path::new(&config_path).with_file_name("seed_genome.toml");
-            let seed_genome_raw = std::fs::read_to_string(&seed_genome_path)
-                .map_err(|e| anyhow!("reading {}: {e}", seed_genome_path.display()))?;
-            let patched = apply_config_overrides(&world_raw, &sets)?;
-            world_config_from_toml_parts(&patched, &seed_genome_raw)
-                .map_err(|e| anyhow!("config after --set failed schema validation: {e}"))?
-        };
+        let mut config = world_config_with_overrides(&config_path, &sets)?;
         if let Some(t) = threads {
             config.intent_parallel_threads = t;
         }

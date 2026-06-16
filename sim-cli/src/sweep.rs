@@ -7,7 +7,6 @@
 use crate::run_output_path;
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
-use sim_config::world_config_from_toml_parts;
 use sim_core::Simulation;
 use sim_metrics::{
     compute_pillar_scores, derive_interval_metrics, ingest_tick, register_founders, Ledger,
@@ -34,7 +33,7 @@ fn metric(p: &PillarScores, key: &str) -> f64 {
         "intelligence" => p.intelligence_pillar,
         "learning" => p.learning_pillar,
         "learning_slope" => p.mean_learning_slope.unwrap_or(f64::NAN),
-        _ => f64::NAN,
+        other => unreachable!("metric() called with key outside METRIC_KEYS: {other}"),
     }
 }
 
@@ -76,7 +75,11 @@ pub fn run_sweep(args: &[&str], out_dir: &str, out: &mut impl Write) -> Result<(
                     if values.iter().any(|v| v.is_empty()) {
                         bail!("--grid `{k}` has an empty value");
                     }
-                    grid.push((k.trim().to_string(), values));
+                    let key = k.trim().to_string();
+                    if grid.iter().any(|(existing, _)| *existing == key) {
+                        bail!("--grid key `{key}` given twice");
+                    }
+                    grid.push((key, values));
                     i += 1;
                 }
             }
@@ -159,10 +162,15 @@ pub fn run_sweep(args: &[&str], out_dir: &str, out: &mut impl Write) -> Result<(
 
     // Cartesian product of the grid → one override-set per cell.
     let cells = cartesian(&grid);
-    let baseline_idx = baseline
-        .as_ref()
-        .and_then(|b| cells.iter().position(|c| same_overrides(c, b)))
-        .unwrap_or(0);
+    // A --baseline that matches no cell is a user error (typo / wrong key set);
+    // fail loudly rather than silently computing deltas against cell 0.
+    let baseline_idx = match baseline.as_ref() {
+        Some(b) => cells
+            .iter()
+            .position(|c| same_overrides(c, b))
+            .ok_or_else(|| anyhow!("--baseline {:?} matches no cell in the grid", b))?,
+        None => 0,
+    };
 
     // Flatten to (cell, seed) jobs and run them in a bounded parallel pool.
     let jobs: Vec<Job> = cells
@@ -192,7 +200,6 @@ pub fn run_sweep(args: &[&str], out_dir: &str, out: &mut impl Write) -> Result<(
     out.flush()?;
 
     let next = AtomicUsize::new(0);
-    let done = AtomicUsize::new(0);
     let outcomes: Mutex<Vec<JobOutcome>> = Mutex::new(Vec::with_capacity(total_jobs));
     let n_workers = parallelism.clamp(1, total_jobs.max(1));
 
@@ -221,8 +228,6 @@ pub fn run_sweep(args: &[&str], out_dir: &str, out: &mut impl Write) -> Result<(
                         },
                     };
                 outcomes.lock().unwrap().push(outcome);
-                let d = done.fetch_add(1, Ordering::Relaxed) + 1;
-                let _ = d; // progress could be logged here; kept quiet for clean output
             });
         }
     });
@@ -250,9 +255,7 @@ fn run_cell_seed(
     report_every: u64,
     threads: u32,
 ) -> Result<PillarScores> {
-    let patched = crate::apply_config_overrides(world_raw, overrides)?;
-    let mut config = world_config_from_toml_parts(&patched, seed_genome_raw)
-        .map_err(|e| anyhow!("config after overrides failed validation: {e}"))?;
+    let mut config = crate::world_config_from_raw_overrides(world_raw, seed_genome_raw, overrides)?;
     config.intent_parallel_threads = threads;
     let mut sim = Simulation::new(config, seed).map_err(|e| anyhow!("{e}"))?;
 
@@ -269,6 +272,10 @@ fn run_cell_seed(
             descendant_population: ledger.descendant_population(),
         });
     }
+    // Include organisms still alive at `to` (the eval drains survivors before
+    // scoring), so sweep pillar values match an eval run of the same config/seed,
+    // not just rank consistently.
+    lifetimes.extend(ledger.drain_survivors());
     let intervals = derive_interval_metrics(&tick_summary, &lifetimes, report_every, to);
     Ok(compute_pillar_scores(&intervals))
 }
