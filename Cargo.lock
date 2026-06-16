@@ -2299,6 +2299,7 @@ dependencies = [
  "anyhow",
  "sim-config",
  "sim-core",
+ "sim-metrics",
  "sim-types",
 ]
 

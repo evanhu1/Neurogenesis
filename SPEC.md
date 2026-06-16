@@ -354,8 +354,14 @@ review (file:line):
    consumes it via re-exports and the shared `register_founders`/`ingest_tick`.
    Golden gate met on seed 1 (timeseries + pillars + state_hash identical).
    Remaining: confirm on the full 8-seed suite before declaring closed.
-2. **CLI recorder**: `Recorder` over `sim_metrics::Ledger` + per-tick row vecs;
-   `record on/off/status`; stepping feeds the recorder; fast path preserved.
+2. **CLI recorder** ✅ *done* — `Recorder` over `sim_metrics::Ledger` + per-tick
+   `TickSummaryRow`/`OrganismLifetimeRow` vecs; `record on/off/status`;
+   `step`/`run-to` route through a recorder-aware `advance` (fast path preserved
+   when off); `load --report-every`; mid-run `record on` back-registers the live
+   population (partial windows labelled). `pillars` + a `state` pillars line read
+   the four axes via `derive_interval_metrics`/`compute_pillar_scores`. Verified:
+   live pillars at seed 1 / 20k == eval baseline (forage .384, pred .094,
+   intel .690, learn 0). Added `Ledger::register_existing` / `ingest::register_existing`.
 3. **Output layer**: `format text|json`, stats (min/p50/mean/p90/max) + sparkline
    helpers; port existing commands; delete hand-rolled action/pillar constants.
 4. **Dashboards**: `state` v2, `pillars`, `actions`, `eco`, `lineage`, `genome`,

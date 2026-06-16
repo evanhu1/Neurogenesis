@@ -12,6 +12,10 @@
 use anyhow::{anyhow, bail, Result};
 use sim_config::load_world_config_from_path;
 use sim_core::Simulation;
+use sim_metrics::{
+    compute_pillar_scores, derive_interval_metrics, ingest_tick, register_existing,
+    register_founders, Ledger, OrganismLifetimeRow, PillarScores, TickSummaryRow,
+};
 use sim_types::{ActionType, EntityId};
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
@@ -27,7 +31,11 @@ const P_BASELINE: f64 = 1.0 / 7.0;
 const PILLAR_TARGET: f64 = 0.55;
 
 fn main() -> Result<()> {
-    let mut app = App { sim: None };
+    let mut app = App {
+        sim: None,
+        recorder: None,
+        report_every: REPORT_EVERY,
+    };
     let stdin = io::stdin();
     let mut out = io::stdout();
     writeln!(
@@ -56,6 +64,26 @@ fn main() -> Result<()> {
 
 struct App {
     sim: Option<Simulation>,
+    /// Live metric accumulator; `Some` only while `record on`. Built on the
+    /// shared `sim-metrics` ledger so live pillars match the eval byte-for-byte.
+    recorder: Option<Recorder>,
+    /// Reporting-interval width used for pillar windowing (eval default 10k;
+    /// override at `load --report-every`).
+    report_every: u64,
+}
+
+/// In-memory metric recorder. Holds the shared per-organism ledger plus the two
+/// raw fact streams the analysis layer consumes (`derive_interval_metrics`):
+/// the per-tick descendant-population line and the lifetime rows of organisms
+/// that died while recording. Survivors are intentionally absent — the interval
+/// layer skips `death_tick == None` rows, exactly as the eval does.
+struct Recorder {
+    ledger: Ledger,
+    tick_summary: Vec<TickSummaryRow>,
+    lifetimes: Vec<OrganismLifetimeRow>,
+    /// Turn at which recording began. `> 0` means already-alive organisms were
+    /// back-registered with partial lifetime counters (windows are approximate).
+    started_turn: u64,
 }
 
 impl App {
@@ -63,6 +91,52 @@ impl App {
         self.sim
             .as_mut()
             .ok_or_else(|| anyhow!("no simulation loaded; run `load` first"))
+    }
+
+    /// Advance `n` ticks. When recording is active each tick's delta is fed to
+    /// the ledger via the shared `ingest_tick`; otherwise this is the fast,
+    /// allocation-free scrub path (delta dropped).
+    fn advance(&mut self, n: u64) -> Result<()> {
+        let sim = self
+            .sim
+            .as_mut()
+            .ok_or_else(|| anyhow!("no simulation loaded; run `load` first"))?;
+        match self.recorder.as_mut() {
+            None => {
+                for _ in 0..n {
+                    sim.tick();
+                }
+            }
+            Some(rec) => {
+                for _ in 0..n {
+                    let delta = sim.tick();
+                    let turn = sim.turn();
+                    let deaths = ingest_tick(&mut rec.ledger, turn, &delta, sim.action_records());
+                    rec.lifetimes.extend(deaths);
+                    rec.tick_summary.push(TickSummaryRow {
+                        tick: turn,
+                        descendant_population: rec.ledger.descendant_population(),
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Compute live pillars over the recorded span using the exact `sim-metrics`
+    /// pipeline. Returns the scores, the interval count, and whether the window
+    /// is partial (recording started after turn 0). `None` when not recording.
+    fn live_pillars(&self) -> Option<(PillarScores, usize, bool)> {
+        let rec = self.recorder.as_ref()?;
+        let total_ticks = self.sim.as_ref()?.turn();
+        let intervals = derive_interval_metrics(
+            &rec.tick_summary,
+            &rec.lifetimes,
+            self.report_every,
+            total_ticks,
+        );
+        let scores = compute_pillar_scores(&intervals);
+        Some((scores, intervals.len(), rec.started_turn > 0))
     }
 
     fn dispatch(&mut self, line: &str, out: &mut impl Write) -> Result<()> {
@@ -78,6 +152,8 @@ impl App {
                 let t = self.sim()?.turn();
                 writeln!(out, "turn = {t}").map_err(Into::into)
             }
+            "record" => self.record(&args, out),
+            "pillars" => self.pillars(out),
             "state" => self.state(out),
             "forage" => self.forage(&args, out),
             "food" => self.food(out),
@@ -92,11 +168,13 @@ impl App {
         writeln!(
             out,
             "commands:\n\
-             \x20 load [--config PATH] [--seed N]   build Simulation::new (default config {DEFAULT_CONFIG}, seed 0)\n\
+             \x20 load [--config PATH] [--seed N] [--report-every R]  build Simulation::new (defaults: config {DEFAULT_CONFIG}, seed 0, report-every 10000)\n\
              \x20 step [N]                          advance N ticks (default 1)\n\
              \x20 run-to T                          advance until turn == T\n\
              \x20 turn                              print current turn\n\
-             \x20 state                             population / energy / food / last-turn metrics summary\n\
+             \x20 record on|off|status             toggle live metric recording (required for pillars)\n\
+             \x20 pillars                           foraging/predation/intelligence/learning pillars + sub-signals (needs recording)\n\
+             \x20 state                             population / energy / food / last-turn metrics summary (+ pillars if recording)\n\
              \x20 forage [FROM] TO                  trace FROM..TO; live foraging probe + eval-style window pillar\n\
              \x20 food                              food (plant/corpse) summary\n\
              \x20 inspect ID                        full dump of one organism\n\
@@ -110,6 +188,7 @@ impl App {
     fn load(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
         let mut config_path = DEFAULT_CONFIG.to_string();
         let mut seed: u64 = 0;
+        let mut report_every: u64 = REPORT_EVERY;
         let mut i = 0;
         while i < args.len() {
             match args[i] {
@@ -127,6 +206,16 @@ impl App {
                         .parse()?;
                     i += 2;
                 }
+                "--report-every" => {
+                    report_every = args
+                        .get(i + 1)
+                        .ok_or_else(|| anyhow!("--report-every needs a value"))?
+                        .parse()?;
+                    if report_every == 0 {
+                        bail!("--report-every must be >= 1");
+                    }
+                    i += 2;
+                }
                 other => bail!("unknown load arg `{other}`"),
             }
         }
@@ -134,23 +223,22 @@ impl App {
         let sim = Simulation::new(config, seed).map_err(|e| anyhow!("{e}"))?;
         writeln!(
             out,
-            "loaded config={config_path} seed={seed}: world_width={} num_organisms={} food_energy={} turn=0 population={}",
+            "loaded config={config_path} seed={seed} report_every={report_every}: world_width={} num_organisms={} food_energy={} turn=0 population={}",
             sim.config().world_width,
             sim.config().num_organisms,
             sim.config().food_energy,
             sim.organisms().len(),
         )?;
         self.sim = Some(sim);
+        self.recorder = None;
+        self.report_every = report_every;
         Ok(())
     }
 
     fn step(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
         let n: u64 = args.first().map(|s| s.parse()).transpose()?.unwrap_or(1);
-        let sim = self.sim()?;
-        for _ in 0..n {
-            sim.tick();
-        }
-        writeln!(out, "turn = {}", sim.turn()).map_err(Into::into)
+        self.advance(n)?;
+        writeln!(out, "turn = {}", self.sim()?.turn()).map_err(Into::into)
     }
 
     fn run_to(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
@@ -158,11 +246,111 @@ impl App {
             .first()
             .ok_or_else(|| anyhow!("run-to needs a target turn"))?
             .parse()?;
-        let sim = self.sim()?;
-        while sim.turn() < target {
-            sim.tick();
+        let current = self.sim()?.turn();
+        if target > current {
+            self.advance(target - current)?;
         }
-        writeln!(out, "turn = {}", sim.turn()).map_err(Into::into)
+        writeln!(out, "turn = {}", self.sim()?.turn()).map_err(Into::into)
+    }
+
+    fn record(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
+        match args.first().copied() {
+            Some("on") => {
+                let sim = self
+                    .sim
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("no simulation loaded; run `load` first"))?;
+                let mut ledger = Ledger::new();
+                let started_turn = sim.turn();
+                if started_turn == 0 {
+                    register_founders(&mut ledger, sim.organisms());
+                } else {
+                    register_existing(&mut ledger, sim.organisms());
+                }
+                self.recorder = Some(Recorder {
+                    ledger,
+                    tick_summary: Vec::new(),
+                    lifetimes: Vec::new(),
+                    started_turn,
+                });
+                let mode = if started_turn == 0 {
+                    "exact from turn 0"
+                } else {
+                    "partial (back-registered live population)"
+                };
+                writeln!(
+                    out,
+                    "recording ON at turn {started_turn} ({mode}); report_every={}",
+                    self.report_every
+                )
+                .map_err(Into::into)
+            }
+            Some("off") => {
+                let was = self.recorder.is_some();
+                self.recorder = None;
+                writeln!(
+                    out,
+                    "recording OFF{}",
+                    if was { "" } else { " (was already off)" }
+                )
+                .map_err(Into::into)
+            }
+            Some("status") | None => match self.recorder.as_ref() {
+                None => writeln!(out, "recording: off").map_err(Into::into),
+                Some(rec) => {
+                    let turn = self.sim.as_ref().map(|s| s.turn()).unwrap_or(0);
+                    writeln!(
+                        out,
+                        "recording: on  started_turn={} now={} ticks_recorded={} deaths_captured={} {}",
+                        rec.started_turn,
+                        turn,
+                        rec.tick_summary.len(),
+                        rec.lifetimes.len(),
+                        if rec.started_turn > 0 { "[PARTIAL]" } else { "[exact]" },
+                    )
+                    .map_err(Into::into)
+                }
+            },
+            Some(other) => bail!("unknown record arg `{other}` (on|off|status)"),
+        }
+    }
+
+    fn pillars(&mut self, out: &mut impl Write) -> Result<()> {
+        let Some((p, n_intervals, partial)) = self.live_pillars() else {
+            bail!("recording is off; `record on` then advance before `pillars`");
+        };
+        let tag = if partial { "  [PARTIAL window]" } else { "" };
+        writeln!(
+            out,
+            "pillars over ({}, {}]  ({n_intervals} interval(s), report_every={}){tag}",
+            p.window_start_tick, p.window_end_tick, self.report_every
+        )?;
+        writeln!(
+            out,
+            "  foraging      {:.3}   plant_consumption_rate {}",
+            p.foraging_pillar,
+            opt(p.mean_plant_consumption_rate, 4)
+        )?;
+        writeln!(
+            out,
+            "  predation     {:.3}   prey_consumption_rate  {}",
+            p.predation_pillar,
+            opt(p.mean_prey_consumption_rate, 4)
+        )?;
+        writeln!(
+            out,
+            "  intelligence  {:.3}   action_effectiveness {}  mi_sa {}",
+            p.intelligence_pillar,
+            opt(p.mean_action_effectiveness, 4),
+            opt(p.mean_mi_sa, 4),
+        )?;
+        writeln!(
+            out,
+            "  learning      {:.3}   learning_slope {}",
+            p.learning_pillar,
+            opt(p.mean_learning_slope, 6),
+        )
+        .map_err(Into::into)
     }
 
     fn state(&mut self, out: &mut impl Write) -> Result<()> {
@@ -201,8 +389,19 @@ impl App {
             m.reproductions_last_turn,
             m.starvations_last_turn,
             m.age_deaths_last_turn,
-        )
-        .map_err(Into::into)
+        )?;
+        if let Some((p, _, partial)) = self.live_pillars() {
+            writeln!(
+                out,
+                "pillars: forage {:.3} | pred {:.3} | intel {:.3} | learn {:.3}{}",
+                p.foraging_pillar,
+                p.predation_pillar,
+                p.intelligence_pillar,
+                p.learning_pillar,
+                if partial { "  [PARTIAL]" } else { "" },
+            )?;
+        }
+        Ok(())
     }
 
     fn food(&mut self, out: &mut impl Write) -> Result<()> {
@@ -635,6 +834,13 @@ fn ratio(num: u64, den: u64) -> f64 {
     } else {
         num as f64 / den as f64
     }
+}
+
+/// Format an optional metric, printing `NA` when the signal is absent.
+fn opt(value: Option<f64>, decimals: usize) -> String {
+    value
+        .map(|v| format!("{v:.decimals$}"))
+        .unwrap_or_else(|| "NA".to_string())
 }
 
 fn pct(num: u64, den: u64) -> f64 {
