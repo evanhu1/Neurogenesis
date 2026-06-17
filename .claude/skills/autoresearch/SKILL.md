@@ -95,13 +95,16 @@ so they reach their heavy `run-to` phases staggered. To keep that staggering fro
 ever aligning into an OOM, **all heavy runs pass through `sim-run.sh`**, a global
 counting semaphore (mkdir-based; macOS-native):
 
-- Set `AUTORESEARCH_SEM` to a **shared absolute dir** (e.g.
-  `/tmp/autoresearch-sem-<iter>`) and `AUTORESEARCH_SEM_SLOTS` (default 8), and
-  pass both to every agent. Total concurrent heavy sims ≤ slots, across all
-  agents; excess runs block briefly, nobody is serialized.
-- An agent's own investigation is naturally light (≈1 advancing run at a time);
-  the only real spike is each agent's 4-seed confirm — the semaphore spreads
-  those. Exploration reads cost nothing.
+- `sim-run` uses ONE fixed shared semaphore dir by default (`/tmp/autoresearch-sem`).
+  **Do NOT override `AUTORESEARCH_SEM` per-agent or per-round** — that splits the
+  cap into independent pools (the iteration-2 bug: a custom pool + the default pool
+  gave an effective cap of ~16, not 8). Keep the dir fixed for everyone (agents +
+  the planner's gate); only `AUTORESEARCH_SEM_SLOTS` (default 8) is tuned to the host.
+- Total concurrent heavy sims ≤ slots across ALL agents; excess blocks briefly,
+  nobody is serialized. An agent's investigation is naturally light (≈1 advancing
+  run at a time); the spike is each agent's 4-seed confirm — the semaphore spreads
+  those. Reads cost nothing. (`det-check.sh`'s sims are tiny scaled 4k-tick runs and
+  run ungated — they must NOT consume heavy slots.)
 
 ## The n=3→n=4 composition rule (read this — it bit us in iteration 1)
 
@@ -150,16 +153,25 @@ stale `autoresearch/*` branches (`high`, `mar26*`, …).
 
 Spawn with `isolation: "worktree"`, `subagent_type: "general-purpose"`. Prompt:
 
-> You are a RESEARCH AGENT — an iterative experimentalist in an ISOLATED git
-> worktree for NeuroGenesis. Read `docs/sim-cli.md` (world-as-file, `cp`-fork,
-> incremental `run-to`, `query`, warm-once-fork, per-organism `inspect`/`brain`/
-> `decide`) and `AGENTS.md` (determinism invariant) first.
-> **Setup:** `export AUTORESEARCH_SEM=<shared dir> AUTORESEARCH_SEM_SLOTS=<n>`.
-> Use `<repo>/.claude/skills/autoresearch/sim-run.sh` for EVERY world-advancing
-> run (`run-to`/`step`/`watch`/`bench`) so you respect the global cap; call
+> You are a RESEARCH AGENT — an iterative experimentalist for NeuroGenesis. Read
+> `docs/sim-cli.md` (world-as-file, `cp`-fork, incremental `run-to`, `query`,
+> warm-once-fork, per-organism `inspect`/`brain`/`decide`) and `AGENTS.md`
+> (determinism invariant) first.
+> **Setup — ISOLATE YOURSELF FIRST (do NOT trust that you were given a private
+> worktree; background-agent isolation can silently fail, dropping you in the
+> shared repo where sibling agents clobber your source edits and the shared
+> binary):** run `git rev-parse --show-toplevel`; if it is the shared repo
+> (`/Users/evanhu/code/NeuroGenesis`) or any path a sibling could share, do
+> `git worktree add --detach /Users/evanhu/code/ng-exp-<iter4>-<coord>-<id> <base_ref>`
+> and `cd` into it. Do ALL work in this private worktree (its own `target/` and
+> `artifacts/`). Do NOT set `AUTORESEARCH_SEM` — use `sim-run`'s fixed default so
+> the global cap stays ONE pool. Use `.claude/skills/autoresearch/sim-run.sh` for
+> EVERY world-advancing run (`run-to`/`step`/`watch`/`bench`); call
 > `./target/release/sim-cli` directly for reads.
 > Experiment **<id>** (surface area **<lever-family>**): <hypothesis> — <change>.
-> 1. `git checkout --detach <base_ref>` (fork the champion).
+> 1. Confirm you are detached on `<base_ref>` in your private worktree. Validate the
+>    fork is the champion: `new --seed 7` + a short `sim-run run-to` should show the
+>    champion's seed-7 population — if not, stop and fix before spending compute.
 > 2. Implement the change — minimal, strictly this surface area; if you change a
 >    config/genome default edit BOTH `sim-evaluation/<file>` and `sim-config/<file>`.
 > 3. Build: `RUSTC_WRAPPER=sccache cargo build -p sim-cli --release`. Compile

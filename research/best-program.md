@@ -3,7 +3,7 @@ type: BestProgram
 title: Current best program
 description: The current research champion — a concrete git ref the next iteration forks from.
 git_ref: autoresearch/best
-iteration: 1
+iteration: 2
 metrics:
   plant_consumption_rate: 0.0690
   prey_consumption_rate: 0.0018
@@ -17,6 +17,14 @@ timestamp: 2026-06-16T00:00:00Z
 ---
 
 # Current best program
+
+> **Iteration 2 produced NO champion advance** (champion code unchanged at
+> `eb30fff` homeostatic metabolism; `autoresearch/best` HEAD `a90244a`+ only adds
+> apparatus + iter2 knowledge). All 6 iter2 experiments dead-ended and the carried
+> `lower-fertility-threshold` foraging lever failed the gate on the homeostatic
+> base. The iteration's value is the central finding
+> [[mechanisms/selection-pressure-is-the-bottleneck-for-intelligence]] and the top
+> lead [[directions/redistributive-kill-reward]]. Metrics below unchanged.
 
 **Champion = homeostatic metabolism** (iteration 1). Energy-dependent passive
 metabolic cost (0.5× floor below energy 5) breaks the starvation death-spiral.

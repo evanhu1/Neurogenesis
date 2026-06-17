@@ -7,6 +7,35 @@ that lets `STATE.md` be compacted aggressively.
 
 <!-- new entries go directly below this line -->
 
+## Iteration 2 — predation mechanics + metabolism (2026-06-17)
+* **First run of the iterative-agent harness.** 6 agents (3 predation, 3
+  metabolism) forked `a90244a`, each driving sim-cli on its own world. **No
+  champion advance:** all 6 dead-ended + the carried `lower-fertility-threshold`
+  foraging lever failed the gate on the homeostatic base.
+* **Central finding (high value):** [[mechanisms/selection-pressure-is-the-bottleneck-for-intelligence]]
+  — every ease-adding lever (more food −0.064 aeff/−0.097 mi_sa; softer metab
+  −0.050; cheaper brains −0.067; free kill-energy → explosion) degrades the
+  intelligence pillars. Targets that raise foraging/survival are in tension with
+  holding intelligence. Path forward = a competence-rewarding predator–prey arms race.
+* **Top lead:** [[directions/redistributive-kill-reward]]. `kill-reward` (additive)
+  drove prey to 0.036 (> target) — the lever works — but minted free energy →
+  population explosion (seed7 590→30574; seeds 42/123 OOM). Fix = energy-conserving
+  (redistributive) reward. Predation triangulated: richer corpses & more-lethal
+  attacks don't create a scavenger niche ([[findings/predation-needs-an-energy-conserving-kill-reward-not-richer-corpses]]).
+* **Metabolism dry:** homeostatic ramp near-optimal; ramp-tune/brain-cost/move-cost
+  all trade action_effectiveness; starvation still 57–72% of deaths; learning_slope
+  seed-noise-dominated at n=4.
+* **Harness bugs found & FIXED (in SKILL):** `isolation:"worktree"` didn't engage
+  for planner-spawned background agents (agents clobbered the shared checkout, then
+  self-isolated → double work); semaphore split into 2 pools from per-agent SEM
+  override (effective cap ~16). Fixes: agents self-isolate as step 0; single fixed
+  SEMDIR. Also added sim-run.sh (semaphore) + det-check.sh (P1 byte + P2 fingerprint)
+  + sccache earlier this session; eval-queue.sh was tried then dropped for the
+  iterative model.
+* **OKF:** 6 iter2 Experiments, 1 new Mechanism, 3 Findings, 2 Directions.
+  `main` restored to clean `ef6f9bb`; agent worktrees cleaned; exp-0002 branches kept.
+* **Next (iter3):** redistributive-kill-reward (top) + corpse-sensory-salience.
+
 ## Iteration 1 — metabolism / plasticity / food-ecology (2026-06-16)
 * **Coordinators (sequential, Agent-tool):** metabolism-lifecycle, plasticity-genome,
   food-ecology. base_ref `70b7700`. 12 code-change experiments total, each forked +
