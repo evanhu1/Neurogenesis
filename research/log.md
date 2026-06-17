@@ -7,6 +7,31 @@ that lets `STATE.md` be compacted aggressively.
 
 <!-- new entries go directly below this line -->
 
+## Iteration 3 — predator–prey arms race (2026-06-17)
+* **First run on the fixed harness** (pre-created isolated worktrees; `main` stayed
+  clean ✓). 3 agents off `a1d33b7`: redistributive-kill-reward, consume-on-kill,
+  corpse-sensory-salience. Plus a planner combo gate (salience + consume-on-kill).
+* **No champion advance.** All 3 + the combo fail the gate.
+* **Major qualitative result:** energy-conserving kill rewards reliably **evolve a
+  real predator niche** — predation 26–48% of deaths, pure-predator phenotypes,
+  emergent contextual hunting brains (`ContactAhead→Eat` w≈1.5; with the corpse
+  channel, learned `Corpse→Eat`), NO explosion. Genuine open-ended behavioral
+  evolution. `mi_sa` ROSE where predation strongest (consume-on-kill 2026: 0.36 vs
+  0.141).
+* **Why no advance — the metric wall** ([[findings/predator-niche-is-inducible-but-the-prey-metric-resists-and-predation-regresses-action-effectiveness]]):
+  `prey_consumption_rate` (= prey/total_actions) barely moves for a hunting
+  minority (tops ~0.004–0.005, 5–10× short); `action_effectiveness` regresses
+  (younger death-cohort + attack chaos). The two intelligence pillars disagree
+  under predation (mi_sa↑, action_eff↓). Salience+reward combo was WORSE (compounded
+  dilution).
+* **Strategic pivot:** the arms race is the goal-aligned mechanism; amplify it until
+  predation dominates ([[directions/amplify-the-predation-dynamic]]) and/or re-weight
+  intelligence toward mi_sa ([[directions/reconsider-intelligence-metric-under-predation]],
+  human call).
+* **OKF:** 3 Experiments, 1 Finding, 2 Directions. STATE/best-program/log updated.
+  Harness hazard logged: cross-agent `pkill` of relative artifact names (use unique names).
+* **Next (iter4):** amplify-predation = consume-on-kill + scarcer plant (hunt-or-starve).
+
 ## Iteration 2 — predation mechanics + metabolism (2026-06-17)
 * **First run of the iterative-agent harness.** 6 agents (3 predation, 3
   metabolism) forked `a90244a`, each driving sim-cli on its own world. **No

@@ -3,7 +3,7 @@ type: BestProgram
 title: Current best program
 description: The current research champion — a concrete git ref the next iteration forks from.
 git_ref: autoresearch/best
-iteration: 2
+iteration: 3
 metrics:
   plant_consumption_rate: 0.0690
   prey_consumption_rate: 0.0018
@@ -18,13 +18,16 @@ timestamp: 2026-06-16T00:00:00Z
 
 # Current best program
 
-> **Iteration 2 produced NO champion advance** (champion code unchanged at
-> `eb30fff` homeostatic metabolism; `autoresearch/best` HEAD `a90244a`+ only adds
-> apparatus + iter2 knowledge). All 6 iter2 experiments dead-ended and the carried
-> `lower-fertility-threshold` foraging lever failed the gate on the homeostatic
-> base. The iteration's value is the central finding
-> [[mechanisms/selection-pressure-is-the-bottleneck-for-intelligence]] and the top
-> lead [[directions/redistributive-kill-reward]]. Metrics below unchanged.
+> **Iterations 2 & 3 produced NO champion advance** (champion code unchanged at
+> `eb30fff` homeostatic metabolism). Iter2: all dead-ended; central finding
+> [[mechanisms/selection-pressure-is-the-bottleneck-for-intelligence]]. **Iter3
+> (predator–prey arms race):** energy-conserving kill rewards reliably evolve a
+> real predator niche with hunting brains (and rising `mi_sa`) — genuine
+> open-ended evolution — but the proxy metrics block it
+> ([[findings/predator-niche-is-inducible-but-the-prey-metric-resists-and-predation-regresses-action-effectiveness]]):
+> `prey_consumption_rate` resists a hunting minority and `action_effectiveness`
+> penalizes predation's younger death-cohort. Top lead now
+> [[directions/amplify-the-predation-dynamic]]. Metrics below unchanged.
 
 **Champion = homeostatic metabolism** (iteration 1). Energy-dependent passive
 metabolic cost (0.5× floor below energy 5) breaks the starvation death-spiral.

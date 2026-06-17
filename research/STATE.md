@@ -13,104 +13,100 @@ timestamp: 2026-06-17T00:00:00Z
 
 ## Goal & targets (cross-seed mean, seeds 7,42,123,2026, 500k; raw metrics)
 
-| axis | target | champion (a90244a, n=4) | status |
+| axis | target | champion (a1d33b7, n=4) | status |
 |---|---|---|---|
 | foraging  | `plant_consumption_rate ≥ 0.10`  | 0.0690 | stuck (more-food de-pressures brains) |
-| predation | `prey_consumption_rate  ≥ 0.025` | 0.0018 | **top lead = redistributive kill-reward** |
-| learning  | `learning_slope ≥ +0.0005`        | −0.000423 | metabolism lever drying up |
-| intelligence | hold action_effectiveness (0.5647) & mi_sa (0.1407) | — | the binding constraint |
+| predation | `prey_consumption_rate  ≥ 0.025` | 0.0018 | arms race works but metric resists a hunting minority |
+| learning  | `learning_slope ≥ +0.0005`        | −0.000423 | seed-noise-dominated; metabolism dry |
+| intelligence | hold action_effectiveness (0.5647) & mi_sa (0.1407) | — | **predation splits them: mi_sa↑, action_eff↓** |
 
 ## Current best program
 
-- **`autoresearch/best` @ `a90244a`** = champion code `eb30fff` (homeostatic
-  metabolism) + apparatus + knowledge. **Iteration 2 advanced nothing** (all 6
-  experiments dead-ended; carried foraging lever failed the gate). Champion
-  metrics unchanged. See `best-program.md`.
+- **`autoresearch/best` @ `a1d33b7`** = champion code `eb30fff` (homeostatic
+  metabolism) + apparatus + knowledge. **Iterations 2 AND 3 advanced nothing.**
+  See `best-program.md`.
 
-## ⚠ THE central insight (iteration 2 — reframes everything)
+## ⚠ Where we are (the strategic crux)
 
-**Selection pressure, not survival ease, is the bottleneck for intelligent brains**
-([[mechanisms/selection-pressure-is-the-bottleneck-for-intelligence]], high conf).
-Every lever that adds slack — more food (lower fertility threshold: aeff −0.064,
-mi_sa −0.097), softer metabolism (ramp-tune: aeff −0.050), cheaper movement,
-cheaper brains (sqrt cost: aeff −0.067), free kill-energy (explosion: aeff
-0.565→0.239) — **grows/relaxes the population and degrades the intelligence
-pillars.** With a reward-free covariance learning rule, selection pressure is the
-only force maintaining competent action; abundance removes it.
+Two compounding insights now define the program:
 
-**Consequence:** the foraging/survival/learning targets are in partial TENSION
-with *holding* intelligence. You cannot buy intelligence with ease. The way
-forward is to route any gain through a **skill that must be earned** — above all a
-**balanced predator–prey arms race** (energy via competent hunting), which adds a
-competence-rewarding niche without relaxing the constraint.
+1. **Selection pressure, not ease, is the bottleneck for intelligent brains**
+   ([[mechanisms/selection-pressure-is-the-bottleneck-for-intelligence]], high).
+   Every ease-adding lever degrades the intelligence pillars.
+2. **The predator–prey arms race is the goal-aligned mechanism — but the proxy
+   metrics block it** ([[findings/predator-niche-is-inducible-but-the-prey-metric-resists-and-predation-regresses-action-effectiveness]],
+   high). Energy-conserving kill rewards reliably evolve a real predator niche
+   with emergent hunting brains (`ContactAhead→Eat`, `Corpse→Eat`) and **rising
+   `mi_sa`** where strong — genuine open-ended evolution. But: `prey_consumption_rate`
+   (= prey/total_actions) barely moves for a hunting *minority* (tops ~0.004–0.005,
+   5–10× short), and `action_effectiveness` regresses (predation kills younger →
+   lower death-cohort competence + attack chaos). The two intelligence pillars
+   **disagree under predation** (mi_sa↑, action_eff↓). Salience + reward did NOT
+   synergize (the combo was worse — compounded dilution).
+
+**Implication:** the most goal-aligned result we can produce (an evolved predator
+niche) scores as a dead-end on the current metrics. Either amplify predation until
+it dominates the ecology (so prey rises and hunting skill is survival-critical), or
+re-weight the intelligence metric toward `mi_sa`
+([[directions/reconsider-intelligence-metric-under-predation]] — needs a human call).
 
 ## Frontier (per surface area)
 
 | surface area | status | next move |
 |---|---|---|
-| corpse / predation mechanics | **hot** | **[[directions/redistributive-kill-reward]]** — energy-conserving kill reward (TOP) |
-| brain topology (sensing) | open | [[directions/corpse-sensory-salience]] — let brains perceive prey/corpses (enabler) |
-| metabolism / lifecycle | **drying up** (1 dry iter) | homeostatic ramp near-optimal; further softening trades intelligence |
-| food ecology | closed (as abundance) | more standing food de-pressures brains; foraging must come from skill |
-| plasticity genome | reserved | a reward-sensitive rule could supply within-life skill pressure (iter1: unstable) |
+| corpse / predation mechanics | **hot, mapped** | **[[directions/amplify-the-predation-dynamic]]** — make predation dominant (consume-on-kill + scarcer plant → hunt-or-starve) |
+| evaluation / metrics | flagged | [[directions/reconsider-intelligence-metric-under-predation]] (mi_sa vs action_eff; human call) |
+| brain topology (sensing) | enabler works alone-weak | corpse channel learnable; only useful WITH a strong reward |
+| metabolism / lifecycle | dry (2 iters) | do not re-tune |
+| food ecology | closed as abundance | foraging must come from skill, not slack |
+| plasticity genome | reserved | reward-sensitive rule once an arms-race ecology selects competence |
 
 ## Established mechanisms (durable laws)
 
-- **[[mechanisms/selection-pressure-is-the-bottleneck-for-intelligence]]** (high) — NEW, central.
+- [[mechanisms/selection-pressure-is-the-bottleneck-for-intelligence]] (high) — central.
 - [[mechanisms/predation-inversely-coupled-to-population-health]] (high).
 - [[mechanisms/plant-rate-tracks-metabolism-over-food-energy]] (high).
-- Negative learning_slope = starvation death-spiral (medium); homeostatic softened
-  but did NOT solve it (starvation still 57–72% of deaths). learning_slope is
-  **seed-noise-dominated at n=4** → require sufficient-n + per-seed consistency.
 
-## Active directions (untapped alpha)
+## Active directions
 
-- **[[directions/redistributive-kill-reward]]** (HIGH, iter3) — proven lever
-  (prey hit 0.036), just needs energy conservation. The arms-race path to BOTH
-  prey and intelligence.
-- [[directions/corpse-sensory-salience]] (med) — enabler so brains can learn to hunt.
-- plasticity: a bounded reward-sensitive rule (three-factor) to supply within-life
-  skill pressure — [[directions/tune-three-factor-neuromodulation-band]] (re-test
-  on the arms-race ecology, where competence is selected).
+- **[[directions/amplify-the-predation-dynamic]]** (HIGH, iter4) — predation-dominant
+  ecology (consume-on-kill + scarcer plant): hunt-or-starve should raise prey AND
+  put hunting *effectiveness* under hard selection (recovering action_eff) AND mi_sa.
+- [[directions/reconsider-intelligence-metric-under-predation]] (med, human call).
+- [[directions/corpse-sensory-salience]] — enabler, only with a strong reward.
+- [[directions/redistributive-kill-reward]] / consume-on-kill — mapped (real niche,
+  prey short, action_eff regress); the base for amplification.
 
-## Dead ends (ruled out)
+## Dead ends
 
-- iter2 predation: richer corpses & more-lethal attacks don't create a scavenger
-  niche; additive kill-reward explodes ([[findings/predation-needs-an-energy-conserving-kill-reward-not-richer-corpses]]).
-- iter2 metabolism: ramp-tune / brain-cost / move-cost all trade action_effectiveness
-  (selection-pressure law).
-- foraging-via-abundance: [[findings/lower-fertility-threshold-does-not-stack-on-the-homeostatic-base]]; food_energy cuts ([[mechanisms/plant-rate-tracks-metabolism-over-food-energy]]).
-- iter1: [[dead-ends/flat-metabolism-cut-removes-action-selective-pressure]], [[dead-ends/grace-window-causes-per-seed-population-runaway]].
+- Predation via richer corpses / more-lethal attacks / additive reward (iter2).
+- Salience + reward COMBO (iter3) — worse than components (compounded dilution).
+- Metabolism ramp/brain-cost/move-cost; foraging-via-abundance (iter2 findings).
 
 ## Bundle census
 
-- experiments: 18 (12 iter1 + 6 iter2; 1 promoted ever) · findings: 5 · mechanisms: 3 ·
-  directions: 7 (5 open) · dead-ends: 2 (+ many rejected experiments).
-- Last iteration: **2** — dry for champion advance; rich findings + harness rebuild.
+- experiments: 21 (12 iter1 + 6 iter2 + 3 iter3) · findings: 6 · mechanisms: 3 ·
+  directions: 9 · dead-ends: 2.
+- Last iteration: **3** — dry for advance; arms race proven inducible; metric
+  misalignment surfaced.
 
-## Next actions (iteration 3)
+## Next actions (iteration 4)
 
-1. **Predation arms race** (TOP): [[directions/redistributive-kill-reward]] —
-   energy-conserving kill reward, sweep the fraction, screen population stability
-   on seed 7 BEFORE any 500k confirm (additive version OOM'd). Pair with
-   [[directions/corpse-sensory-salience]] (disjoint surface area).
-2. Watch for the hoped-for signature: prey↑ AND action_effectiveness/mi_sa HOLD or
-   RISE (the arms race should *select for* competence, unlike ease-levers).
-3. Metabolism is dry — do not re-tune the ramp; pivot learning to plasticity only
-   if the arms race establishes a competence-rewarding ecology.
+1. **Amplify predation** ([[directions/amplify-the-predation-dynamic]]): base =
+   consume-on-kill; deliberately CROSS-FAMILY with reduced plant availability so
+   hunting is required to survive — 2 scarcity levels. Watch for the win signature:
+   prey↑ toward 0.025 AND action_effectiveness HELD (hunting now survival-critical
+   → effective hunting selected) AND mi_sa↑. Screen population/extinction on seed 7
+   BEFORE 500k (scarcity risks collapse).
+2. If it still can't hold action_effectiveness while raising prey, the proxy-metric
+   misalignment is confirmed structural → surface the metric question to the user.
 
-## Process / harness learnings (iteration 2)
+## Process / harness (iteration 3)
 
-- **`isolation:"worktree"` did NOT engage** for planner-spawned background agents —
-  they landed in the shared checkout and clobbered each other's source + the shared
-  binary; the capable agents detected it and self-isolated (doubling their work).
-  **FIXED in SKILL:** agents now self-isolate (own worktree) as step 0; don't trust
-  the harness flag.
-- **Semaphore split into two pools** (custom `AUTORESEARCH_SEM` override drift) →
-  effective cap ~16 not 8. **FIXED:** use sim-run's single fixed default SEMDIR;
-  never override per-round.
-- Blanket `pkill` of a runaway clipped M3's unpersisted confirm — persist the
-  branch BEFORE the confirm / target only the runaway PID.
-- Iterative agents are token-heavy (100–360k each) and slow under contention; the
-  gate (planner-controlled, clean worktree) is the authoritative backstop and
-  worked. sccache + det-check (P1 byte + P2 fingerprint) validated.
+- **Self-isolation fix WORKED** — pre-created per-agent worktrees + agent self-check;
+  `main` stayed clean (vs iter2 contamination). Single SEMDIR held (no split).
+- **New hazard:** an agent's broad `pkill` matched a sibling's relative
+  `artifacts/c-42.bin` and killed its run → recipe should mandate UNIQUE artifact
+  names per agent + absolute-path process matching. (S1 killed P2's seed-42; P2 recovered.)
+- Planner-controlled clean-worktree gate (sccache + det-check P1/P2) remains the
+  authoritative backstop and worked. Determinism held across topology + turn-logic combo.
