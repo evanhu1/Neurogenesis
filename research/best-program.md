@@ -3,59 +3,61 @@ type: BestProgram
 title: Current best program
 description: The current research champion — a concrete git ref the next iteration forks from.
 git_ref: autoresearch/best
-iteration: 0
+iteration: 1
 metrics:
-  plant_consumption_rate: 0.0599
-  prey_consumption_rate: 0.0217
-  action_effectiveness: 0.5566
-  mi_sa: 0.0955
-  learning_slope: -0.000689
-lineage: []
+  plant_consumption_rate: 0.0690
+  prey_consumption_rate: 0.0018
+  action_effectiveness: 0.5647
+  mi_sa: 0.1407
+  learning_slope: -0.000423
+lineage:
+  - experiments/0001-metabolism-homeostatic-metabolism
 tags: [autoresearch, champion]
 timestamp: 2026-06-16T00:00:00Z
 ---
 
 # Current best program
 
-**Baseline champion = `main` (no experiments accepted yet).** `autoresearch/best`
-sits exactly at `main`; iteration 0 only recorded the baseline canonical metrics.
+**Champion = homeostatic metabolism** (iteration 1). Energy-dependent passive
+metabolic cost (0.5× floor below energy 5) breaks the starvation death-spiral.
 
-- **Exact commit:** `ef6f9bb50657cffcdf49e2926d856704ddaaa701`
-  (`autoresearch: drop the workflow engine; orchestrate with the Agent tool`).
-- **Reproduce:** `git checkout autoresearch/best` →
-  `cargo build -p sim-cli --release` →
-  `sim-cli sweep --grid food_energy=20 --seeds 7,42,123,2026 --to 500000 --baseline food_energy=20`.
+- **Exact commit:** `eb30fffe4cc477c4c6b56993dd358b7e47a61942`
+  (`exp metabolism homeostatic-metabolism: energy-dependent passive cost`),
+  fast-forwarded onto `autoresearch/best` over the iteration-0 baseline `70b7700`.
+- **Change:** `sim-core/src/metabolism.rs` only (11 lines). Determinism ✓
+  (byte-identical threads 1 vs 4), build ✓.
+- **Reproduce:** `git checkout autoresearch/best` → `cargo build -p sim-cli --release`
+  → per-seed `new --seed S` + `run-to 500000` + `pillars` for S ∈ {7,42,123,2026}.
 
-## Metrics (cross-seed mean, raw pillars)
+## Metrics (cross-seed mean over all 4 seeds — the new baseline for iteration 2)
 
-| metric | value | spread (min/max, n) | target | status |
+| metric | champion (n=4) | iter-0 baseline (n=3) | clean Δ on 7/42/123 | target |
 |---|---|---|---|---|
-| plant_consumption_rate | 0.0599 | 0.0562 / 0.0624 (n=3) | ≥ 0.10  | ✗ gap −0.040 |
-| prey_consumption_rate  | 0.0217 | 0.0201 / 0.0244 (n=3) | ≥ 0.025 | ✗ gap −0.003 (close) |
-| action_effectiveness   | 0.5566 | 0.5121 / 0.5920 (n=3) | hold    | ✓ |
-| mi_sa                  | 0.0955 | 0.0641 / 0.1409 (n=3) | hold    | ✓ |
-| learning_slope         | −0.000689 | −0.000903 / −0.000549 (n=3) | ≥ +0.0005 | ✗ negative — the wall |
+| plant_consumption_rate | 0.0690 | 0.0599 | +0.0057 | ≥ 0.10 (gap remains) |
+| prey_consumption_rate  | 0.0018 | 0.0217 | −0.0202 | ≥ 0.025 (inherent trade — see Mechanism) |
+| action_effectiveness   | 0.5647 | 0.5566 | +0.0155 | HOLD ✓ |
+| mi_sa                  | 0.1407 | 0.0955 | +0.047  | HOLD ✓ |
+| learning_slope         | −0.000423 | −0.000689 | +0.000276 | ≥ +0.0005 (closing) |
 
-**⚠ n=3, not 4 — seed 2026 collapses to full extinction** (population 0 at
-turn 500000; pillars NA). The cross-seed mean above is over the 3 survivors
-(7/42/123, populations 1316/2052/1605). All three survivors have **negative
-learning_slope** (−0.000616 / −0.000903 / −0.000549). Populations are far below
-the world cap (62500 cells), so the baseline sits in a **scarcity/collapse
-regime near a tipping boundary**, not a population-explosion regime.
-**Population robustness (sustaining all 4 seeds, esp. 2026) is a first-class
-objective**, not just hitting the rate thresholds — see STATE.
+**All 4 seeds now survive (n 3→4):** seed 2026 rescued from extinction (pop 1170).
+Per-seed (authoritative): 7 = plant 0.0658 / AE 0.5575 / mi_sa 0.0478 / slope
+−0.000659 / pop 1185; 42 = 0.0655 / 0.5276 / 0.0896 / −0.000527 / 1936;
+123 = 0.0653 / 0.6311 / 0.2903 / −0.000053 / 1555; 2026 = 0.0794 / 0.5428 /
+0.1350 / −0.000451 / 1170.
+
+The prey collapse is the expected healthier-population effect
+([[mechanisms/predation-inversely-coupled-to-population-health]]), not a defect;
+predation is reserved for iteration 2
+([[directions/predation-needs-energetic-attractiveness]]).
 
 # Lineage
 
-The ordered list of accepted experiments that built this program. Each advance
-of `autoresearch/best` appends the merged `experiments/...` concept here, so the
-champion's full construction history is traceable.
-
-_(empty — no experiments accepted yet; champion = baseline `main`)_
+1. [[experiments/0001-metabolism-homeostatic-metabolism]] — energy-dependent
+   passive metabolism (eb30fff). The unique iteration-1 experiment that lifted the
+   keystone while holding both HOLD pillars and rescuing the marginal seed.
 
 # Citations
 
-- Baseline sweep: `sweep --grid food_energy=20 --seeds 7,42,123,2026 --to 500000`
-  at `ef6f9bb`, 321s wall (4 parallel, threads/run=3). Raw JSON was under
-  `artifacts/runs/` (gitignored, transient); the metrics table above is the
-  durable record.
+- Iteration-0 baseline (n=3) + per-seed diagnostic: recorded in `log.md` iter 0.
+- Champion validation: planner authoritative cross-seed eval, byte-identical to
+  the agent run (determinism).
