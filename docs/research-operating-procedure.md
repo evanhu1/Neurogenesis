@@ -3,7 +3,7 @@
 Distilled from AsterLab's "Scaling autonomous research to thousands of agents"
 (planner→worker→subagent hierarchy, Cluster-Elites archive, surface-area
 decomposition, warm/frozen baselines, handoff loops) and mapped onto **this**
-project's stack: `sim-cli`, Claude Code subagents, the `Workflow` tool, and
+project's stack: `sim-cli`, Claude Code subagents (the `Agent` tool), and
 `/loop` goal-looping.
 
 ## 0. The one idea to internalize
@@ -29,9 +29,12 @@ hundreds of LLM subagents; spawn a handful and let each fan out over compute.
 | **Worker** | a **subagent** (`Agent` tool), one per *surface area* | one lever-family; proposes hypotheses, runs sweeps, returns a handoff |
 | **Subagent / experiment** | a **`sim-cli sweep` job** (one grid cell × seed) | a single world run → raw pillar metrics |
 
-The deterministic round (fan-out workers → aggregate handoffs) is best authored
-as a **`Workflow`** when you want it reproducible/journaled; use bare `Agent`
-calls for exploratory rounds.
+The round (fan-out workers → aggregate handoffs) is plain **`Agent`-tool**
+orchestration: launch the worker subagents in parallel (multiple Agent calls in
+one message and/or `run_in_background`), each worktree-isolated via
+`isolation: "worktree"`; resume is free because each experiment persists an
+`autoresearch/exp-*` branch + OKF concept. (No workflow engine — for our small,
+durable-artifact fan-out it adds complexity without payoff.)
 
 ## 2. Surface-area decomposition (the anti-confusion rule)
 
@@ -111,8 +114,7 @@ scaled-world luck.** Promote a result only as far up this ladder as it survives:
 4. **Adversarially review:** a final subagent whose job is to *refute* the
    finding — "is this a measurement artifact (survivor draining, partial window,
    stale sidecar)? does it reproduce? is the delta within seed noise?" Only
-   findings that survive refutation update the baseline. (Same pattern as the
-   `Workflow` adversarial-verify stage.)
+   findings that survive refutation update the baseline.
 
 **Warm-once-fork** (the "frozen baseline" trick — biggest compute saver): pillars
 read only the last 10% window, so warm to 400k **once**, then fork per

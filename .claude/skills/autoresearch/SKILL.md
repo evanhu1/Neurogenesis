@@ -8,10 +8,17 @@ description: Start or resume autonomous research on the NeuroGenesis simulation.
 You run autonomous research to improve the NeuroGenesis simulation's competence
 metrics. You are the **planner** in this hierarchy (AsterLab vocabulary):
 
-> **planner** (you) → **coordinators** (one per surface area, each run as a
-> *workflow*) → **research agents** (worktree-isolated subagents that make
-> **code changes**) → **evaluator** (`sim-cli` sweep, cross-seed + a determinism
-> check) → **database** (the OKF bundle in `research/`).
+> **planner** (you, the main session) → **coordinators** (one per surface area,
+> each a subagent you spawn with the **Agent tool**) → **research agents**
+> (worktree-isolated subagents the coordinator spawns, that make **code
+> changes**) → **evaluator** (`sim-cli` sweep, cross-seed + a determinism check)
+> → **database** (the OKF bundle in `research/`).
+
+Orchestration is **plain Agent-tool spawning** — no workflow engine. Parallelism
+comes from launching multiple Agent calls in one message and/or `run_in_background`;
+worktree isolation comes from the Agent tool's `isolation: "worktree"`. Resume is
+free because every experiment persists an `autoresearch/exp-*` branch + an OKF
+`Experiment` concept, so on restart you skip work that already exists on disk.
 
 The compounding thread of knowledge lives in `research/STATE.md` (your working
 memory) backed by the append-only OKF database. You do **not** run experiments
@@ -67,7 +74,7 @@ canonical eval. Metrics are raw (no [0,1] interpretation):
 - **Worktrees fork from `autoresearch/best`** (detached HEAD on its commit),
   never from `main`.
 - **Every research agent persists its change as a branch `autoresearch/exp-*`
-  before returning** — workflow worktrees are ephemeral and auto-cleaned; an
+  before returning** — its worktree is ephemeral and auto-cleaned; an
   unpersisted change is lost and unrecoverable on resume.
 - **Advance `autoresearch/best` only through the merge gate:** build ✓ +
   determinism ✓ + cross-seed eval shows **no regression** on the other pillars ✓.
@@ -107,18 +114,15 @@ baseline metrics.) Record the sha + metrics in `best-program.md`.
    frontier + open `directions/`. Give each a *primary goal* and the current
    `autoresearch/best` sha as `base_ref`. Favour under-explored axes and the
    most untapped alpha. Keep surface areas disjoint.
-2. **Run each coordinator as a workflow:**
-   ```
-   Workflow({ scriptPath: ".claude/skills/autoresearch/research-round.mjs",
-              args: { iteration, coordinator: "<surface-area>", goal: "...",
-                      base_ref: "<sha>", surface_area: "<lever-family>",
-                      seeds: [7,42,123,2026], screen_seeds: [7],
-                      n_experiments: 4 } })
-   ```
-   It returns the **coordinator handoff** (best experiments, learnings, concerns,
-   recommendations) plus the `autoresearch/exp-*` branch refs, and writes an
-   `Experiment` concept per run. Run coordinators sequentially, or a couple in
-   parallel within your compute budget.
+2. **Spawn a coordinator subagent per surface area** with the Agent tool (use
+   `run_in_background` to run several coordinators at once within budget). Give
+   each its primary goal + the `base_ref` (current `autoresearch/best` sha) +
+   its lever-family + the seeds. The coordinator's job (see **Coordinator agent**
+   below) is to spawn ~3–5 worktree-isolated **research agents**, collect their
+   reports, and return a single **coordinator handoff** (best experiments,
+   learnings, concerns, recommended promotions + their `autoresearch/exp-*`
+   refs). Before spawning, check the database: skip any experiment that already
+   has an `Experiment` concept / `exp-*` branch (free resume).
 3. **Collect handoffs.** Keep the conclusions, not the sweep dumps.
 4. **Synthesize the current best program.** Across coordinators, select the
    winner(s): the best **independent** gains that don't regress other pillars.
@@ -131,7 +135,8 @@ baseline metrics.) Record the sha + metrics in `best-program.md`.
    Conflicts that don't auto-resolve → record a `Concern`/`DeadEnd`, surface to
    the user, don't force.
 6. **Update the database (OKF).** Verify every experiment has its `Experiment`
-   concept with full provenance (`git_ref`, `base_ref`, sweep citation). Promote
+   concept with full provenance (`git_ref`, `base_ref`, embedded `metrics`, and a
+   `# Reproduce` command — not a citation to the transient sweep file). Promote
    validated results → `Finding`; promising avenues → `Direction`; ruled-out →
    `DeadEnd`; repeatedly-supported patterns → `Mechanism`. Update
    `best-program.md` (new sha, append lineage, metrics).
@@ -143,6 +148,55 @@ baseline metrics.) Record the sha + metrics in `best-program.md`.
 8. **Decide & loop.** Targets met cross-seed? Frontier still improving? Budget
    left? → next iteration, or stop. Self-pace with `/loop` / `ScheduleWakeup`;
    don't poll sims (the harness re-invokes you when a backgrounded run finishes).
+
+## Coordinator agent (spawn one per surface area)
+
+Spawn with the Agent tool (`run_in_background: true` to parallelize coordinators).
+Put roughly this in its prompt:
+
+> You are the COORDINATOR for surface area **"<lever-family>"**. Primary goal:
+> **<goal>**. The current best program is commit **<base_ref>**; seeds
+> **<seeds>**. Read `docs/sim-cli.md`, `docs/research-operating-procedure.md`,
+> `AGENTS.md`, and only the engine code for THIS surface area.
+> 1. Propose **3–5 independent, single-surface-area CODE-CHANGE experiments**
+>    (real edits, not config sweeps), each mechanistically motivated and
+>    determinism-preserving.
+> 2. Spawn **one RESEARCH AGENT per experiment** (Agent tool,
+>    `isolation: "worktree"`), in parallel — give each the recipe below.
+> 3. Collect their reports. Return a single **coordinator handoff** as JSON:
+>    `{ coordinator, surface_area, best:[ids], promote_refs:[exp-branches],
+>    reports:[…], learnings, concerns, directions:[{title,rationale}],
+>    dead_ends:[{title,reason}] }`. Synthesize learnings across experiments —
+>    don't concatenate. **Do not write to `research/`; return data only — the
+>    planner owns the database.**
+
+## Research agent (the experiment recipe)
+
+The coordinator spawns these with `isolation: "worktree"`. Each agent's prompt:
+
+> You are a RESEARCH AGENT in an ISOLATED git worktree. Do everything here.
+> Experiment **<id>** (surface area **<lever-family>**): <hypothesis> — <change>.
+> 1. `git checkout --detach <base_ref>` (fork the champion).
+> 2. Implement the change; stay strictly within this surface area; keep it minimal.
+> 3. Build: `cargo build -p sim-cli --release`. Fails to compile → return
+>    `status:"build-failed"`, `git_ref:null`. Stop.
+> 4. **Determinism check:** `sim-cli new --seed 7 --scale 70,400 --out /tmp/d.bin`;
+>    `cp /tmp/d.bin /tmp/d2.bin`; `run-to 4000` on each `--no-metrics`;
+>    `cmp` them. Differ → `status:"determinism-broken"`. Stop.
+> 5. **Persist the code (worktree is ephemeral):** `git checkout -b
+>    autoresearch/exp-<iter4>-<coord>-<id>`; `git add -A` (sweep output under
+>    `artifacts/` is gitignored, so this stages code only); `git commit`.
+> 6. **Evaluate.** Screen cheap first (`sim-cli sweep --grid <baseline cell>
+>    --seeds <screen seed> --to 100000`); if the target metric doesn't improve →
+>    `status:"screened-out"`, `recommend:"dead-end"`. If it does, confirm
+>    cross-seed (`--seeds <all> --to 500000`). The cross-seed means are the
+>    **durable evidence — embed them in the report** (the raw sweep JSON is
+>    transient).
+> 7. Return JSON: `{ id, git_ref, status, determinism, metrics:{5 raw pillars},
+>    delta:{vs base}, seeds_used, learnings, concerns, recommend }`. Flag any
+>    regression in a non-target pillar. `recommend:"promote"` only if the target
+>    improved cross-seed with no other-pillar regression. **Never fabricate
+>    metrics** — report exactly what the sweep produced; a clean null result is valuable.
 
 ## Merge gate (concrete)
 
@@ -165,10 +219,11 @@ Never advance `autoresearch/best` without all three checks green.
 ## Provenance discipline
 
 Follow `research/CONVENTIONS.md`. Non-negotiables: every `Experiment` records
-`git_ref` + `base_ref` + the sweep result citation; every `Finding`/`Mechanism`
-links its supporting experiments; `best-program.md` lineage is the ordered chain
-of accepted experiments. `log.md` is append-only; `STATE.md` is the compacted
-view over it.
+`git_ref` + `base_ref` + embedded `metrics` + a `# Reproduce` command (the
+durable evidence; the raw sweep file is transient and not relied upon); every
+`Finding`/`Mechanism` links its supporting experiments; `best-program.md` lineage
+is the ordered chain of accepted experiments. `log.md` is append-only; `STATE.md`
+is the compacted view over it.
 
 ## Budget & stopping
 
