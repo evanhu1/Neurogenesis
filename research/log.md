@@ -7,6 +7,24 @@ that lets `STATE.md` be compacted aggressively.
 
 <!-- new entries go directly below this line -->
 
+## Iteration 4 — amplify predation (2026-06-17)
+* 2 agents (isolated worktrees, fixed harness) off consume-on-kill: scarcity, reliable.
+  **No champion advance.**
+* **Scarcity backfired** → [[mechanisms/predation-is-encounter-limited]]: predation
+  fires only on predator–prey co-location, so it's density-driven. Plant scarcity
+  lowers density → SUPPRESSES predation (seed-7 share 17%→4%; predations/tick −10×).
+* **Reliability** (success floor + dmg 0.75) doubled the niche (8% dedicated hunters,
+  35% of deaths), prey beat champion on 3/4 seeds, mi_sa/slope held — **but prey
+  still ~0.002**, confirming
+  [[findings/prey-consumption-target-is-structurally-unreachable-in-a-stable-ecology]]
+  (0.025 needs ~25 kills/tick ≈ 2% of the population/tick; only iter2's explosion hit it).
+* **Conclusion:** the predation/prey target is a metric-calibration problem, not a
+  mechanism one. The last mechanism lever is **encounter amplification** (attack
+  reach / prey-pursuit). Judge predation by goal-signals (niche size, hunting
+  behavior, mi_sa), not the unreachable rate.
+* OKF: 2 Experiments, 1 Mechanism (encounter-limited), 1 Finding (target unreachable).
+* **Next (iter5):** attack-reach / prey-pursuit (encounter amplification).
+
 ## Iteration 3 — predator–prey arms race (2026-06-17)
 * **First run on the fixed harness** (pre-created isolated worktrees; `main` stayed
   clean ✓). 3 agents off `a1d33b7`: redistributive-kill-reward, consume-on-kill,

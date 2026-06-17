@@ -16,7 +16,7 @@ timestamp: 2026-06-17T00:00:00Z
 | axis | target | champion (a1d33b7, n=4) | status |
 |---|---|---|---|
 | foraging  | `plant_consumption_rate ≥ 0.10`  | 0.0690 | stuck (more-food de-pressures brains) |
-| predation | `prey_consumption_rate  ≥ 0.025` | 0.0018 | arms race works but metric resists a hunting minority |
+| predation | `prey_consumption_rate  ≥ 0.025` | 0.0018 | **target structurally UNREACHABLE in a stable ecology** (needs ~25 kills/tick) |
 | learning  | `learning_slope ≥ +0.0005`        | −0.000423 | seed-noise-dominated; metabolism dry |
 | intelligence | hold action_effectiveness (0.5647) & mi_sa (0.1407) | — | **predation splits them: mi_sa↑, action_eff↓** |
 
@@ -64,6 +64,9 @@ re-weight the intelligence metric toward `mi_sa`
 ## Established mechanisms (durable laws)
 
 - [[mechanisms/selection-pressure-is-the-bottleneck-for-intelligence]] (high) — central.
+- **[[mechanisms/predation-is-encounter-limited]]** (high) — NEW (iter4): predation is
+  density/co-location-driven, not hunger-driven; scarcity SUPPRESSES it; grow it via
+  encounter amplification (attack reach / prey-pursuit), not scarcity or lethality.
 - [[mechanisms/predation-inversely-coupled-to-population-health]] (high).
 - [[mechanisms/plant-rate-tracks-metabolism-over-food-energy]] (high).
 
@@ -90,16 +93,30 @@ re-weight the intelligence metric toward `mi_sa`
 - Last iteration: **3** — dry for advance; arms race proven inducible; metric
   misalignment surfaced.
 
-## Next actions (iteration 4)
+## Iteration 4 result (done): amplify-predation — both dead-end
 
-1. **Amplify predation** ([[directions/amplify-the-predation-dynamic]]): base =
-   consume-on-kill; deliberately CROSS-FAMILY with reduced plant availability so
-   hunting is required to survive — 2 scarcity levels. Watch for the win signature:
-   prey↑ toward 0.025 AND action_effectiveness HELD (hunting now survival-critical
-   → effective hunting selected) AND mi_sa↑. Screen population/extinction on seed 7
-   BEFORE 500k (scarcity risks collapse).
-2. If it still can't hold action_effectiveness while raising prey, the proxy-metric
-   misalignment is confirmed structural → surface the metric question to the user.
+- Scarcity BACKFIRED (predation encounter-limited → scarcity lowers density →
+  less predation). Reliability doubled the niche (8% hunters) but prey stayed
+  ~0.002 — the **prey target is structurally unreachable in a stable ecology**
+  ([[findings/prey-consumption-target-is-structurally-unreachable-in-a-stable-ecology]]).
+  No champion advance.
+
+## Next actions (iteration 5)
+
+1. **Encounter amplification** — the last predation lever per
+   [[mechanisms/predation-is-encounter-limited]]: **attack reach** (predator can
+   attack prey within a small radius, not just the adjacent cell) on the
+   consume-on-kill base. This directly breaks the encounter limit and rewards
+   spatial positioning. The intelligent version is **prey-pursuit navigation**
+   (perceive prey via the corpse/prey sensory channel → move toward it → attack →
+   eat) — the full hunting loop.
+2. **Judge by goal-signals, not the broken prey rate:** predator-niche size,
+   emergent hunting behavior, mi_sa. The `prey ≥ 0.025` target needs human
+   recalibration ([[directions/reconsider-intelligence-metric-under-predation]]);
+   predation can't advance the champion on the current contract regardless of mechanism.
+3. If encounter-amplification also can't hold action_effectiveness, predation is
+   exhaustively mapped — consolidate and the next real lever is the metric contract
+   (human) and/or a reward-sensitive plasticity rule.
 
 ## Process / harness (iteration 3)
 
