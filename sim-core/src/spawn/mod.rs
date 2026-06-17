@@ -15,6 +15,8 @@ mod food;
 mod organisms;
 pub(crate) mod world;
 
+pub(crate) use food::CORPSE_ENERGY_RETENTION;
+
 pub(crate) const NO_REGROWTH_SCHEDULED: u64 = u64::MAX;
 
 pub(crate) struct ReproductionSpawn {

@@ -230,9 +230,12 @@ impl<'a> CommitPhaseContext<'a> {
         // Larger attackers land hits on smaller prey reliably; punching up is
         // proportionally unlikely. The roll is a deterministic hash (see
         // `deterministic_predation_sample`); a failed roll is a wasted
-        // contingent action. The predator gains no energy from the hit itself
-        // — the prey's stash is only recoverable by eating the corpse, which
-        // keeps predation a recycling path rather than an energy source.
+        // contingent action. A non-lethal hit yields no energy — the predator
+        // is only fed by a kill (see the `killed` branch below), where it
+        // consumes the prey directly. Energy is conserved: the meal is the
+        // prey's own stash times CORPSE_ENERGY_RETENTION, identical to what
+        // eating the prey's corpse would have transferred, so predation is an
+        // energy-recycling path, not a source.
         let predator = &self.sim.organisms[predator_idx];
         let predator_id = predator.id;
         let predator_size = sim_types::get_size(predator).max(1.0);
@@ -261,7 +264,39 @@ impl<'a> CommitPhaseContext<'a> {
 
         if killed {
             self.result.predations += 1;
-            self.mark_organism_dead(prey_idx, prey_id, target_idx, (prey_q, prey_r), prey_energy);
+
+            // The kill is the meal: the attacker directly consumes the prey.
+            // Energy gained matches eating the prey's corpse (prey energy times
+            // CORPSE_ENERGY_RETENTION), so total energy is conserved and no
+            // corpse is left behind. This turns the existing predation behavior
+            // into prey_consumption directly, establishing a predator niche.
+            let gained_energy = prey_energy * CORPSE_ENERGY_RETENTION;
+            let predator = &mut self.sim.organisms[predator_idx];
+            predator.energy += gained_energy;
+            predator.consumptions_count = predator.consumptions_count.saturating_add(1);
+            predator.prey_consumptions_count = predator.prey_consumptions_count.saturating_add(1);
+
+            self.result.consumptions += 1;
+            #[cfg(feature = "instrumentation")]
+            {
+                let predator = &self.sim.organisms[predator_idx];
+                let total = predator.consumptions_count;
+                let plant = predator.plant_consumptions_count;
+                let prey = predator.prey_consumptions_count;
+                self.sim
+                    .record_consumption_counts(predator_idx, total, plant, prey);
+            }
+
+            // Suppress the corpse: the prey was eaten, not left behind. Other
+            // death paths (starvation / age / spike) still drop a corpse.
+            self.kill_organism(
+                prey_idx,
+                prey_id,
+                target_idx,
+                (prey_q, prey_r),
+                prey_energy,
+                false,
+            );
         }
     }
 
@@ -272,6 +307,24 @@ impl<'a> CommitPhaseContext<'a> {
         cell_idx: usize,
         position: (i32, i32),
         corpse_energy: f32,
+    ) {
+        self.kill_organism(organism_idx, organism_id, cell_idx, position, corpse_energy, true);
+    }
+
+    /// Death bookkeeping shared by every death path. `spawn_corpse` is `true`
+    /// for starvation / old-age / spike deaths (the body is left to be eaten);
+    /// it is `false` only for a predation kill, where the attacker has already
+    /// consumed the prey's energy directly (see `resolve_attack_damage`), so no
+    /// corpse is left behind. Corpse spawning draws no RNG, so suppressing it on
+    /// the predation path does not perturb the deterministic RNG stream.
+    fn kill_organism(
+        &mut self,
+        organism_idx: usize,
+        organism_id: OrganismId,
+        cell_idx: usize,
+        position: (i32, i32),
+        corpse_energy: f32,
+        spawn_corpse: bool,
     ) {
         if self.dead_organisms[organism_idx] {
             return;
@@ -285,8 +338,10 @@ impl<'a> CommitPhaseContext<'a> {
         });
         self.sim.occupancy[cell_idx] = None;
         self.sim.visual_map[cell_idx] = self.sim.visual_map_base[cell_idx];
-        if let Some(corpse) = self.sim.spawn_corpse_at_cell(cell_idx, corpse_energy) {
-            self.result.food_spawned.push(corpse);
+        if spawn_corpse {
+            if let Some(corpse) = self.sim.spawn_corpse_at_cell(cell_idx, corpse_energy) {
+                self.result.food_spawned.push(corpse);
+            }
         }
     }
 

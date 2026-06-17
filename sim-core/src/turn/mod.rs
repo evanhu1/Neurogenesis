@@ -10,7 +10,7 @@ use crate::brain::scan_rays;
 use crate::brain::{action_index, evaluate_brain, BrainEvalContext, BrainScratch, ACTION_COUNT};
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right, wrap_position};
 use crate::plasticity::{apply_runtime_weight_updates, compute_pending_coactivations};
-use crate::spawn::{ReproductionSpawn, SpawnRequest};
+use crate::spawn::{ReproductionSpawn, SpawnRequest, CORPSE_ENERGY_RETENTION};
 #[cfg(feature = "profiling")]
 use crate::{profiling, profiling::TurnPhase};
 use crate::{PendingActionKind, PendingActionState, Simulation};

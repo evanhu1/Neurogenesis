@@ -4,8 +4,10 @@ use sim_config::food_ecology_policy;
 
 /// Fraction of a dead organism's remaining energy that carries into its corpse.
 /// Consumption transfers a corpse's full energy, so this loss is applied once,
-/// at corpse creation, rather than every time something takes a bite.
-const CORPSE_ENERGY_RETENTION: f32 = 0.80;
+/// at corpse creation, rather than every time something takes a bite. The same
+/// retention is applied when a predation kill feeds the attacker directly
+/// (commit.rs), so eating-on-kill is energy-equivalent to eating the corpse.
+pub(crate) const CORPSE_ENERGY_RETENTION: f32 = 0.80;
 
 impl Simulation {
     pub(crate) fn initialize_food_ecology(&mut self) {
