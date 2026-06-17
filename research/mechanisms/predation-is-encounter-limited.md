@@ -30,8 +30,12 @@ to prey**. So predation rate is governed by **predator–prey co-location
   **population explosion** (iter2) — i.e. raising density (catastrophically).
 
 **Lever implication:** to grow the predator niche you must amplify *encounters* or
-preserve density — candidates: **attack reach** (attack prey within a radius, not
-just the adjacent cell), **prey-seeking pursuit** (brains navigate toward perceived
-prey — the genuinely *intelligent* hunting loop, combining the corpse/prey sensory
-channel with motor pursuit and consume-on-kill), or density-dependent predation.
-NOT scarcity, NOT mere lethality. See [[directions/amplify-the-predation-dynamic]].
+preserve density. BUT iteration 5 added the crucial qualifier: a **free encounter
+buff DE-SKILLS hunting and collapses intelligence.** Attack-reach (R=2) grew the
+niche (prey 0.0053) but let attacks land without aiming/positioning → action_eff
+0.51→0.31, mi_sa 0.17→0.03 ([[experiments/0005-predation-attack-reach]]). So the
+encounter amplification must come from a **skill that is selected/learned**, not a
+free buff: i.e. **prey-seeking pursuit** (brain perceives prey → navigates to it →
+attacks adjacent → eats — the genuinely intelligent hunting loop), which requires
+within-life reward-learning to acquire ([[directions/reward-sensitive-learning-on-the-predator-ecology]]).
+NOT scarcity, NOT lethality, NOT free reach. See [[directions/amplify-the-predation-dynamic]].
