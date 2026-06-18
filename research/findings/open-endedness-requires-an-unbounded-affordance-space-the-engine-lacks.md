@@ -4,7 +4,7 @@ title: ROOT CAUSE — open-ended intelligence requires an UNBOUNDED affordance s
 description: After 20 iterations / 35 experiments, the root cause of every failure is identified and is more fundamental than any mechanism. Open-ended intelligence needs the environment to keep demanding genuinely NEW kinds of skill. This engine has a fixed small affordance set (4 actions, simple vision, ~4 environment mechanics) → a finite set of skill TYPES → intelligence saturates once they're mastered, and extra capacity becomes bloat. No in-engine mechanism — intransitive dynamics, cognitive arms races, compositional resources, or even POET-style environment co-evolution — can manufacture unbounded skill-complexity from a bounded affordance space. Achieving the goal requires designing-in an unbounded affordance space — a fundamental engine redesign.
 confidence: high
 status: active
-supported_by: [findings/open-endedness-needs-a-dense-substrate-the-binding-constraint-is-the-food-ecology-lock, experiments/0018-ecology-pursuit-evasion, experiments/0019-ecology-display-contest, experiments/0020-ecology-compositional-foraging]
+supported_by: [findings/open-endedness-needs-a-dense-substrate-the-binding-constraint-is-the-food-ecology-lock, experiments/0018-ecology-pursuit-evasion, experiments/0019-ecology-display-contest, experiments/0020-ecology-compositional-foraging, experiments/0021-affordance-construction]
 tags: [open-endedness, root-cause, affordance-space, architecture, capstone, research-scope]
 timestamp: 2026-06-18T00:00:00Z
 ---
@@ -71,6 +71,30 @@ metric, the substrate-density, the interaction form, or the search method — it
 the **dimensionality/unboundedness of what an agent can DO and SENSE**. Designing
 that in is the prerequisite to open-ended evolution of intelligent brains; no
 mechanism downstream of a bounded affordance space can produce it.
+
+# UPDATE (iter21): even the FIX (adding an affordance) fails — the meta-problem
+
+The fix this finding identified — expand the affordance space — was tested directly:
+a `Build`/construction action (deposit sheltering, composable walls)
+([[experiments/0021-affordance-construction]]). It did NOT lift the ceiling; it
+**collapsed competence ~20×** (aeff 0.013 vs baseline 0.30). Agents built heavily
+but as **degenerate spam**, because the shelter payoff couldn't be made to reward
+*skilled, discriminating* construction over spam. This reveals the deeper, doubly-
+binding structure:
+1. The affordance set is bounded ⇒ finite skills ⇒ saturation; AND
+2. **even ADDING an affordance fails, because rewarding its SKILLED use (not spam /
+   not dilution) is itself the open problem.** A richer affordance only helps if the
+   selective environment can discriminate skilled use — which requires a problem that
+   *demands and grades* that use, i.e. the unbounded-problem-space requirement again,
+   one level up.
+
+So open-endedness here is blocked at BOTH the affordance level and the
+reward/problem level — the two are entangled: you can't reward open-ended skill
+without an open-ended problem, and you can't pose an open-ended problem without
+open-ended affordances. Breaking this circular dependency is the essence of the
+open-ended-evolution grand challenge, and it is fundamentally beyond an in-loop
+parameter/mechanism change on a fixed engine. The autonomous loop has localized the
+blocker to this precise circular core.
 
 # What the loop DID achieve (banked, real)
 

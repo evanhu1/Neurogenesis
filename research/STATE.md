@@ -138,10 +138,13 @@ confidence, [[findings/seed-7-mi_sa-outlier-is-a-short-vision-crisp-binning-effe
 
 ## Bundle census
 
-- experiments: 35 (+0012-spike, +0017-social-transfer promoted;
-  +0013/14/15/16/18/19/20 rejected) · findings: 14
-  (+ROOT-CAUSE: OE needs an unbounded affordance space the engine lacks) ·
-  mechanisms: 4 · directions: 16
+- experiments: 36 (+0012-spike, +0017-social-transfer promoted;
+  +0013/14/15/16/18/19/20/21 rejected) · findings: 14 (incl. ROOT-CAUSE) ·
+  mechanisms: 4 · directions: 16. **iter21 tested the root-cause FIX itself
+  (affordance expansion via a Build action) — it COLLAPSED competence ~20×
+  (degenerate wall-spam): even adding an affordance fails because rewarding its
+  SKILLED use is the open problem. OE is blocked at BOTH the affordance and
+  reward/problem levels — a circular dependency = the grand challenge's core.**
   (+architectural-path-to-open-ended-intelligence) · dead-ends: 2.
 - **The architectural path's FIRST step was tested (iter20) and FAILED:** an
   ease-neutral compositional 2-step resource raises the skill floor but LOWERS the
