@@ -13,12 +13,20 @@ timestamp: 2026-06-17T00:00:00Z
 
 ## Goal & targets (cross-seed mean, seeds 7,42,123,2026, 500k; raw metrics)
 
-| axis | target | champion (homeostatic, n=4) | status |
+### ⭐ CONTRACT CHANGE (2026-06-18, user decision after Dir1/Dir2)
+
+**The intelligence headline is now `action_effectiveness` (vision-invariant).
+`mi_sa` is DEMOTED to a diagnostic — it is partly a vision-range confound (it
+rewards myopia; see Dir1).** Promotions are judged on action_effectiveness, not
+mi_sa. This re-grounds the whole loop: any prior mi_sa-driven move is re-evaluated.
+
+| axis | target | champion `1dab610` (n=4) | status under NEW contract |
 |---|---|---|---|
+| **intelligence (HEADLINE)** | **hold/raise `action_effectiveness`** | **0.5435** | ⚠ **BELOW the homeostatic-only `eb30fff` (0.5647)** — the iter9 promotion was mi_sa-justified; under the new headline it reads as an aeff regression bought with confounded mi_sa |
+| intelligence (diagnostic) | ~~mi_sa~~ | 0.1952 | demoted — vision-confounded, not trusted |
 | foraging  | `plant_consumption_rate ≥ 0.10`  | 0.0786 | improving (still short) |
 | predation | `prey_consumption_rate  ≥ 0.025` | 0.00235 | **structurally UNREACHABLE in a stable ecology** |
 | learning  | `learning_slope ≥ +0.0005`        | −0.000487 | seed-noise-dominated |
-| intelligence | action_effectiveness / mi_sa | 0.5435 / **0.1952** | **mi_sa now ABOVE the original 0.1407** (within-life learning win, seed-7-heavy); aeff just below the homeostatic 0.5647. ⚠ **mi_sa is partly a vision-range confound** — see Dir1 result below |
 
 ## Current best program
 

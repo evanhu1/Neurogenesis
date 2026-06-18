@@ -7,6 +7,22 @@ that lets `STATE.md` be compacted aggressively.
 
 <!-- new entries go directly below this line -->
 
+## Dir2 decision — intelligence headline = action_effectiveness; mi_sa demoted — 2026-06-18
+* **User call** (after the Dir2 prototype skill panel): **`action_effectiveness` becomes
+  the intelligence headline; `mi_sa` is demoted to a vision-confounded diagnostic.** Zero
+  engine change; unblocks Dir3 under a trustworthy measure.
+* **Re-grounding (no new runs — from recorded metrics):** action_effectiveness DRIFTED DOWN
+  across the champion line — `eb30fff` 0.5647 → `0fa799b` ~0.5422 → `1dab610` 0.5435. The
+  iter6→9 "intelligence gains" were mi_sa (now distrusted); on the trusted measure the
+  program has not improved aeff since `eb30fff`. The iter6→9 gains were foraging/predation/
+  ecology richness.
+* **Champion base for Dir3:** held at `1dab610` (carries the open-endedness substrate:
+  predator niche + within-life learning) as a GOAL-driven choice; `eb30fff` is the
+  aeff-optimal alternative. Recorded in `best-program.md` + `STATE.md`. Dir3's bar:
+  genuinely RAISE action_effectiveness via a skilled niche, avoiding the vision-myopia trap.
+* **Next:** Dir3 = [[directions/predation-led-mortality-selects-for-skill]] — scope a minimal
+  far-field-sensing / predation-led-mortality niche, evaluated on action_effectiveness.
+
 ## Dir1 investigation — the seed-7 mi_sa=0.44 outlier is a SHORT-VISION confound — 2026-06-18
 * **Not a code-change iteration** — a read-only deep-inspection of the 4 evolved 500k
   worlds of champion code `1dab610` (planner `autoresearch/best` @ `c542d21`), the first

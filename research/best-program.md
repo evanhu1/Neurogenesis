@@ -21,6 +21,27 @@ timestamp: 2026-06-16T00:00:00Z
 
 # Current best program
 
+> ## ⭐ CONTRACT CHANGE (2026-06-18) — intelligence headline = action_effectiveness
+>
+> After Dir1/Dir2 (user decision): **`action_effectiveness` is the intelligence
+> headline; `mi_sa` is demoted to a vision-confounded diagnostic** (it rewards
+> myopia — [[findings/seed-7-mi_sa-outlier-is-a-short-vision-crisp-binning-effect]],
+> [[directions/mi_sa-is-confounded-by-vision-range]]). This **re-grounds the
+> champion line:** the iter6→9 moves were justified largely on mi_sa, which is no
+> longer trusted. Under the new headline, **action_effectiveness has DRIFTED DOWN**
+> across the line: homeostatic-only `eb30fff` **0.5647** → consume-on-kill+3-factor
+> `0fa799b` ~0.5422 → iter9 `1dab610` **0.5435**. So on the trusted measure the
+> program has *not* improved intelligence since `eb30fff`; the iter6→9 gains were
+> foraging/predation/ecology-richness (+ confounded mi_sa), not aeff.
+>
+> **Champion held at `1dab610` as the Dir3 base — a GOAL-driven, not metric-driven,
+> choice:** it carries the open-ended-evolution substrate (predator niche +
+> within-life learning) the goal needs, at a small aeff cost (−0.021 vs `eb30fff`).
+> The aeff-optimal alternative base is `eb30fff` (forager-only, no within-life
+> learning). **Dir3's success bar is now: genuinely RAISE action_effectiveness**
+> (toward/past 0.5647) via a skilled niche, without the vision-myopia trap.
+> *(Open to revisiting the base with the user.)*
+
 > **CHAMPION ADVANCED AGAIN (iter9):** `autoresearch/best` @ `121ee21` = the iter6
 > substrate + **three-factor band tuned to GAIN 0.04** (gentler within-life reward
 > credit). It **strictly dominates the prior (iter6) champion on ALL pillars**
