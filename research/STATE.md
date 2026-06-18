@@ -208,15 +208,19 @@ exhaustively across substrates:
   antisymmetry → does NOT collapse to one hue, but spreads to a **stable UNIFORM**
   equilibrium (R→0.11) where the interaction goes inert — a *different* fixed point.
 
-**The true barrier is FINITE-POPULATION / DYNAMICAL, not just substrate**
+**The true barrier is FINITE-POPULATION + SPARSE-ECOLOGY**
 ([[findings/open-endedness-needs-a-dense-substrate-the-binding-constraint-is-the-food-ecology-lock]]):
 the infinite-population antisymmetric game has neutral orbits, but the finite,
-spatial, stochastic system always relaxes to a fixed distribution (a single hue OR
-uniform) — drift + discreteness damp the orbit. Sustaining a traveling-wave limit
-cycle needs the central fixed point to be a REPELLER, which no ease-safe /
-determinism-safe / no-speciation mechanism provides. Genuine OE likely needs a
-qualitatively different driver (structural/spatial niching, or relaxing an
-invariant) — a research-scope question, not a tuning knob.
+sparse, stochastic system relaxes toward a fixed distribution — drift + discreteness
+damp the orbit. **Spatial correction:** the iter17 "uniform" is NOT dead — it has
+WEAK spatial hue domains (NEAR-pair cos 0.13 ≫ ALL 0.01 at 1M) = weak sustained
+LOCAL cycling (the global mean averaged it away). But it can't be strengthened into
+traveling waves while preserving intelligence: the world is sparse/food-limited
+(~1–2% density), and the strengthening levers all fail — **density** needs more food
+(=ease, degrades intelligence); **lower dispersal** (higher move-cost) shrinks the
+pop → MORE drift → global convergence. So strong sustained OE needs an engine change
+escaping the sparse-ecology/finite-pop regime WITHOUT relaxing selection — a
+research/human-scope decision, not an in-loop knob.
 
 **Ruled out:** diversity maintenance; the metric; static niche; moving hazard;
 intransitive strength; the food-ecology lock; AND now a dense organism–organism

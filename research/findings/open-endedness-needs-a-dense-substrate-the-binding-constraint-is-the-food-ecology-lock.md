@@ -45,6 +45,37 @@ systematic sweep of mechanisms, the answer is sharp.
    architecture invariant). So within the current invariants the open-endedness
    lever has no dense substrate to ride on.
 
+# SPATIAL CORRECTION (post-iter17): the "uniform" is WEAKLY spatially structured — but the strengthening levers conflict with the goal
+
+The "stable uniform equilibrium" (R→0.11) claim for iter17 was measured by the
+GLOBAL circular-mean, which **cannot distinguish dead-uniform from spatial pattern
+formation** (domains/waves) — and spatial structure is the classic thing that
+SUSTAINS intransitive cycles (spatial rock-paper-scissors). Re-measured with
+spatial autocorrelation (added `q`/`r`/`hue` read fields): at 1M, global R=0.109
+but **NEAR-pair (hex-dist ≤4) cos(Δhue)=0.129 ≫ ALL-pair 0.010** — so weak spatial
+hue DOMAINS persist (weak sustained local cycling). The earlier "relaxes to a dead
+fixed point" was therefore **wrong**: there is weak, persistent spatial structure.
+
+**But it is WEAK, and cannot be strengthened while preserving intelligence:**
+- The world is large (250-wide) and **sparse (~1–2% equilibrium density, food-
+  limited)** → few neighbors → weak local coupling → diffuse domains.
+- **Density lever** (more food → denser → stronger coupling) = "ease", which the
+  central law says DEGRADES intelligence — anti-goal.
+- **Dispersal lever** (higher `move_action_energy_cost` → less wandering → expect
+  lineage/hue clustering): tested at 2.0 — it BACKFIRED. Lower dispersal shrank the
+  breeding pop (n≈319) → MORE finite-population drift → faster GLOBAL convergence
+  (NEAR 0.79 ≈ ALL 0.72, one hue), the opposite of domains.
+- Initial over-seeding (denser start) just crashes back to the food-limited
+  carrying capacity.
+
+**Final:** strong sustained spatial waves are unreachable here — the sparse,
+food-limited, finite-population ecology caps spatial coupling, and every lever that
+would strengthen it either adds ease (degrading the "intelligent" half of the goal)
+or shrinks the population (more drift → convergence). Genuine unbounded
+open-endedness of *intelligent* brains needs an engine change that escapes this
+sparse-ecology / finite-population regime WITHOUT relaxing selection — a research/
+human-scope decision, not an in-loop tuning knob.
+
 # FINAL UPDATE (iters 16–17): added the dense organism–organism interaction — it converges too. OE is finite-population-limited.
 
 The capstone said the missing piece was a *dense organism–organism* interaction
