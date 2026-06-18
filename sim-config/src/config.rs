@@ -96,7 +96,7 @@ pub fn world_config_defaults() -> WorldConfigDefaults {
         terrain: TerrainDefaults {
             terrain_noise_scale: 0.02,
             terrain_threshold: 0.86,
-            spike_density: 0.10,
+            spike_density: 0.05,
         },
         evolution: EvolutionDefaults {
             global_mutation_rate_modifier: 1.0,

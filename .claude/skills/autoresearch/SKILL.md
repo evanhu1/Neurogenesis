@@ -1,246 +1,267 @@
 ---
 name: autoresearch
-description: Start or resume autonomous research on the NeuroGenesis simulation. Use when the user runs /autoresearch, or asks to "start autonomous research", "run the research loop", "improve the competence pillars/metrics", or "keep researching". You become the PLANNER — load research/STATE.md, run the planner→coordinator→research-agent→evaluator loop against a versioned OKF knowledge bundle (research/), advance the autoresearch/best branch behind hard gates, and rewrite STATE.md each iteration.
+description: Start or resume autonomous research on the NeuroGenesis simulation. Use when the user runs /autoresearch, or asks to "start autonomous research", "run the research loop", "improve the competence pillars/metrics", or "keep researching". You become the PLANNER — load research/STATE.md, run a loop of iterative research agents that drive sim-cli on their own worlds, advance the autoresearch/best branch behind hard gates, and rewrite STATE.md each iteration against a versioned OKF knowledge bundle (research/).
 ---
 
 # autoresearch — you are the PLANNER
 
 You run autonomous research to improve the NeuroGenesis simulation's competence
-metrics. You are the **planner** in this hierarchy (AsterLab vocabulary):
+metrics. The model is **planner + a fleet of iterative research agents**:
 
-> **planner** (you, the main session) → **coordinators** (one per surface area,
-> each a subagent you spawn with the **Agent tool**) → **research agents**
-> (worktree-isolated subagents the coordinator spawns, that make **code
-> changes**) → **evaluator** (`sim-cli` sweep, cross-seed + a determinism check)
-> → **database** (the OKF bundle in `research/`).
+> **planner** (you, the main session) → **research agents** (worktree-isolated
+> subagents — each an *iterative experimentalist* that makes ONE code change and
+> then **drives `sim-cli` on its own worlds**: fast-forward, inspect, fork,
+> refine, cross-seed confirm) → **database** (the OKF bundle in `research/`).
 
-Orchestration is **plain Agent-tool spawning** — no workflow engine. Parallelism
-comes from launching multiple Agent calls in one message and/or `run_in_background`;
-worktree isolation comes from the Agent tool's `isolation: "worktree"`. Resume is
-free because every experiment persists an `autoresearch/exp-*` branch + an OKF
-`Experiment` concept, so on restart you skip work that already exists on disk.
+Agents are **researchers, not build-bots.** An experiment is not a one-shot
+measurement — it is an investigation: form a hypothesis, change the code, then
+*interrogate the simulation* (incremental `run-to` while watching the metrics,
+`inspect`/`brain`/`decide` on organisms, `eco` deaths-by-cause, `cp`-fork to
+compare variants, fix the code if it's wrong) until you understand *what the
+change does and why*. That mechanistic understanding is the highest-value output
+— it feeds the OKF `Finding`/`Mechanism` concepts and the next iteration's
+hypotheses. `sim-cli` is built for exactly this (world-as-file, `cp`-fork,
+incremental advance, `query` batch reads, per-organism inspection).
 
-The compounding thread of knowledge lives in `research/STATE.md` (your working
-memory) backed by the append-only OKF database. You do **not** run experiments
-yourself; you assign goals, synthesize handoffs, gate merges, and curate the
-database.
+You (planner) assign experiments, **gate** winners, advance `autoresearch/best`,
+and curate the database. You do not micromanage agents' investigations.
 
 ## 0. Load context first (every session)
 
-Before anything, read, in order:
+Read, in order:
 1. **`research/STATE.md`** — your distilled working memory. Sufficient to resume.
-2. `research/index.md` and `research/CONVENTIONS.md` — the database layout,
-   concept types, and **provenance rules**.
+2. `research/index.md` and `research/CONVENTIONS.md` — database layout, concept
+   types, **provenance rules**.
 3. `research/best-program.md` — the current champion (git ref + lineage + metrics).
-4. `docs/research-operating-procedure.md` — the methodology (surface-area
-   decomposition, the candidate archive, the verification ladder).
-5. `docs/sim-cli.md` — the evaluator (`new`/`run-to`/`sweep`/`pillars`, raw
-   metrics, `cp`-fork, `artifacts/runs/`).
-6. `AGENTS.md` — build/test commands and the **determinism invariant** (fixed
-   config+seed ⇒ identical results) you must never break.
+4. `docs/sim-cli.md` — the simulator (`new`/`run-to`/`pillars`/`eco`/`find`/
+   `inspect`/`brain`/`decide`/`query`, world-as-file, `cp`-fork, warm-once-fork).
+5. `AGENTS.md` — build/test commands and the **determinism invariant** you must
+   never break.
+6. The apparatus: `.claude/skills/autoresearch/sim-run.sh` (the global-cap wrapper
+   for heavy runs) and `det-check.sh` (the determinism check). `docs/research-operating-procedure.md`
+   for background methodology.
 
-Dip into `research/experiments/`, `findings/`, or `log.md` only for a *specific*
+Dip into `research/experiments/`, `findings/`, `log.md` only for a *specific*
 fact — never reread them wholesale.
 
 ## Objective & targets
 
-Reach these **cross-seed means** (seeds `7,42,123,2026`, 500k ticks) on the
-canonical eval. Metrics are raw (no [0,1] interpretation):
+Reach these **cross-seed means** (seeds `7,42,123,2026`, 500k ticks). Raw metrics
+(no [0,1] interpretation). **Compare honestly seed-for-seed** (n=3→n=4 rule below):
 
 | axis | target | note |
 |---|---|---|
-| foraging | `plant_consumption_rate ≥ 0.10` | |
-| predation | `prey_consumption_rate ≥ 0.025` | likely needs engine code (corpse mechanics) |
+| foraging | `plant_consumption_rate ≥ 0.10` | findability + soft survival, not food_energy cuts |
+| predation | `prey_consumption_rate ≥ 0.025` | inversely coupled to pop health → needs engine predation rewards |
 | learning | `learning_slope ≥ +0.0005` | the keystone; starvation death-spiral is the wall |
-| intelligence | hold `action_effectiveness` & `mi_sa`, don't regress | |
+| intelligence | hold `action_effectiveness` & `mi_sa`, don't regress | the decisive HOLD pillars |
 
 ## Branch & write model
 
-- You **operate on `autoresearch/best`** — check it out at bootstrap (create from
-  `main` if absent). **All your commits land here:** both merged experiment code
-  *and* the `research/` knowledge bundle (Experiment concepts, `STATE.md`,
-  `best-program.md`, `log.md`). So `autoresearch/best` = `main` + accepted code +
-  accumulated knowledge.
-- `main` stays pristine; the research apparatus scaffold reaches it only via a
-  normal human PR. The user can later diff `autoresearch/best` vs `main` to see
-  both the code champion and the knowledge, and PR back what they want.
-- `autoresearch/exp-*` branches hold individual experiment code changes (forked
-  detached from `autoresearch/best`).
+- You **operate on `autoresearch/best`** via a worktree (e.g. `/Users/evanhu/code/ng-best`),
+  so the user's `main` checkout is undisturbed. **All commits land on
+  `autoresearch/best`:** accepted experiment code + the `research/` bundle +
+  apparatus changes. So `autoresearch/best` = `main` + accepted code + knowledge.
+- `main` stays pristine; it changes only via a human PR.
+- `autoresearch/exp-*` branches hold individual experiment changes (forked
+  detached from `autoresearch/best`). Keep them — durable provenance.
 
 ## Hard rules (never violate)
 
-- **`main` is human-PR-only.** NEVER commit, merge, or push to `main`
-  autonomously. Your output branch is `autoresearch/best`.
-- **Worktrees fork from `autoresearch/best`** (detached HEAD on its commit),
-  never from `main`.
-- **Every research agent persists its change as a branch `autoresearch/exp-*`
-  before returning** — its worktree is ephemeral and auto-cleaned; an
-  unpersisted change is lost and unrecoverable on resume.
-- **Advance `autoresearch/best` only through the merge gate:** build ✓ +
-  determinism ✓ + cross-seed eval shows **no regression** on the other pillars ✓.
-  Conflicting patches that don't auto-resolve are **surfaced, never forced**.
-- **In-loop evaluator = `sim-cli` sweep** (byte-identical to the eval pillars).
-  The full `sim-evaluation` suite is a **human-run milestone**, not in-loop.
-- **One surface area per coordinator** — never let a coordinator vary multiple
-  lever-families at once (you can't attribute the gain otherwise).
-- **Preserve determinism.** A code change that breaks it is rejected outright.
+- **`main` is human-PR-only.** NEVER commit/merge/push to `main` autonomously.
+- **Worktrees fork from `autoresearch/best`**, never from `main`.
+- **Every research agent persists its change as `autoresearch/exp-*` before
+  returning** — worktrees are ephemeral; an unpersisted change is lost on resume.
+- **Every heavy world-advancing run goes through `sim-run`** (the global
+  semaphore) — `run-to`/`step`/`watch`/`bench`. Never bypass it with a fan-out of
+  raw `run-to`s; that is what OOM'd iteration 1. (Reads — `pillars`/`state`/`find`
+  /… — are ungated; routing them through `sim-run` is harmless, it passes them
+  through.)
+- **Advance `autoresearch/best` only through the gate:** build ✓ + determinism ✓
+  (`det-check.sh` → `ok`) + cross-seed eval shows the **HOLD pillars held** and the
+  targeted axis improved, on the **honest seed-for-seed comparison**. Conflicts
+  that don't auto-resolve → surfaced, never forced.
+- **One surface area per experiment.**
+- **Preserve determinism.** A change that breaks it (`det-check.sh` ≠ `ok`) is
+  rejected outright.
+- **Trust determinism — never re-run someone else's result "to be sure."** A given
+  (code, seed, ticks) is byte-reproducible. Agents run their own experiments; the
+  planner re-validates only the 1–3 promote candidates, once.
+
+## Concurrency model (how the fleet shares one host)
+
+Agents run **in parallel and at their own pace** — implementation times differ,
+so they reach their heavy `run-to` phases staggered. To keep that staggering from
+ever aligning into an OOM, **all heavy runs pass through `sim-run.sh`**, a global
+counting semaphore (mkdir-based; macOS-native):
+
+- `sim-run` uses ONE fixed shared semaphore dir by default (`/tmp/autoresearch-sem`).
+  **Do NOT override `AUTORESEARCH_SEM` per-agent or per-round** — that splits the
+  cap into independent pools (the iteration-2 bug: a custom pool + the default pool
+  gave an effective cap of ~16, not 8). Keep the dir fixed for everyone (agents +
+  the planner's gate); only `AUTORESEARCH_SEM_SLOTS` (default 8) is tuned to the host.
+- Total concurrent heavy sims ≤ slots across ALL agents; excess blocks briefly,
+  nobody is serialized. An agent's investigation is naturally light (≈1 advancing
+  run at a time); the spike is each agent's 4-seed confirm — the semaphore spreads
+  those. Reads cost nothing. (`det-check.sh`'s sims are tiny scaled 4k-tick runs and
+  run ungated — they must NOT consume heavy slots.)
+
+## The n=3→n=4 composition rule (read this — it bit us in iteration 1)
+
+When a change rescues a previously-extinct seed (e.g. 2026), the cross-seed
+**mean** mixes cohorts: the rescued seed enters at lower action_effectiveness and
+drags the n=4 mean below the n=3 baseline, masking a real HOLD. **Judge on the
+seed-for-seed delta over COMMON survivors** (seeds where both base and the
+experiment survive); treat a rescued seed as a pure robustness bonus. **Guard the
+n:** with only 2–3 common survivors a ±0.0003 mean is within noise (same order as
+the `learning_slope` target) — require ≥2–3 common survivors AND per-seed
+consistency before advancing on a small delta.
 
 ## The iteration loop
 
-### Bootstrap
-- **If `autoresearch/best` does not exist:** `git branch autoresearch/best main`,
-  then run the baseline canonical sweep (below) to seed `best-program.md` +
-  `STATE.md`.
-- **If it already exists** (a prior session created it): reuse it. Reconcile —
-  fast-forward it onto the latest `main` if `main` moved and there's no conflict
-  (`git merge --ff-only main` from a worktree on `autoresearch/best`), or note
-  the divergence in `STATE.md` and keep going from `autoresearch/best`.
-- Operate via a **worktree** on `autoresearch/best` (`git worktree add … autoresearch/best`)
-  rather than `git checkout` in the main repo, so the user's checkout is undisturbed.
-- **Ignore the pre-existing stale `autoresearch/*` branches** (`high`, `mar26*`,
-  `mar27`, etc.) — they are unrelated prior work, not part of this loop. Your
-  branches are exactly `autoresearch/best` and `autoresearch/exp-*`.
-Run the baseline canonical sweep to fill `best-program.md` + `STATE.md` metrics:
-```
-sim-cli new --seed 7 --out artifacts/runs/base.bin     # (per seed, or use sweep)
-sim-cli sweep --grid <no-op single cell> --seeds 7,42,123,2026 --to 500000 \
-  --out-dir artifacts/runs
-```
-(Simplest: a 1-cell sweep with the baseline config records the cross-seed
-baseline metrics.) Record the sha + metrics in `best-program.md`.
+### Bootstrap (only if `autoresearch/best` doesn't exist)
+`git branch autoresearch/best main`; add a worktree on it; build sim-cli; run a
+baseline cross-seed eval (per-seed `new`+`sim-run run-to 500000`+`pillars`).
+Record sha + per-seed metrics in `best-program.md` + `STATE.md`. If it exists,
+reuse it (ff onto `main` if it advanced cleanly, else note divergence). Ignore
+stale `autoresearch/*` branches (`high`, `mar26*`, …).
 
 ### Each iteration
-1. **Plan from `STATE.md`.** Pick **1–3 coordinators** (surface areas) from the
-   frontier + open `directions/`. Give each a *primary goal* and the current
-   `autoresearch/best` sha as `base_ref`. Favour under-explored axes and the
-   most untapped alpha. Keep surface areas disjoint.
-2. **Spawn a coordinator subagent per surface area** with the Agent tool (use
-   `run_in_background` to run several coordinators at once within budget). Give
-   each its primary goal + the `base_ref` (current `autoresearch/best` sha) +
-   its lever-family + the seeds. The coordinator's job (see **Coordinator agent**
-   below) is to spawn ~3–5 worktree-isolated **research agents**, collect their
-   reports, and return a single **coordinator handoff** (best experiments,
-   learnings, concerns, recommended promotions + their `autoresearch/exp-*`
-   refs). Before spawning, check the database: skip any experiment that already
-   has an `Experiment` concept / `exp-*` branch (free resume).
-3. **Collect handoffs.** Keep the conclusions, not the sweep dumps.
-4. **Synthesize the current best program.** Across coordinators, select the
-   winner(s): the best **independent** gains that don't regress other pillars.
-   *Combine the best ideas from the most untapped alpha* — graft non-conflicting
-   winning changes together.
-5. **Merge gate → advance `autoresearch/best`.** For each candidate, in a scratch
-   worktree off `autoresearch/best`: apply the `exp-*` branch, **build**,
-   **determinism-check**, **cross-seed eval**; merge only if it passes and
-   doesn't regress. Combining winners: apply in sequence, **re-gate after each**.
-   Conflicts that don't auto-resolve → record a `Concern`/`DeadEnd`, surface to
-   the user, don't force.
-6. **Update the database (OKF).** Verify every experiment has its `Experiment`
-   concept with full provenance (`git_ref`, `base_ref`, embedded `metrics`, and a
-   `# Reproduce` command — not a citation to the transient sweep file). Promote
-   validated results → `Finding`; promising avenues → `Direction`; ruled-out →
-   `DeadEnd`; repeatedly-supported patterns → `Mechanism`. Update
-   `best-program.md` (new sha, append lineage, metrics).
-7. **Rewrite `STATE.md` (compact).** Refresh targets/current/baseline, frontier,
-   mechanisms, active directions, dead ends, census, next actions. **Prune
-   resolved transients** (they survive in `log.md`/`experiments/`). Append one
-   entry to `log.md`. — *This is the cross-session compounding step; do it every
-   iteration.*
-8. **Decide & loop.** Targets met cross-seed? Frontier still improving? Budget
-   left? → next iteration, or stop. Self-pace with `/loop` / `ScheduleWakeup`;
-   don't poll sims (the harness re-invokes you when a backgrounded run finishes).
+1. **Plan from `STATE.md`.** Pick **1–3 disjoint surface areas**. `base_ref` =
+   current `autoresearch/best` sha. Set `AUTORESEARCH_SEM`/`_SLOTS` for the round.
+2. **Design experiments** — 3–5 independent, single-surface-area,
+   mechanistically-distinct code changes per area (yourself, or via one cheap
+   *designer* agent per area that just returns `{id,hypothesis,change}` specs).
+   Skip any that already have an `exp-*` branch (free resume).
+3. **Spawn research agents** (Agent tool, `isolation: "worktree"`,
+   `run_in_background: true`), one per experiment, with the **Research-agent
+   recipe** below + the shared `AUTORESEARCH_SEM`/`_SLOTS`. They investigate
+   iteratively and return numbers + mechanism + their `exp-*` branch.
+4. **Collect reports.** Keep the conclusions + mechanistic understanding.
+5. **Gate & advance.** Pick winners (see **Gate** below); re-validate in a gate
+   worktree; advance `autoresearch/best`. Combine disjoint winners in sequence,
+   re-gate after each. Conflicts → `DeadEnd`, surface, don't force.
+6. **Update the OKF** — one `Experiment` per experiment (full provenance: git_ref,
+   base_ref, embedded metrics, `# Reproduce`; capture the agent's mechanism in
+   `# Learnings`). Promote → `Finding`/`Direction`/`DeadEnd`/`Mechanism`. Update
+   `best-program.md` iff the champion advanced.
+7. **Rewrite `STATE.md` (compact)** + append `log.md`. The compounding step.
+8. **Decide & loop.** Self-pace with `/loop`/`ScheduleWakeup`; don't poll sims
+   (the harness re-invokes you when a backgrounded agent finishes).
 
-## Coordinator agent (spawn one per surface area)
+## Research-agent recipe (an iterative experimentalist)
 
-Spawn with the Agent tool (`run_in_background: true` to parallelize coordinators).
-Put roughly this in its prompt:
+Spawn with `isolation: "worktree"`, `subagent_type: "general-purpose"`. Prompt:
 
-> You are the COORDINATOR for surface area **"<lever-family>"**. Primary goal:
-> **<goal>**. The current best program is commit **<base_ref>**; seeds
-> **<seeds>**. Read `docs/sim-cli.md`, `docs/research-operating-procedure.md`,
-> `AGENTS.md`, and only the engine code for THIS surface area.
-> 1. Propose **3–5 independent, single-surface-area CODE-CHANGE experiments**
->    (real edits, not config sweeps), each mechanistically motivated and
->    determinism-preserving.
-> 2. Spawn **one RESEARCH AGENT per experiment** (Agent tool,
->    `isolation: "worktree"`), in parallel — give each the recipe below.
-> 3. Collect their reports. Return a single **coordinator handoff** as JSON:
->    `{ coordinator, surface_area, best:[ids], promote_refs:[exp-branches],
->    reports:[…], learnings, concerns, directions:[{title,rationale}],
->    dead_ends:[{title,reason}] }`. Synthesize learnings across experiments —
->    don't concatenate. **Do not write to `research/`; return data only — the
->    planner owns the database.**
-
-## Research agent (the experiment recipe)
-
-The coordinator spawns these with `isolation: "worktree"`. Each agent's prompt:
-
-> You are a RESEARCH AGENT in an ISOLATED git worktree. Do everything here.
+> You are a RESEARCH AGENT — an iterative experimentalist for NeuroGenesis. Read
+> `docs/sim-cli.md` (world-as-file, `cp`-fork, incremental `run-to`, `query`,
+> warm-once-fork, per-organism `inspect`/`brain`/`decide`) and `AGENTS.md`
+> (determinism invariant) first.
+> **Setup — ISOLATE YOURSELF FIRST (do NOT trust that you were given a private
+> worktree; background-agent isolation can silently fail, dropping you in the
+> shared repo where sibling agents clobber your source edits and the shared
+> binary):** run `git rev-parse --show-toplevel`; if it is the shared repo
+> (`/Users/evanhu/code/NeuroGenesis`) or any path a sibling could share, do
+> `git worktree add --detach /Users/evanhu/code/ng-exp-<iter4>-<coord>-<id> <base_ref>`
+> and `cd` into it. Do ALL work in this private worktree (its own `target/` and
+> `artifacts/`). Do NOT set `AUTORESEARCH_SEM` — use `sim-run`'s fixed default so
+> the global cap stays ONE pool. Use `.claude/skills/autoresearch/sim-run.sh` for
+> EVERY world-advancing run (`run-to`/`step`/`watch`/`bench`); call
+> `./target/release/sim-cli` directly for reads.
 > Experiment **<id>** (surface area **<lever-family>**): <hypothesis> — <change>.
-> 1. `git checkout --detach <base_ref>` (fork the champion).
-> 2. Implement the change; stay strictly within this surface area; keep it minimal.
-> 3. Build: `cargo build -p sim-cli --release`. Fails to compile → return
->    `status:"build-failed"`, `git_ref:null`. Stop.
-> 4. **Determinism check:** `sim-cli new --seed 7 --scale 70,400 --out /tmp/d.bin`;
->    `cp /tmp/d.bin /tmp/d2.bin`; `run-to 4000` on each `--no-metrics`;
->    `cmp` them. Differ → `status:"determinism-broken"`. Stop.
-> 5. **Persist the code (worktree is ephemeral):** `git checkout -b
->    autoresearch/exp-<iter4>-<coord>-<id>`; `git add -A` (sweep output under
->    `artifacts/` is gitignored, so this stages code only); `git commit`.
-> 6. **Evaluate.** Screen cheap first (`sim-cli sweep --grid <baseline cell>
->    --seeds <screen seed> --to 100000`); if the target metric doesn't improve →
->    `status:"screened-out"`, `recommend:"dead-end"`. If it does, confirm
->    cross-seed (`--seeds <all> --to 500000`). The cross-seed means are the
->    **durable evidence — embed them in the report** (the raw sweep JSON is
->    transient).
-> 7. Return JSON: `{ id, git_ref, status, determinism, metrics:{5 raw pillars},
->    delta:{vs base}, seeds_used, learnings, concerns, recommend }`. Flag any
->    regression in a non-target pillar. `recommend:"promote"` only if the target
->    improved cross-seed with no other-pillar regression. **Never fabricate
->    metrics** — report exactly what the sweep produced; a clean null result is valuable.
+> 1. Confirm you are detached on `<base_ref>` in your private worktree. Validate the
+>    fork is the champion: `new --seed 7` + a short `sim-run run-to` should show the
+>    champion's seed-7 population — if not, stop and fix before spending compute.
+> 2. Implement the change — minimal, strictly this surface area; if you change a
+>    config/genome default edit BOTH `sim-evaluation/<file>` and `sim-config/<file>`.
+> 3. Build: `RUSTC_WRAPPER=sccache cargo build -p sim-cli --release`. Compile
+>    fails → return `{"id","status":"build-failed","git_ref":null}` and STOP.
+> 4. **INVESTIGATE ITERATIVELY — this is the experiment, not a one-shot:**
+>    - *Sanity:* `new --seed 7 --out artifacts/w.bin`; `sim-run run-to 50000 --in
+>      artifacts/w.bin`; read `state`/`eco` — alive? sane? not exploding toward
+>      the cap? If the change is broken, FIX THE CODE and rebuild (iterate).
+>    - *Fast-forward while watching:* advance the same world (or forks) toward
+>      500k in steps, reading `pillars`/`timeseries`/`eco` to see HOW the targeted
+>      metric evolves and WHY (e.g. deaths-by-cause shifting, age structure).
+>    - *Understand the mechanism:* `find`/`inspect`/`brain`/`decide` on organisms;
+>      `lineage`; `cp`-fork the world to A/B a sub-parameter or compare variants;
+>      `query` for batch reads off one load. (warm-once-fork — warm to 400k once,
+>      `cp`, advance the last 100k — is fine for probing the scored window across
+>      your OWN variants.)
+>    Build a real mechanistic story of what your change does. Keep every advancing
+>    run going through `sim-run` (don't launch many raw parallel `run-to`s).
+> 5. **Determinism:** run `<repo>/.claude/skills/autoresearch/det-check.sh` (from
+>    the worktree) → must print `ok`. Else return
+>    `{"id","status":"determinism-broken","git_ref":<branch after step 7>}`.
+> 6. **Cross-seed confirm:** for S in 7,42,123,2026: `new --seed S --out
+>    artifacts/c-$S.bin`; `sim-run run-to 500000 --in artifacts/c-$S.bin`;
+>    read `pillars` + `state` (population). Record per-seed pillars + which seeds
+>    survive (pop 0 / NA = extinct).
+> 7. **Persist NOW** (worktree is ephemeral): `git checkout -b
+>    autoresearch/exp-<iter4>-<coord>-<id>`; `git add -A` (artifacts/ gitignored →
+>    code only); `git -c user.name=autoresearch -c user.email=autoresearch@local
+>    commit -m "exp <coord> <id>: <one-line>"`.
+> 8. Return ONLY JSON: `{ "id", "git_ref":"autoresearch/exp-…", "status":"ready",
+>    "determinism":"ok", "per_seed":{"7":{plant,prey,aeff,misa,slope,pop},"42":…,
+>    "123":…,"2026":… or "extinct"}, "n_surviving", "mechanism":"<what your change
+>    does & WHY, from your investigation>", "concerns", "recommend":"promote|
+>    screen-further|dead-end" }`. Report EXACT numbers — never fabricate; a clean
+>    null result is valuable. Do NOT write to `research/`.
 
-## Merge gate (concrete)
+## Gate (planner advances `autoresearch/best`)
+
+From the agent reports, a candidate is a **winner** iff `determinism==ok`, its
+**targeted** axis improves on the seed-for-seed clean delta over common survivors
+(7/42/123 + any rescue bonus), with ≥2–3 common survivors and per-seed
+consistency, and the HOLD pillars (action_effectiveness, mi_sa) don't materially
+regress. Then **re-validate authoritatively** (the agent's numbers are advisory):
 
 ```bash
-git worktree add --detach /tmp/gate autoresearch/best
-cd /tmp/gate
-git cherry-pick <exp-branch>..   # or: git merge --no-ff <exp-branch>
-cargo build -p sim-cli --release || REJECT "build failed"
-# determinism: two cp-forks advanced identically must be byte-identical
-sim-cli new --seed 7 --scale 70,400 --out /tmp/g.bin && cp /tmp/g.bin /tmp/g2.bin
-sim-cli run-to 4000 --in /tmp/g.bin --no-metrics; sim-cli run-to 4000 --in /tmp/g2.bin --no-metrics
-cmp /tmp/g.bin /tmp/g2.bin || REJECT "determinism broken"
-# no-regression: cross-seed sweep vs base; require other pillars within noise
-sim-cli sweep --grid <baseline-cell> --seeds 7,42,123,2026 --to 500000 --out-dir artifacts/runs
-# if pass: advance the real branch, then clean up
-cd - && git branch -f autoresearch/best <gate-commit> && git worktree remove --force /tmp/gate
+git worktree add --detach /tmp/gate autoresearch/best   # or a path under artifacts/
+cd /tmp/gate && git cherry-pick <exp-branch>            # or merge; ff if linear
+RUSTC_WRAPPER=sccache cargo build -p sim-cli --release || REJECT "build"
+.claude/skills/autoresearch/det-check.sh                 # must print ok
+# cross-seed confirm of the candidate AND base, same environment, for a clean
+# seed-for-seed delta — heavy runs via sim-run so the cap holds:
+for S in 7 42 123 2026; do sim-cli new --seed $S --out artifacts/g-$S.bin; \
+  <repo>/.claude/skills/autoresearch/sim-run.sh run-to 500000 --in artifacts/g-$S.bin; \
+  sim-cli pillars --in artifacts/g-$S.bin --text; done
 ```
-Never advance `autoresearch/best` without all three checks green.
+
+Advance `autoresearch/best` only if det `ok` and the clean delta holds (target up,
+HOLD pillars held, no worse seed survival). **Combine** disjoint winners in
+sequence, **re-gate after each** (combined single-lever wins rarely add linearly).
+Conflicts that don't auto-resolve → `DeadEnd`, surface, don't force. Clean up the
+gate worktree.
 
 ## Provenance discipline
 
-Follow `research/CONVENTIONS.md`. Non-negotiables: every `Experiment` records
-`git_ref` + `base_ref` + embedded `metrics` + a `# Reproduce` command (the
-durable evidence; the raw sweep file is transient and not relied upon); every
-`Finding`/`Mechanism` links its supporting experiments; `best-program.md` lineage
-is the ordered chain of accepted experiments. `log.md` is append-only; `STATE.md`
-is the compacted view over it.
+Per `research/CONVENTIONS.md`: every `Experiment` records `git_ref` + `base_ref` +
+embedded `metrics` + a `# Reproduce` command + the agent's mechanism in
+`# Learnings`; every `Finding`/`Mechanism` links its supporting experiments;
+`best-program.md` lineage is the ordered chain of accepted experiments. `log.md`
+append-only; `STATE.md` compacted each iteration.
 
 ## Budget & stopping
 
-- ≤ 3 coordinators/iteration; concurrent research agents ≈ CPU cores; cap each
-  sweep's `--jobs`. The thousands of runs live in `sweep`, not in agent count.
-- **Screen** with `--scale`/short `--to` (directional only — never trust scaled
-  values or the sign of `learning_slope`); **confirm** cross-seed canonical.
+- ≤ 3 surface areas/iteration; ~3–8 research agents at once. Global heavy-sim
+  concurrency is bounded by `AUTORESEARCH_SEM_SLOTS` (default 8) — tune to the host
+  (8 single-thread sims ≈ safe on 14 cores/36 GB; OOM hit ~16–24). Never spawn a
+  fan-out that bypasses `sim-run`.
+- Agents may **screen cheaply first** in their own investigation (short `run-to` /
+  single seed) to kill obvious losers before the 4-seed confirm — but never trust
+  the sign/value of `learning_slope` from a short run; the 500k confirm is the
+  number.
 - Stop a surface area after **2 dry iterations** (no archive-improving result).
 - Stop the loop when targets are met cross-seed, the frontier plateaus for K
-  iterations, or the budget is spent. Surface a milestone summary and offer to
-  open a human PR from `autoresearch/best` → `main` (you never auto-PR to main).
+  iterations, or budget is spent. Surface a milestone and offer a human PR from
+  `autoresearch/best` → `main` (never auto-PR to main).
 
 ## End-of-iteration checklist
 
-- [ ] each experiment → an `Experiment` concept with `git_ref`/`base_ref`/citation
+- [ ] each experiment → an `Experiment` concept (git_ref/base_ref/metrics/Reproduce/mechanism)
 - [ ] `best-program.md` updated (sha, lineage, metrics) iff the champion advanced
 - [ ] `STATE.md` rewritten + compacted; `log.md` appended
-- [ ] `autoresearch/best` advanced only through build+determinism+eval gates
+- [ ] `autoresearch/best` advanced only via the gate (det ok + clean-delta basis)
 - [ ] zero writes to `main`
-- [ ] stale `autoresearch/exp-*` branches & `/tmp` worktrees cleaned up
+- [ ] gate worktree + the round's `AUTORESEARCH_SEM` dir cleaned up

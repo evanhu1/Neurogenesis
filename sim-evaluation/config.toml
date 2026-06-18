@@ -23,7 +23,7 @@ food_fertility_jitter_strength = 1.0
 [terrain]
 terrain_noise_scale = 0.01
 terrain_threshold = 0.70
-spike_density = 0.10
+spike_density = 0.05 # Dir3: clustered lethal spike fields — target coverage fraction.
 
 [evolution]
 global_mutation_rate_modifier = 1.0

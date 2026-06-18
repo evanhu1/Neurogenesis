@@ -17,7 +17,17 @@ pub(crate) fn organism_passive_metabolic_energy_cost(
     config: &WorldConfig,
     organism: &OrganismState,
 ) -> f32 {
-    config.passive_metabolism_cost_per_unit * organism.base_metabolic_cost
+    // Homeostatic metabolism: low-energy organisms downregulate their passive
+    // burn so they get more ticks to find food before starving. The factor is
+    // 1.0 above a small energy threshold and ramps linearly down to a 0.5 floor
+    // as energy approaches 0. Pure deterministic function of energy (no RNG).
+    const HOMEOSTATIC_THRESHOLD: f32 = 5.0;
+    let factor = if organism.energy >= HOMEOSTATIC_THRESHOLD {
+        1.0
+    } else {
+        0.5 + 0.5 * (organism.energy.max(0.0) / HOMEOSTATIC_THRESHOLD)
+    };
+    config.passive_metabolism_cost_per_unit * organism.base_metabolic_cost * factor
 }
 
 fn organism_base_metabolic_cost(

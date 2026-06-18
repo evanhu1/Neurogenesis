@@ -3,35 +3,180 @@ type: BestProgram
 title: Current best program
 description: The current research champion — a concrete git ref the next iteration forks from.
 git_ref: autoresearch/best
-iteration: 0
+iteration: 17
 metrics:
-  plant_consumption_rate: null
-  prey_consumption_rate: null
-  action_effectiveness: null
-  mi_sa: null
-  learning_slope: null
-lineage: []
+  plant_consumption_rate: 0.0733
+  prey_consumption_rate: 0.00303
+  action_effectiveness: 0.5613
+  mi_sa: 0.1059
+  learning_slope: -0.000578
+lineage:
+  - experiments/0001-metabolism-homeostatic-metabolism
+  - experiments/0003-predation-consume-on-kill
+  - experiments/0006-plasticity-three-factor-on-predation
+  - experiments/0009-plasticity-three-factor-tune
+  - experiments/0012-ecology-spike-fields
+  - experiments/0017-ecology-social-transfer
 tags: [autoresearch, champion]
-timestamp: 2026-06-16T00:00:00Z
+timestamp: 2026-06-18T00:00:00Z
 ---
 
 # Current best program
 
-**Not yet established.** The first iteration creates branch `autoresearch/best`
-from `main` and runs the baseline canonical eval to fill in the metrics above.
+> ## 🏆 CHAMPION ADVANCED AGAIN (iter17, 2026-06-18) — `autoresearch/best` @ `120a9eb`
+>
+> = the iter12 spike champion + **dense organism–organism ZERO-SUM color-cyclic
+> energy transfer** ([[experiments/0017-ecology-social-transfer]]). Each tick,
+> energy flows from hue-DOMINATED to hue-DOMINANT adjacent organisms (`net =
+> A·Σ sin(hue_self − hue_neighbor)`) — zero-sum/conservative (NOT ease, like
+> consume-on-kill). **Cross-seed 500k (gate green — build/det P1-P2/tests):**
+> - **action_effectiveness 0.5522 → 0.5613 (+0.0091)** — HEADLINE win (3/4 seeds
+>   0.585–0.607; seed 2026 regresses to 0.453).
+> - prey 0.00226 → 0.00303 (+0.0008); plant −0.0028 (within noise); mi_sa/slope flat.
+> - **Color diversity is maximized** — the population does NOT converge to one hue
+>   (a richer co-evolving ecology). Holds at 1M (seed-7 aeff 0.561, vs the spike
+>   champion's seed-7-at-1M 0.465 — a lasting gain).
+> - **NOT open-endedness** (honest): the 1M test shows the color reaches a STABLE
+>   UNIFORM equilibrium (R→0.11), where the mechanism goes ~inert — a different
+>   fixed point, not sustained novelty. A champion advance, not the OE breakthrough.
+> Metrics above are this champion. Lineage now 6 deep.
+>
+> ---
 
-- **Exact commit:** _tbd_ (record the sha here each time `autoresearch/best` advances).
-- **Reproduce:** `git checkout autoresearch/best` → build → `sim-cli` canonical
-  cross-seed sweep (seeds 7,42,123,2026, to 500000).
+> ## 🏆 CHAMPION ADVANCED (iter12, 2026-06-18) — `autoresearch/best` @ `47a6111`
+>
+> = the iter9 substrate + **Dir3 clustered lethal spike fields**
+> ([[experiments/0012-ecology-spike-fields]]). The FIRST champion advance judged
+> under the new `action_effectiveness` headline, and the first to attack the
+> vision-confound at its root. Two changes to the existing spike entity: spikes
+> **cluster** into contiguous Perlin fields (coverage `spike_density=0.05`), and a
+> **Forward INTO a spike is scored as a failed action** (organism still enters +
+> takes damage). This makes far-field perception survival-relevant.
+> **Result (cross-seed 500k, gate green — build/det/tests/eval):**
+> - **action_effectiveness 0.5434 → 0.5522 (+0.0088)** — HEADLINE win, 3/4 seeds up.
+> - **vision=1 collapse BROKEN:** seed 7 holds `vision_distance` 9.04 (was 1.06);
+>   all seeds ~7.5–9.0. mi_sa de-inflates 0.195 → 0.109 (uniform; the seed-7
+>   0.44 confound is gone) — empirical confirmation of the Dir1 thesis.
+> - predation held (−0.0001), foraging −0.0025 (within noise, all seed-7),
+>   learning_slope −0.000083 (within noise). Det-check P1/P2 ✓, tests ✓ (modulo the
+>   known pre-existing corpse-feeding failure). Also resolved a pre-existing
+>   eval(0.10)/baseline(0.05) `spike_density` desync.
+> - Modestly less convergent than baseline (2nd-half aeff slope +0.0044 vs −0.0008).
+> Metrics above are this champion. Lineage now 5 deep.
+>
+> ---
+
+> ## ⭐ CONTRACT CHANGE (2026-06-18) — intelligence headline = action_effectiveness
+>
+> After Dir1/Dir2 (user decision): **`action_effectiveness` is the intelligence
+> headline; `mi_sa` is demoted to a vision-confounded diagnostic** (it rewards
+> myopia — [[findings/seed-7-mi_sa-outlier-is-a-short-vision-crisp-binning-effect]],
+> [[directions/mi_sa-is-confounded-by-vision-range]]). This **re-grounds the
+> champion line:** the iter6→9 moves were justified largely on mi_sa, which is no
+> longer trusted. Under the new headline, **action_effectiveness has DRIFTED DOWN**
+> across the line: homeostatic-only `eb30fff` **0.5647** → consume-on-kill+3-factor
+> `0fa799b` ~0.5422 → iter9 `1dab610` **0.5435**. So on the trusted measure the
+> program has *not* improved intelligence since `eb30fff`; the iter6→9 gains were
+> foraging/predation/ecology-richness (+ confounded mi_sa), not aeff.
+>
+> **Champion held at `1dab610` as the Dir3 base — a GOAL-driven, not metric-driven,
+> choice:** it carries the open-ended-evolution substrate (predator niche +
+> within-life learning) the goal needs, at a small aeff cost (−0.021 vs `eb30fff`).
+> The aeff-optimal alternative base is `eb30fff` (forager-only, no within-life
+> learning). **Dir3's success bar is now: genuinely RAISE action_effectiveness**
+> (toward/past 0.5647) via a skilled niche, without the vision-myopia trap.
+> *(Open to revisiting the base with the user.)*
+
+> **CHAMPION ADVANCED AGAIN (iter9):** `autoresearch/best` @ `121ee21` = the iter6
+> substrate + **three-factor band tuned to GAIN 0.04** (gentler within-life reward
+> credit). It **strictly dominates the prior (iter6) champion on ALL pillars**
+> cross-seed (aeff 0.5435>0.5422, **mi_sa 0.1952>0.1335 (+46%)**, prey 0.00235,
+> plant 0.0786), all seeds survive, det ✓ — and its **mi_sa now exceeds the
+> original homeostatic high-water mark (0.1407)**: within-life reward-learning on
+> the arms-race ecology produced genuinely more information-rich brains (a clean
+> intelligence gain). aeff (0.5435) sits just below the homeostatic-only 0.5647.
+> The mi_sa gain is seed-7-heavy (seed 7: 0.44; others ~0.10-0.12) — honest caveat.
+> A clean strict-dominance advance over the predecessor. Metrics above are this
+> champion. Lineage now 4 deep (homeostatic→consume-on-kill→three-factor→tune).
+>
+> *(prior advance:)*
+> **iter8 close-out, goal-driven:** `autoresearch/best` @
+> `0fa799b` = homeostatic metabolism + **consume-on-kill** + **three-factor
+> (within-life reward) learning** — the open-ended-evolution substrate the 8-iter
+> arc converged toward (a multi-niche predator/forager ecosystem with within-life
+> learning, vs the prior foraging monoculture). This is a **deliberate goal-driven
+> advance** for "open-ended evolution of brains": it improves foraging (+0.003) and
+> predation (+0.0004) and establishes a richer co-evolving ecology, at a small,
+> seed-123-driven INTELLIGENCE-PROXY cost (action_effectiveness −0.022, mi_sa
+> −0.007) on proxies shown to be misaligned with the goal
+> ([[findings/predator-niche-is-inducible-but-the-prey-metric-resists-and-predation-regresses-action-effectiveness]]).
+> Build ✓ determinism ✓ (det-check P1/P2). The user may revert if they prefer the
+> pure-intelligence-proxy champion (prior: homeostatic-only `eb30fff`,
+> aeff 0.5647 / mi_sa 0.1407). Metrics below are the NEW champion.
+>
+> ---
+> *Historical (homeostatic-only champion through iter7):*
+> **Iterations 2 & 3 produced NO champion advance** (champion code unchanged at
+> `eb30fff` homeostatic metabolism). Iter2: all dead-ended; central finding
+> [[mechanisms/selection-pressure-is-the-bottleneck-for-intelligence]]. **Iter3
+> (predator–prey arms race):** energy-conserving kill rewards reliably evolve a
+> real predator niche with hunting brains (and rising `mi_sa`) — genuine
+> open-ended evolution — but the proxy metrics block it
+> ([[findings/predator-niche-is-inducible-but-the-prey-metric-resists-and-predation-regresses-action-effectiveness]]):
+> `prey_consumption_rate` resists a hunting minority and `action_effectiveness`
+> penalizes predation's younger death-cohort. Top lead now
+> [[directions/amplify-the-predation-dynamic]]. Metrics below unchanged.
+>
+> **Iters 4–6 (no advance):** predation is *encounter-limited*
+> ([[mechanisms/predation-is-encounter-limited]]) — scarcity suppresses it;
+> lethality/reliability hit a structurally-unreachable prey-rate ceiling
+> ([[findings/prey-consumption-target-is-structurally-unreachable-in-a-stable-ecology]]);
+> free attack-reach *de-skills* hunting (intelligence collapses). **Validated lead
+> (iter6):** within-life reward-learning (gentle three-factor) ON the predator
+> ecology RECOVERS action_effectiveness — the intelligent-hunting loop, narrowly
+> short of a clean gate ([[experiments/0006-plasticity-three-factor-on-predation]]).
+> Next: refine the band + stack sensory salience; and/or the metric contract (human).
+
+**Champion = homeostatic metabolism** (iteration 1). Energy-dependent passive
+metabolic cost (0.5× floor below energy 5) breaks the starvation death-spiral.
+
+- **Exact commit:** `eb30fffe4cc477c4c6b56993dd358b7e47a61942`
+  (`exp metabolism homeostatic-metabolism: energy-dependent passive cost`),
+  fast-forwarded onto `autoresearch/best` over the iteration-0 baseline `70b7700`.
+- **Change:** `sim-core/src/metabolism.rs` only (11 lines). Determinism ✓
+  (byte-identical threads 1 vs 4), build ✓.
+- **Reproduce:** `git checkout autoresearch/best` → `cargo build -p sim-cli --release`
+  → per-seed `new --seed S` + `run-to 500000` + `pillars` for S ∈ {7,42,123,2026}.
+
+## Metrics (cross-seed mean over all 4 seeds — the new baseline for iteration 2)
+
+| metric | champion (n=4) | iter-0 baseline (n=3) | clean Δ on 7/42/123 | target |
+|---|---|---|---|---|
+| plant_consumption_rate | 0.0690 | 0.0599 | +0.0057 | ≥ 0.10 (gap remains) |
+| prey_consumption_rate  | 0.0018 | 0.0217 | −0.0202 | ≥ 0.025 (inherent trade — see Mechanism) |
+| action_effectiveness   | 0.5647 | 0.5566 | +0.0155 | HOLD ✓ |
+| mi_sa                  | 0.1407 | 0.0955 | +0.047  | HOLD ✓ |
+| learning_slope         | −0.000423 | −0.000689 | +0.000276 | ≥ +0.0005 (closing) |
+
+**All 4 seeds now survive (n 3→4):** seed 2026 rescued from extinction (pop 1170).
+Per-seed (authoritative): 7 = plant 0.0658 / AE 0.5575 / mi_sa 0.0478 / slope
+−0.000659 / pop 1185; 42 = 0.0655 / 0.5276 / 0.0896 / −0.000527 / 1936;
+123 = 0.0653 / 0.6311 / 0.2903 / −0.000053 / 1555; 2026 = 0.0794 / 0.5428 /
+0.1350 / −0.000451 / 1170.
+
+The prey collapse is the expected healthier-population effect
+([[mechanisms/predation-inversely-coupled-to-population-health]]), not a defect;
+predation is reserved for iteration 2
+([[directions/predation-needs-energetic-attractiveness]]).
 
 # Lineage
 
-The ordered list of accepted experiments that built this program. Each advance
-of `autoresearch/best` appends the merged `experiments/...` concept here, so the
-champion's full construction history is traceable.
-
-_(empty — no experiments accepted yet)_
+1. [[experiments/0001-metabolism-homeostatic-metabolism]] — energy-dependent
+   passive metabolism (eb30fff). The unique iteration-1 experiment that lifted the
+   keystone while holding both HOLD pillars and rescuing the marginal seed.
 
 # Citations
 
-_(sweep result files for the champion's metrics, once evaluated)_
+- Iteration-0 baseline (n=3) + per-seed diagnostic: recorded in `log.md` iter 0.
+- Champion validation: planner authoritative cross-seed eval, byte-identical to
+  the agent run (determinism).
