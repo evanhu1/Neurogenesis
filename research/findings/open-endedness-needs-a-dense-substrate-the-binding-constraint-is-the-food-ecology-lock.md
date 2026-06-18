@@ -45,6 +45,23 @@ systematic sweep of mechanisms, the answer is sharp.
    architecture invariant). So within the current invariants the open-endedness
    lever has no dense substrate to ride on.
 
+# DEFINITIVE (iter19): the precisely-diagnosed mechanism ALSO plateaus below champion
+
+iter18 diagnosed the missing piece as a DENSE + BRAIN-CONTROLLED + non-saturating
+cognitive contest (so complexity PAYS → intelligence). iter19 built *exactly* that
+([[experiments/0019-ecology-display-contest]]: a brain "display" output + perception
+of neighbors' displays + a dense zero-sum intransitive transfer on the display).
+Result: seed-7 aeff *appeared* to rise (0.32→0.42 @500k, accelerating) — but the 1M
+test shows it was slow recovery from the perception-dilution hit: aeff **peaks ~0.46
+@750k then turns over to 0.44 @1M, plateauing far below champion 0.56**; complexity
+turns over too; cross-seed mean aeff 0.50 < champion. So **even the exact
+theory-specified mechanism converges AND stays below champion** (the 2 added
+perception channels dilute and the contest never repays it). The ≥2×-horizon check
+caught the slow-saturation a THIRD time (roamer, genome, now display). This is
+airtight from every angle: no in-loop mechanism yields sustained open-ended
+*intelligence*; it needs a fundamentally richer cognitive substrate (non-diluting
+perception/action + a non-saturating arms race) — a research-scope redesign.
+
 # DEFINITIVE (iter18): the cognitive arms race gives the FIRST sustained growth — as dilutive bloat. Open-ended growth and intelligence are in DIRECT CONFLICT.
 
 The most goal-aligned test — an intransitive *POLICY* arms race (committed-attack

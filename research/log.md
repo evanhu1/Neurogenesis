@@ -7,6 +7,29 @@ that lets `STATE.md` be compacted aggressively.
 
 <!-- new entries go directly below this line -->
 
+## Iteration 19 (display contest) — the precisely-diagnosed OE mechanism ALSO plateaus below champion — REJECTED; OE definitively unreachable in-loop — 2026-06-18
+* **The exact mechanism iter18's diagnosis specified:** a DENSE + BRAIN-CONTROLLED +
+  non-saturating cognitive contest. Built it (`exp-0019` @ c4f4825): a brain "display"
+  output neuron (continuous, brain-computed, conditioned on perception, no action-slot
+  cost) + a neighbor-display sensory channel (sin,cos) + a dense zero-sum adjacency
+  energy transfer keyed on `sin(Δθ_display)` (intransitive, brain-controlled). det-check
+  ok; strength-0 byte-identical; the contest is load-bearing (display channels wired
+  with large evolved weights).
+* **500k looked promising:** seed-7 aeff rose 0.318→0.421 with an ACCELERATING slope +
+  complexity grew — the first time aeff and complexity rose together (vs iter18's
+  dilution). Encouraging "both-properties" signal.
+* **1M test KILLED it (burned-twice pattern, 3rd time):** the rise was slow recovery
+  from the perception-dilution hit — aeff peaks ~0.46 @750k then TURNS OVER to 0.44 @1M,
+  plateauing far below champion 0.5613; complexity turns over too. Cross-seed @500k mean
+  aeff 0.50 < champion (complexity grown 2.5×, neurons 35-46). So it converges AND the 2
+  added perception channels dilute it below champion.
+* **DEFINITIVE:** even the exact theory-specified mechanism (dense brain-controlled
+  intransitive cognitive contest) converges + dilutes. The ≥2×-horizon check caught
+  slow-saturation a THIRD time (roamer, genome, display). OE of intelligent brains is
+  not reachable in-loop on this engine — it needs a fundamentally richer cognitive
+  substrate (non-diluting perception/action + a non-saturating arms race), a
+  research-scope redesign. Champion unchanged (`120a9eb`). `main` untouched.
+
 ## Iteration 18 (pursuit-evasion) — cognitive arms race: FIRST sustained growth, but dilutive bloat — REJECTED; definitive OE conclusion — 2026-06-18
 * **The most goal-aligned untested paradigm:** an intransitive POLICY arms race on brain
   COGNITION (not passive color). Committed-attack predation: an Attack commits to a cell

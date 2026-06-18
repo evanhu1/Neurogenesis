@@ -122,8 +122,15 @@ confidence, [[findings/seed-7-mi_sa-outlier-is-a-short-vision-crisp-binning-effe
 
 ## Bundle census
 
-- experiments: 33 (+0012-spike, +0017-social-transfer promoted; +0013/14/15/16/18
+- experiments: 34 (+0012-spike, +0017-social-transfer promoted; +0013/14/15/16/18/19
   rejected) · findings: 13 · mechanisms: 4 · directions: 15 · dead-ends: 2.
+- **iter19 (brain-controlled cognitive contest — the precisely-diagnosed OE
+  mechanism):** built a brain "display" output + neighbor-display perception + dense
+  intransitive transfer on it. seed-7 aeff rose 0.32→0.46 @750k then PLATEAUED to
+  0.44 @1M (below champion 0.56); cross-seed mean 0.50 < champion; complexity grew
+  2.5× then turned over. The ≥2×-horizon check caught slow-saturation a 3rd time.
+  **Even the exact theory-specified mechanism converges + dilutes.** OE is
+  definitively not in-loop-reachable. ([[experiments/0019-ecology-display-contest]])
 - Champion advances: **4** (iter1 homeostatic, iter9 three-factor, iter12 spike
   fields, **iter17 social transfer**). Last iteration: **17**. The Dir1→Dir3 arc
   fixed the vision-confound (aeff advance); iters 13–17 exhaustively mapped
