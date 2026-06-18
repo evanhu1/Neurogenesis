@@ -65,6 +65,18 @@ where the second-half slope stays positive. It also argues for a future
 behavioral/lineage novelty rate) as a first-class signal alongside the static
 action_effectiveness headline.
 
+# Confirmation: the spike champion (iter12) ALSO converges (1M test)
+
+Extending the iter12 spike champion 500k→1M ticks: cross-seed mean
+action_effectiveness is **flat** (0.5522 @500k → 0.5492 @1M; only seed 123 keeps
+climbing 0.573→0.622, seed 42 drops 0.589→0.538). So the clustered-spike niche
+raised the competence *level* and broke the vision-myopia, but a **static** skill
+challenge still converges — it does not produce sustained novelty. This is the
+direct empirical motivation for a **moving / co-evolutionary** hazard
+([[directions/predation-led-mortality-selects-for-skill]] → the roamer,
+`experiments/0013-ecology-roamer`): a non-stationary target is needed for
+open-endedness.
+
 # Reproduce
 
 ```
