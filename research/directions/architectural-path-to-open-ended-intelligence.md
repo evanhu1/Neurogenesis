@@ -70,14 +70,26 @@ minimal brain. To let intelligence grow with the expanding problem space:
    problem** so the cost ceiling rises with the expanding problem space (NOT a flat
    ease discount, which degrades intelligence — [[mechanisms/selection-pressure-is-the-bottleneck-for-intelligence]]).
 
-# The minimal first experiment (if a human authorizes the redesign)
+# The minimal first experiment — DONE, and it FAILED (informative)
 
-Start with Requirement A option (1): a 2-tier compositional resource (eating tier-1
-unlocks the ability to use tier-2 patches that are otherwise inert), and check
-whether competence + behavioral repertoire keep climbing past the single-tier
-ceiling at ≥1M. If it climbs, layer a 3rd tier and test for *continued* climb (the
-open-ended signature). Pair with Requirement B option (1) (modular protected
-growth) so the brain can add the capacity each new tier demands without diluting.
+Requirement A option (1) was implemented and tested
+([[experiments/0020-ecology-compositional-foraging]]): an ease-neutral 2-step
+compositional resource (eat tier-1 → primed → eat tier-2). Result at 1.5M: it
+SUPPRESSES competence for ~900k then plateaus at aeff ~0.38 — **BELOW** the
+single-tier baseline ~0.46. Organisms learn the chain (rate→0.55, brains grow 0→12)
+but the harder structure **raises the skill floor while lowering the achievable
+ceiling**. So a hand-added compositional dependency is NOT an OE driver — it shifts
+the equilibrium (lower), not transcends it.
+
+**Updated implication:** the failure of the SIMPLEST expandable-problem-space option
+means the requirement is stronger than "add structure": it needs a problem space
+that is GENUINELY UNBOUNDED and **co-evolved with the agents** (option 2, POET-style:
+the challenge distribution itself evolves to track the agents' frontier), or a
+**major transition** (option 3) that opens a new organizational level. A
+hand-authored finite structure (tiers) has a finite ceiling. This is a substantial
+multi-component research build, and the compositional failure is evidence it cannot
+be shortcut by static structure — the open-endedness must come from an
+agent-coupled, never-saturating problem generator.
 
 # Status / why this is here, not done
 

@@ -122,13 +122,17 @@ confidence, [[findings/seed-7-mi_sa-outlier-is-a-short-vision-crisp-binning-effe
 
 ## Bundle census
 
-- experiments: 34 (+0012-spike, +0017-social-transfer promoted; +0013/14/15/16/18/19
-  rejected) · findings: 13 · mechanisms: 4 · directions: 16
+- experiments: 35 (+0012-spike, +0017-social-transfer promoted;
+  +0013/14/15/16/18/19/20 rejected) · findings: 13 · mechanisms: 4 · directions: 16
   (+architectural-path-to-open-ended-intelligence) · dead-ends: 2.
-- **The actionable path forward is now specified:**
-  [[directions/architectural-path-to-open-ended-intelligence]] — an expandable
-  problem space + non-diluting capacity growth (a research-scope engine redesign,
-  human-authorized). The in-loop space is exhausted.
+- **The architectural path's FIRST step was tested (iter20) and FAILED:** an
+  ease-neutral compositional 2-step resource raises the skill floor but LOWERS the
+  ceiling (aeff plateaus ~0.38 < baseline 0.46 @1.5M). So even a hand-added
+  expandable structure has a finite (lower) ceiling — OE needs a GENUINELY UNBOUNDED,
+  agent-CO-EVOLVED problem generator (POET-style) or a major transition, NOT static
+  structure ([[directions/architectural-path-to-open-ended-intelligence]]). That is a
+  large multi-component research build; the in-loop AND simplest-architectural spaces
+  are now both exhausted.
 - **iter19 (brain-controlled cognitive contest — the precisely-diagnosed OE
   mechanism):** built a brain "display" output + neighbor-display perception + dense
   intransitive transfer on it. seed-7 aeff rose 0.32→0.46 @750k then PLATEAUED to
