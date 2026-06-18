@@ -3,7 +3,7 @@ type: BestProgram
 title: Current best program
 description: The current research champion — a concrete git ref the next iteration forks from.
 git_ref: autoresearch/best
-iteration: 3
+iteration: 6
 metrics:
   plant_consumption_rate: 0.0690
   prey_consumption_rate: 0.0018
@@ -28,6 +28,16 @@ timestamp: 2026-06-16T00:00:00Z
 > `prey_consumption_rate` resists a hunting minority and `action_effectiveness`
 > penalizes predation's younger death-cohort. Top lead now
 > [[directions/amplify-the-predation-dynamic]]. Metrics below unchanged.
+>
+> **Iters 4–6 (no advance):** predation is *encounter-limited*
+> ([[mechanisms/predation-is-encounter-limited]]) — scarcity suppresses it;
+> lethality/reliability hit a structurally-unreachable prey-rate ceiling
+> ([[findings/prey-consumption-target-is-structurally-unreachable-in-a-stable-ecology]]);
+> free attack-reach *de-skills* hunting (intelligence collapses). **Validated lead
+> (iter6):** within-life reward-learning (gentle three-factor) ON the predator
+> ecology RECOVERS action_effectiveness — the intelligent-hunting loop, narrowly
+> short of a clean gate ([[experiments/0006-plasticity-three-factor-on-predation]]).
+> Next: refine the band + stack sensory salience; and/or the metric contract (human).
 
 **Champion = homeostatic metabolism** (iteration 1). Energy-dependent passive
 metabolic cost (0.5× floor below energy 5) breaks the starvation death-spiral.

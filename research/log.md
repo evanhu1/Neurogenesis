@@ -7,6 +7,28 @@ that lets `STATE.md` be compacted aggressively.
 
 <!-- new entries go directly below this line -->
 
+## Iteration 6 — reward-sensitive learning on predator ecology (2026-06-17)
+* 1 agent: gentle three-factor (energy-delta neuromodulated Hebbian, GAIN 0.08) on
+  the consume-on-kill predator ecology — let brains LEARN to hunt within life.
+  (Agent's API connection dropped before its commit; planner recovered results from
+  its saved 500k worlds and persisted the branch 696def5.)
+* **Validated the deep hypothesis — the most promising arms-race result.** Vs the
+  consume-on-kill base, the three-factor rule **RECOVERED action_effectiveness
+  0.5088→0.5422** (what iter1's three-factor FAILED on foraging-only) — within-life
+  reward-learning works WHEN there's skill to learn. Held mi_sa on 3/4 seeds. The
+  CLOSEST any predation experiment came to holding the HOLD pillars (vs champion:
+  aeff −0.022, mi_sa −0.007, seed-123-driven) — narrowly short of a clean advance.
+  Strong band (GAIN 1.5) destabilized → gentleness matters. det-check ok.
+* **No champion advance, but the path is now clear and validated:** the full
+  intelligent-hunting loop (predator niche + within-life reward learning) is the
+  right mechanism ([[directions/reward-sensitive-learning-on-the-predator-ecology]]).
+  Refine the band + stack the corpse sensory channel to clear the gate; and/or
+  recalibrate the metric contract (human).
+* **6-iteration arc complete** — coherent theory in STATE: intelligence needs
+  selection pressure for skill + within-life learning to acquire it, and the
+  current metrics partly block recognizing the predator-niche arms race that
+  delivers both. OKF: experiment 0006, STATE/best-program updated.
+
 ## Iteration 4 — amplify predation (2026-06-17)
 * 2 agents (isolated worktrees, fixed harness) off consume-on-kill: scarcity, reliable.
   **No champion advance.**

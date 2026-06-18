@@ -8,122 +8,101 @@ timestamp: 2026-06-17T00:00:00Z
 
 # STATE
 
-**Read this first.** Distilled working memory. Dip into `experiments/`,
-`findings/`, `log.md` only for a specific fact. Rewritten each iteration.
+**Read this first.** Distilled working memory over 6 iterations. Dip into
+`experiments/`, `findings/`, `log.md` only for a specific fact.
 
 ## Goal & targets (cross-seed mean, seeds 7,42,123,2026, 500k; raw metrics)
 
-| axis | target | champion (a1d33b7, n=4) | status |
+| axis | target | champion (homeostatic, n=4) | status |
 |---|---|---|---|
-| foraging  | `plant_consumption_rate ≥ 0.10`  | 0.0690 | stuck (more-food de-pressures brains) |
-| predation | `prey_consumption_rate  ≥ 0.025` | 0.0018 | **target structurally UNREACHABLE in a stable ecology** (needs ~25 kills/tick) |
-| learning  | `learning_slope ≥ +0.0005`        | −0.000423 | seed-noise-dominated; metabolism dry |
-| intelligence | hold action_effectiveness (0.5647) & mi_sa (0.1407) | — | **predation splits them: mi_sa↑, action_eff↓** |
+| foraging  | `plant_consumption_rate ≥ 0.10`  | 0.0690 | stuck (abundance de-pressures brains) |
+| predation | `prey_consumption_rate  ≥ 0.025` | 0.0018 | **structurally UNREACHABLE in a stable ecology** |
+| learning  | `learning_slope ≥ +0.0005`        | −0.000423 | seed-noise-dominated |
+| intelligence | hold action_effectiveness (0.5647) & mi_sa (0.1407) | — | the binding constraint; predation splits them |
 
 ## Current best program
 
-- **`autoresearch/best` @ `a1d33b7`** = champion code `eb30fff` (homeostatic
-  metabolism) + apparatus + knowledge. **Iterations 2 AND 3 advanced nothing.**
-  See `best-program.md`.
+- **`autoresearch/best`** = champion code `eb30fff` (homeostatic metabolism, the
+  ONLY accepted advance, iter1) + apparatus + 6 iterations of knowledge.
+  **Iterations 2–6 produced no further code advance** — but a complete, coherent
+  theory of WHAT blocks open-ended evolution of intelligent brains, and a
+  validated lead. See `best-program.md`.
 
-## ⚠ Where we are (the strategic crux)
+## ⚠ THE THEORY (the compounding result of 6 iterations)
 
-Two compounding insights now define the program:
+**Open-ended evolution of intelligent brains requires (1) selection pressure for
+SKILL, and (2) a learning rule that converts that pressure into within-life skill —
+and the current eval metrics partly block recognizing it.**
 
-1. **Selection pressure, not ease, is the bottleneck for intelligent brains**
+1. **Selection pressure is the bottleneck**
    ([[mechanisms/selection-pressure-is-the-bottleneck-for-intelligence]], high).
-   Every ease-adding lever degrades the intelligence pillars.
-2. **The predator–prey arms race is the goal-aligned mechanism — but the proxy
-   metrics block it** ([[findings/predator-niche-is-inducible-but-the-prey-metric-resists-and-predation-regresses-action-effectiveness]],
-   high). Energy-conserving kill rewards reliably evolve a real predator niche
-   with emergent hunting brains (`ContactAhead→Eat`, `Corpse→Eat`) and **rising
-   `mi_sa`** where strong — genuine open-ended evolution. But: `prey_consumption_rate`
-   (= prey/total_actions) barely moves for a hunting *minority* (tops ~0.004–0.005,
-   5–10× short), and `action_effectiveness` regresses (predation kills younger →
-   lower death-cohort competence + attack chaos). The two intelligence pillars
-   **disagree under predation** (mi_sa↑, action_eff↓). Salience + reward did NOT
-   synergize (the combo was worse — compounded dilution).
+   Every ease-adding lever (more food, softer metabolism, cheaper/bigger brains,
+   free kill-energy, free attack-reach) grows/relaxes the population and DEGRADES
+   action_effectiveness & mi_sa. Intelligence cannot be bought with ease.
+2. **The predator–prey arms race is the skill-demanding niche**
+   ([[findings/predator-niche-is-inducible-but-the-prey-metric-resists-and-predation-regresses-action-effectiveness]]).
+   Energy-conserving kill rewards reliably evolve hunting brains and raise mi_sa.
+   But predation is **encounter-limited** ([[mechanisms/predation-is-encounter-limited]]):
+   you can't grow it by scarcity (suppresses it via density), lethality, or free
+   reach (DE-skills it → intelligence collapses). It must grow through *learned
+   skilled pursuit*.
+3. **Within-life reward-learning is the missing piece — and it WORKS on the
+   predator ecology** ([[experiments/0006-plasticity-three-factor-on-predation]],
+   iter6): a gentle three-factor (energy-delta) Hebbian rule on consume-on-kill
+   RECOVERED action_effectiveness (0.5088→0.5422) — what iter1's three-factor
+   FAILED to do on foraging-only. The full loop (predator niche + within-life
+   reward learning) is validated as the mechanism; it narrowly misses the gate
+   (vs champion aeff −0.022 / mi_sa −0.007, seed-123-driven).
+4. **The metrics partly block the goal:** `prey ≥ 0.025` is structurally
+   unreachable ([[findings/prey-consumption-target-is-structurally-unreachable-in-a-stable-ecology]]);
+   action_effectiveness penalizes predation (younger death-cohort) while mi_sa
+   rewards it. A human call on the eval contract is the deepest unblock
+   ([[directions/reconsider-intelligence-metric-under-predation]]).
 
-**Implication:** the most goal-aligned result we can produce (an evolved predator
-niche) scores as a dead-end on the current metrics. Either amplify predation until
-it dominates the ecology (so prey rises and hunting skill is survival-critical), or
-re-weight the intelligence metric toward `mi_sa`
-([[directions/reconsider-intelligence-metric-under-predation]] — needs a human call).
+## Frontier / next levers
 
-## Frontier (per surface area)
-
-| surface area | status | next move |
+| lever | status | note |
 |---|---|---|
-| corpse / predation mechanics | **hot, mapped** | **[[directions/amplify-the-predation-dynamic]]** — make predation dominant (consume-on-kill + scarcer plant → hunt-or-starve) |
-| evaluation / metrics | flagged | [[directions/reconsider-intelligence-metric-under-predation]] (mi_sa vs action_eff; human call) |
-| brain topology (sensing) | enabler works alone-weak | corpse channel learnable; only useful WITH a strong reward |
-| metabolism / lifecycle | dry (2 iters) | do not re-tune |
-| food ecology | closed as abundance | foraging must come from skill, not slack |
-| plasticity genome | reserved | reward-sensitive rule once an arms-race ecology selects competence |
+| **[[directions/reward-sensitive-learning-on-the-predator-ecology]]** | **validated, REFINE** | tune the neuromod band; STACK corpse sensory channel so hunting is perceivable+learnable; fix the seed-123 disruption → aim to clear the gate |
+| [[directions/reconsider-intelligence-metric-under-predation]] | human call | prey target unreachable; weight mi_sa? cohort-normalize action_eff? |
+| predation mechanics | exhaustively mapped | corpse/lethality/reliability/scarcity/reach all dead-ended |
+| metabolism / food | dry / closed | ease de-pressures brains |
 
 ## Established mechanisms (durable laws)
 
 - [[mechanisms/selection-pressure-is-the-bottleneck-for-intelligence]] (high) — central.
-- **[[mechanisms/predation-is-encounter-limited]]** (high) — NEW (iter4): predation is
-  density/co-location-driven, not hunger-driven; scarcity SUPPRESSES it; grow it via
-  encounter amplification (attack reach / prey-pursuit), not scarcity or lethality.
+- [[mechanisms/predation-is-encounter-limited]] (high).
 - [[mechanisms/predation-inversely-coupled-to-population-health]] (high).
 - [[mechanisms/plant-rate-tracks-metabolism-over-food-energy]] (high).
 
-## Active directions
-
-- **[[directions/amplify-the-predation-dynamic]]** (HIGH, iter4) — predation-dominant
-  ecology (consume-on-kill + scarcer plant): hunt-or-starve should raise prey AND
-  put hunting *effectiveness* under hard selection (recovering action_eff) AND mi_sa.
-- [[directions/reconsider-intelligence-metric-under-predation]] (med, human call).
-- [[directions/corpse-sensory-salience]] — enabler, only with a strong reward.
-- [[directions/redistributive-kill-reward]] / consume-on-kill — mapped (real niche,
-  prey short, action_eff regress); the base for amplification.
-
-## Dead ends
-
-- Predation via richer corpses / more-lethal attacks / additive reward (iter2).
-- Salience + reward COMBO (iter3) — worse than components (compounded dilution).
-- Metabolism ramp/brain-cost/move-cost; foraging-via-abundance (iter2 findings).
-
 ## Bundle census
 
-- experiments: 21 (12 iter1 + 6 iter2 + 3 iter3) · findings: 6 · mechanisms: 3 ·
-  directions: 9 · dead-ends: 2.
-- Last iteration: **3** — dry for advance; arms race proven inducible; metric
-  misalignment surfaced.
+- experiments: 24 (12 iter1 + 6 iter2 + 3 iter3 + 2 iter4 + 1 iter5 + 1 iter6) ·
+  findings: 7 · mechanisms: 4 · directions: 11 · dead-ends: 2.
+- Champion advances: 1 (iter1 homeostatic). Last iteration: **6**.
 
-## Iteration 4 result (done): amplify-predation — both dead-end
+## Next actions (iteration 7)
 
-- Scarcity BACKFIRED (predation encounter-limited → scarcity lowers density →
-  less predation). Reliability doubled the niche (8% hunters) but prey stayed
-  ~0.002 — the **prey target is structurally unreachable in a stable ecology**
-  ([[findings/prey-consumption-target-is-structurally-unreachable-in-a-stable-ecology]]).
-  No champion advance.
+1. **Refine the validated lead** ([[directions/reward-sensitive-learning-on-the-predator-ecology]]):
+   on the consume-on-kill base, (a) sweep the three-factor band (GAIN/SCALE/bounds)
+   and (b) STACK the corpse/prey sensory channel (exp-0003-sensing) so the brain
+   can perceive prey and the reward-learning has a clean signal — aim to push
+   action_effectiveness ≥ champion AND mi_sa ≥ champion (then it cleanly advances,
+   establishing a predator-niche champion with within-life learning).
+2. If it still can't clear both HOLD pillars, the binding constraint is confirmed
+   to be the **metric contract** — the predator-niche arms race IS open-ended
+   evolution but the proxies undervalue it; surface the metric recalibration to the
+   user (prey target + mi_sa-vs-action_effectiveness).
 
-## Next actions (iteration 5)
+## Process / harness (works well now)
 
-1. **Encounter amplification** — the last predation lever per
-   [[mechanisms/predation-is-encounter-limited]]: **attack reach** (predator can
-   attack prey within a small radius, not just the adjacent cell) on the
-   consume-on-kill base. This directly breaks the encounter limit and rewards
-   spatial positioning. The intelligent version is **prey-pursuit navigation**
-   (perceive prey via the corpse/prey sensory channel → move toward it → attack →
-   eat) — the full hunting loop.
-2. **Judge by goal-signals, not the broken prey rate:** predator-niche size,
-   emergent hunting behavior, mi_sa. The `prey ≥ 0.025` target needs human
-   recalibration ([[directions/reconsider-intelligence-metric-under-predation]]);
-   predation can't advance the champion on the current contract regardless of mechanism.
-3. If encounter-amplification also can't hold action_effectiveness, predation is
-   exhaustively mapped — consolidate and the next real lever is the metric contract
-   (human) and/or a reward-sensitive plasticity rule.
-
-## Process / harness (iteration 3)
-
-- **Self-isolation fix WORKED** — pre-created per-agent worktrees + agent self-check;
-  `main` stayed clean (vs iter2 contamination). Single SEMDIR held (no split).
-- **New hazard:** an agent's broad `pkill` matched a sibling's relative
-  `artifacts/c-42.bin` and killed its run → recipe should mandate UNIQUE artifact
-  names per agent + absolute-path process matching. (S1 killed P2's seed-42; P2 recovered.)
-- Planner-controlled clean-worktree gate (sccache + det-check P1/P2) remains the
-  authoritative backstop and worked. Determinism held across topology + turn-logic combo.
+- Pre-created per-agent isolated worktrees + single fixed SEMDIR: `main` stays
+  clean, no semaphore split, no cross-agent contamination (iter3–6 clean).
+- Agents must use UNIQUE artifact names (a cross-agent relative-path `pkill` once
+  killed a sibling's run). Planner blanket `pkill` can clip an unpersisted confirm —
+  persist branch BEFORE confirm / target by PID.
+- An agent's API drop can lose its return JSON — but its persisted worlds + branch
+  are recoverable (iter6 recovered from saved 500k worlds; planner committed the branch).
+- Planner-controlled clean-worktree gate (sccache + det-check P1/P2) is the
+  authoritative backstop. det-check correctly validated the three-factor's new
+  energy-delta read (reuses persisted state → deterministic).
