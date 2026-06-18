@@ -7,6 +7,36 @@ that lets `STATE.md` be compacted aggressively.
 
 <!-- new entries go directly below this line -->
 
+## Iteration 13 (roamer) — moving hazard delays but does NOT escape convergence — REJECTED — 2026-06-18
+* **Goal:** test whether a NON-STATIONARY pressure (a moving lethal hazard to flee
+  using far-field vision) produces genuine open-endedness, defeating the convergence
+  the static spike niche showed.
+* **Built** (impl agent, isolated worktree, branch `autoresearch/exp-0013-ecology-roamer`
+  @ 6a2775b): `sim-core/src/roamer.rs` — config-driven `roamer_count` (default 14)
+  deterministically-moving lethal agents; new `Roamers` tick phase (move→roamers→
+  commit); REUSES the spike visual channel (no new sensory neuron — dodges dilution);
+  serialized roamer state; deterministic motion via `(seed,turn,index)` hash. det-check
+  ok (P1+P2), tests ok (only known failure), clippy clean.
+* **500k looked like a WIN:** aeff 2nd-half slope **+0.0183/100k (4× the champion)**,
+  all seeds still climbing (ending at their maxima), vision held ~8.5, pops healthy.
+  BUT aeff LEVEL regressed (0.5229 vs champion 0.5522). roamer_count sweep {6,10,14}
+  never recovered the 500k level (0.479/0.543/0.523).
+* **1M test CORRECTED it — REJECTED:** by 1M the roamer's late-slope is ~0 (CONVERGED),
+  at aeff 0.5282 — still BELOW champion (0.5492 @1M). seed 7 even declined 0.582→0.548.
+  **The strong 500k slope was slow convergence on a harder task, not open-endedness.**
+* **Two durable lessons** ([[findings/a-moving-hazard-delays-but-does-not-escape-convergence]]):
+  (1) a positive 500k 2nd-half slope is NOT proof of open-endedness — confirm OE
+  claims at ≥2× horizon (this nearly caused a wrong promotion); (2) a permanent
+  mortality tax lowers the competence ceiling (pressure must reward skill, not just
+  kill more). **Both static AND moving niches converge — unbounded OE unachieved.**
+* **Decision:** champion HELD at `47a6111` (roamer beats it on neither horizon). Did
+  NOT bypass the merge gate for a 500k regression. Recorded as a rejected-but-
+  instructive experiment + finding.
+* **Bundle:** +1 experiment (0013, rejected), +2 findings (convergence,
+  moving-hazard-delays), +1 direction (measure-open-endedness). STATE frontier
+  rewritten: **co-evolution (Red Queen)** is the leading untried open-endedness
+  route; a moving fixed-policy hazard is not enough. `main` untouched.
+
 ## Iteration 12 (Dir3) — clustered spike fields break the vision-myopia collapse — CHAMPION ADVANCED — 2026-06-18
 * **Goal:** a new skill-demanding niche (Dir3) that raises the new headline
   `action_effectiveness` via FAR-FIELD perception (no vision=1 trap) and without ease.

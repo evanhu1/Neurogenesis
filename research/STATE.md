@@ -125,12 +125,14 @@ confidence, [[findings/seed-7-mi_sa-outlier-is-a-short-vision-crisp-binning-effe
 
 ## Bundle census
 
-- experiments: 27 (+0012-ecology-spike-fields) · findings: 11 (+seed-7-outlier,
-  +convergence/not-open-ended, +clustered-hazards-break-myopia) · mechanisms: 4 ·
-  directions: 14 (mi_sa-vision-confound in-progress) · dead-ends: 2.
+- experiments: 28 (+0012-spike-fields promoted, +0013-roamer rejected) ·
+  findings: 12 (+seed-7-outlier, +convergence, +clustered-hazards-break-myopia,
+  +moving-hazard-delays-not-escapes-convergence) · mechanisms: 4 ·
+  directions: 15 (+measure-open-endedness) · dead-ends: 2.
 - Champion advances: **3** (iter1 homeostatic, iter9 three-factor, **iter12 spike
-  fields**). Last iteration: **12**. The Dir1→Dir2→Dir3 arc fixed the
-  vision-confound (measure + niche) and produced a clean aeff advance.
+  fields**). Last iteration: **13** (roamer, rejected). The Dir1→Dir2→Dir3 arc
+  fixed the vision-confound (clean aeff advance); iter13 proved open-endedness is
+  NOT achieved by a moving hazard (converges) — co-evolution is the next route.
 
 ## ⛳ STATUS after iter 7–8: mechanism space EXHAUSTED — binding constraint = metric contract
 
@@ -168,22 +170,33 @@ synapses/neurons all regress intelligence). The minimal brain + tuned three-fact
   survival-relevant: break the vision=1 collapse (seed 7 → vision 9) AND raise
   action_effectiveness +0.0088. Champion advanced to `47a6111` (iter12).
 
-## Frontier / next directions (post-Dir3)
+## Frontier / next directions (post-Dir3, post-roamer)
 
-1. **Push the spike niche further (open-endedness):** the static field converges
-   eventually ([[findings/the-system-converges-it-is-not-open-ended-under-action-effectiveness]]).
-   A **moving / co-evolutionary hazard** (a roaming lethal agent to flee using
-   vision) is the design-agent's Candidate 2 — forces far-field sensing AND never
-   settles (Red-Queen). Likely the biggest remaining open-endedness lever.
-   Also: re-tune coverage/lethality (lethality is still hardcoded 0.10) now that 5%
-   coverage is the champion; and a longer horizon (1M) to see if seeds 123/2026
-   (still climbing at 500k) pass 0.5647.
-2. **An open-endedness metric** — make "sustained 2nd-half competence slope" (or
-   behavioral/lineage novelty rate) a first-class signal beside action_effectiveness;
-   the goal is *open-ended* evolution, which a static snapshot can't capture.
-3. **A better learning rule** (C, unchanged) — prediction-error-gated eligibility
-   or a 2nd (health/damage) neuromodulator.
-4. Still open: `prey ≥ 0.025` unreachable ([[directions/reconsider-intelligence-metric-under-predation]]).
+**iter13 (roamer) REJECTED — and it taught the central lesson.** A moving lethal
+hazard *looked* open-ended at 500k (slope 4× the champion, all seeds climbing) but
+the **1M test showed it CONVERGES too** — slower and *lower* (aeff 0.528 vs champion
+0.549) ([[findings/a-moving-hazard-delays-but-does-not-escape-convergence]]). So
+**both static AND moving niches converge — unbounded open-endedness is still
+unachieved.** Two durable process/mechanism lessons: (a) a positive 500k 2nd-half
+slope can be slow convergence — confirm OE claims at ≥2× horizon; (b) a permanent
+mortality tax lowers the competence ceiling (pressure must reward skill, not just
+kill more).
+
+1. **TRUE CO-EVOLUTION (Red Queen)** — the leading untried route. A moving
+   *fixed-policy* hazard isn't enough; the THREAT (or prey) must itself EVOLVE so
+   the target never stops moving. This is the most promising open-endedness lever
+   left. (The existing predator-prey IS co-evolutionary but converges; needs a
+   mechanism that keeps the arms race from settling.)
+2. **Growing OPPORTUNITY, not just mortality** — an environment that keeps opening
+   *new* niches/resources (open-ended opportunity), vs a fixed tax.
+3. **Select FOR open-endedness directly** — make sustained-novelty a first-class
+   objective ([[directions/measure-open-endedness-not-just-static-competence]]),
+   not a hoped-for side effect. (Likely a contract/human call, like Dir2.)
+4. **A better learning rule** — prediction-error-gated eligibility / 2nd
+   neuromodulator. Still open: `prey ≥ 0.025` unreachable.
+
+**Champion HELD at `47a6111` (iter12 spike fields)** — the roamer didn't beat it
+on either horizon.
 
 ## Process / harness (works well now)
 
