@@ -7,6 +7,22 @@ that lets `STATE.md` be compacted aggressively.
 
 <!-- new entries go directly below this line -->
 
+## Iterations 7–8 — perception to complete the hunting loop (2026-06-17)
+* iter7: corpse channel + consume-on-kill + three-factor → mismatch (consume-on-kill
+  leaves no corpse / targets live prey) → not retained, dilutes → dead-end, but
+  pinpointed the fix (live-prey channel). iter8: the matched live-prey channel →
+  ALSO regresses both HOLD pillars below champion AND the iter6 base.
+* **Conclusion:** adding sensory channels dilutes brain topology more than the
+  hunting signal repays — even matched + with within-life learning
+  ([[findings/perception-augmentation-dilutes-topology-the-best-arms-race-substrate-is-iter6]]).
+  **The predation mechanism space is EXHAUSTED.** Best substrate = iter6
+  (consume-on-kill + three-factor), narrowly short of the gate.
+* **Binding constraint = the metric contract** (human decision): prey target
+  structurally unreachable; action_effectiveness penalizes predation while mi_sa
+  rewards it. With a recalibrated contract, iter6 cleanly advances. 8-iteration arc
+  complete; champion still iter1 homeostatic. OKF: experiments 0007/0008 + 2 findings
+  + 2 directions; STATE/best-program reflect the exhausted-mechanism conclusion.
+
 ## Iteration 6 — reward-sensitive learning on predator ecology (2026-06-17)
 * 1 agent: gentle three-factor (energy-delta neuromodulated Hebbian, GAIN 0.08) on
   the consume-on-kill predator ecology — let brains LEARN to hunt within life.

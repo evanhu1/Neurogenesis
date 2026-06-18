@@ -77,22 +77,41 @@ and the current eval metrics partly block recognizing it.**
 
 ## Bundle census
 
-- experiments: 24 (12 iter1 + 6 iter2 + 3 iter3 + 2 iter4 + 1 iter5 + 1 iter6) ·
-  findings: 7 · mechanisms: 4 · directions: 11 · dead-ends: 2.
-- Champion advances: 1 (iter1 homeostatic). Last iteration: **6**.
+- experiments: 26 (12 iter1 + 6 iter2 + 3 iter3 + 2 iter4 + 1 each iter5–8) ·
+  findings: 8 · mechanisms: 4 · directions: 12 · dead-ends: 2.
+- Champion advances: 1 (iter1 homeostatic). Last iteration: **8**. Mechanism space
+  exhausted; binding constraint = metric contract (human decision).
 
-## Next actions (iteration 7)
+## ⛳ STATUS after iter 7–8: mechanism space EXHAUSTED — binding constraint = metric contract
 
-1. **Refine the validated lead** ([[directions/reward-sensitive-learning-on-the-predator-ecology]]):
-   on the consume-on-kill base, (a) sweep the three-factor band (GAIN/SCALE/bounds)
-   and (b) STACK the corpse/prey sensory channel (exp-0003-sensing) so the brain
-   can perceive prey and the reward-learning has a clean signal — aim to push
-   action_effectiveness ≥ champion AND mi_sa ≥ champion (then it cleanly advances,
-   establishing a predator-niche champion with within-life learning).
-2. If it still can't clear both HOLD pillars, the binding constraint is confirmed
-   to be the **metric contract** — the predator-niche arms race IS open-ended
-   evolution but the proxies undervalue it; surface the metric recalibration to the
-   user (prey target + mi_sa-vs-action_effectiveness).
+Iters 7–8 tried to complete the loop via PERCEPTION (corpse channel; reward-matched
+live-prey channel). **Both regress intelligence** — adding sensory channels dilutes
+brain topology more than the hunting signal repays
+([[findings/perception-augmentation-dilutes-topology-the-best-arms-race-substrate-is-iter6]]).
+The predation mechanism space is now fully mapped (corpse-energy / lethality /
+reliability / scarcity / reach / kill-reward / perception). No clean champion advance.
+
+**The best goal-aligned substrate is iter6** (consume-on-kill + three-factor,
+branch `autoresearch/exp-0006-plasticity-three-factor-on-predation`, 696def5): a
+predator-niche ecosystem with within-life reward-learning, det-check ok, ready to
+promote — gated ONLY by a small (seed-123-driven) HOLD-pillar miss (aeff −0.022,
+mi_sa −0.007 vs champion).
+
+## Next actions (need a human decision — the high-leverage unblock)
+
+1. **THE decision: recalibrate the eval contract**
+   ([[directions/reconsider-intelligence-metric-under-predation]]). The predator-niche
+   arms race IS open-ended evolution (emergent hunting brains, mi_sa↑) but the
+   proxies undervalue it: `prey ≥ 0.025` is **structurally unreachable**
+   ([[findings/prey-consumption-target-is-structurally-unreachable-in-a-stable-ecology]]),
+   and `action_effectiveness` penalizes predation's younger death-cohort while
+   `mi_sa` rewards it. With prey recalibrated to an achievable value and/or
+   action_effectiveness cohort-normalized (or mi_sa weighted), **iter6 cleanly
+   advances** the champion to a learned-hunting ecosystem.
+2. Speculative autonomous options if the contract can't change (lower-odds): a
+   topology-EFFICIENT perception (repurpose an existing channel rather than add
+   neurons); a different skill-demanding niche (spatial/terrain); a stronger
+   within-life learning rule that exceeds (not just recovers) champion competence.
 
 ## Process / harness (works well now)
 

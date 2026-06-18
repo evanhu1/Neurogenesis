@@ -3,7 +3,7 @@ type: BestProgram
 title: Current best program
 description: The current research champion — a concrete git ref the next iteration forks from.
 git_ref: autoresearch/best
-iteration: 6
+iteration: 8
 metrics:
   plant_consumption_rate: 0.0690
   prey_consumption_rate: 0.0018
