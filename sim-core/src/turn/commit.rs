@@ -218,13 +218,44 @@ impl<'a> CommitPhaseContext<'a> {
             social_damage[idx] = SOCIAL_DAMAGE * accum;
         }
 
-        // Apply as a zero-sum energy TRANSFER in index order: a dominated
-        // organism (surrounded by leading hues) bleeds energy and starves via
-        // the normal lifecycle; a dominant one gains and out-reproduces. Net
-        // flow over all organisms is ~0 (antisymmetric pairs cancel); the
-        // energy>=0 clamp only ever DESTROYS energy, never creates it, so this
-        // is conservative / ease-safe. Zero-sum preserves the antisymmetric
-        // structure a sustained intransitive cycle needs (pure damage broke it).
+        // Apply as a zero-sum energy TRANSFER: a dominated organism (surrounded
+        // by leading hues) bleeds energy and starves via the normal lifecycle; a
+        // dominant one gains and out-reproduces. The per-pair flows are exactly
+        // antisymmetric (sin(a-b) = -sin(b-a)), so the *intended* net flow is 0.
+        // But a dominated organism can only pay what energy it has: simply
+        // capping its loss at zero while still crediting its dominant neighbors
+        // the full positive flow would CREATE energy from nothing — and that
+        // happens precisely in the low-energy (near-starvation) adjacencies that
+        // are common, silently turning a conservative transfer into "ease". To
+        // stay strictly conservative we close the books globally: sum what the
+        // losers can actually afford to surrender, then scale the winners' gains
+        // down to match, so total energy removed == total energy added.
+        //
+        // Determinism: both passes read only the *pre-transfer* energy snapshot
+        // (a loser reads its own energy, never a neighbor's mutated value; a
+        // winner reads no energy at all), so the result is order-independent.
+        let mut gross_in = 0.0_f32;
+        let mut afford_out = 0.0_f32;
+        for idx in 0..org_count {
+            if self.dead_organisms[idx] {
+                continue;
+            }
+            let flow = social_damage[idx];
+            if flow > 0.0 {
+                gross_in += flow;
+            } else if flow < 0.0 {
+                afford_out += (-flow).min(self.sim.organisms[idx].energy.max(0.0));
+            }
+        }
+        // Winners share only the energy the losers could actually give up.
+        // `scale` never exceeds 1.0, so a gain is only ever reduced, never
+        // amplified; any residual fp imbalance can therefore only destroy a
+        // sliver of energy, never create it.
+        let scale = if gross_in > 0.0 {
+            (afford_out / gross_in).min(1.0)
+        } else {
+            0.0
+        };
         for idx in 0..org_count {
             if self.dead_organisms[idx] {
                 continue;
@@ -234,7 +265,13 @@ impl<'a> CommitPhaseContext<'a> {
                 continue;
             }
             let organism = &mut self.sim.organisms[idx];
-            organism.energy = (organism.energy + flow).max(0.0);
+            if flow < 0.0 {
+                // Loser pays at most its available energy (floored at 0).
+                let loss = (-flow).min(organism.energy.max(0.0));
+                organism.energy -= loss;
+            } else {
+                organism.energy += flow * scale;
+            }
         }
 
         self.sim.turn_scratch.social_damage = social_damage;
