@@ -75,6 +75,22 @@ and the current eval metrics partly block recognizing it.**
    rewards it. A human call on the eval contract is the deepest unblock
    ([[directions/reconsider-intelligence-metric-under-predation]]).
 
+## ⛳⛳ ROOT CAUSE of the OE limit (2026-06-18, after 20 iterations)
+
+**Open-ended intelligence requires an UNBOUNDED affordance space; this engine has a
+fixed small one (4 actions, simple vision, ~4 environment mechanics) → a finite set
+of skill TYPES → competence saturates once mastered, extra capacity = bloat.** No
+in-engine mechanism — intransitive dynamics, cognitive arms races, perception
+augmentation, compositional resources, OR POET-style environment co-evolution — can
+manufacture unbounded skill-complexity from a bounded affordance space (POET only
+generates harder *instances* of the same finite skills). The bottleneck is NOT
+selection/diversity/metric/substrate/interaction/search — it is the dimensionality
+of what an agent can DO and SENSE. Achieving the goal needs designing-in an
+unbounded affordance space (composable actions / tool use / evolvable morphology /
+expanding environment rules / open-ended signalling) — a fundamental engine
+redesign. See [[findings/open-endedness-requires-an-unbounded-affordance-space-the-engine-lacks]].
+The two champion advances (intelligence ↑) + the full 20-iteration map are banked.
+
 ## ⚑ Dir1 RESULT (2026-06-18) — the seed-7 mi_sa=0.44 outlier is a SHORT-VISION confound
 
 Read-only deep-inspection of the 4 evolved 500k worlds (3 parallel sub-agents:
@@ -123,7 +139,9 @@ confidence, [[findings/seed-7-mi_sa-outlier-is-a-short-vision-crisp-binning-effe
 ## Bundle census
 
 - experiments: 35 (+0012-spike, +0017-social-transfer promoted;
-  +0013/14/15/16/18/19/20 rejected) · findings: 13 · mechanisms: 4 · directions: 16
+  +0013/14/15/16/18/19/20 rejected) · findings: 14
+  (+ROOT-CAUSE: OE needs an unbounded affordance space the engine lacks) ·
+  mechanisms: 4 · directions: 16
   (+architectural-path-to-open-ended-intelligence) · dead-ends: 2.
 - **The architectural path's FIRST step was tested (iter20) and FAILED:** an
   ease-neutral compositional 2-step resource raises the skill floor but LOWERS the
