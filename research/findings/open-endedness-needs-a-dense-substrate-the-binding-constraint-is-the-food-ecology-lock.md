@@ -4,7 +4,7 @@ title: Open-endedness needs a DENSE interaction substrate — the binding constr
 description: Across four mechanisms (static spikes, moving roamer, and intransitive color-predation at two strengths) the system converges or fails to wind. Diversity is maintained, the metric is fine, and the intransitive idea is theoretically non-convergent — but it has no dense substrate to ride on. The only dense organism-level interaction (foraging/food) is policy-locked. So realizing open-endedness requires relaxing the food-ecology invariant — a deliberate human decision. This is the capstone of the open-endedness investigation.
 confidence: high
 status: active
-supported_by: [experiments/0013-ecology-roamer, experiments/0014-ecology-color-dominance]
+supported_by: [experiments/0013-ecology-roamer, experiments/0014-ecology-color-dominance, experiments/0015-ecology-forage-color]
 seeds: [7, 42, 123, 2026]
 tags: [open-endedness, substrate, food-ecology, invariant, binding-constraint, human-call, capstone]
 timestamp: 2026-06-18T00:00:00Z
@@ -45,7 +45,30 @@ systematic sweep of mechanisms, the answer is sharp.
    architecture invariant). So within the current invariants the open-endedness
    lever has no dense substrate to ride on.
 
-# Conclusion — the binding constraint is the food-ecology policy lock (a human call)
+# UPDATE (iter15): the dense substrate was tried — the barrier is ARCHITECTURAL
+
+The food-layer was NOT a human-call blocker after all (the food-ecology invariant
+means "hidden from world-TOML", not "code frozen"), so the loop built it:
+intransitive hue-keyed foraging + niche construction on the dense foraging
+substrate ([[experiments/0015-ecology-forage-color]], ease-safe, deterministic).
+**It also failed to wind — worse than predation** (winding −0.06 turns; hue
+concentration R≈0.98). The **niche-construction painting is positive feedback that
+self-concentrates** the population+food hue, collapsing the spread the `sin(Δ)`
+cycle needs.
+
+**The real barrier is ARCHITECTURAL, not the food-ecology lock:**
+- An intransitive cycle needs frequency-dependence (opponent hue tracks the
+  population) AND maintained spread. Organism–food frequency-dependence requires
+  painting, which concentrates (kills spread). The interaction that is inherently
+  frequency-dependent *without* painting is organism–organism — but the only one
+  (predation) is too sparse.
+- **The engine has no DENSE organism–organism interaction** to host the cycle.
+  This is the true binding constraint. Realizing open-endedness would need a
+  deeper architectural change: a dense organism–organism interaction, a
+  cycle-preserving (not polymorphism-fixing) niche mechanism, or spatial/structural
+  niching — beyond config or single-function tuning.
+
+# (superseded) earlier conclusion — the food-ecology policy lock
 
 Realizing open-endedness in this engine most plausibly requires putting an
 intransitive / niche-construction dynamic on the **dense food layer** — e.g.

@@ -125,15 +125,14 @@ confidence, [[findings/seed-7-mi_sa-outlier-is-a-short-vision-crisp-binning-effe
 
 ## Bundle census
 
-- experiments: 29 (+0012-spike-fields promoted, +0013-roamer rejected,
-  +0014-color-dominance rejected) · findings: 13 (+seed-7-outlier, +convergence,
-  +clustered-hazards-break-myopia, +moving-hazard-delays, +OE-needs-dense-substrate)
-  · mechanisms: 4 · directions: 15 · dead-ends: 2.
+- experiments: 30 (+0012-spike-fields promoted; +0013-roamer, +0014-color-dominance,
+  +0015-forage-color rejected) · findings: 13 · mechanisms: 4 · directions: 15 ·
+  dead-ends: 2.
 - Champion advances: **3** (iter1 homeostatic, iter9 three-factor, **iter12 spike
-  fields**). Last iteration: **14** (color-dominance, rejected). The Dir1→Dir3 arc
-  fixed the vision-confound (clean aeff advance); iters 13–14 systematically mapped
-  open-endedness and reached the invariant boundary: the binding constraint is the
-  food-ecology policy lock (a human call).
+  fields**). Last iteration: **15** (forage-color, rejected). The Dir1→Dir3 arc
+  fixed the vision-confound (clean aeff advance); iters 13–15 exhaustively mapped
+  open-endedness to an ARCHITECTURAL conclusion: no dense organism–organism
+  interaction exists to host an intransitive (non-convergent) cycle.
 
 ## ⛳ STATUS after iter 7–8: mechanism space EXHAUSTED — binding constraint = metric contract
 
@@ -198,26 +197,40 @@ substrate** (~0.003/tick) — drift overwhelms the rare color-selection. Strengt
 doesn't fix an event-frequency bottleneck
 ([[experiments/0014-ecology-color-dominance]]).
 
-### ⛳ CAPSTONE: the binding constraint is the FOOD-ECOLOGY POLICY LOCK (a human call)
+### ⛳ CAPSTONE (iters 12–15): open-endedness is blocked by an ARCHITECTURAL gap — no dense organism–organism interaction
 
-Open-endedness needs **endogenous non-stationarity on a DENSE substrate**. The only
-dense organism-level interaction is **foraging/food**, which is **policy-locked**
-in sim-config (architecture invariant). So within the current invariants the
-open-endedness lever has no dense substrate to ride on
-([[findings/open-endedness-needs-a-dense-substrate-the-binding-constraint-is-the-food-ecology-lock]]).
-**The next decision is the human's:** open a controlled crack in the food-ecology
-lock to put an intransitive / niche-construction dynamic on the food layer (e.g.
-hue-keyed digestion + corpse-driven local resource-hue shifts = consumer-resource
-co-evolution). The no-speciation & determinism invariants are NOT blockers — keep
-them; the food-ecology lock is the one to negotiate.
+Open-endedness needs **endogenous non-stationarity** — an intransitive (no-ESS)
+interaction whose optimum chases the population so it can't settle. Tested
+exhaustively:
+- **predation substrate** (iter14): theoretically sound (antisymmetric ⇒ no ESS)
+  but predation is too SPARSE (~0.003/tick) → drift wins → bounded hue wander, no winding.
+- **foraging substrate + niche construction** (iter15): dense (~0.075/tick) but the
+  painting that makes it frequency-dependent is **positive feedback that
+  self-concentrates** the hue (R≈0.98) → kills the cyclic gradient → no winding
+  (worse than predation).
 
-**Ruled out as the missing ingredient:** diversity maintenance (already high); the
-metric (fine); a static niche (converges); a moving fixed-policy hazard (converges
-lower); intransitive selection strength (frequency, not strength, is the limit).
+**The true binding constraint is ARCHITECTURAL** (not the food-ecology lock — that
+was editable, and we did):
+([[findings/open-endedness-needs-a-dense-substrate-the-binding-constraint-is-the-food-ecology-lock]])
+- Organism–food frequency-dependence needs painting → concentrates (kills spread).
+- The inherently-frequency-dependent interaction (organism–organism) is only
+  **predation**, which is too sparse. **The engine has no DENSE organism–organism
+  interaction** to host the cycle.
+- Realizing OE needs a deeper architectural change: a dense organism–organism
+  interaction, a cycle-PRESERVING (not polymorphism-fixing) niche mechanism, or
+  spatial/structural niching. Beyond config / single-function tuning.
 
-**Champion HELD at `47a6111` (iter12 spike fields)** — the best program; the OE
-experiments (roamer, color-dominance) are rejected-but-instructive dead-ends. The
-loop has reached the invariant boundary; further OE progress needs the human call.
+**Ruled out:** diversity maintenance (already high); the metric (fine); static niche
+(converges); moving fixed-policy hazard (converges lower); intransitive strength
+(frequency, not strength); the food-ecology lock (editable; tried; self-concentrates).
+
+**Champion HELD at `47a6111` (iter12 spike fields)** — the best program. iters 13–15
+(roamer, color-predation, color-foraging) are rejected-but-instructive dead-ends
+that together prove OE is not reachable by ecology-niche tuning on this architecture.
+**Remaining within-engine OE leads** (untried, speculative): a dense
+organism–organism interaction (e.g. dense contact/social mechanic), or
+negative-frequency niche maintenance that preserves a cycle. Else: an architectural
+change (a human-scope decision).
 
 ## Process / harness (works well now)
 

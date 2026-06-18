@@ -7,6 +7,34 @@ that lets `STATE.md` be compacted aggressively.
 
 <!-- new entries go directly below this line -->
 
+## Iteration 15 (forage-color) — intransitive on the DENSE substrate: niche-construction self-concentrates — REJECTED; OE barrier is ARCHITECTURAL — 2026-06-18
+* **Goal:** iter14 said intransitivity needs a dense substrate; foraging is ~25× denser
+  than predation. Put the antisymmetric hue dynamic on FORAGING with niche construction
+  (organisms paint plants toward their hue → optimal forager-hue chases the
+  population-painted food-hue = frequency-dependent cycle). (Corrected the iter14
+  "human call" framing: the food-ecology invariant = hidden-from-TOML, not code-frozen,
+  so this is a permissible deterministic sim-config change.)
+* **Built** (impl agent, branch `autoresearch/exp-0015-ecology-forage-color` @ c9919a7):
+  hue-keyed digestion `yield ×= (1+A·sin Δhue)/(1+A)` (≤1, no ease — proven), + a
+  serialized `food_painter_color` buffer + regrowth blend toward the painter. A=0 ⇒
+  baseline byte-identical; det-check ok (P1+P2); tests ok; pop stable; aeff ~0.56.
+* **Measured winding to 700k (seed 7):** total **−0.06 turns**, hue PINNED near 0,
+  concentration **R≈0.98** (tighter than predation's 0.36–0.94). **NO WINDING — worse
+  than predation.** The niche-construction painting is positive feedback: food painted
+  toward consumers makes consumers+food co-converge in hue → spread collapses →
+  sin(Δhue)≈0 → cyclic gradient dies.
+* **ARCHITECTURAL CONCLUSION** ([[experiments/0015-ecology-forage-color]],
+  [[findings/open-endedness-needs-a-dense-substrate-the-binding-constraint-is-the-food-ecology-lock]]):
+  organism–food frequency-dependence needs painting → concentrates; the inherently-
+  frequency-dependent interaction (organism–organism) is only predation → too sparse.
+  **The engine has no DENSE organism–organism interaction to host the antisymmetric
+  cycle.** OE is not reachable by ecology-niche tuning on this architecture; it needs a
+  deeper architectural change.
+* **Decision:** rejected; champion HELD at `47a6111` (spike fields). The OE arc
+  (iters 13–15) is a complete, rigorous negative map. `main` untouched.
+* **Bundle:** +1 experiment (0015 rejected); capstone finding + STATE updated to the
+  architectural conclusion.
+
 ## Iteration 14 (color-dominance) — intransitive predation: theoretically non-convergent, too sparse a substrate — REJECTED; CAPSTONE reached — 2026-06-18
 * **Goal:** the diagnosis said the OE barrier is a static fitness landscape; the cure
   is endogenous non-stationarity (an intransitive interaction with no ESS). A scoping
