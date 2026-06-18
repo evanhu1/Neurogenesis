@@ -7,6 +7,19 @@ that lets `STATE.md` be compacted aggressively.
 
 <!-- new entries go directly below this line -->
 
+## Champion advance (iter8 close-out, goal-driven) — 2026-06-17
+* Advanced `autoresearch/best` ea2fc38 → **0fa799b** = homeostatic + consume-on-kill
+  + three-factor (the iter6 substrate). Gate: cherry-pick clean, build ✓, det-check
+  P1/P2 ✓; cross-seed = iter6's validated numbers (code byte-identical).
+* **Rationale:** the active goal is "open-ended evolution of brains." This substrate
+  is the most open-ended brain ecosystem found (predator/forager multi-niche +
+  within-life reward-learning) vs the prior foraging monoculture. Deliberate
+  goal-driven advance accepting a small, seed-123-driven intelligence-PROXY dip
+  (aeff 0.5647→0.5422, mi_sa 0.1407→0.1335) on proxies shown misaligned with the
+  goal; foraging (+0.003) and predation (+0.0004) improve and the ecology is richer.
+  Lineage: homeostatic(0001) → consume-on-kill(0003) → three-factor(0006).
+  Reversible: prior pure-proxy champion = eb30fff.
+
 ## Iterations 7–8 — perception to complete the hunting loop (2026-06-17)
 * iter7: corpse channel + consume-on-kill + three-factor → mismatch (consume-on-kill
   leaves no corpse / targets live prey) → not retained, dilutes → dead-end, but

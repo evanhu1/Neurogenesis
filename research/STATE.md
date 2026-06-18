@@ -15,18 +15,22 @@ timestamp: 2026-06-17T00:00:00Z
 
 | axis | target | champion (homeostatic, n=4) | status |
 |---|---|---|---|
-| foraging  | `plant_consumption_rate ≥ 0.10`  | 0.0690 | stuck (abundance de-pressures brains) |
-| predation | `prey_consumption_rate  ≥ 0.025` | 0.0018 | **structurally UNREACHABLE in a stable ecology** |
-| learning  | `learning_slope ≥ +0.0005`        | −0.000423 | seed-noise-dominated |
-| intelligence | hold action_effectiveness (0.5647) & mi_sa (0.1407) | — | the binding constraint; predation splits them |
+| foraging  | `plant_consumption_rate ≥ 0.10`  | 0.0719 | stuck (abundance de-pressures brains) |
+| predation | `prey_consumption_rate  ≥ 0.025` | 0.0022 | **structurally UNREACHABLE in a stable ecology** |
+| learning  | `learning_slope ≥ +0.0005`        | −0.000598 | seed-noise-dominated |
+| intelligence | action_effectiveness / mi_sa | 0.5422 / 0.1335 | predation splits them (mi_sa↑ on strong-predator seeds; aeff dinged by death-cohort) |
 
 ## Current best program
 
-- **`autoresearch/best`** = champion code `eb30fff` (homeostatic metabolism, the
-  ONLY accepted advance, iter1) + apparatus + 6 iterations of knowledge.
-  **Iterations 2–6 produced no further code advance** — but a complete, coherent
-  theory of WHAT blocks open-ended evolution of intelligent brains, and a
-  validated lead. See `best-program.md`.
+- **`autoresearch/best` @ `0fa799b`** = homeostatic metabolism (iter1) +
+  **consume-on-kill** (iter3) + **three-factor within-life learning** (iter6) — the
+  **open-ended-evolution substrate** (predator/forager multi-niche ecosystem with
+  within-life reward-learning). Advanced at iter8 close-out as a **goal-driven**
+  move for "open-ended evolution of brains": +foraging/+predation/richer ecology at
+  a small seed-123-driven intelligence-proxy cost (aeff −0.022, mi_sa −0.007) on
+  proxies shown misaligned with the goal. New champion metrics in the targets table.
+  Prior pure-proxy champion (homeostatic-only `eb30fff`, aeff 0.5647/mi_sa 0.1407)
+  is one revert away if preferred. See `best-program.md`.
 
 ## ⚠ THE THEORY (the compounding result of 6 iterations)
 

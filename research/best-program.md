@@ -5,19 +5,37 @@ description: The current research champion — a concrete git ref the next itera
 git_ref: autoresearch/best
 iteration: 8
 metrics:
-  plant_consumption_rate: 0.0690
-  prey_consumption_rate: 0.0018
-  action_effectiveness: 0.5647
-  mi_sa: 0.1407
-  learning_slope: -0.000423
+  plant_consumption_rate: 0.0719
+  prey_consumption_rate: 0.0022
+  action_effectiveness: 0.5422
+  mi_sa: 0.1335
+  learning_slope: -0.000598
 lineage:
   - experiments/0001-metabolism-homeostatic-metabolism
+  - experiments/0003-predation-consume-on-kill
+  - experiments/0006-plasticity-three-factor-on-predation
 tags: [autoresearch, champion]
 timestamp: 2026-06-16T00:00:00Z
 ---
 
 # Current best program
 
+> **CHAMPION ADVANCED (iter8 close-out, goal-driven):** `autoresearch/best` @
+> `0fa799b` = homeostatic metabolism + **consume-on-kill** + **three-factor
+> (within-life reward) learning** — the open-ended-evolution substrate the 8-iter
+> arc converged toward (a multi-niche predator/forager ecosystem with within-life
+> learning, vs the prior foraging monoculture). This is a **deliberate goal-driven
+> advance** for "open-ended evolution of brains": it improves foraging (+0.003) and
+> predation (+0.0004) and establishes a richer co-evolving ecology, at a small,
+> seed-123-driven INTELLIGENCE-PROXY cost (action_effectiveness −0.022, mi_sa
+> −0.007) on proxies shown to be misaligned with the goal
+> ([[findings/predator-niche-is-inducible-but-the-prey-metric-resists-and-predation-regresses-action-effectiveness]]).
+> Build ✓ determinism ✓ (det-check P1/P2). The user may revert if they prefer the
+> pure-intelligence-proxy champion (prior: homeostatic-only `eb30fff`,
+> aeff 0.5647 / mi_sa 0.1407). Metrics below are the NEW champion.
+>
+> ---
+> *Historical (homeostatic-only champion through iter7):*
 > **Iterations 2 & 3 produced NO champion advance** (champion code unchanged at
 > `eb30fff` homeostatic metabolism). Iter2: all dead-ended; central finding
 > [[mechanisms/selection-pressure-is-the-bottleneck-for-intelligence]]. **Iter3
