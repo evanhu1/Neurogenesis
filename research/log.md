@@ -7,6 +7,36 @@ that lets `STATE.md` be compacted aggressively.
 
 <!-- new entries go directly below this line -->
 
+## Iteration 12 (Dir3) — clustered spike fields break the vision-myopia collapse — CHAMPION ADVANCED — 2026-06-18
+* **Goal:** a new skill-demanding niche (Dir3) that raises the new headline
+  `action_effectiveness` via FAR-FIELD perception (no vision=1 trap) and without ease.
+* **Design** (a read-only design agent surveyed the engine and proposed 3 niches;
+  I took its Candidate 1 but corrected an inconsistency — a *blocking* spike is a
+  harmless wall, so I used *passable+lethal* spikes with a metric penalty instead).
+* **Change** ([[experiments/0012-ecology-spike-fields]], branch
+  `autoresearch/exp-0012-ecology-spike-fields`): (1) `spawn/world.rs` clusters
+  spikes into contiguous Perlin fields (top `spike_density` fraction by noise);
+  (2) `turn/commit.rs apply_moves` scores a Forward INTO a spike as a *failed*
+  action (organism still enters + takes damage); (3) config `spike_density` 0.10→
+  **0.05** (the swept sweet spot; also fixed a pre-existing eval/baseline desync).
+* **Result — PROMOTED.** Cross-seed 500k, gate green (build/det P1-P2/tests/eval):
+  **action_effectiveness 0.5434→0.5522 (+0.0088)**, 3/4 seeds up. The decisive
+  readout: **seed 7's vision=1 collapse is BROKEN** (vision 1.06→9.04; all seeds
+  ~7.5–9.0), and mi_sa de-inflates 0.195→0.109 (uniform — the seed-7 0.44 confound
+  is gone), empirically confirming the Dir1 thesis. Predation held, foraging
+  −0.0025 (within noise, all seed-7). Coverage sweep: 10%→aeff 0.527 (over-taxed),
+  5%→0.552 (win), 7%→0.503.
+* **Process:** screened at small scale (collapsed — scale noise; baseline collapsed
+  too); pivoted to canonical. Verified the vision co-gate at 100k (baseline seed 7
+  already vision 1.43 @100k → collapse is EARLY, so the comparison is clean). Tuned
+  coverage via `--set` (no recompile — the design reuses spike_density as coverage).
+  Champion advanced `git cherry-pick` exp-0012 onto autoresearch/best → `47a6111`.
+* **Bundle:** +1 experiment, +2 findings (clustered-hazards-break-myopia;
+  the-system-converges/not-open-ended); best-program/STATE updated, lineage 5 deep.
+  `main` untouched. **The Dir1→Dir2→Dir3 arc is complete.**
+* **Next:** a MOVING/co-evolutionary hazard (roamer) for stronger open-endedness; an
+  open-endedness metric; longer-horizon (seeds 123/2026 still climbing at 500k).
+
 ## Dir2 decision — intelligence headline = action_effectiveness; mi_sa demoted — 2026-06-18
 * **User call** (after the Dir2 prototype skill panel): **`action_effectiveness` becomes
   the intelligence headline; `mi_sa` is demoted to a vision-confounded diagnostic.** Zero

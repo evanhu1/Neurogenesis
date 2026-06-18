@@ -20,31 +20,32 @@ timestamp: 2026-06-17T00:00:00Z
 rewards myopia; see Dir1).** Promotions are judged on action_effectiveness, not
 mi_sa. This re-grounds the whole loop: any prior mi_sa-driven move is re-evaluated.
 
-| axis | target | champion `1dab610` (n=4) | status under NEW contract |
+| axis | target | champion `47a6111` (iter12, n=4) | status under NEW contract |
 |---|---|---|---|
-| **intelligence (HEADLINE)** | **hold/raise `action_effectiveness`** | **0.5435** | ⚠ **BELOW the homeostatic-only `eb30fff` (0.5647)** — the iter9 promotion was mi_sa-justified; under the new headline it reads as an aeff regression bought with confounded mi_sa |
-| intelligence (diagnostic) | ~~mi_sa~~ | 0.1952 | demoted — vision-confounded, not trusted |
-| foraging  | `plant_consumption_rate ≥ 0.10`  | 0.0786 | improving (still short) |
-| predation | `prey_consumption_rate  ≥ 0.025` | 0.00235 | **structurally UNREACHABLE in a stable ecology** |
-| learning  | `learning_slope ≥ +0.0005`        | −0.000487 | seed-noise-dominated |
+| **intelligence (HEADLINE)** | **hold/raise `action_effectiveness`** | **0.5522** | ↑ from iter9's 0.5435 (+0.0088, Dir3 spike fields); now ~0.012 below the all-time homeostatic 0.5647 but EARNED with vision held high (no confound) |
+| intelligence (diagnostic) | ~~mi_sa~~ | 0.1089 | demoted; now HONEST/uniform (~0.09–0.13 all seeds) — the seed-7 0.44 confound is GONE |
+| foraging  | `plant_consumption_rate ≥ 0.10`  | 0.0761 | within noise of iter9; still short of target |
+| predation | `prey_consumption_rate  ≥ 0.025` | 0.00226 | **structurally UNREACHABLE in a stable ecology** |
+| learning  | `learning_slope ≥ +0.0005`        | −0.000570 | seed-noise-dominated |
 
 ## Current best program
 
-- **`autoresearch/best` @ `121ee21`** (iter9) = the substrate below + **three-factor
-  tuned to GAIN 0.04**. Strictly dominates the iter6/iter8 champion on ALL pillars
-  (mi_sa 0.1335→**0.1952**, +46%, now above the original 0.1407; aeff 0.5422→0.5435;
-  prey/plant up); a clean strict-dominance advance with a genuine intelligence
-  (mi_sa) gain from within-life learning. Lineage 4 deep. (mi_sa gain seed-7-heavy;
-  aeff still < homeostatic-only 0.5647.)
-- *(substrate:)* **`0fa799b`** = homeostatic metabolism (iter1) +
-  **consume-on-kill** (iter3) + **three-factor within-life learning** (iter6) — the
-  **open-ended-evolution substrate** (predator/forager multi-niche ecosystem with
-  within-life reward-learning). Advanced at iter8 close-out as a **goal-driven**
-  move for "open-ended evolution of brains": +foraging/+predation/richer ecology at
-  a small seed-123-driven intelligence-proxy cost (aeff −0.022, mi_sa −0.007) on
-  proxies shown misaligned with the goal. New champion metrics in the targets table.
-  Prior pure-proxy champion (homeostatic-only `eb30fff`, aeff 0.5647/mi_sa 0.1407)
-  is one revert away if preferred. See `best-program.md`.
+- **`autoresearch/best` @ `47a6111`** (iter12) = the iter9 substrate + **Dir3
+  clustered lethal spike fields** ([[experiments/0012-ecology-spike-fields]]).
+  Spikes cluster into Perlin fields (coverage `spike_density=0.05`) and a Forward
+  INTO a spike scores as a *failed* action → far-field perception becomes
+  survival-relevant. **First advance under the action_effectiveness contract AND
+  the first to fix the vision-confound at its root:** breaks the seed-7 vision=1
+  collapse (seed 7 now vision 9.04; all seeds ~7.5–9.0), de-inflates mi_sa to an
+  honest 0.109, and raises aeff +0.0088 (3/4 seeds up). Gate green (build/det
+  P1-P2/tests/eval). Lineage 5 deep.
+  ([[findings/clustered-lethal-hazards-break-the-vision-myopia-collapse]])
+- *(substrate, `1dab610`/iter9:)* homeostatic metabolism (iter1) + consume-on-kill
+  (iter3) + three-factor within-life learning (iter6) + GAIN-0.04 tune (iter9) —
+  the predator/forager multi-niche ecosystem with within-life learning. Its mi_sa
+  headline (0.1952) was later shown to be the seed-7 vision-confound (Dir1).
+- *(aeff-optimal alternative base:)* homeostatic-only `eb30fff` (aeff 0.5647) — no
+  predator niche / no within-life learning; one revert away if pure-aeff preferred.
 
 ## ⚠ THE THEORY (the compounding result of 6 iterations)
 
@@ -124,11 +125,12 @@ confidence, [[findings/seed-7-mi_sa-outlier-is-a-short-vision-crisp-binning-effe
 
 ## Bundle census
 
-- experiments: 26 (12 iter1 + 6 iter2 + 3 iter3 + 2 iter4 + 1 each iter5–8) ·
-  findings: 9 (+seed-7-outlier, an investigation) · mechanisms: 4 ·
-  directions: 14 (+mi_sa-vision-confound, +predation-led-mortality) · dead-ends: 2.
-- Champion advances: 1 (iter1 homeostatic). Last iteration: **8**. Mechanism space
-  exhausted; binding constraint = metric contract (human decision).
+- experiments: 27 (+0012-ecology-spike-fields) · findings: 11 (+seed-7-outlier,
+  +convergence/not-open-ended, +clustered-hazards-break-myopia) · mechanisms: 4 ·
+  directions: 14 (mi_sa-vision-confound in-progress) · dead-ends: 2.
+- Champion advances: **3** (iter1 homeostatic, iter9 three-factor, **iter12 spike
+  fields**). Last iteration: **12**. The Dir1→Dir2→Dir3 arc fixed the
+  vision-confound (measure + niche) and produced a clean aeff advance.
 
 ## ⛳ STATUS after iter 7–8: mechanism space EXHAUSTED — binding constraint = metric contract
 
@@ -156,31 +158,32 @@ mechanics, plasticity/learning, sensing, topology). Recurring law:
 synapses/neurons all regress intelligence). The minimal brain + tuned three-factor
 + arms-race ecology is the optimum on this architecture.
 
-## Candidate next directions (post-Dir1; the user selected all four — A/B/C/D)
+## ✅ The Dir1→Dir2→Dir3 arc is COMPLETE (2026-06-18)
 
-**Dir1 (seed-7 outlier) — ✅ RESOLVED above.** It re-shaped the others:
+- **Dir1 ✅** — seed-7 mi_sa=0.44 = a `vision_distance=1` confound (mi_sa rewards myopia).
+- **Dir2 ✅** — measure recalibrated (user): `action_effectiveness` is the headline,
+  mi_sa demoted. Skill panel confirmed seed-7's lead was mi_sa-only.
+- **Dir3 ✅ PROMOTED** — clustered lethal spike fields
+  ([[experiments/0012-ecology-spike-fields]]) make far-field perception
+  survival-relevant: break the vision=1 collapse (seed 7 → vision 9) AND raise
+  action_effectiveness +0.0088. Champion advanced to `47a6111` (iter12).
 
-A′. **Fix the intelligence measure FIRST** (now the highest-leverage human call) —
-   [[directions/mi_sa-is-confounded-by-vision-range]] supersedes the old framing:
-   mi_sa rewards myopia, so any mi_sa-selected champion is suspect. Prototype a
-   **vision-invariant behavioral skill score** post-hoc over the existing 500k
-   worlds (no engine change) and check whether it still ranks seed 7 #1 or
-   collapses the gap. Also still open: `prey ≥ 0.025` unreachable
-   ([[directions/reconsider-intelligence-metric-under-predation]]).
-B′. **A predation-led-mortality niche** —
-   [[directions/predation-led-mortality-selects-for-skill]]. Re-route the death
-   mix from starvation→predation (without adding ease), and/or a far-field-sensing
-   skill-cull that does NOT collapse to the vision=1 degenerate optimum. This is
-   the concrete form of "a new skill-demanding niche" (Dir3), informed by Dir1.
-C. **A better learning rule** — three-factor is the only within-life lever tried
-   in depth; prediction-error-gated eligibility or a 2nd (health/damage)
-   neuromodulator could exceed it. (Unchanged; lower priority than A′/B′.)
-E. **Longer-horizon / scaling** — does arms-race intelligence compound past 500k /
-   at larger world scales? Also tests whether long vision becomes competitive when
-   the world is big enough (ties A′↔B′).
+## Frontier / next directions (post-Dir3)
 
-**Sequence (agreed with user):** Dir1 ✅ → Dir2 = A′ (define+measure, human call) →
-Dir3 = B′ (new niche), evaluated under the new measure.
+1. **Push the spike niche further (open-endedness):** the static field converges
+   eventually ([[findings/the-system-converges-it-is-not-open-ended-under-action-effectiveness]]).
+   A **moving / co-evolutionary hazard** (a roaming lethal agent to flee using
+   vision) is the design-agent's Candidate 2 — forces far-field sensing AND never
+   settles (Red-Queen). Likely the biggest remaining open-endedness lever.
+   Also: re-tune coverage/lethality (lethality is still hardcoded 0.10) now that 5%
+   coverage is the champion; and a longer horizon (1M) to see if seeds 123/2026
+   (still climbing at 500k) pass 0.5647.
+2. **An open-endedness metric** — make "sustained 2nd-half competence slope" (or
+   behavioral/lineage novelty rate) a first-class signal beside action_effectiveness;
+   the goal is *open-ended* evolution, which a static snapshot can't capture.
+3. **A better learning rule** (C, unchanged) — prediction-error-gated eligibility
+   or a 2nd (health/damage) neuromodulator.
+4. Still open: `prey ≥ 0.025` unreachable ([[directions/reconsider-intelligence-metric-under-predation]]).
 
 ## Process / harness (works well now)
 

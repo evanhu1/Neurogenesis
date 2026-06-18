@@ -3,23 +3,47 @@ type: BestProgram
 title: Current best program
 description: The current research champion — a concrete git ref the next iteration forks from.
 git_ref: autoresearch/best
-iteration: 8
+iteration: 12
 metrics:
-  plant_consumption_rate: 0.0786
-  prey_consumption_rate: 0.00235
-  action_effectiveness: 0.5435
-  mi_sa: 0.1952
-  learning_slope: -0.000487
+  plant_consumption_rate: 0.0761
+  prey_consumption_rate: 0.00226
+  action_effectiveness: 0.5522
+  mi_sa: 0.1089
+  learning_slope: -0.000570
 lineage:
   - experiments/0001-metabolism-homeostatic-metabolism
   - experiments/0003-predation-consume-on-kill
   - experiments/0006-plasticity-three-factor-on-predation
   - experiments/0009-plasticity-three-factor-tune
+  - experiments/0012-ecology-spike-fields
 tags: [autoresearch, champion]
-timestamp: 2026-06-16T00:00:00Z
+timestamp: 2026-06-18T00:00:00Z
 ---
 
 # Current best program
+
+> ## 🏆 CHAMPION ADVANCED (iter12, 2026-06-18) — `autoresearch/best` @ `47a6111`
+>
+> = the iter9 substrate + **Dir3 clustered lethal spike fields**
+> ([[experiments/0012-ecology-spike-fields]]). The FIRST champion advance judged
+> under the new `action_effectiveness` headline, and the first to attack the
+> vision-confound at its root. Two changes to the existing spike entity: spikes
+> **cluster** into contiguous Perlin fields (coverage `spike_density=0.05`), and a
+> **Forward INTO a spike is scored as a failed action** (organism still enters +
+> takes damage). This makes far-field perception survival-relevant.
+> **Result (cross-seed 500k, gate green — build/det/tests/eval):**
+> - **action_effectiveness 0.5434 → 0.5522 (+0.0088)** — HEADLINE win, 3/4 seeds up.
+> - **vision=1 collapse BROKEN:** seed 7 holds `vision_distance` 9.04 (was 1.06);
+>   all seeds ~7.5–9.0. mi_sa de-inflates 0.195 → 0.109 (uniform; the seed-7
+>   0.44 confound is gone) — empirical confirmation of the Dir1 thesis.
+> - predation held (−0.0001), foraging −0.0025 (within noise, all seed-7),
+>   learning_slope −0.000083 (within noise). Det-check P1/P2 ✓, tests ✓ (modulo the
+>   known pre-existing corpse-feeding failure). Also resolved a pre-existing
+>   eval(0.10)/baseline(0.05) `spike_density` desync.
+> - Modestly less convergent than baseline (2nd-half aeff slope +0.0044 vs −0.0008).
+> Metrics above are this champion. Lineage now 5 deep.
+>
+> ---
 
 > ## ⭐ CONTRACT CHANGE (2026-06-18) — intelligence headline = action_effectiveness
 >
