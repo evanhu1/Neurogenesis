@@ -68,10 +68,22 @@ fixed point" was therefore **wrong**: there is weak, persistent spatial structur
 - Initial over-seeding (denser start) just crashes back to the food-limited
   carrying capacity.
 
-**Final:** strong sustained spatial waves are unreachable here — the sparse,
-food-limited, finite-population ecology caps spatial coupling, and every lever that
-would strengthen it either adds ease (degrading the "intelligent" half of the goal)
-or shrinks the population (more drift → convergence). Genuine unbounded
+- **Population-size lever** (larger world, MORE organisms at the SAME density →
+  lower drift, ease-free, intelligence-preserving — the cleanest test of the drift
+  hypothesis): tested at 400-wide (~2900 organisms, 2.5× N). Winding = 0.97 turns
+  over 400k (a slightly faster WANDER, still a bounded random walk, not directed),
+  and NEAR-cos ≈ ALL-cos throughout (**no** spatial domains — the bigger world is
+  MORE well-mixed). So reducing drift does NOT convert the wander into sustained
+  directed winding. Drift-reduction fails too.
+
+**Final:** strong sustained OE is unreachable here. Across ~19 experiments and
+every principled lever — substrate (predation/foraging/social), interaction form
+(pure-damage/zero-sum), spatial structure, dispersal, AND population size — the
+intransitive cycle always either CONVERGES (to a hue or uniform) or WANDERS (a
+bounded ~1-turn random walk); it never sustains directed winding. The sparse,
+food-limited, finite-population ecology caps spatial coupling, and every
+strengthening lever either adds ease (degrading the "intelligent" half of the goal)
+or shrinks/well-mixes the population. Genuine unbounded
 open-endedness of *intelligent* brains needs an engine change that escapes this
 sparse-ecology / finite-population regime WITHOUT relaxing selection — a research/
 human-scope decision, not an in-loop tuning knob.
