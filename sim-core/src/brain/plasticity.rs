@@ -36,7 +36,15 @@ const PRUNE_ELIGIBILITY_MULTIPLIER: f32 = 2.0;
 /// the unsupervised structure. SCALE normalizes the energy delta to roughly
 /// [-1, 1] (a typical food/prey intake is on the order of a few energy units);
 /// the inner clamp then caps the contribution of any single large gain/loss.
-const NEUROMOD_GAIN: f32 = 0.08;
+///
+/// GAIN was tuned to 0.04 (down from 0.08) by a plasticity-only cross-seed
+/// screen: a gentler credit signal lets the unsupervised covariance rule build
+/// far richer sensory→action structure (cross-seed mi_sa ~0.13 → ~0.20) without
+/// diluting action precision (action_effectiveness held) and while keeping the
+/// predator niche (prey rate held). With GAIN this small the modulator stays in
+/// [0.96, 1.04], so the MIN/MAX rails are an inert safety bound, not a constraint
+/// that bites — the levers that matter are GAIN (strength) and SCALE (saturation).
+const NEUROMOD_GAIN: f32 = 0.04;
 const NEUROMOD_SCALE: f32 = 5.0;
 const NEUROMOD_MIN: f32 = 0.85;
 const NEUROMOD_MAX: f32 = 1.15;
