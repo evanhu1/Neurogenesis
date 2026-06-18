@@ -1,6 +1,11 @@
 use super::*;
 use sim_config::terrain_generation_policy;
 
+/// Perlin frequency for Dir3 spike-field clustering. Smaller = larger contiguous
+/// fields. ~0.10 gives fields several cells wide (a 1-cell reflex cannot escape
+/// by stepping between spikes; routing requires perceiving the field's extent).
+const SPIKE_NOISE_SCALE: f64 = 0.10;
+
 impl Simulation {
     pub(crate) fn initialize_terrain(&mut self) {
         let policy = terrain_generation_policy();
@@ -14,9 +19,14 @@ impl Simulation {
             self.config.terrain_threshold as f64,
         );
         let spike_seed = self.seed ^ policy.spike_seed_mix;
-        self.spike_map = build_random_mask_with_density(
+        // Dir3: spikes are CLUSTERED into contiguous fields (Perlin quantile)
+        // rather than i.i.d. salt-and-pepper, so a 1-cell reflex can't trivially
+        // step between them — routing around a field is a navigation skill. The
+        // `spike_density` config is reused as the target coverage fraction.
+        self.spike_map = build_clustered_mask(
             width,
             width,
+            SPIKE_NOISE_SCALE,
             spike_seed,
             self.config.spike_density as f64,
         );
@@ -51,25 +61,44 @@ fn build_noise_mask_with_threshold(
     blocked
 }
 
-fn build_random_mask_with_density(width: u32, height: u32, seed: u64, density: f64) -> Vec<bool> {
+/// Build a CLUSTERED hazard mask: the top `density` fraction of cells by Perlin
+/// noise become spikes, so hazards form contiguous fields rather than i.i.d.
+/// noise. Deterministic (Perlin is a pure hash of (x,y,seed); the quantile cut
+/// uses `total_cmp`), so byte-identical and thread-independent.
+fn build_clustered_mask(
+    width: u32,
+    height: u32,
+    scale: f64,
+    seed: u64,
+    density: f64,
+) -> Vec<bool> {
     let width = width as usize;
     let height = height as usize;
+    let n = width * height;
     let density = density.clamp(0.0, 1.0);
     if density <= 0.0 {
-        return vec![false; width * height];
+        return vec![false; n];
     }
     if density >= 1.0 {
-        return vec![true; width * height];
+        return vec![true; n];
     }
 
-    let mut blocked = Vec::with_capacity(width * height);
+    let mut values = Vec::with_capacity(n);
     for r in 0..height {
         for q in 0..width {
-            let sample = hash_to_unit_interval(hash_2d(q as i64, r as i64, seed));
-            blocked.push(sample < density);
+            let x = q as f64 * scale;
+            let y = r as f64 * scale;
+            let normalized = ((noise_2d(x, y, seed) + 1.0) * 0.5).clamp(0.0, 1.0);
+            values.push(normalized);
         }
     }
-    blocked
+    // Deterministic quantile: threshold at the (1 - density) order statistic so
+    // exactly ~`density` of cells exceed it (clustered by the noise field).
+    let mut sorted = values.clone();
+    sorted.sort_unstable_by(|a, b| a.total_cmp(b));
+    let cut = (((1.0 - density) * n as f64).round() as usize).min(n.saturating_sub(1));
+    let threshold = sorted[cut];
+    values.into_iter().map(|v| v >= threshold).collect()
 }
 
 /// Single-octave Perlin noise. The seed mix matches the octave-0 seed

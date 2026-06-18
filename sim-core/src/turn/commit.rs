@@ -97,8 +97,15 @@ impl<'a> CommitPhaseContext<'a> {
             let organism = &mut self.sim.organisms[resolution.actor_idx];
             organism.q = resolution.to.0;
             organism.r = resolution.to.1;
+            // Dir3: moving INTO a spike cell is a self-harming move — the
+            // organism still enters (and takes spike damage in
+            // `apply_spike_hazards`), but the Forward is NOT marked successful,
+            // so action_effectiveness penalizes blundering into a hazard and
+            // rewards routing around it.
             #[cfg(feature = "instrumentation")]
-            self.sim.mark_action_succeeded(resolution.actor_idx);
+            if !self.sim.spike_map[to_idx] {
+                self.sim.mark_action_succeeded(resolution.actor_idx);
+            }
         }
     }
 
