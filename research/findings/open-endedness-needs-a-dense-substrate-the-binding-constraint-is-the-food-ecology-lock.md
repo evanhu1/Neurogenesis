@@ -4,7 +4,7 @@ title: Open-endedness needs a DENSE interaction substrate — the binding constr
 description: Across four mechanisms (static spikes, moving roamer, and intransitive color-predation at two strengths) the system converges or fails to wind. Diversity is maintained, the metric is fine, and the intransitive idea is theoretically non-convergent — but it has no dense substrate to ride on. The only dense organism-level interaction (foraging/food) is policy-locked. So realizing open-endedness requires relaxing the food-ecology invariant — a deliberate human decision. This is the capstone of the open-endedness investigation.
 confidence: high
 status: active
-supported_by: [experiments/0013-ecology-roamer, experiments/0014-ecology-color-dominance, experiments/0015-ecology-forage-color]
+supported_by: [experiments/0013-ecology-roamer, experiments/0014-ecology-color-dominance, experiments/0015-ecology-forage-color, experiments/0016-ecology-social-color, experiments/0017-ecology-social-transfer]
 seeds: [7, 42, 123, 2026]
 tags: [open-endedness, substrate, food-ecology, invariant, binding-constraint, human-call, capstone]
 timestamp: 2026-06-18T00:00:00Z
@@ -45,7 +45,40 @@ systematic sweep of mechanisms, the answer is sharp.
    architecture invariant). So within the current invariants the open-endedness
    lever has no dense substrate to ride on.
 
-# UPDATE (iter15): the dense substrate was tried — the barrier is ARCHITECTURAL
+# FINAL UPDATE (iters 16–17): added the dense organism–organism interaction — it converges too. OE is finite-population-limited.
+
+The capstone said the missing piece was a *dense organism–organism* interaction
+(the only inherently-frequency-dependent kind). So the loop **built one**: a dense
+color-cyclic adjacency interaction between hex-neighbors.
+- **Pure damage** ([[experiments/0016-ecology-social-color]]): wound **0.85 turns**
+  (far past everything prior) — then LOCKED (R→0.98). No-ease forced *all-damage*,
+  which breaks antisymmetry → race-to-dominant-hue → convergence.
+- **Zero-sum energy transfer** ([[experiments/0017-ecology-social-transfer]],
+  PROMOTED as champion): restores antisymmetry → the color does NOT collapse to one
+  hue. But the 1M test shows it spreads to a **STABLE UNIFORM** distribution
+  (R→0.11) where the interaction goes ~inert — a *different fixed point*, not
+  sustained rotation/novelty. aeff settles (above champion).
+
+**So every regime converges to SOME fixed point:** a single hue (pure-damage,
+foraging) or a uniform distribution (zero-sum). The infinite-population
+antisymmetric game has neutral orbits, but the FINITE, spatial, stochastic system
+always relaxes to a stable distribution — **drift + discreteness damp the orbit.**
+
+**The true barrier is finite-population / dynamical, not just substrate:** an
+intransitive cycle's neutral orbits are not robust to finite-population drift here;
+sustaining a *traveling-wave* (winding) limit cycle would need an extra force that
+makes the central/uniform fixed point a REPELLER (a stable limit cycle around it),
+which none of the ease-safe, determinism-safe, no-speciation mechanisms provide.
+Achieving genuine open-endedness likely needs a qualitatively different driver
+(e.g. structural/spatial niching, or relaxing an invariant) — a research-scope
+question, not a tuning knob.
+
+**Silver lining:** the search produced a real CHAMPION ADVANCE — the zero-sum
+social transfer maximizes color diversity and lifts cross-seed action_effectiveness
++0.0091 ([[experiments/0017-ecology-social-transfer]]). Open-ended *novelty* was
+approached (0.85-turn winding; maintained spread) but never *sustained*.
+
+# (earlier, iter15) the dense substrate was tried — the barrier is ARCHITECTURAL
 
 The food-layer was NOT a human-call blocker after all (the food-ecology invariant
 means "hidden from world-TOML", not "code frozen"), so the loop built it:

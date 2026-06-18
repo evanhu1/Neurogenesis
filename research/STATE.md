@@ -20,32 +20,29 @@ timestamp: 2026-06-17T00:00:00Z
 rewards myopia; see Dir1).** Promotions are judged on action_effectiveness, not
 mi_sa. This re-grounds the whole loop: any prior mi_sa-driven move is re-evaluated.
 
-| axis | target | champion `47a6111` (iter12, n=4) | status under NEW contract |
+| axis | target | champion `120a9eb` (iter17, n=4) | status under NEW contract |
 |---|---|---|---|
-| **intelligence (HEADLINE)** | **hold/raise `action_effectiveness`** | **0.5522** | ↑ from iter9's 0.5435 (+0.0088, Dir3 spike fields); now ~0.012 below the all-time homeostatic 0.5647 but EARNED with vision held high (no confound) |
-| intelligence (diagnostic) | ~~mi_sa~~ | 0.1089 | demoted; now HONEST/uniform (~0.09–0.13 all seeds) — the seed-7 0.44 confound is GONE |
-| foraging  | `plant_consumption_rate ≥ 0.10`  | 0.0761 | within noise of iter9; still short of target |
-| predation | `prey_consumption_rate  ≥ 0.025` | 0.00226 | **structurally UNREACHABLE in a stable ecology** |
-| learning  | `learning_slope ≥ +0.0005`        | −0.000570 | seed-noise-dominated |
+| **intelligence (HEADLINE)** | **hold/raise `action_effectiveness`** | **0.5613** | ↑ from iter12's 0.5522 (+0.0091, iter17 social transfer); now ~0.003 below the all-time homeostatic 0.5647, earned with vision held + max color diversity |
+| intelligence (diagnostic) | ~~mi_sa~~ | 0.1059 | demoted; honest/uniform — no confound |
+| foraging  | `plant_consumption_rate ≥ 0.10`  | 0.0733 | within noise; still short of target |
+| predation | `prey_consumption_rate  ≥ 0.025` | 0.00303 | up from 0.00226; still **structurally UNREACHABLE** |
+| learning  | `learning_slope ≥ +0.0005`        | −0.000578 | seed-noise-dominated |
 
 ## Current best program
 
-- **`autoresearch/best` @ `47a6111`** (iter12) = the iter9 substrate + **Dir3
-  clustered lethal spike fields** ([[experiments/0012-ecology-spike-fields]]).
-  Spikes cluster into Perlin fields (coverage `spike_density=0.05`) and a Forward
-  INTO a spike scores as a *failed* action → far-field perception becomes
-  survival-relevant. **First advance under the action_effectiveness contract AND
-  the first to fix the vision-confound at its root:** breaks the seed-7 vision=1
-  collapse (seed 7 now vision 9.04; all seeds ~7.5–9.0), de-inflates mi_sa to an
-  honest 0.109, and raises aeff +0.0088 (3/4 seeds up). Gate green (build/det
-  P1-P2/tests/eval). Lineage 5 deep.
-  ([[findings/clustered-lethal-hazards-break-the-vision-myopia-collapse]])
-- *(substrate, `1dab610`/iter9:)* homeostatic metabolism (iter1) + consume-on-kill
-  (iter3) + three-factor within-life learning (iter6) + GAIN-0.04 tune (iter9) —
-  the predator/forager multi-niche ecosystem with within-life learning. Its mi_sa
-  headline (0.1952) was later shown to be the seed-7 vision-confound (Dir1).
-- *(aeff-optimal alternative base:)* homeostatic-only `eb30fff` (aeff 0.5647) — no
-  predator niche / no within-life learning; one revert away if pure-aeff preferred.
+- **`autoresearch/best` @ `120a9eb`** (iter17) = the iter12 spike champion + **dense
+  organism–organism ZERO-SUM color-cyclic energy transfer**
+  ([[experiments/0017-ecology-social-transfer]]). Energy flows hue-DOMINATED→DOMINANT
+  between hex-neighbors (zero-sum/conservative, not ease). **aeff 0.5522→0.5613
+  (+0.0091)**, prey up, **color diversity MAXIMIZED** (never converges to one hue —
+  a richer ecology). Gate green; holds at 1M. NOT open-endedness (reaches a stable
+  UNIFORM color equilibrium, R→0.11; mechanism goes inert) — a champion advance, not
+  the OE breakthrough. Lineage 6 deep.
+- *(prior, `47a6111`/iter12:)* clustered lethal spike fields — fixed the seed-7
+  vision=1 confound (vision 1.06→9, mi_sa de-inflated), aeff +0.0088.
+- *(substrate, `1dab610`/iter9:)* homeostatic + consume-on-kill + three-factor
+  within-life learning + GAIN-0.04 tune.
+- *(aeff-optimal alternative base:)* homeostatic-only `eb30fff` (aeff 0.5647).
 
 ## ⚠ THE THEORY (the compounding result of 6 iterations)
 
@@ -125,14 +122,14 @@ confidence, [[findings/seed-7-mi_sa-outlier-is-a-short-vision-crisp-binning-effe
 
 ## Bundle census
 
-- experiments: 30 (+0012-spike-fields promoted; +0013-roamer, +0014-color-dominance,
-  +0015-forage-color rejected) · findings: 13 · mechanisms: 4 · directions: 15 ·
-  dead-ends: 2.
-- Champion advances: **3** (iter1 homeostatic, iter9 three-factor, **iter12 spike
-  fields**). Last iteration: **15** (forage-color, rejected). The Dir1→Dir3 arc
-  fixed the vision-confound (clean aeff advance); iters 13–15 exhaustively mapped
-  open-endedness to an ARCHITECTURAL conclusion: no dense organism–organism
-  interaction exists to host an intransitive (non-convergent) cycle.
+- experiments: 32 (+0012-spike, +0017-social-transfer promoted; +0013/14/15/16
+  rejected) · findings: 13 · mechanisms: 4 · directions: 15 · dead-ends: 2.
+- Champion advances: **4** (iter1 homeostatic, iter9 three-factor, iter12 spike
+  fields, **iter17 social transfer**). Last iteration: **17**. The Dir1→Dir3 arc
+  fixed the vision-confound (aeff advance); iters 13–17 exhaustively mapped
+  open-endedness to a FINITE-POPULATION conclusion (every intransitive regime
+  relaxes to a fixed point) — and the search yielded a 2nd aeff advance (social
+  transfer, +0.0091, max color diversity).
 
 ## ⛳ STATUS after iter 7–8: mechanism space EXHAUSTED — binding constraint = metric contract
 
@@ -197,40 +194,39 @@ substrate** (~0.003/tick) — drift overwhelms the rare color-selection. Strengt
 doesn't fix an event-frequency bottleneck
 ([[experiments/0014-ecology-color-dominance]]).
 
-### ⛳ CAPSTONE (iters 12–15): open-endedness is blocked by an ARCHITECTURAL gap — no dense organism–organism interaction
+### ⛳ CAPSTONE (iters 12–17): open-endedness is FINITE-POPULATION-LIMITED — every regime relaxes to a fixed point
 
 Open-endedness needs **endogenous non-stationarity** — an intransitive (no-ESS)
 interaction whose optimum chases the population so it can't settle. Tested
-exhaustively:
-- **predation substrate** (iter14): theoretically sound (antisymmetric ⇒ no ESS)
-  but predation is too SPARSE (~0.003/tick) → drift wins → bounded hue wander, no winding.
-- **foraging substrate + niche construction** (iter15): dense (~0.075/tick) but the
-  painting that makes it frequency-dependent is **positive feedback that
-  self-concentrates** the hue (R≈0.98) → kills the cyclic gradient → no winding
-  (worse than predation).
+exhaustively across substrates:
+- predation (iter14): too SPARSE → bounded hue wander (0.11–0.28 turns).
+- foraging + niche construction (iter15): dense but painting SELF-CONCENTRATES
+  (R≈0.98) → no winding.
+- **dense organism–organism, pure damage** (iter16): wound **0.85 turns** then
+  LOCKED (no-ease ⇒ all-damage ⇒ race-to-dominant ⇒ R→0.98).
+- **dense organism–organism, ZERO-SUM transfer** (iter17, PROMOTED): restores
+  antisymmetry → does NOT collapse to one hue, but spreads to a **stable UNIFORM**
+  equilibrium (R→0.11) where the interaction goes inert — a *different* fixed point.
 
-**The true binding constraint is ARCHITECTURAL** (not the food-ecology lock — that
-was editable, and we did):
-([[findings/open-endedness-needs-a-dense-substrate-the-binding-constraint-is-the-food-ecology-lock]])
-- Organism–food frequency-dependence needs painting → concentrates (kills spread).
-- The inherently-frequency-dependent interaction (organism–organism) is only
-  **predation**, which is too sparse. **The engine has no DENSE organism–organism
-  interaction** to host the cycle.
-- Realizing OE needs a deeper architectural change: a dense organism–organism
-  interaction, a cycle-PRESERVING (not polymorphism-fixing) niche mechanism, or
-  spatial/structural niching. Beyond config / single-function tuning.
+**The true barrier is FINITE-POPULATION / DYNAMICAL, not just substrate**
+([[findings/open-endedness-needs-a-dense-substrate-the-binding-constraint-is-the-food-ecology-lock]]):
+the infinite-population antisymmetric game has neutral orbits, but the finite,
+spatial, stochastic system always relaxes to a fixed distribution (a single hue OR
+uniform) — drift + discreteness damp the orbit. Sustaining a traveling-wave limit
+cycle needs the central fixed point to be a REPELLER, which no ease-safe /
+determinism-safe / no-speciation mechanism provides. Genuine OE likely needs a
+qualitatively different driver (structural/spatial niching, or relaxing an
+invariant) — a research-scope question, not a tuning knob.
 
-**Ruled out:** diversity maintenance (already high); the metric (fine); static niche
-(converges); moving fixed-policy hazard (converges lower); intransitive strength
-(frequency, not strength); the food-ecology lock (editable; tried; self-concentrates).
+**Ruled out:** diversity maintenance; the metric; static niche; moving hazard;
+intransitive strength; the food-ecology lock; AND now a dense organism–organism
+intransitive interaction (converges to a fixed point too).
 
-**Champion HELD at `47a6111` (iter12 spike fields)** — the best program. iters 13–15
-(roamer, color-predation, color-foraging) are rejected-but-instructive dead-ends
-that together prove OE is not reachable by ecology-niche tuning on this architecture.
-**Remaining within-engine OE leads** (untried, speculative): a dense
-organism–organism interaction (e.g. dense contact/social mechanic), or
-negative-frequency niche maintenance that preserves a cycle. Else: an architectural
-change (a human-scope decision).
+**Champion ADVANCED to `120a9eb` (iter17 social transfer)** — the OE search's silver
+lining: the zero-sum transfer maximizes color diversity and lifts aeff +0.0091. OE
+itself: open-ended *novelty* was approached (0.85-turn winding; maintained spread)
+but never *sustained*. **The loop has thoroughly answered the OE question: not
+reachable here without a qualitatively new (likely human-scope) mechanism.**
 
 ## Process / harness (works well now)
 

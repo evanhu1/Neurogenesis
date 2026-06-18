@@ -7,6 +7,32 @@ that lets `STATE.md` be compacted aggressively.
 
 <!-- new entries go directly below this line -->
 
+## Iterations 16–17 (social color) — dense organism–organism intransitivity: 0.85-turn winding, then a CHAMPION ADVANCE (not OE) — 2026-06-18
+* **iter16 (pure damage, `exp-0016` rejected):** added the missing dense organism–
+  organism interaction — each tick an organism takes pure damage from hue-dominant
+  hex-neighbors (`Σ max(0,sin Δhue)`). Wound **0.85 turns** (far past predation
+  0.11–0.28 / foraging 0.06) — the dense antisymmetric kick works — then LOCKED
+  (R→0.98). Insight: no-ease forces ALL-damage, which breaks antisymmetry → race-to-
+  dominant-hue → convergence.
+* **iter17 (zero-sum transfer, `exp-0017` PROMOTED → champion `120a9eb`):** fix —
+  make it a ZERO-SUM energy transfer (energy flows dominated→dominant; conservative,
+  NOT ease — like consume-on-kill). Restores antisymmetry. **Cross-seed 500k: aeff
+  0.5522→0.5613 (+0.0091), prey up, color diversity MAXIMIZED (never converges to one
+  hue).** Gate green (build/det P1-P2/tests); holds at 1M (seed-7 0.561 vs spike-
+  champ-seed7 0.465 — lasting). 4th champion advance.
+* **But NOT open-endedness (honest):** the 1M test shows the color spreads to a
+  STABLE UNIFORM equilibrium (R→0.11) where the transfer goes ~inert — a different
+  fixed point, not sustained rotation. aeff settles (above champion).
+* **CAPSTONE refined → the barrier is FINITE-POPULATION/DYNAMICAL**
+  ([[findings/open-endedness-needs-a-dense-substrate-the-binding-constraint-is-the-food-ecology-lock]]):
+  every intransitive regime (single-hue OR uniform) relaxes to a fixed point — the
+  infinite-pop neutral orbits don't survive finite-pop drift + discreteness.
+  Sustaining a limit cycle needs the central fixed point to be a repeller, which no
+  ease/determinism/no-speciation-safe mechanism provides. OE needs a qualitatively
+  new (likely human-scope) driver. **The OE question is thoroughly answered.**
+* **Bundle:** +2 experiments (0016 rejected, 0017 promoted); best-program (champion
+  120a9eb, lineage 6) + capstone finding + STATE updated. `main` untouched.
+
 ## Iteration 15 (forage-color) — intransitive on the DENSE substrate: niche-construction self-concentrates — REJECTED; OE barrier is ARCHITECTURAL — 2026-06-18
 * **Goal:** iter14 said intransitivity needs a dense substrate; foraging is ~25× denser
   than predation. Put the antisymmetric hue dynamic on FORAGING with niche construction

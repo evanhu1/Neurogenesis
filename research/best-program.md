@@ -3,24 +3,45 @@ type: BestProgram
 title: Current best program
 description: The current research champion — a concrete git ref the next iteration forks from.
 git_ref: autoresearch/best
-iteration: 12
+iteration: 17
 metrics:
-  plant_consumption_rate: 0.0761
-  prey_consumption_rate: 0.00226
-  action_effectiveness: 0.5522
-  mi_sa: 0.1089
-  learning_slope: -0.000570
+  plant_consumption_rate: 0.0733
+  prey_consumption_rate: 0.00303
+  action_effectiveness: 0.5613
+  mi_sa: 0.1059
+  learning_slope: -0.000578
 lineage:
   - experiments/0001-metabolism-homeostatic-metabolism
   - experiments/0003-predation-consume-on-kill
   - experiments/0006-plasticity-three-factor-on-predation
   - experiments/0009-plasticity-three-factor-tune
   - experiments/0012-ecology-spike-fields
+  - experiments/0017-ecology-social-transfer
 tags: [autoresearch, champion]
 timestamp: 2026-06-18T00:00:00Z
 ---
 
 # Current best program
+
+> ## 🏆 CHAMPION ADVANCED AGAIN (iter17, 2026-06-18) — `autoresearch/best` @ `120a9eb`
+>
+> = the iter12 spike champion + **dense organism–organism ZERO-SUM color-cyclic
+> energy transfer** ([[experiments/0017-ecology-social-transfer]]). Each tick,
+> energy flows from hue-DOMINATED to hue-DOMINANT adjacent organisms (`net =
+> A·Σ sin(hue_self − hue_neighbor)`) — zero-sum/conservative (NOT ease, like
+> consume-on-kill). **Cross-seed 500k (gate green — build/det P1-P2/tests):**
+> - **action_effectiveness 0.5522 → 0.5613 (+0.0091)** — HEADLINE win (3/4 seeds
+>   0.585–0.607; seed 2026 regresses to 0.453).
+> - prey 0.00226 → 0.00303 (+0.0008); plant −0.0028 (within noise); mi_sa/slope flat.
+> - **Color diversity is maximized** — the population does NOT converge to one hue
+>   (a richer co-evolving ecology). Holds at 1M (seed-7 aeff 0.561, vs the spike
+>   champion's seed-7-at-1M 0.465 — a lasting gain).
+> - **NOT open-endedness** (honest): the 1M test shows the color reaches a STABLE
+>   UNIFORM equilibrium (R→0.11), where the mechanism goes ~inert — a different
+>   fixed point, not sustained novelty. A champion advance, not the OE breakthrough.
+> Metrics above are this champion. Lineage now 6 deep.
+>
+> ---
 
 > ## 🏆 CHAMPION ADVANCED (iter12, 2026-06-18) — `autoresearch/best` @ `47a6111`
 >
