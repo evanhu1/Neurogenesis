@@ -15,14 +15,20 @@ timestamp: 2026-06-17T00:00:00Z
 
 | axis | target | champion (homeostatic, n=4) | status |
 |---|---|---|---|
-| foraging  | `plant_consumption_rate ≥ 0.10`  | 0.0719 | stuck (abundance de-pressures brains) |
-| predation | `prey_consumption_rate  ≥ 0.025` | 0.0022 | **structurally UNREACHABLE in a stable ecology** |
-| learning  | `learning_slope ≥ +0.0005`        | −0.000598 | seed-noise-dominated |
-| intelligence | action_effectiveness / mi_sa | 0.5422 / 0.1335 | predation splits them (mi_sa↑ on strong-predator seeds; aeff dinged by death-cohort) |
+| foraging  | `plant_consumption_rate ≥ 0.10`  | 0.0786 | improving (still short) |
+| predation | `prey_consumption_rate  ≥ 0.025` | 0.00235 | **structurally UNREACHABLE in a stable ecology** |
+| learning  | `learning_slope ≥ +0.0005`        | −0.000487 | seed-noise-dominated |
+| intelligence | action_effectiveness / mi_sa | 0.5435 / **0.1952** | **mi_sa now ABOVE the original 0.1407** (within-life learning win, seed-7-heavy); aeff just below the homeostatic 0.5647 |
 
 ## Current best program
 
-- **`autoresearch/best` @ `0fa799b`** = homeostatic metabolism (iter1) +
+- **`autoresearch/best` @ `121ee21`** (iter9) = the substrate below + **three-factor
+  tuned to GAIN 0.04**. Strictly dominates the iter6/iter8 champion on ALL pillars
+  (mi_sa 0.1335→**0.1952**, +46%, now above the original 0.1407; aeff 0.5422→0.5435;
+  prey/plant up); a clean strict-dominance advance with a genuine intelligence
+  (mi_sa) gain from within-life learning. Lineage 4 deep. (mi_sa gain seed-7-heavy;
+  aeff still < homeostatic-only 0.5647.)
+- *(substrate:)* **`0fa799b`** = homeostatic metabolism (iter1) +
   **consume-on-kill** (iter3) + **three-factor within-life learning** (iter6) — the
   **open-ended-evolution substrate** (predator/forager multi-niche ecosystem with
   within-life reward-learning). Advanced at iter8 close-out as a **goal-driven**

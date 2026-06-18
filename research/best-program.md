@@ -5,22 +5,36 @@ description: The current research champion — a concrete git ref the next itera
 git_ref: autoresearch/best
 iteration: 8
 metrics:
-  plant_consumption_rate: 0.0719
-  prey_consumption_rate: 0.0022
-  action_effectiveness: 0.5422
-  mi_sa: 0.1335
-  learning_slope: -0.000598
+  plant_consumption_rate: 0.0786
+  prey_consumption_rate: 0.00235
+  action_effectiveness: 0.5435
+  mi_sa: 0.1952
+  learning_slope: -0.000487
 lineage:
   - experiments/0001-metabolism-homeostatic-metabolism
   - experiments/0003-predation-consume-on-kill
   - experiments/0006-plasticity-three-factor-on-predation
+  - experiments/0009-plasticity-three-factor-tune
 tags: [autoresearch, champion]
 timestamp: 2026-06-16T00:00:00Z
 ---
 
 # Current best program
 
-> **CHAMPION ADVANCED (iter8 close-out, goal-driven):** `autoresearch/best` @
+> **CHAMPION ADVANCED AGAIN (iter9):** `autoresearch/best` @ `121ee21` = the iter6
+> substrate + **three-factor band tuned to GAIN 0.04** (gentler within-life reward
+> credit). It **strictly dominates the prior (iter6) champion on ALL pillars**
+> cross-seed (aeff 0.5435>0.5422, **mi_sa 0.1952>0.1335 (+46%)**, prey 0.00235,
+> plant 0.0786), all seeds survive, det ✓ — and its **mi_sa now exceeds the
+> original homeostatic high-water mark (0.1407)**: within-life reward-learning on
+> the arms-race ecology produced genuinely more information-rich brains (a clean
+> intelligence gain). aeff (0.5435) sits just below the homeostatic-only 0.5647.
+> The mi_sa gain is seed-7-heavy (seed 7: 0.44; others ~0.10-0.12) — honest caveat.
+> A clean strict-dominance advance over the predecessor. Metrics above are this
+> champion. Lineage now 4 deep (homeostatic→consume-on-kill→three-factor→tune).
+>
+> *(prior advance:)*
+> **iter8 close-out, goal-driven:** `autoresearch/best` @
 > `0fa799b` = homeostatic metabolism + **consume-on-kill** + **three-factor
 > (within-life reward) learning** — the open-ended-evolution substrate the 8-iter
 > arc converged toward (a multi-niche predator/forager ecosystem with within-life

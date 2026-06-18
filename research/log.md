@@ -7,6 +7,22 @@ that lets `STATE.md` be compacted aggressively.
 
 <!-- new entries go directly below this line -->
 
+## Iteration 9 — three-factor band tune → intelligence gain (CHAMPION ADVANCE) — 2026-06-17
+* 1 agent on the new champion base: swept the three-factor neuromodulator band;
+  **GAIN 0.08→0.04** (one line) won. Authoritatively re-confirmed cross-seed
+  (planner re-ran 4×500k; matched the agent byte-for-byte; det-check ✓).
+* **CLEAN strict-dominance advance** ea2fc38-substrate → **121ee21**: beats the
+  predecessor champion on ALL pillars — action_eff 0.5422→0.5435, **mi_sa
+  0.1335→0.1952 (+46%)**, prey 0.0022→0.00235, plant 0.0719→0.0786, all 4 seeds
+  survive. **mi_sa now exceeds the original homeostatic 0.1407** — within-life
+  reward-learning on the arms-race ecology produced genuinely more information-rich
+  brains. Gentle credit (GAIN 0.04) lets the covariance rule retain rich
+  sensory→action structure (`ContactAhead→Eat`/`Attack` consolidated).
+* Honest caveats: mi_sa gain is seed-7-heavy; aeff (0.5435) still < homeostatic-only
+  0.5647 (so vs the all-time aeff mark it's a mi_sa-for-aeff trade). OKF: experiment
+  0009 (promoted); best-program/STATE/log updated. Champion lineage 4 deep:
+  homeostatic → consume-on-kill → three-factor → tune.
+
 ## Champion advance (iter8 close-out, goal-driven) — 2026-06-17
 * Advanced `autoresearch/best` ea2fc38 → **0fa799b** = homeostatic + consume-on-kill
   + three-factor (the iter6 substrate). Gate: cherry-pick clean, build ✓, det-check
