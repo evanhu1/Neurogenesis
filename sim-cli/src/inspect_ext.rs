@@ -328,6 +328,7 @@ fn is_field(name: &str) -> bool {
             | "vision"
             | "hebb_eta"
             | "gestating"
+            | "hue"
     )
 }
 
@@ -350,6 +351,7 @@ fn org_field(o: &OrganismState, name: &str) -> f64 {
         "synapses" => o.brain.synapse_count as f64,
         "vision" => o.genome.topology.vision_distance as f64,
         "hebb_eta" => o.genome.plasticity.hebb_eta_gain as f64,
+        "hue" => sim_types::color_hue(o.genome.lifecycle.body_color) as f64,
         "gestating" => {
             if o.is_gestating {
                 1.0
@@ -367,7 +369,7 @@ fn field_text(o: &OrganismState, name: &str) -> String {
         | "reproductions" | "neurons" | "synapses" | "vision" | "gestating" => {
             format!("{}", org_field(o, name) as i64)
         }
-        "hebb_eta" => format!("{:.4}", org_field(o, name)),
+        "hebb_eta" | "hue" => format!("{:.4}", org_field(o, name)),
         _ => format!("{:.2}", org_field(o, name)),
     }
 }

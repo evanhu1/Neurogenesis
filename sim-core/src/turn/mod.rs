@@ -33,6 +33,17 @@ const RNG_ORGANISM_MIX: u64 = 0xBF58_476D_1CE4_E5B9;
 const RNG_PREY_MIX: u64 = 0x2545_F491_4F6C_DD1D;
 const SPIKE_DAMAGE_FRACTION: f32 = 0.10;
 const ATTACK_DAMAGE_FRACTION: f32 = 0.5;
+/// Per-tick strength of the social color-cyclic adjacency ENERGY TRANSFER
+/// (see `CommitPhaseContext::apply_social_color_mortality`). Each living
+/// organism's net energy change is `SOCIAL_DAMAGE * Σ sin(hue_self - hue_neighbor)`
+/// over its ≤6 hex-adjacent organisms — energy flows from hue-DOMINATED to
+/// hue-DOMINANT organisms. The full antisymmetric `sin` makes the transfer
+/// ZERO-SUM (conservative — not "ease"; the energy>=0 clamp only ever destroys
+/// energy, never creates it). Zero-sum preserves the antisymmetric structure a
+/// sustained intransitive cycle needs, which the prior PURE-DAMAGE variant broke
+/// (all-damage ⇒ race-to-dominant-hue ⇒ convergence/lock). Dense + strong +
+/// frequency-dependent. `0.0` ⇒ the phase is a no-op, byte-identical to baseline.
+const SOCIAL_DAMAGE: f32 = 1.0;
 const HEALTH_REGEN_FRACTION: f32 = 0.10;
 const INTENT_PARALLEL_MIN_LEN: usize = 64;
 
@@ -88,6 +99,10 @@ pub(crate) struct TurnScratch {
     move_candidates: Vec<(usize, MoveCandidate)>,
     move_resolutions: Vec<MoveResolution>,
     intents: Vec<OrganismIntent>,
+    /// Per-organism social color-cyclic adjacency damage, computed from a
+    /// pre-damage snapshot in `apply_social_color_mortality` then applied in
+    /// index order so the result is order-independent.
+    social_damage: Vec<f32>,
 }
 
 #[derive(Default)]

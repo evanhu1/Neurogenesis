@@ -720,6 +720,21 @@ pub fn get_size(organism: &OrganismState) -> f32 {
     offspring_transfer_energy(organism.genome.lifecycle.gestation_ticks)
 }
 
+/// Hue angle (radians, in (-π, π]) of a body color on the RGB color wheel.
+/// Used by the cyclic (intransitive) social color-dominance mortality term:
+/// because dominance is `sin(hue_neighbor - hue_self)` — antisymmetric, so no
+/// hue beats all others — the fitness optimum keeps rotating (endogenous
+/// non-stationarity). Pure and deterministic. Greys (zero chroma) map to
+/// angle 0 (neutral).
+pub fn color_hue(c: RgbColor) -> f32 {
+    let two_r_minus_g_minus_b = 2.0 * c.r - c.g - c.b;
+    let sqrt3_g_minus_b = 3.0_f32.sqrt() * (c.g - c.b);
+    if two_r_minus_g_minus_b == 0.0 && sqrt3_g_minus_b == 0.0 {
+        return 0.0;
+    }
+    sqrt3_g_minus_b.atan2(two_r_minus_g_minus_b)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FoodState {
     pub id: FoodId,

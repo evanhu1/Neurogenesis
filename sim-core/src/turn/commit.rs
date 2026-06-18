@@ -54,6 +54,7 @@ impl<'a> CommitPhaseContext<'a> {
         self.apply_facing_and_action_costs();
         self.apply_moves();
         self.apply_spike_hazards();
+        self.apply_social_color_mortality();
         self.resolve_interactions();
         self.finalize(gestation_started_this_tick);
         self.result
@@ -139,6 +140,104 @@ impl<'a> CommitPhaseContext<'a> {
                 self.mark_organism_dead(idx, organism_id, cell_idx, (q, r), corpse_energy);
             }
         }
+    }
+
+    /// Social color-cyclic adjacency mortality ("social hue pressure").
+    ///
+    /// Each living organism takes pure damage (health loss — never energy
+    /// gain/transfer) from its ≤6 hex-adjacent organisms whose body-color hue
+    /// *dominates* it on the color wheel:
+    ///
+    /// ```text
+    /// damage(o) = SOCIAL_DAMAGE * Σ_{n ∈ neighbors(o)} max(0, sin(hue_n - hue_o))
+    /// ```
+    ///
+    /// `sin(hue_n - hue_o) > 0` ⟺ n's hue leads o's by 0..180° ⟺ n dominates o.
+    /// This is antisymmetric (if n hurts o, o does not hurt n by the same
+    /// pairing) — an intransitive rock-paper-scissors on the color wheel with no
+    /// dominant hue — and frequency-dependent (the damage depends on the colors
+    /// of whoever is around you), so the population hue can keep winding instead
+    /// of converging. Death drops a corpse, exactly like spike/starvation/age
+    /// deaths (reuses `mark_organism_dead`).
+    ///
+    /// Determinism: damage is a pure function of persisted, *pre-damage* state
+    /// (post-move occupancy + each organism's body color). Neither positions nor
+    /// body colors are mutated by this phase, and the per-organism damage never
+    /// reads any organism's health, so the computation is order-independent. We
+    /// still compute every organism's damage into a snapshot buffer first, then
+    /// apply in index order, so the result can never depend on iteration order.
+    /// No RNG is drawn. `SOCIAL_DAMAGE == 0.0` ⇒ every damage is 0 ⇒ no health
+    /// changes and no deaths ⇒ byte-identical to baseline.
+    fn apply_social_color_mortality(&mut self) {
+        if SOCIAL_DAMAGE == 0.0 {
+            return;
+        }
+        let org_count = self.sim.organisms.len();
+        let world_width = self.world_width_usize as i32;
+
+        // Snapshot: per-organism social damage, computed from pre-damage state.
+        let mut social_damage = std::mem::take(&mut self.sim.turn_scratch.social_damage);
+        social_damage.clear();
+        social_damage.resize(org_count, 0.0_f32);
+
+        for idx in 0..org_count {
+            if self.dead_organisms[idx] {
+                continue;
+            }
+            let organism = &self.sim.organisms[idx];
+            let self_hue = sim_types::color_hue(organism.genome.lifecycle.body_color);
+            let (q, r) = (organism.q, organism.r);
+
+            let mut accum = 0.0_f32;
+            for &facing in FacingDirection::ALL {
+                let (nq, nr) = hex_neighbor((q, r), facing, world_width);
+                let cell_idx = nr as usize * self.world_width_usize + nq as usize;
+                let Some(Occupant::Organism(neighbor_id)) = self.sim.occupancy[cell_idx] else {
+                    continue;
+                };
+                let Some(neighbor_idx) = organism_index_by_id(&self.sim.organisms, neighbor_id)
+                else {
+                    continue;
+                };
+                // A neighbor that already died earlier this commit (spike) still
+                // occupies its cell here only if its corpse hasn't replaced it;
+                // `kill_organism` clears occupancy on death, so a live occupant
+                // is genuinely alive. Guard anyway for robustness.
+                if self.dead_organisms[neighbor_idx] {
+                    continue;
+                }
+                let neighbor_hue = sim_types::color_hue(
+                    self.sim.organisms[neighbor_idx].genome.lifecycle.body_color,
+                );
+                // FULL antisymmetric sin (not max(0)): flow TO self is positive
+                // when self DOMINATES the neighbor on the hue wheel. The pair's
+                // two contributions cancel (sin(a-b) = -sin(b-a)), so the energy
+                // transfer is ZERO-SUM (conservative — not "ease").
+                accum += (self_hue - neighbor_hue).sin();
+            }
+            social_damage[idx] = SOCIAL_DAMAGE * accum;
+        }
+
+        // Apply as a zero-sum energy TRANSFER in index order: a dominated
+        // organism (surrounded by leading hues) bleeds energy and starves via
+        // the normal lifecycle; a dominant one gains and out-reproduces. Net
+        // flow over all organisms is ~0 (antisymmetric pairs cancel); the
+        // energy>=0 clamp only ever DESTROYS energy, never creates it, so this
+        // is conservative / ease-safe. Zero-sum preserves the antisymmetric
+        // structure a sustained intransitive cycle needs (pure damage broke it).
+        for idx in 0..org_count {
+            if self.dead_organisms[idx] {
+                continue;
+            }
+            let flow = social_damage[idx];
+            if flow == 0.0 {
+                continue;
+            }
+            let organism = &mut self.sim.organisms[idx];
+            organism.energy = (organism.energy + flow).max(0.0);
+        }
+
+        self.sim.turn_scratch.social_damage = social_damage;
     }
 
     fn resolve_interactions(&mut self) {
