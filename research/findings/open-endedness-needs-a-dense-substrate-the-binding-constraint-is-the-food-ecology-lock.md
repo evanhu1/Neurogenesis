@@ -76,14 +76,25 @@ fixed point" was therefore **wrong**: there is weak, persistent spatial structur
   MORE well-mixed). So reducing drift does NOT convert the wander into sustained
   directed winding. Drift-reduction fails too.
 
-**Final:** strong sustained OE is unreachable here. Across ~19 experiments and
-every principled lever — substrate (predation/foraging/social), interaction form
-(pure-damage/zero-sum), spatial structure, dispersal, AND population size — the
-intransitive cycle always either CONVERGES (to a hue or uniform) or WANDERS (a
-bounded ~1-turn random walk); it never sustains directed winding. The sparse,
-food-limited, finite-population ecology caps spatial coupling, and every
-strengthening lever either adds ease (degrading the "intelligent" half of the goal)
-or shrinks/well-mixes the population. Genuine unbounded
+- **Density-via-EASE lever** (the trade-off itself — accept ease to force density):
+  tested iter17 with 3× food / fast regrowth → pop ~5000 (8% density). It FAILS ON
+  EVERY AXIS: NEAR ≈ ALL (still **no** spatial domains — mobility/mixing washes out
+  local sorting even at 8% density), winding still a bounded wander (−0.29 turns),
+  AND **aeff drops 0.56→0.38** (ease degrades intelligence, exactly as the central
+  law predicts). So even accepting the trade-off buys NO open-endedness and loses
+  intelligence.
+
+**Final (exhaustive, ~20 experiments):** sustained OE is unreachable here through
+ANY tested mechanism or trade-off. Every principled lever — substrate
+(predation/foraging/social), interaction form (pure-damage/zero-sum), spatial
+structure, dispersal, population size, AND the density/ease trade-off — leaves the
+intransitive cycle either CONVERGING (to a hue/uniform) or WANDERING (a bounded
+~1-turn random walk); it never sustains directed winding, and strong spatial
+domains never form (mobility + finite-population mixing dominate). The conclusion is
+not a constraint conflict that a trade-off resolves — the cycle simply does not
+sustain in this finite, mobile, spatially-mixing system. Genuine unbounded
+open-endedness would require a qualitatively different evolutionary mechanism (the
+open-ended-evolution grand challenge), not an in-engine lever. Genuine unbounded
 open-endedness of *intelligent* brains needs an engine change that escapes this
 sparse-ecology / finite-population regime WITHOUT relaxing selection — a research/
 human-scope decision, not an in-loop tuning knob.
