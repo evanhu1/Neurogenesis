@@ -3,7 +3,7 @@ type: Direction
 title: mi_sa is confounded by vision range — control for it or replace it
 description: Because the mi_sa sensory state S is "which vision ray first sees food", shorter vision yields crisper bins and higher I(S;A). mi_sa thus has a degenerate optimum at sensory impoverishment (myopia), which is anti-correlated with the open-ended-intelligence goal. The measure must control for vision range or be replaced by a sensory-richness-invariant skill metric.
 priority: high
-status: open
+status: in-progress
 surface_area: eval-contract
 supported_by: [findings/seed-7-mi_sa-outlier-is-a-short-vision-crisp-binning-effect]
 tags: [eval-contract, mi_sa, metric-confound, open-endedness, measure-design]
@@ -57,9 +57,36 @@ on one short-vision seed.
 - Does action_effectiveness share the confound? (It scores contingent-action
   success, less obviously vision-coupled — check.)
 
+# Prototype result (2026-06-18, read-only over the 4 existing 500k worlds)
+
+Built a vision-invariant skill panel and ranked seed 7 against the other seeds on
+each measure. **Seed 7's outsized lead exists ONLY in mi_sa:**
+
+| measure | seed-7 lead over best non-7 seed | seed-7 rank |
+|---|---|---|
+| mi_sa | **3.65×** | 1/4 |
+| action_effectiveness (cleanest vision-invariant) | **0.98× (behind seed 42)** | **2/4** |
+| plant_consumption_rate (food-availability-confounded) | 1.16× | 1/4 |
+| prey_consumption_rate | 1.52× | 1/4 |
+| predations/capita | 1.12× | 1/4 |
+
+**The 3.65× mi_sa lead is a vision-range confound, not a skill gap.** On the
+cleanest availability-invariant skill measure (`action_effectiveness`) seed 7 has
+**no** advantage. Genuine skill gaps are modest (1.1–1.5×). action_effectiveness
+does **not** share the confound (it ranks the long-vision seed 42 first), so it is
+the better-behaved intelligence proxy of the two existing pillars.
+
+**Sobering corollary:** the champion's headline iter9 "intelligence gain"
+(mi_sa 0.1335→0.1952, promoted, seed-7-heavy —
+[[experiments/0009-plasticity-three-factor-tune]]) may be substantially a
+vision-confound artifact (seed 7 evolving shorter vision), not a real cognitive
+gain. *Unverified hypothesis* — needs a per-seed vision comparison vs the
+predecessor champion to confirm.
+
 # Next action
 
-Bring the four candidate fixes to the user (Dir2 is an explicit human call on the
-eval contract). Prototype fix (3) — a vision-invariant behavioral skill score —
-as a read-only post-hoc metric over existing 500k worlds first (no engine change),
-and check whether it still ranks seed 7 #1 or collapses the gap.
+Surface the contract decision to the user (this is the explicit human call). The
+panel makes the recommendation concrete: **demote mi_sa as the intelligence
+headline in favor of action_effectiveness (vision-invariant), and/or redefine S to
+be sensory-richness-invariant.** After the user's call, lock the measure, then
+proceed to [[directions/predation-led-mortality-selects-for-skill]] (Dir3) under it.
