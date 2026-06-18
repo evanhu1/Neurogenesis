@@ -182,18 +182,28 @@ slope can be slow convergence — confirm OE claims at ≥2× horizon; (b) a per
 mortality tax lowers the competence ceiling (pressure must reward skill, not just
 kill more).
 
-1. **TRUE CO-EVOLUTION (Red Queen)** — the leading untried route. A moving
-   *fixed-policy* hazard isn't enough; the THREAT (or prey) must itself EVOLVE so
-   the target never stops moving. This is the most promising open-endedness lever
-   left. (The existing predator-prey IS co-evolutionary but converges; needs a
-   mechanism that keeps the arms race from settling.)
-2. **Growing OPPORTUNITY, not just mortality** — an environment that keeps opening
-   *new* niches/resources (open-ended opportunity), vs a fixed tax.
-3. **Select FOR open-endedness directly** — make sustained-novelty a first-class
-   objective ([[directions/measure-open-endedness-not-just-static-competence]]),
-   not a hoped-for side effect. (Likely a contract/human call, like Dir2.)
-4. **A better learning rule** — prediction-error-gated eligibility / 2nd
+**Diagnosed barrier (genome-over-time probe):** the blocker is a **STATIC FITNESS
+LANDSCAPE**, NOT diversity loss and NOT the metric. Genetic diversity stays HIGH
+the whole run (stable polymorphism), and the genome converges by ~1M just like
+aeff — a fixed niche has a fixed optimum that evolution finds then stops
+([[findings/the-system-converges-it-is-not-open-ended-under-action-effectiveness]]).
+
+1. **ENDOGENOUS NICHE CREATION / true co-evolution** — the leading route. The
+   fitness landscape must KEEP CHANGING by the agents' own adaptation (adaptation
+   by one part opens new opportunity for another), not a fixed/moving external
+   pressure. A moving *fixed-policy* hazard (roamer) failed; the existing
+   predator-prey is co-evolutionary but its landscape still settles. Need a
+   mechanism where the arms race CANNOT reach a fixed optimum (e.g. cyclic
+   advantage / intransitive (rock-paper-scissors) interactions, or
+   resource/behavioral niche construction).
+2. **Select FOR open-endedness directly** — make sustained-novelty a first-class
+   objective ([[directions/measure-open-endedness-not-just-static-competence]]).
+   NOTE: confirm any OE signal at ≥2× horizon — a 500k slope misled twice (roamer,
+   genome). (Likely a contract/human call, like Dir2.)
+3. **A better learning rule** — prediction-error-gated eligibility / 2nd
    neuromodulator. Still open: `prey ≥ 0.025` unreachable.
+- **Ruled out as the missing ingredient:** diversity maintenance (already high);
+  a static skill niche (converges); a moving fixed-policy hazard (converges lower).
 
 **Champion HELD at `47a6111` (iter12 spike fields)** — the roamer didn't beat it
 on either horizon.

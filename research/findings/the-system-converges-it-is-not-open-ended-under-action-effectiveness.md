@@ -77,6 +77,38 @@ direct empirical motivation for a **moving / co-evolutionary** hazard
 `experiments/0013-ecology-roamer`): a non-stationary target is needed for
 open-endedness.
 
+# Deeper: the GENOTYPE converges too — the barrier is a STATIC fitness landscape
+
+A diversity-over-time probe (spike champion, seed 42, breeding cohort, 100k→1M)
+ruled out the obvious hypotheses:
+
+| tick | vision | neurons | hebb_eta | genome-CVs |
+|---|---|---|---|---|
+| 100k | 4.74 | 16.1 | 0.061 | high (0.25–0.47) |
+| 500k | 7.48 | 18.8 | 0.142 | high |
+| 1M | 7.32 | 20.3 | 0.162 | high (0.13–1.1) |
+
+- **NOT genetic-diversity collapse:** the CVs stay HIGH the whole run (0.17–1.1) —
+  the population is a *stable balanced polymorphism*, never fixing on one genome.
+  So "maintain diversity" is NOT the missing ingredient; diversity is already there
+  and is not, by itself, producing continued innovation.
+- **The genome DOES converge — just slower than aeff.** vision/hebb_eta/neurons
+  change *directionally* through ~500k (hebb_eta more than doubles, vision rises
+  4.7→7.5) then **plateau by ~700k–1M** (hebb_eta asymptotes ~0.16, vision
+  oscillates ~7). The early change was *one-time adaptation to the fixed niche*,
+  not sustained innovation. **(Methodological: the 500k snapshot caught the genome
+  mid-adaptation and looked open-ended — the SAME "confirm at ≥2× horizon" trap as
+  the roamer. Both genotype and phenotype converge by 1M.)**
+
+**Conclusion — the barrier is a STATIC FITNESS LANDSCAPE, not diversity or the
+metric.** A fixed niche (even a hazardous or moving-hazard one) has a fixed
+optimum; evolution finds it (directionally, while staying polymorphic) and then
+stops. Open-endedness requires a fitness landscape that **keeps opening NEW
+adaptive opportunities** over time — endogenous niche creation / true
+co-evolution where adaptation by one part *changes the landscape* for another, not
+a fixed (even moving) external pressure. Maintained diversity + a static landscape
+= a stable polymorphic equilibrium, which is what we observe.
+
 # Reproduce
 
 ```
