@@ -7,6 +7,17 @@ that lets `STATE.md` be compacted aggressively.
 
 <!-- new entries go directly below this line -->
 
+## Iterations 10–11 — plasticity/topology refinement (DRY → plateau) — 2026-06-17
+* iter10 (eligibility_retention/decay): dead-end — a longer credit window cannibalizes
+  the seed-7 mi_sa win; credit-window genes trade aeff↔mi_sa per-seed, can't broaden both.
+* iter11 (brain substrate: more synapses/neurons/vision): dead-end — more substrate
+  DILUTES (minimal brain has the highest aeff/mi_sa). Confirms "capability without
+  strong-enough reward dilutes" for topology too.
+* **2 consecutive dry iterations → the frontier has plateaued.** Champion holds at
+  1dab610 (the iter9 arms-race+learning substrate, mi_sa 0.1952). Architecture mapped
+  across 11 iterations. Next moves need a human call (metric contract) or a fresh
+  mechanism (new skill niche / better learning rule) — candidate directions A–E in STATE.
+
 ## Iteration 9 — three-factor band tune → intelligence gain (CHAMPION ADVANCE) — 2026-06-17
 * 1 agent on the new champion base: swept the three-factor neuromodulator band;
   **GAIN 0.08→0.04** (one line) won. Authoritatively re-confirmed cross-seed

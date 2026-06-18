@@ -107,21 +107,37 @@ predator-niche ecosystem with within-life reward-learning, det-check ok, ready t
 promote — gated ONLY by a small (seed-123-driven) HOLD-pillar miss (aeff −0.022,
 mi_sa −0.007 vs champion).
 
-## Next actions (need a human decision — the high-leverage unblock)
+## ⛳ FRONTIER PLATEAUED (after iter11) — strong champion, architecture mapped
 
-1. **THE decision: recalibrate the eval contract**
-   ([[directions/reconsider-intelligence-metric-under-predation]]). The predator-niche
-   arms race IS open-ended evolution (emergent hunting brains, mi_sa↑) but the
-   proxies undervalue it: `prey ≥ 0.025` is **structurally unreachable**
-   ([[findings/prey-consumption-target-is-structurally-unreachable-in-a-stable-ecology]]),
-   and `action_effectiveness` penalizes predation's younger death-cohort while
-   `mi_sa` rewards it. With prey recalibrated to an achievable value and/or
-   action_effectiveness cohort-normalized (or mi_sa weighted), **iter6 cleanly
-   advances** the champion to a learned-hunting ecosystem.
-2. Speculative autonomous options if the contract can't change (lower-odds): a
-   topology-EFFICIENT perception (repurpose an existing channel rather than add
-   neurons); a different skill-demanding niche (spatial/terrain); a stronger
-   within-life learning rule that exceeds (not just recovers) champion competence.
+Iters 9–11: iter9 ADVANCED the champion (three-factor GAIN 0.04 → mi_sa 0.1952,
+above the original 0.1407 — a real intelligence gain); iter10 (eligibility/decay)
+and iter11 (brain substrate) both DRY. **2 consecutive dry iterations = plateau.**
+The full architecture is mapped across 11 iterations (metabolism, food, predation
+mechanics, plasticity/learning, sensing, topology). Recurring law:
+**capability without strong-enough reward dilutes competence** (extra sensing/
+synapses/neurons all regress intelligence). The minimal brain + tuned three-factor
++ arms-race ecology is the optimum on this architecture.
+
+## Candidate next directions (to weigh with the user)
+
+A. **Recalibrate the eval contract** (highest leverage; human call) —
+   [[directions/reconsider-intelligence-metric-under-predation]]. `prey ≥ 0.025` is
+   structurally unreachable; action_effectiveness penalizes the predator niche while
+   mi_sa rewards it. A corrected contract recognizes the arms-race progress already
+   made and re-opens the gate.
+B. **A new skill-demanding niche beyond predation** — e.g. spatial/terrain mastery
+   (navigate spike fields), or social/cooperative behaviors. Predation is mapped;
+   a fresh source of selection-for-skill is the main untapped mechanism space.
+C. **A fundamentally better learning rule** — three-factor recovered+gained mi_sa
+   but is the only within-life-learning lever tried in depth; a different
+   credit-assignment scheme (e.g. eligibility gated by prediction error, or a
+   second neuromodulator for health/damage) could exceed it.
+D. **Understand the seed-7 mi_sa=0.44 outlier** — it's the program's single biggest
+   intelligence signal; if we understand WHY seed 7 found it and others didn't, we
+   may be able to induce it broadly (a targeted investigation, not a blind sweep).
+E. **Longer-horizon / scaling experiments** — does the arms-race intelligence keep
+   compounding past 500k ticks, or with different world scales? (open-endedness is
+   a long-horizon property the 500k eval may truncate).
 
 ## Process / harness (works well now)
 
