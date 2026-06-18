@@ -122,7 +122,7 @@ confidence, [[findings/seed-7-mi_sa-outlier-is-a-short-vision-crisp-binning-effe
 
 ## Bundle census
 
-- experiments: 32 (+0012-spike, +0017-social-transfer promoted; +0013/14/15/16
+- experiments: 33 (+0012-spike, +0017-social-transfer promoted; +0013/14/15/16/18
   rejected) · findings: 13 · mechanisms: 4 · directions: 15 · dead-ends: 2.
 - Champion advances: **4** (iter1 homeostatic, iter9 three-factor, iter12 spike
   fields, **iter17 social transfer**). Last iteration: **17**. The Dir1→Dir3 arc
@@ -226,11 +226,23 @@ research/human-scope decision, not an in-loop knob.
 intransitive strength; the food-ecology lock; AND now a dense organism–organism
 intransitive interaction (converges to a fixed point too).
 
-**Champion ADVANCED to `120a9eb` (iter17 social transfer)** — the OE search's silver
-lining: the zero-sum transfer maximizes color diversity and lifts aeff +0.0091. OE
-itself: open-ended *novelty* was approached (0.85-turn winding; maintained spread)
-but never *sustained*. **The loop has thoroughly answered the OE question: not
-reachable here without a qualitatively new (likely human-scope) mechanism.**
+**iter18 (cognitive arms race) — the DEFINITIVE test + result.** Committed-attack
+pursuit-evasion (intransitive POLICY game; predator predicts, prey evades), measured
+by brain COMPLEXITY (the goal's real target): produced the **FIRST sustained
+non-convergent signal** (brain complexity grows monotonically to 1M, no plateau) —
+**but as DILUTIVE BLOAT** (cross-seed aeff regressed 0.5613→0.5157; the shallow
+encounter-limited ecology can't reward the extra capacity). **Definitive: open-ended
+brain GROWTH and brain INTELLIGENCE are in DIRECT CONFLICT here** — you get sustained
+complexity inflation OR sustained intelligence, not both. Open-ended evolution *of
+intelligent* brains needs a richer cognitive substrate (deeper perception/action +
+a non-saturating arms race) — a research-scope redesign, not an in-loop lever.
+([[experiments/0018-ecology-pursuit-evasion]])
+
+**Champion remains `120a9eb` (iter17 social transfer)** — the OE search's banked
+gains: 2 champion advances (aeff +0.0088 then +0.0091; vision-confound fixed; max
+color diversity). OE itself: approached (0.85-turn winding; sustained complexity
+growth) but never as sustained *intelligence*. **The OE question is thoroughly and
+definitively answered across all paradigms.**
 
 ## Process / harness (works well now)
 

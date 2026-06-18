@@ -45,7 +45,31 @@ systematic sweep of mechanisms, the answer is sharp.
    architecture invariant). So within the current invariants the open-endedness
    lever has no dense substrate to ride on.
 
-# SPATIAL CORRECTION (post-iter17): the "uniform" is WEAKLY spatially structured — but the strengthening levers conflict with the goal
+# DEFINITIVE (iter18): the cognitive arms race gives the FIRST sustained growth — as dilutive bloat. Open-ended growth and intelligence are in DIRECT CONFLICT.
+
+The most goal-aligned test — an intransitive *POLICY* arms race (committed-attack
+pursuit-evasion: predator predicts, prey evades), measured by brain COMPLEXITY (the
+goal's real target, not passive color) — [[experiments/0018-ecology-pursuit-evasion]]:
+- It produced the **FIRST sustained non-convergent signal in the whole program**:
+  seed-7 brain complexity rose monotonically through 1M (neurons 12→30, synapses
+  13→30, no plateau), and complexity grew on all 4 seeds (mean ~26 neurons / ~30
+  synapses vs champion ~18/16).
+- **But it is DILUTIVE BLOAT, not intelligence:** cross-seed competence REGRESSED
+  (aeff 0.5613→0.5157; seeds 42/123 crashed to 0.38/0.49). The encounter-limited
+  ecology makes the arms race too SHALLOW to reward the extra capacity, so the
+  growing brain is noise that dilutes competence (the "capacity dilutes" law).
+
+**This is the definitive conclusion, from the sharpest possible angle: open-ended
+brain GROWTH and brain INTELLIGENCE are in DIRECT CONFLICT in this engine.** You can
+get sustained non-convergent brain evolution (complexity inflation) OR sustained
+intelligence — not both. Making the growth PAY (→ open-ended *intelligence*) needs a
+DEEP arms race with unbounded strategic depth, which the engine's shallow,
+encounter-limited, simple-perception (4-action) ecology structurally cannot provide.
+Genuine open-ended evolution of *intelligent* brains is therefore not reachable
+in-loop on this engine — it needs a richer cognitive substrate (deeper perception/
+action space + an arms race that can't saturate), a research-scope redesign.
+
+# (earlier) SPATIAL CORRECTION (post-iter17): the "uniform" is WEAKLY spatially structured — strengthening levers conflict with the goal
 
 The "stable uniform equilibrium" (R→0.11) claim for iter17 was measured by the
 GLOBAL circular-mean, which **cannot distinguish dead-uniform from spatial pattern

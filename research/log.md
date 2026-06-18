@@ -7,6 +7,33 @@ that lets `STATE.md` be compacted aggressively.
 
 <!-- new entries go directly below this line -->
 
+## Iteration 18 (pursuit-evasion) — cognitive arms race: FIRST sustained growth, but dilutive bloat — REJECTED; definitive OE conclusion — 2026-06-18
+* **The most goal-aligned untested paradigm:** an intransitive POLICY arms race on brain
+  COGNITION (not passive color). Committed-attack predation: an Attack commits to a cell
+  this tick, resolves NEXT tick → a pursuit-evasion PREDICTION game (predator anticipates,
+  prey evades, no fixed best strategy). Measured by brain COMPLEXITY + competence over time
+  (the goal's real target). Branch `autoresearch/exp-0018-ecology-pursuit-evasion` @ 83c65a9.
+  det-check ok; off ⇒ byte-identical. (Breaks one attack test — deliberate same-tick→next-tick
+  semantic change; don't-care-about-backwards-compat.)
+* **Result — the FIRST sustained non-convergent signal in the program:** seed-7 brain
+  complexity rose monotonically through 1M (neurons 12→30, synapses 13→30, no plateau);
+  grew on all 4 seeds (mean ~26 neurons / ~30 synapses vs champion ~18/16). The arms race
+  is real (attacks land, prey evade).
+* **BUT it's DILUTIVE BLOAT — REJECTED:** cross-seed competence REGRESSED (aeff
+  0.5613→0.5157; seeds 42/123 crashed to 0.38/0.49). The encounter-limited ecology (prey
+  ~0.003) makes the arms race too SHALLOW to reward the extra capacity → growing brain =
+  noise that dilutes competence ("capacity dilutes" law confirmed from the sharpest angle).
+* **DEFINITIVE conclusion** ([[experiments/0018-ecology-pursuit-evasion]],
+  [[findings/open-endedness-needs-a-dense-substrate-the-binding-constraint-is-the-food-ecology-lock]]):
+  **open-ended brain GROWTH and brain INTELLIGENCE are in DIRECT CONFLICT in this engine** —
+  sustained non-convergent brain evolution is achievable ONLY as complexity inflation that
+  degrades competence. Open-ended evolution OF INTELLIGENT brains needs a richer cognitive
+  substrate (deeper perception/action + a non-saturating arms race) — a research-scope
+  redesign, not an in-loop lever. The OE question is now answered across ALL paradigms
+  (intransitive color, spatial, dispersal, population size, ease trade-off, AND cognitive
+  arms race / brain complexity).
+* Champion unchanged (`120a9eb`). `main` untouched.
+
 ## Iterations 16–17 (social color) — dense organism–organism intransitivity: 0.85-turn winding, then a CHAMPION ADVANCE (not OE) — 2026-06-18
 * **iter16 (pure damage, `exp-0016` rejected):** added the missing dense organism–
   organism interaction — each tick an organism takes pure damage from hue-dominant
