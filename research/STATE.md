@@ -18,7 +18,7 @@ timestamp: 2026-06-17T00:00:00Z
 | foraging  | `plant_consumption_rate ≥ 0.10`  | 0.0786 | improving (still short) |
 | predation | `prey_consumption_rate  ≥ 0.025` | 0.00235 | **structurally UNREACHABLE in a stable ecology** |
 | learning  | `learning_slope ≥ +0.0005`        | −0.000487 | seed-noise-dominated |
-| intelligence | action_effectiveness / mi_sa | 0.5435 / **0.1952** | **mi_sa now ABOVE the original 0.1407** (within-life learning win, seed-7-heavy); aeff just below the homeostatic 0.5647 |
+| intelligence | action_effectiveness / mi_sa | 0.5435 / **0.1952** | **mi_sa now ABOVE the original 0.1407** (within-life learning win, seed-7-heavy); aeff just below the homeostatic 0.5647. ⚠ **mi_sa is partly a vision-range confound** — see Dir1 result below |
 
 ## Current best program
 
@@ -69,6 +69,35 @@ and the current eval metrics partly block recognizing it.**
    rewards it. A human call on the eval contract is the deepest unblock
    ([[directions/reconsider-intelligence-metric-under-predation]]).
 
+## ⚑ Dir1 RESULT (2026-06-18) — the seed-7 mi_sa=0.44 outlier is a SHORT-VISION confound
+
+Read-only deep-inspection of the 4 evolved 500k worlds (3 parallel sub-agents:
+sensory/policy, wiring/convergence, niche/trajectory). Conclusion (high
+confidence, [[findings/seed-7-mi_sa-outlier-is-a-short-vision-crisp-binning-effect]]):
+
+- **Seed 7 is the only seed that converged on `vision_distance = 1`** (mean 1.06,
+  94% see 1 hex) vs **~8–9** for all others. Short vision **sharpens the mi_sa
+  sensory bins** (food = crisp adjacent/absent) → near-deterministic
+  food-direction→action map → high I(S;A). It wires a clean 3-reflex policy
+  (`visF→Eat`, `visL→¬Forward`, `visR→TurnRight`; intra-seed cosine 0.975).
+- **mi_sa has a degenerate optimum at MYOPIA** — reducing vision range raises it.
+  So chasing mi_sa partly optimizes sensory *impoverishment*, the opposite of the
+  open-ended goal. The champion's mi_sa headline rests on this one short-vision
+  seed. → **the central Dir2 fix:** [[directions/mi_sa-is-confounded-by-vision-range]].
+- **But it is also genuinely competent** (seed 7 = highest foraging 0.0925 AND
+  predation 0.0034). Short vision here is an *effective, legible* strategy, not
+  pure gaming.
+- **Enabling niche:** sparse, food-rich (3.3× food/capita), **predation-led not
+  starvation-led mortality** (38.5% vs 25–35% predation share). cross-seed
+  corr(mi_sa, food/capita)=+0.997. Death-cause mix looks like a skill driver →
+  [[directions/predation-led-mortality-selects-for-skill]] (Dir3 lever).
+- All breeding pops are single-species monocultures; the "418 founder lineages"
+  are inert gen-0 re-seed injections (artifact). Convergence is not the
+  discriminator — *which policy* it converged on is.
+- *Not measured:* exact H(S) vs H(A|S) split (per-tick records unserialized;
+  the sub-agent attempting per-organism sampling leaked memory and was killed).
+  Conditional-policy-sharpness rests on the wiring evidence.
+
 ## Frontier / next levers
 
 | lever | status | note |
@@ -88,7 +117,8 @@ and the current eval metrics partly block recognizing it.**
 ## Bundle census
 
 - experiments: 26 (12 iter1 + 6 iter2 + 3 iter3 + 2 iter4 + 1 each iter5–8) ·
-  findings: 8 · mechanisms: 4 · directions: 12 · dead-ends: 2.
+  findings: 9 (+seed-7-outlier, an investigation) · mechanisms: 4 ·
+  directions: 14 (+mi_sa-vision-confound, +predation-led-mortality) · dead-ends: 2.
 - Champion advances: 1 (iter1 homeostatic). Last iteration: **8**. Mechanism space
   exhausted; binding constraint = metric contract (human decision).
 
@@ -118,26 +148,31 @@ mechanics, plasticity/learning, sensing, topology). Recurring law:
 synapses/neurons all regress intelligence). The minimal brain + tuned three-factor
 + arms-race ecology is the optimum on this architecture.
 
-## Candidate next directions (to weigh with the user)
+## Candidate next directions (post-Dir1; the user selected all four — A/B/C/D)
 
-A. **Recalibrate the eval contract** (highest leverage; human call) —
-   [[directions/reconsider-intelligence-metric-under-predation]]. `prey ≥ 0.025` is
-   structurally unreachable; action_effectiveness penalizes the predator niche while
-   mi_sa rewards it. A corrected contract recognizes the arms-race progress already
-   made and re-opens the gate.
-B. **A new skill-demanding niche beyond predation** — e.g. spatial/terrain mastery
-   (navigate spike fields), or social/cooperative behaviors. Predation is mapped;
-   a fresh source of selection-for-skill is the main untapped mechanism space.
-C. **A fundamentally better learning rule** — three-factor recovered+gained mi_sa
-   but is the only within-life-learning lever tried in depth; a different
-   credit-assignment scheme (e.g. eligibility gated by prediction error, or a
-   second neuromodulator for health/damage) could exceed it.
-D. **Understand the seed-7 mi_sa=0.44 outlier** — it's the program's single biggest
-   intelligence signal; if we understand WHY seed 7 found it and others didn't, we
-   may be able to induce it broadly (a targeted investigation, not a blind sweep).
-E. **Longer-horizon / scaling experiments** — does the arms-race intelligence keep
-   compounding past 500k ticks, or with different world scales? (open-endedness is
-   a long-horizon property the 500k eval may truncate).
+**Dir1 (seed-7 outlier) — ✅ RESOLVED above.** It re-shaped the others:
+
+A′. **Fix the intelligence measure FIRST** (now the highest-leverage human call) —
+   [[directions/mi_sa-is-confounded-by-vision-range]] supersedes the old framing:
+   mi_sa rewards myopia, so any mi_sa-selected champion is suspect. Prototype a
+   **vision-invariant behavioral skill score** post-hoc over the existing 500k
+   worlds (no engine change) and check whether it still ranks seed 7 #1 or
+   collapses the gap. Also still open: `prey ≥ 0.025` unreachable
+   ([[directions/reconsider-intelligence-metric-under-predation]]).
+B′. **A predation-led-mortality niche** —
+   [[directions/predation-led-mortality-selects-for-skill]]. Re-route the death
+   mix from starvation→predation (without adding ease), and/or a far-field-sensing
+   skill-cull that does NOT collapse to the vision=1 degenerate optimum. This is
+   the concrete form of "a new skill-demanding niche" (Dir3), informed by Dir1.
+C. **A better learning rule** — three-factor is the only within-life lever tried
+   in depth; prediction-error-gated eligibility or a 2nd (health/damage)
+   neuromodulator could exceed it. (Unchanged; lower priority than A′/B′.)
+E. **Longer-horizon / scaling** — does arms-race intelligence compound past 500k /
+   at larger world scales? Also tests whether long vision becomes competitive when
+   the world is big enough (ties A′↔B′).
+
+**Sequence (agreed with user):** Dir1 ✅ → Dir2 = A′ (define+measure, human call) →
+Dir3 = B′ (new niche), evaluated under the new measure.
 
 ## Process / harness (works well now)
 

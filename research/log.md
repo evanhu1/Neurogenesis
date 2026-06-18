@@ -7,6 +7,36 @@ that lets `STATE.md` be compacted aggressively.
 
 <!-- new entries go directly below this line -->
 
+## Dir1 investigation — the seed-7 mi_sa=0.44 outlier is a SHORT-VISION confound — 2026-06-18
+* **Not a code-change iteration** — a read-only deep-inspection of the 4 evolved 500k
+  worlds of champion code `1dab610` (planner `autoresearch/best` @ `c542d21`), the first
+  of the four directions the user selected. Executed via 3 parallel read-only sub-agents
+  (sensory/policy, wiring/convergence, niche/trajectory).
+* **Result (high confidence):** seed 7 is the ONLY seed to converge on `vision_distance=1`
+  (mean 1.06, 94% see 1 hex) vs ~8–9 for the others. Short vision sharpens the mi_sa
+  sensory bins (food = crisp adjacent/absent) → near-deterministic food-direction→action
+  map → high I(S;A). Clean 3-reflex wiring (`visF→Eat`/`visL→¬Forward`/`visR→TurnRight`,
+  intra-seed cosine 0.975). → `findings/seed-7-mi_sa-outlier-is-a-short-vision-crisp-binning-effect`.
+* **Big implication:** **mi_sa has a degenerate optimum at MYOPIA** — reducing vision range
+  raises it. The loop has been partly optimizing sensory impoverishment when chasing mi_sa;
+  the champion's mi_sa headline rests on one short-vision seed. New high-priority direction
+  `directions/mi_sa-is-confounded-by-vision-range` (the core Dir2 fix). But seed 7 is also the
+  best forager+predator, so the short-vision reflex is genuinely competent, not pure gaming.
+* **Niche:** seed 7 = sparse, food-rich (3.3× food/capita), predation-led (38.5%) not
+  starvation-led mortality; cross-seed corr(mi_sa, food/capita)=+0.997. → new direction
+  `directions/predation-led-mortality-selects-for-skill` (the Dir3 lever). All breeding pops
+  are single-species monocultures; the "418 founder lineages" are inert gen-0 re-seed
+  injections (a `lineage` artifact, not real diversity).
+* **Process:** the per-organism sensory/policy sub-agent leaked memory (it spawned hundreds
+  of `decide` subprocesses; per-tick records aren't serialized so `step`+`decide` must be
+  same-process, and `query` rejects `step`). Killed it; recovered the qualitative answer
+  from the wiring sub-agent (conditional-policy sharpness = the 3-reflex). Exact H(S) vs
+  H(A|S) split not separately measured — noted honestly in the Finding.
+* **Bundle:** +1 finding, +2 directions; `STATE.md` updated (Dir1 RESULT block, reframed
+  candidate directions A′/B′, census). `main` untouched; no champion change (investigation).
+* **Next:** Dir2 = A′ (vision-invariant skill measure — prototype post-hoc, human call on the
+  contract), then Dir3 = B′ (predation-led niche) evaluated under the new measure.
+
 ## Iterations 10–11 — plasticity/topology refinement (DRY → plateau) — 2026-06-17
 * iter10 (eligibility_retention/decay): dead-end — a longer credit window cannibalizes
   the seed-7 mi_sa win; credit-window genes trade aeff↔mi_sa per-seed, can't broaden both.
