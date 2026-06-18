@@ -14,6 +14,40 @@ use std::time::Instant;
 const PLASTIC_WEIGHT_DECAY: f32 = 0.001;
 const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
 const PRUNE_ELIGIBILITY_MULTIPLIER: f32 = 2.0;
+
+/// Three-factor (neuromodulated) gating of the Hebbian learning term.
+///
+/// The pure covariance rule consolidates whatever coactivations happened,
+/// regardless of whether the behavior they encode actually paid off — so a
+/// brain cannot LEARN within its lifetime that a behavior was rewarded. These
+/// constants add a scalar neuromodulator `m`, read from the organism's
+/// within-tick energy change (`energy - energy_at_last_sensing`, already
+/// persisted in world bytes), that gently scales ONLY the eligibility→weight
+/// term: coactivations that preceded an energy GAIN (ate prey/plant) get
+/// consolidated a little harder; those before a LOSS get damped a little.
+///
+/// This is NOT a value function / TD / actor-critic — `m` is a bounded read of
+/// an already-existing homeostatic quantity, computed per-organism, so it is
+/// order-independent and adds no RNG (determinism preserved).
+///
+/// GENTLE band: `m = clamp(1 + GAIN * clamp(delta / SCALE, -1, 1), MIN, MAX)`.
+/// `GAIN` is small so the modulator never dominates the covariance signal — it
+/// biases consolidation toward rewarded coactivations rather than overriding
+/// the unsupervised structure. SCALE normalizes the energy delta to roughly
+/// [-1, 1] (a typical food/prey intake is on the order of a few energy units);
+/// the inner clamp then caps the contribution of any single large gain/loss.
+const NEUROMOD_GAIN: f32 = 0.08;
+const NEUROMOD_SCALE: f32 = 5.0;
+const NEUROMOD_MIN: f32 = 0.85;
+const NEUROMOD_MAX: f32 = 1.15;
+
+/// Bounded energy-delta neuromodulator for the three-factor learning rule.
+/// `delta` is the organism's within-tick energy change (post-action energy
+/// minus the energy stashed at sensing time this tick).
+fn energy_delta_neuromodulator(delta: f32) -> f32 {
+    let normalized = (delta / NEUROMOD_SCALE).clamp(-1.0, 1.0);
+    (1.0 + NEUROMOD_GAIN * normalized).clamp(NEUROMOD_MIN, NEUROMOD_MAX)
+}
 /// EMA rate for the per-neuron mean activation used to center pending
 /// coactivations (covariance rule). ~20-tick window; tight enough that the
 /// mean tracks real drift between biomes, loose enough to smooth
@@ -22,6 +56,10 @@ const ACTIVATION_MEAN_ALPHA: f32 = 0.05;
 
 struct PlasticityStepParams {
     eta: f32,
+    /// Bounded three-factor neuromodulator gating ONLY the learning term
+    /// (eligibility→weight). The passive decay term is left un-modulated. See
+    /// `energy_delta_neuromodulator`.
+    learning_modulator: f32,
     eligibility_retention: f32,
     max_weight_delta_per_tick: f32,
     should_prune: bool,
@@ -276,8 +314,17 @@ impl PlasticityStepParams {
     fn from_organism(organism: &OrganismState) -> Self {
         let eta = organism.genome.plasticity.hebb_eta_gain.max(0.0) * learning_rate_scale(organism);
 
+        // Within-tick energy change: post-action energy (this is the post-commit
+        // plasticity pass) minus the energy stashed during this tick's sensing
+        // pass. Reuses the already-persisted `energy_at_last_sensing` (only ever
+        // written at sensing time), so reading it here neither allocates new
+        // state nor disturbs the EnergyDelta sensor.
+        let energy_delta = organism.energy - organism.energy_at_last_sensing;
+        let learning_modulator = energy_delta_neuromodulator(energy_delta);
+
         Self {
             eta,
+            learning_modulator,
             eligibility_retention: organism
                 .genome
                 .plasticity
@@ -358,10 +405,14 @@ fn apply_edge_weight_update_and_fold_pending(
     params: &PlasticityStepParams,
 ) {
     for edge in edges {
-        // Ungated covariance-rule update: the eligibility trace is a decaying
-        // sum of centered coactivations, scaled by the maturity-gated learning
-        // rate, with a small passive decay toward zero.
-        let uncapped_delta = params.eta * edge.eligibility - PLASTIC_WEIGHT_DECAY * edge.weight;
+        // Three-factor covariance-rule update: the eligibility trace is a
+        // decaying sum of centered coactivations, scaled by the maturity-gated
+        // learning rate AND a bounded energy-delta neuromodulator so that
+        // coactivations preceding an energy gain consolidate harder and those
+        // preceding a loss are damped — within-life reward-learning. The
+        // passive decay term toward zero is left un-modulated.
+        let uncapped_delta = params.learning_modulator * params.eta * edge.eligibility
+            - PLASTIC_WEIGHT_DECAY * edge.weight;
         let capped_delta = uncapped_delta.clamp(
             -params.max_weight_delta_per_tick,
             params.max_weight_delta_per_tick,
