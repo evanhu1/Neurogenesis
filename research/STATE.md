@@ -123,7 +123,12 @@ confidence, [[findings/seed-7-mi_sa-outlier-is-a-short-vision-crisp-binning-effe
 ## Bundle census
 
 - experiments: 34 (+0012-spike, +0017-social-transfer promoted; +0013/14/15/16/18/19
-  rejected) · findings: 13 · mechanisms: 4 · directions: 15 · dead-ends: 2.
+  rejected) · findings: 13 · mechanisms: 4 · directions: 16
+  (+architectural-path-to-open-ended-intelligence) · dead-ends: 2.
+- **The actionable path forward is now specified:**
+  [[directions/architectural-path-to-open-ended-intelligence]] — an expandable
+  problem space + non-diluting capacity growth (a research-scope engine redesign,
+  human-authorized). The in-loop space is exhausted.
 - **iter19 (brain-controlled cognitive contest — the precisely-diagnosed OE
   mechanism):** built a brain "display" output + neighbor-display perception + dense
   intransitive transfer on it. seed-7 aeff rose 0.32→0.46 @750k then PLATEAUED to
