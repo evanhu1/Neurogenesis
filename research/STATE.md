@@ -125,14 +125,15 @@ confidence, [[findings/seed-7-mi_sa-outlier-is-a-short-vision-crisp-binning-effe
 
 ## Bundle census
 
-- experiments: 28 (+0012-spike-fields promoted, +0013-roamer rejected) ·
-  findings: 12 (+seed-7-outlier, +convergence, +clustered-hazards-break-myopia,
-  +moving-hazard-delays-not-escapes-convergence) · mechanisms: 4 ·
-  directions: 15 (+measure-open-endedness) · dead-ends: 2.
+- experiments: 29 (+0012-spike-fields promoted, +0013-roamer rejected,
+  +0014-color-dominance rejected) · findings: 13 (+seed-7-outlier, +convergence,
+  +clustered-hazards-break-myopia, +moving-hazard-delays, +OE-needs-dense-substrate)
+  · mechanisms: 4 · directions: 15 · dead-ends: 2.
 - Champion advances: **3** (iter1 homeostatic, iter9 three-factor, **iter12 spike
-  fields**). Last iteration: **13** (roamer, rejected). The Dir1→Dir2→Dir3 arc
-  fixed the vision-confound (clean aeff advance); iter13 proved open-endedness is
-  NOT achieved by a moving hazard (converges) — co-evolution is the next route.
+  fields**). Last iteration: **14** (color-dominance, rejected). The Dir1→Dir3 arc
+  fixed the vision-confound (clean aeff advance); iters 13–14 systematically mapped
+  open-endedness and reached the invariant boundary: the binding constraint is the
+  food-ecology policy lock (a human call).
 
 ## ⛳ STATUS after iter 7–8: mechanism space EXHAUSTED — binding constraint = metric contract
 
@@ -188,25 +189,35 @@ the whole run (stable polymorphism), and the genome converges by ~1M just like
 aeff — a fixed niche has a fixed optimum that evolution finds then stops
 ([[findings/the-system-converges-it-is-not-open-ended-under-action-effectiveness]]).
 
-1. **ENDOGENOUS NICHE CREATION / true co-evolution** — the leading route. The
-   fitness landscape must KEEP CHANGING by the agents' own adaptation (adaptation
-   by one part opens new opportunity for another), not a fixed/moving external
-   pressure. A moving *fixed-policy* hazard (roamer) failed; the existing
-   predator-prey is co-evolutionary but its landscape still settles. Need a
-   mechanism where the arms race CANNOT reach a fixed optimum (e.g. cyclic
-   advantage / intransitive (rock-paper-scissors) interactions, or
-   resource/behavioral niche construction).
-2. **Select FOR open-endedness directly** — make sustained-novelty a first-class
-   objective ([[directions/measure-open-endedness-not-just-static-competence]]).
-   NOTE: confirm any OE signal at ≥2× horizon — a 500k slope misled twice (roamer,
-   genome). (Likely a contract/human call, like Dir2.)
-3. **A better learning rule** — prediction-error-gated eligibility / 2nd
-   neuromodulator. Still open: `prey ≥ 0.025` unreachable.
-- **Ruled out as the missing ingredient:** diversity maintenance (already high);
-  a static skill niche (converges); a moving fixed-policy hazard (converges lower).
+**iter14 tested the cure (intransitive co-evolution) — and found the BINDING
+CONSTRAINT.** Cyclic color-dominance in predation (`predation_success *= 1 +
+A·sin(Δhue)`, A∈{0.5,0.9}) is *theoretically* non-convergent (antisymmetric ⇒ no
+ESS ⇒ orbits forever). In practice it **does NOT wind** — the population hue does a
+bounded random walk (0.11–0.28 turns), because **predation is too SPARSE a
+substrate** (~0.003/tick) — drift overwhelms the rare color-selection. Strength (A)
+doesn't fix an event-frequency bottleneck
+([[experiments/0014-ecology-color-dominance]]).
 
-**Champion HELD at `47a6111` (iter12 spike fields)** — the roamer didn't beat it
-on either horizon.
+### ⛳ CAPSTONE: the binding constraint is the FOOD-ECOLOGY POLICY LOCK (a human call)
+
+Open-endedness needs **endogenous non-stationarity on a DENSE substrate**. The only
+dense organism-level interaction is **foraging/food**, which is **policy-locked**
+in sim-config (architecture invariant). So within the current invariants the
+open-endedness lever has no dense substrate to ride on
+([[findings/open-endedness-needs-a-dense-substrate-the-binding-constraint-is-the-food-ecology-lock]]).
+**The next decision is the human's:** open a controlled crack in the food-ecology
+lock to put an intransitive / niche-construction dynamic on the food layer (e.g.
+hue-keyed digestion + corpse-driven local resource-hue shifts = consumer-resource
+co-evolution). The no-speciation & determinism invariants are NOT blockers — keep
+them; the food-ecology lock is the one to negotiate.
+
+**Ruled out as the missing ingredient:** diversity maintenance (already high); the
+metric (fine); a static niche (converges); a moving fixed-policy hazard (converges
+lower); intransitive selection strength (frequency, not strength, is the limit).
+
+**Champion HELD at `47a6111` (iter12 spike fields)** — the best program; the OE
+experiments (roamer, color-dominance) are rejected-but-instructive dead-ends. The
+loop has reached the invariant boundary; further OE progress needs the human call.
 
 ## Process / harness (works well now)
 

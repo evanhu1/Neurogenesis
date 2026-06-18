@@ -7,6 +7,38 @@ that lets `STATE.md` be compacted aggressively.
 
 <!-- new entries go directly below this line -->
 
+## Iteration 14 (color-dominance) — intransitive predation: theoretically non-convergent, too sparse a substrate — REJECTED; CAPSTONE reached — 2026-06-18
+* **Goal:** the diagnosis said the OE barrier is a static fitness landscape; the cure
+  is endogenous non-stationarity (an intransitive interaction with no ESS). A scoping
+  agent designed it rigorously: reweight predation by `1 + A·sin(Δhue)` of
+  attacker-vs-prey body color (continuous, heritable, PERCEIVED `body_color`; no
+  speciation; energy conserved; deterministic). Math is sound: antisymmetric ⇒ no ESS
+  ⇒ replicator orbits forever ⇒ the population mean hue should WIND endlessly.
+* **Built** (branch `autoresearch/exp-0014-ecology-color-dominance` @ f484c6a):
+  `color_hue`+`predation_color_dominance` in sim-types, the predation reweight in
+  `commit.rs`, and `hue`/`cr`/`cg`/`cb` as sim-cli read fields to measure the winding
+  number. det-check ok.
+* **Measured the winding number** (convergence-immune signal — unbounded rotation =
+  open-ended; bounded = converged). seed 7, fine 20k intervals:
+  A=0.5 → +0.11 turns over 460k; A=0.9 → −0.28 turns over 380k. **NO WINDING** — the
+  hue does a bounded random walk, not a directed orbit. Color variance healthy
+  (R 0.36–0.94, not collapsed). aeff regresses (~0.46 vs champion 0.55).
+* **Why:** predation is encounter-limited (~0.003/tick), so drift overwhelms the rare
+  color-selection signal. Strength (A) ~doubles the wander rate but can't fix an
+  event-FREQUENCY bottleneck. The intransitive idea is right; the substrate is too sparse.
+* **CAPSTONE** ([[findings/open-endedness-needs-a-dense-substrate-the-binding-constraint-is-the-food-ecology-lock]]):
+  endogenous non-stationarity needs a DENSE substrate; the only dense organism-level
+  interaction (foraging/food) is POLICY-LOCKED in sim-config. So within the invariants
+  the OE lever has no substrate to ride on. **The binding constraint is the
+  food-ecology policy lock — a human call** (put intransitivity / niche construction
+  on the food layer, e.g. hue-keyed digestion + corpse-driven resource-hue shifts).
+  no-speciation & determinism invariants are NOT blockers; keep them.
+* **Decision:** rejected; champion HELD at `47a6111` (spike fields). The loop has
+  systematically mapped open-endedness and reached the invariant boundary. Further OE
+  progress needs the human decision on the food-ecology lock. `main` untouched.
+* **Bundle:** +1 experiment (0014 rejected), +1 finding (capstone). STATE frontier =
+  the capstone; census updated.
+
 ## Iteration 13 (roamer) — moving hazard delays but does NOT escape convergence — REJECTED — 2026-06-18
 * **Goal:** test whether a NON-STATIONARY pressure (a moving lethal hazard to flee
   using far-field vision) produces genuine open-endedness, defeating the convergence
