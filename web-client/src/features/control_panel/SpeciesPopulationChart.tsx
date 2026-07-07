@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { colorForSpeciesId } from '../../speciesColor';
-import type { SpeciesPopulationPoint } from '../sim/hooks/useSimulationSession';
+import type { SpeciesPopulationPoint } from '../sim/hooks/useWorld';
 
 const MAX_DISPLAY_POINTS = 300;
 const MAX_VISIBLE_SPECIES = 10;

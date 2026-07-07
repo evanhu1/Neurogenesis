@@ -1,4 +1,4 @@
-import type { FacingDirection, WorldOrganismState, WorldSnapshot } from '../../types';
+import type { FacingDirection, WorldOrganismState, WorldSnapshot } from '../types';
 
 const SQRT_3 = Math.sqrt(3);
 // Natural-world palette: grassland earth with subtle per-cell tonal variation,

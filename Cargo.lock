@@ -2304,6 +2304,7 @@ dependencies = [
  "sim-core",
  "sim-metrics",
  "sim-types",
+ "sim-views",
  "toml",
 ]
 
@@ -2375,6 +2376,7 @@ dependencies = [
  "sim-config",
  "sim-core",
  "sim-types",
+ "sim-views",
  "tokio",
  "tokio-tungstenite",
  "tower-http",
@@ -2391,6 +2393,21 @@ dependencies = [
  "serde",
  "sim-config",
  "strum",
+]
+
+[[package]]
+name = "sim-views"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ciborium",
+ "serde",
+ "serde_json",
+ "sim-config",
+ "sim-core",
+ "sim-metrics",
+ "sim-types",
+ "toml",
 ]
 
 [[package]]

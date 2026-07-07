@@ -1,11 +1,9 @@
-//! Per-organism inspection commands: predicate filtering (`find`), neural
-//! inspection (`brain`), and single-tick decision explanation (`decide`).
-//!
-//! These are `impl App` methods in their own module; they may freely use
-//! `App`'s fields/helpers and the shared output helpers in `crate::output`.
+//! Per-organism inspection reads: predicate filtering (`find`), neural
+//! inspection (`brain`), and single-tick decision explanation (`decide`). Free
+//! functions over a [`crate::ReadCtx`], rendering to a writer (text or JSON).
 
 use crate::output::{Format, Stats};
-use crate::App;
+use crate::{take_format, ReadCtx};
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
 use sim_types::{
@@ -19,289 +17,289 @@ use std::io::Write;
 const EXPLICIT_IDLE_LOGIT_BIAS: f32 = -0.01;
 const MIN_ACTION_TEMPERATURE: f32 = 1.0e-6;
 
-impl App {
-    pub(crate) fn find(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
-        let (fmt, rest) = self.take_format(args);
+pub fn find(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
+    let (fmt, rest) = take_format(ctx.format, args);
 
-        // Split args into the predicate expression and the trailing options.
-        let mut expr_tokens: Vec<&str> = Vec::new();
-        let mut fields_spec: Option<&str> = None;
-        let mut limit: usize = 20;
-        let mut i = 0;
-        while i < rest.len() {
-            match rest[i] {
-                "--fields" => {
-                    fields_spec = Some(
-                        rest.get(i + 1)
-                            .copied()
-                            .ok_or_else(|| anyhow!("--fields needs a comma-separated list"))?,
-                    );
-                    i += 2;
-                }
-                "--limit" => {
-                    limit = rest
-                        .get(i + 1)
-                        .ok_or_else(|| anyhow!("--limit needs a value"))?
-                        .parse()?;
-                    i += 2;
-                }
-                tok => {
-                    expr_tokens.push(tok);
-                    i += 1;
-                }
+    // Split args into the predicate expression and the trailing options.
+    let mut expr_tokens: Vec<&str> = Vec::new();
+    let mut fields_spec: Option<&str> = None;
+    let mut limit: usize = 20;
+    let mut i = 0;
+    while i < rest.len() {
+        match rest[i] {
+            "--fields" => {
+                fields_spec = Some(
+                    rest.get(i + 1)
+                        .copied()
+                        .ok_or_else(|| anyhow!("--fields needs a comma-separated list"))?,
+                );
+                i += 2;
+            }
+            "--limit" => {
+                limit = rest
+                    .get(i + 1)
+                    .ok_or_else(|| anyhow!("--limit needs a value"))?
+                    .parse()?;
+                i += 2;
+            }
+            tok => {
+                expr_tokens.push(tok);
+                i += 1;
             }
         }
-        if expr_tokens.is_empty() {
-            bail!("find needs a predicate, e.g. `find energy > 100 and age < 50`");
-        }
-        let predicate = Predicate::parse(&expr_tokens)?;
-
-        let fields: Vec<&str> = match fields_spec {
-            Some(s) => s.split(',').map(str::trim).filter(|s| !s.is_empty()).collect(),
-            None => DEFAULT_FIND_FIELDS.to_vec(),
-        };
-        for f in &fields {
-            if !is_field(f) {
-                bail!("unknown --fields column `{f}`; valid: {FIND_FIELDS}");
-            }
-        }
-
-        let sim = self
-            .sim
-            .as_ref()
-            .ok_or_else(|| anyhow!("no simulation loaded; run `load` first"))?;
-        let orgs = sim.organisms();
-
-        let matched: Vec<&OrganismState> =
-            orgs.iter().filter(|o| predicate.eval(o)).collect();
-        let total = matched.len();
-        let shown = &matched[..total.min(limit)];
-
-        if fmt.is_json() {
-            let rows: Vec<Value> = shown
-                .iter()
-                .map(|o| {
-                    let mut obj = serde_json::Map::new();
-                    for f in &fields {
-                        obj.insert((*f).to_string(), field_json(o, f));
-                    }
-                    Value::Object(obj)
-                })
-                .collect();
-            let v = json!({ "matched": total, "shown": shown.len(), "rows": rows });
-            return writeln!(out, "{v}").map_err(Into::into);
-        }
-
-        writeln!(
-            out,
-            "{total} match(es){}; fields: {}",
-            if total > shown.len() {
-                format!(" (showing {})", shown.len())
-            } else {
-                String::new()
-            },
-            fields.join(",")
-        )?;
-        for o in shown {
-            let cells: Vec<String> = fields
-                .iter()
-                .map(|f| format!("{f}={}", field_text(o, f)))
-                .collect();
-            writeln!(out, "  {}", cells.join(" "))?;
-        }
-        Ok(())
     }
+    if expr_tokens.is_empty() {
+        bail!("find needs a predicate, e.g. `find energy > 100 and age < 50`");
+    }
+    let predicate = Predicate::parse(&expr_tokens)?;
 
-    pub(crate) fn brain(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
-        let (fmt, rest) = self.take_format(args);
-        let id: u64 = rest
-            .first()
-            .ok_or_else(|| anyhow!("brain needs an organism id"))?
-            .parse()?;
-        let mut view = BrainView::Summary;
-        let mut i = 1;
-        while i < rest.len() {
-            match rest[i] {
-                "--view" => {
-                    view = BrainView::parse(
-                        rest.get(i + 1)
-                            .copied()
-                            .ok_or_else(|| anyhow!("--view needs summary|synapses|activations|dot"))?,
-                    )?;
-                    i += 2;
-                }
-                other => bail!("unknown brain arg `{other}`"),
-            }
-        }
-
-        let sim = self
-            .sim
-            .as_ref()
-            .ok_or_else(|| anyhow!("no simulation loaded; run `load` first"))?;
-        let idx = sim
-            .organisms()
-            .iter()
-            .position(|o| o.id.0 == id)
-            .ok_or_else(|| anyhow!("no live organism with id {id}"))?;
-        let rec = sim.action_records().get(idx).cloned().flatten();
-        let o = &sim.organisms()[idx];
-
-        match view {
-            BrainView::Summary => brain_summary(o, rec.as_ref(), fmt, out),
-            BrainView::Synapses => brain_synapses(o, fmt, out),
-            BrainView::Activations => brain_activations(o, fmt, out),
-            BrainView::Dot => brain_dot(o, fmt, out),
+    let fields: Vec<&str> = match fields_spec {
+        Some(s) => s
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect(),
+        None => DEFAULT_FIND_FIELDS.to_vec(),
+    };
+    for f in &fields {
+        if !is_field(f) {
+            bail!("unknown --fields column `{f}`; valid: {FIND_FIELDS}");
         }
     }
 
-    pub(crate) fn decide(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
-        let (fmt, rest) = self.take_format(args);
-        let id: u64 = rest
-            .first()
-            .ok_or_else(|| anyhow!("decide needs an organism id"))?
-            .parse()?;
-        let temperature = self
-            .sim
-            .as_ref()
-            .ok_or_else(|| anyhow!("no simulation loaded; run `load` first"))?
-            .config()
-            .action_temperature;
-        let sim = self.sim.as_ref().unwrap();
-        let idx = sim
-            .organisms()
-            .iter()
-            .position(|o| o.id.0 == id)
-            .ok_or_else(|| anyhow!("no live organism with id {id}"))?;
-        let rec = sim.action_records().get(idx).cloned().flatten();
-        let o = &sim.organisms()[idx];
+    let sim = ctx.sim;
+    let orgs = sim.organisms();
 
-        let Some(rec) = rec else {
-            if fmt.is_json() {
-                let v = json!({ "id": id, "decided": false,
-                    "note": "no action record yet; advance one tick (`step`) first" });
-                return writeln!(out, "{v}").map_err(Into::into);
-            }
-            writeln!(
-                out,
-                "organism {id}: no decision recorded yet; run `step` to advance one tick first"
-            )?;
-            return Ok(());
-        };
+    let matched: Vec<&OrganismState> = orgs.iter().filter(|o| predicate.eval(o)).collect();
+    let total = matched.len();
+    let shown = &matched[..total.min(limit)];
 
-        // Reproduce the softmax from sim-core/src/brain/evaluation.rs
-        // `sample_action_from_logits` (lines 141-174): max over the 6 action
-        // logits and the idle bias, then exp((logit - max)/temp) over each
-        // action plus the implicit idle option, normalized by their sum.
-        let logits: Vec<f32> = o.brain.action.iter().map(|a| a.logit).collect();
-        let temp = temperature.max(MIN_ACTION_TEMPERATURE);
-        let max_logit = logits
+    if fmt.is_json() {
+        let rows: Vec<Value> = shown
             .iter()
-            .copied()
-            .fold(EXPLICIT_IDLE_LOGIT_BIAS, f32::max);
-        let mut weight_sum = 0.0f32;
-        let weights: Vec<f32> = logits
-            .iter()
-            .map(|&l| {
-                let w = ((l - max_logit) / temp).exp();
-                weight_sum += w;
-                w
+            .map(|o| {
+                let mut obj = serde_json::Map::new();
+                for f in &fields {
+                    obj.insert((*f).to_string(), field_json(o, f));
+                }
+                Value::Object(obj)
             })
             .collect();
-        let idle_weight = ((EXPLICIT_IDLE_LOGIT_BIAS - max_logit) / temp).exp();
-        weight_sum += idle_weight;
-        let idle_prob = idle_weight / weight_sum;
+        let v = json!({ "matched": total, "shown": shown.len(), "rows": rows });
+        return writeln!(out, "{v}").map_err(Into::into);
+    }
 
-        let inter_act: Vec<f64> = o.brain.inter.iter().map(|n| n.neuron.activation as f64).collect();
-        let inter_stats = Stats::of(&inter_act);
+    writeln!(
+        out,
+        "{total} match(es){}; fields: {}",
+        if total > shown.len() {
+            format!(" (showing {})", shown.len())
+        } else {
+            String::new()
+        },
+        fields.join(",")
+    )?;
+    for o in shown {
+        let cells: Vec<String> = fields
+            .iter()
+            .map(|f| format!("{f}={}", field_text(o, f)))
+            .collect();
+        writeln!(out, "  {}", cells.join(" "))?;
+    }
+    Ok(())
+}
 
+pub fn brain(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
+    let (fmt, rest) = take_format(ctx.format, args);
+    let id: u64 = rest
+        .first()
+        .ok_or_else(|| anyhow!("brain needs an organism id"))?
+        .parse()?;
+    let mut view = BrainView::Summary;
+    let mut i = 1;
+    while i < rest.len() {
+        match rest[i] {
+            "--view" => {
+                view =
+                    BrainView::parse(rest.get(i + 1).copied().ok_or_else(|| {
+                        anyhow!("--view needs summary|synapses|activations|dot")
+                    })?)?;
+                i += 2;
+            }
+            other => bail!("unknown brain arg `{other}`"),
+        }
+    }
+
+    let sim = ctx.sim;
+    let idx = sim
+        .organisms()
+        .iter()
+        .position(|o| o.id.0 == id)
+        .ok_or_else(|| anyhow!("no live organism with id {id}"))?;
+    let rec = sim.action_records().get(idx).cloned().flatten();
+    let o = &sim.organisms()[idx];
+
+    match view {
+        BrainView::Summary => brain_summary(o, rec.as_ref(), fmt, out),
+        BrainView::Synapses => brain_synapses(o, fmt, out),
+        BrainView::Activations => brain_activations(o, fmt, out),
+        BrainView::Dot => brain_dot(o, fmt, out),
+    }
+}
+
+pub fn decide(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
+    let (fmt, rest) = take_format(ctx.format, args);
+    let id: u64 = rest
+        .first()
+        .ok_or_else(|| anyhow!("decide needs an organism id"))?
+        .parse()?;
+    let temperature = ctx.sim.config().action_temperature;
+    let sim = ctx.sim;
+    let idx = sim
+        .organisms()
+        .iter()
+        .position(|o| o.id.0 == id)
+        .ok_or_else(|| anyhow!("no live organism with id {id}"))?;
+    let rec = sim.action_records().get(idx).cloned().flatten();
+    let o = &sim.organisms()[idx];
+
+    let Some(rec) = rec else {
         if fmt.is_json() {
-            let inputs: Vec<Value> = o
-                .brain
-                .sensory
-                .iter()
-                .map(|s| {
-                    json!({
-                        "receptor": receptor_label(&s.receptor),
-                        "activation": round3(s.neuron.activation),
-                    })
-                })
-                .collect();
-            let actions: Vec<Value> = o
-                .brain
-                .action
-                .iter()
-                .enumerate()
-                .map(|(k, a)| {
-                    json!({
-                        "action": format!("{:?}", a.action_type),
-                        "logit": round3(a.logit),
-                        "prob": round3(weights[k] / weight_sum),
-                    })
-                })
-                .collect();
-            let v = json!({
-                "id": id,
-                "decided": true,
-                "inputs": inputs,
-                "inter": inter_stats.map(|s| s.json()),
-                "actions": actions,
-                "idle_prob": round3(idle_prob),
-                "selected": format!("{:?}", rec.selected_action),
-                "action_failed": rec.action_failed,
-                "food_visible": rec.food_visible,
-                "note": "logits/probs reflect current (post-tick) brain state; selected/food_visible are from the decision tick just executed",
-            });
+            let v = json!({ "id": id, "decided": false,
+                "note": "no action record yet; advance one tick (`step`) first" });
             return writeln!(out, "{v}").map_err(Into::into);
         }
+        writeln!(
+            out,
+            "organism {id}: no decision recorded yet; run `step` to advance one tick first"
+        )?;
+        return Ok(());
+    };
 
-        writeln!(out, "decision for organism {id} (turn-current):")?;
-        writeln!(out, "  sensory inputs (nonzero):")?;
-        for s in &o.brain.sensory {
-            if s.neuron.activation != 0.0 {
-                writeln!(
-                    out,
-                    "    {:<22} {:>7.3}",
-                    receptor_label(&s.receptor),
-                    s.neuron.activation
-                )?;
-            }
-        }
-        match inter_stats {
-            Some(st) => writeln!(out, "  inter ({}): {}", o.brain.inter.len(), st.text())?,
-            None => writeln!(out, "  inter: (none)")?,
-        }
-        writeln!(out, "  actions (logit -> prob):")?;
-        for (k, a) in o.brain.action.iter().enumerate() {
+    // Reproduce the softmax from sim-core/src/brain/evaluation.rs
+    // `sample_action_from_logits` (lines 141-174): max over the 6 action logits
+    // and the idle bias, then exp((logit - max)/temp) over each action plus the
+    // implicit idle option, normalized by their sum.
+    let logits: Vec<f32> = o.brain.action.iter().map(|a| a.logit).collect();
+    let temp = temperature.max(MIN_ACTION_TEMPERATURE);
+    let max_logit = logits
+        .iter()
+        .copied()
+        .fold(EXPLICIT_IDLE_LOGIT_BIAS, f32::max);
+    let mut weight_sum = 0.0f32;
+    let weights: Vec<f32> = logits
+        .iter()
+        .map(|&l| {
+            let w = ((l - max_logit) / temp).exp();
+            weight_sum += w;
+            w
+        })
+        .collect();
+    let idle_weight = ((EXPLICIT_IDLE_LOGIT_BIAS - max_logit) / temp).exp();
+    weight_sum += idle_weight;
+    let idle_prob = idle_weight / weight_sum;
+
+    let inter_act: Vec<f64> = o
+        .brain
+        .inter
+        .iter()
+        .map(|n| n.neuron.activation as f64)
+        .collect();
+    let inter_stats = Stats::of(&inter_act);
+
+    if fmt.is_json() {
+        let inputs: Vec<Value> = o
+            .brain
+            .sensory
+            .iter()
+            .map(|s| {
+                json!({
+                    "receptor": receptor_label(&s.receptor),
+                    "activation": round3(s.neuron.activation),
+                })
+            })
+            .collect();
+        let actions: Vec<Value> = o
+            .brain
+            .action
+            .iter()
+            .enumerate()
+            .map(|(k, a)| {
+                json!({
+                    "action": format!("{:?}", a.action_type),
+                    "logit": round3(a.logit),
+                    "prob": round3(weights[k] / weight_sum),
+                })
+            })
+            .collect();
+        let v = json!({
+            "id": id,
+            "decided": true,
+            "inputs": inputs,
+            "inter": inter_stats.map(|s| s.json()),
+            "actions": actions,
+            "idle_prob": round3(idle_prob),
+            "selected": format!("{:?}", rec.selected_action),
+            "action_failed": rec.action_failed,
+            "food_visible": rec.food_visible,
+            "note": "logits/probs reflect current (post-tick) brain state; selected/food_visible are from the decision tick just executed",
+        });
+        return writeln!(out, "{v}").map_err(Into::into);
+    }
+
+    writeln!(out, "decision for organism {id} (turn-current):")?;
+    writeln!(out, "  sensory inputs (nonzero):")?;
+    for s in &o.brain.sensory {
+        if s.neuron.activation != 0.0 {
             writeln!(
                 out,
-                "    {:<10} logit={:>8.3}  p={:.3}",
-                format!("{:?}", a.action_type),
-                a.logit,
-                weights[k] / weight_sum
+                "    {:<22} {:>7.3}",
+                receptor_label(&s.receptor),
+                s.neuron.activation
             )?;
         }
-        writeln!(out, "    {:<10} (implicit)     p={:.3}", "Idle", idle_prob)?;
-        writeln!(
-            out,
-            "  selected={:?} failed={} food_visible(rays -1/0/+1)={:?}",
-            rec.selected_action, rec.action_failed, rec.food_visible
-        )?;
-        writeln!(
-            out,
-            "  note: logits/probs reflect the brain's CURRENT (post-tick) state; \
-             `selected`/`food_visible` are from the decision tick just executed, \
-             so they may differ after plasticity/state updates."
-        )?;
-        Ok(())
     }
+    match inter_stats {
+        Some(st) => writeln!(out, "  inter ({}): {}", o.brain.inter.len(), st.text())?,
+        None => writeln!(out, "  inter: (none)")?,
+    }
+    writeln!(out, "  actions (logit -> prob):")?;
+    for (k, a) in o.brain.action.iter().enumerate() {
+        writeln!(
+            out,
+            "    {:<10} logit={:>8.3}  p={:.3}",
+            format!("{:?}", a.action_type),
+            a.logit,
+            weights[k] / weight_sum
+        )?;
+    }
+    writeln!(out, "    {:<10} (implicit)     p={:.3}", "Idle", idle_prob)?;
+    writeln!(
+        out,
+        "  selected={:?} failed={} food_visible(rays -1/0/+1)={:?}",
+        rec.selected_action, rec.action_failed, rec.food_visible
+    )?;
+    writeln!(
+        out,
+        "  note: logits/probs reflect the brain's CURRENT (post-tick) state; \
+         `selected`/`food_visible` are from the decision tick just executed, \
+         so they may differ after plasticity/state updates."
+    )?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
 // `find` predicate grammar + field mapping
 // ---------------------------------------------------------------------------
 
-const DEFAULT_FIND_FIELDS: &[&str] =
-    &["id", "energy", "age", "generation", "consumptions", "reproductions"];
+const DEFAULT_FIND_FIELDS: &[&str] = &[
+    "id",
+    "energy",
+    "age",
+    "generation",
+    "consumptions",
+    "reproductions",
+];
 
 /// All field names accepted by `find` predicates and `--fields` columns. Shown
 /// in error messages so the command is self-documenting.
@@ -413,8 +411,8 @@ impl CmpOp {
             CmpOp::Gt => lhs > rhs,
             CmpOp::Ge => lhs >= rhs,
             // Relative+absolute tolerance: fields are f32-derived, so an exact
-            // `==` against a parsed f64 literal would almost never hold. Scale
-            // the tolerance with magnitude so `energy == 100` behaves sensibly.
+            // `==` against a parsed f64 literal would almost never hold. Scale the
+            // tolerance with magnitude so `energy == 100` behaves sensibly.
             CmpOp::Eq => (lhs - rhs).abs() <= 1e-6 * lhs.abs().max(rhs.abs()).max(1.0),
             CmpOp::Ne => (lhs - rhs).abs() > 1e-6 * lhs.abs().max(rhs.abs()).max(1.0),
         }
@@ -487,7 +485,10 @@ impl Comparison {
 /// "100"]`, while leaving bare words (`energy`, `and`) untouched.
 fn split_comparison_token(tok: &str, out: &mut Vec<String>) {
     let bytes = tok.as_bytes();
-    if let Some(pos) = bytes.iter().position(|&b| matches!(b, b'<' | b'>' | b'=' | b'!')) {
+    if let Some(pos) = bytes
+        .iter()
+        .position(|&b| matches!(b, b'<' | b'>' | b'=' | b'!'))
+    {
         let mut end = pos + 1;
         if end < bytes.len() && bytes[end] == b'=' {
             end += 1;
@@ -574,7 +575,10 @@ fn neuron_label(id: NeuronId) -> String {
 
 fn receptor_label(r: &SensoryReceptor) -> String {
     match r {
-        SensoryReceptor::VisionRay { ray_offset, channel } => {
+        SensoryReceptor::VisionRay {
+            ray_offset,
+            channel,
+        } => {
             let side = match ray_offset {
                 -1 => "L",
                 0 => "F",
@@ -601,9 +605,9 @@ fn channel_label(c: VisionChannel) -> &'static str {
     }
 }
 
-/// Effective per-tick learning rate, reproducing
-/// `learning_rate_scale_at_age` in sim-core/src/brain/plasticity.rs: 1.0 once
-/// `age >= age_of_maturity`, else the genome's juvenile eta scale (>= 0).
+/// Effective per-tick learning rate, reproducing `learning_rate_scale_at_age` in
+/// sim-core/src/brain/plasticity.rs: 1.0 once `age >= age_of_maturity`, else the
+/// genome's juvenile eta scale (>= 0).
 fn effective_eta(o: &OrganismState) -> f32 {
     let g = &o.genome;
     let scale = if o.age_turns >= u64::from(g.lifecycle.age_of_maturity) {
@@ -614,8 +618,8 @@ fn effective_eta(o: &OrganismState) -> f32 {
     g.plasticity.hebb_eta_gain.max(0.0) * scale
 }
 
-/// Collect every expressed outgoing edge (sensory + inter) into one slice for
-/// the synapse-centric views.
+/// Collect every expressed outgoing edge (sensory + inter) into one slice for the
+/// synapse-centric views.
 fn all_edges(o: &OrganismState) -> Vec<&SynapseEdge> {
     o.brain
         .sensory
@@ -750,7 +754,12 @@ fn brain_synapses(o: &OrganismState, fmt: Format, out: &mut impl Write) -> Resul
         return writeln!(out, "{v}").map_err(Into::into);
     }
 
-    writeln!(out, "brain of organism {}: {} synapse(s):", o.id.0, edges.len())?;
+    writeln!(
+        out,
+        "brain of organism {}: {} synapse(s):",
+        o.id.0,
+        edges.len()
+    )?;
     for e in &edges {
         writeln!(
             out,
@@ -784,9 +793,7 @@ fn brain_activations(o: &OrganismState, fmt: Format, out: &mut impl Write) -> Re
         let actions: Vec<Value> = b
             .action
             .iter()
-            .map(|a| {
-                json!({ "action": format!("{:?}", a.action_type), "logit": round3(a.logit) })
-            })
+            .map(|a| json!({ "action": format!("{:?}", a.action_type), "logit": round3(a.logit) }))
             .collect();
         let v = json!({
             "id": o.id.0,

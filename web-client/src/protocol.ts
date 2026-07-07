@@ -1,11 +1,9 @@
 import type {
   ApiChampionPoolResponse,
-  ApiCreateSessionResponse,
   ApiEntityId,
-  ApiFocusBrainData,
   ApiFoodState,
-  ApiLiveMetricsData,
   ApiMetricsSnapshot,
+  ApiOrganismDetail,
   ApiOrganismGenome,
   ApiOrganismState,
   ApiScalarId,
@@ -14,13 +12,11 @@ import type {
   ApiWorldSnapshot,
   BrainState,
   ChampionPoolResponse,
-  CreateSessionResponse,
   EntityId,
   FoodState,
-  FocusBrainData,
-  LiveMetricsData,
   MetricsSnapshot,
   NeuronState,
+  OrganismDetail,
   OrganismGenome,
   OrganismState,
   TickDelta,
@@ -178,7 +174,7 @@ export function normalizeTickDelta(delta: ApiTickDelta): TickDelta {
   };
 }
 
-export function normalizeFocusBrainData(data: ApiFocusBrainData): FocusBrainData {
+export function normalizeOrganismDetail(data: ApiOrganismDetail): OrganismDetail {
   return {
     turn: data.turn,
     organism: normalizeOrganismState(data.organism),
@@ -186,82 +182,3 @@ export function normalizeFocusBrainData(data: ApiFocusBrainData): FocusBrainData
   };
 }
 
-export function normalizeCreateSessionResponse(
-  response: ApiCreateSessionResponse,
-): CreateSessionResponse {
-  return {
-    metadata: response.metadata,
-    snapshot: normalizeWorldSnapshot(response.snapshot),
-  };
-}
-
-export function normalizeLiveMetricsData(
-  data: ApiLiveMetricsData,
-  previousTotalSpeciesCreated = 0,
-): LiveMetricsData {
-  return {
-    turn: data.turn,
-    metrics: {
-      ...data.metrics,
-      species_counts: { ...data.species_counts },
-      total_species_created: Math.max(
-        previousTotalSpeciesCreated,
-        Object.keys(data.species_counts).length,
-      ),
-    },
-  };
-}
-
-export function applyTickDelta(snapshot: WorldSnapshot, delta: TickDelta): WorldSnapshot {
-  const movements = new Map<number, [number, number]>();
-  for (const move of delta.moves) {
-    movements.set(move.id, move.to);
-  }
-  const facings = new Map<number, WorldOrganismState['facing']>();
-  for (const update of delta.facing_updates) {
-    facings.set(update.id, update.facing);
-  }
-
-  const removedOrganisms = new Set<number>();
-  const removedFoods = new Set<number>();
-  for (const entry of delta.removed_positions) {
-    if (entry.entity_id.entity_type === 'Organism') {
-      removedOrganisms.add(entry.entity_id.id);
-    } else {
-      removedFoods.add(entry.entity_id.id);
-    }
-  }
-
-  const organisms = snapshot.organisms
-    .filter((organism) => !removedOrganisms.has(organism.id))
-    .map((organism) => {
-      const next = movements.get(organism.id);
-      return {
-        ...organism,
-        q: next ? next[0] : organism.q,
-        r: next ? next[1] : organism.r,
-        facing: facings.get(organism.id) ?? organism.facing,
-        age_turns: organism.age_turns + 1,
-      };
-    })
-    .concat(delta.spawned);
-
-  const foods =
-    removedFoods.size === 0 && delta.food_spawned.length === 0
-      ? snapshot.foods
-      : snapshot.foods
-          .filter((food) => !removedFoods.has(food.id))
-          .concat(delta.food_spawned);
-
-  return {
-    ...snapshot,
-    turn: delta.turn,
-    metrics: normalizeMetrics(delta.metrics, organisms, snapshot.metrics.total_species_created),
-    organisms,
-    foods,
-  };
-}
-
-export function findOrganism(snapshot: WorldSnapshot, organismId: number) {
-  return snapshot.organisms.find((item) => item.id === organismId) ?? null;
-}

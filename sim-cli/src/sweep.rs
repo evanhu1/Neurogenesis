@@ -85,7 +85,9 @@ pub fn run_sweep(args: &[&str], out_dir: &str, out: &mut impl Write) -> Result<(
                 }
             }
             "--seeds" => {
-                let spec = args.get(i + 1).ok_or_else(|| anyhow!("--seeds needs a list"))?;
+                let spec = args
+                    .get(i + 1)
+                    .ok_or_else(|| anyhow!("--seeds needs a list"))?;
                 for s in spec.split(',') {
                     seeds.push(s.trim().parse().map_err(|_| anyhow!("bad seed `{s}`"))?);
                 }
@@ -187,7 +189,9 @@ pub fn run_sweep(args: &[&str], out_dir: &str, out: &mut impl Write) -> Result<(
         .collect();
 
     let parallelism = jobs_cap.unwrap_or_else(|| {
-        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4)
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
     });
     let total_jobs = jobs.len();
     writeln!(
@@ -212,22 +216,28 @@ pub fn run_sweep(args: &[&str], out_dir: &str, out: &mut impl Write) -> Result<(
                     break;
                 }
                 let job = &jobs[idx];
-                let outcome =
-                    match run_cell_seed(&world_raw, &seed_genome_raw, &job.overrides, job.seed, to, report_every, threads)
-                    {
-                        Ok(pillars) => JobOutcome {
-                            cell_idx: job.cell_idx,
-                            seed: job.seed,
-                            pillars: Some(pillars),
-                            error: None,
-                        },
-                        Err(e) => JobOutcome {
-                            cell_idx: job.cell_idx,
-                            seed: job.seed,
-                            pillars: None,
-                            error: Some(e.to_string()),
-                        },
-                    };
+                let outcome = match run_cell_seed(
+                    &world_raw,
+                    &seed_genome_raw,
+                    &job.overrides,
+                    job.seed,
+                    to,
+                    report_every,
+                    threads,
+                ) {
+                    Ok(pillars) => JobOutcome {
+                        cell_idx: job.cell_idx,
+                        seed: job.seed,
+                        pillars: Some(pillars),
+                        error: None,
+                    },
+                    Err(e) => JobOutcome {
+                        cell_idx: job.cell_idx,
+                        seed: job.seed,
+                        pillars: None,
+                        error: Some(e.to_string()),
+                    },
+                };
                 outcomes.lock().unwrap().push(outcome);
             });
         }
@@ -241,7 +251,11 @@ pub fn run_sweep(args: &[&str], out_dir: &str, out: &mut impl Write) -> Result<(
     let file = std::fs::File::create(&path).map_err(|e| anyhow!("writing {path:?}: {e}"))?;
     serde_json::to_writer_pretty(file, &result)?;
 
-    writeln!(out, "{}", json!({ "wrote": path.to_string_lossy(), "runs": total_jobs }))?;
+    writeln!(
+        out,
+        "{}",
+        json!({ "wrote": path.to_string_lossy(), "runs": total_jobs })
+    )?;
     print_table(out, &result)?;
     Ok(())
 }
@@ -256,7 +270,8 @@ fn run_cell_seed(
     report_every: u64,
     threads: u32,
 ) -> Result<PillarScores> {
-    let mut config = crate::world_config_from_raw_overrides(world_raw, seed_genome_raw, overrides)?;
+    let mut config =
+        sim_views::world_config_from_raw_overrides(world_raw, seed_genome_raw, overrides)?;
     config.intent_parallel_threads = threads;
     let mut sim = Simulation::new(config, seed).map_err(|e| anyhow!("{e}"))?;
 
@@ -309,7 +324,9 @@ fn parse_overrides(spec: &str) -> Result<Vec<(String, String)>> {
 }
 
 fn same_overrides(a: &[(String, String)], b: &[(String, String)]) -> bool {
-    a.len() == b.len() && b.iter().all(|(k, v)| a.iter().any(|(ak, av)| ak == k && av == v))
+    a.len() == b.len()
+        && b.iter()
+            .all(|(k, v)| a.iter().any(|(ak, av)| ak == k && av == v))
 }
 
 /// Aggregate per cell across seeds: mean/min/max for each metric, plus delta of
@@ -435,9 +452,14 @@ fn print_table(out: &mut impl Write, result: &Value) -> Result<()> {
             .unwrap_or_default();
         let m = |key: &str| c["metrics"][key]["mean"].as_f64();
         let fmt = |v: Option<f64>| v.map(|x| format!("{x:.4}")).unwrap_or_else(|| "NA".into());
-        let fmt_slope = |v: Option<f64>| v.map(|x| format!("{x:.6}")).unwrap_or_else(|| "NA".into());
+        let fmt_slope =
+            |v: Option<f64>| v.map(|x| format!("{x:.6}")).unwrap_or_else(|| "NA".into());
         let dplant = c["delta_vs_baseline"]["plant_consumption_rate"].as_f64();
-        let star = if c["is_baseline"].as_bool().unwrap_or(false) { "*" } else { " " };
+        let star = if c["is_baseline"].as_bool().unwrap_or(false) {
+            "*"
+        } else {
+            " "
+        };
         writeln!(
             out,
             "{star}{:<31} {:>9} {:>9} {:>9} {:>9} {:>11} {:>12}",
@@ -447,7 +469,9 @@ fn print_table(out: &mut impl Write, result: &Value) -> Result<()> {
             fmt(m("action_effectiveness")),
             fmt(m("mi_sa")),
             fmt_slope(m("learning_slope")),
-            dplant.map(|x| format!("{x:+.4}")).unwrap_or_else(|| "—".into()),
+            dplant
+                .map(|x| format!("{x:+.4}"))
+                .unwrap_or_else(|| "—".into()),
         )?;
     }
     Ok(())

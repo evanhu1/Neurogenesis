@@ -1,69 +1,15 @@
+//! Wire schema for the thin file-server. A world is a file on disk; these are
+//! the client-facing views the server serializes over HTTP + the WebSocket
+//! animation stream. Render-shaped organism/food/terrain data only — the
+//! CLI-parity research reads (state/pillars/inspect/brain/…) are produced by
+//! `sim-views` and forwarded as raw JSON, so they have no structs here.
+
 use serde::{Deserialize, Serialize};
 use sim_types::{
-    organism_visual, FacingDirection, FoodState, MetricsSnapshot, NeuronId, OrganismFacing,
-    OrganismGenome, OrganismId, OrganismMove, OrganismState, RemovedEntityPosition,
-    ReproductionEvent, SpeciesId, TerrainCell, TickDelta, VisualProperties, WorldConfig,
-    WorldSnapshot,
+    organism_visual, FacingDirection, FoodState, MetricsSnapshot, OrganismFacing, OrganismGenome,
+    OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, ReproductionEvent, SpeciesId,
+    TerrainCell, TickDelta, VisualProperties, WorldSnapshot,
 };
-use std::collections::BTreeMap;
-use uuid::Uuid;
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum StreamMode {
-    #[default]
-    Full,
-    MetricsOnly,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SessionMetadata {
-    pub id: Uuid,
-    pub created_at_unix_ms: u128,
-    pub config: WorldConfig,
-    pub running: bool,
-    pub ticks_per_second: u32,
-    #[serde(default)]
-    pub stream_mode: StreamMode,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct CreateSessionRequest {
-    pub seed: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct CreateSessionResponse {
-    pub metadata: SessionMetadata,
-    pub snapshot: WorldSnapshotView,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ChampionPoolEntry {
-    pub genome: OrganismGenome,
-    pub source_turn: u64,
-    pub source_created_at_unix_ms: u128,
-    pub generation: u64,
-    pub age_turns: u64,
-    pub reproductions_count: u64,
-    pub consumptions_count: u64,
-    pub energy: f32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ChampionPoolResponse {
-    pub entries: Vec<ChampionPoolEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct CountRequest {
-    pub count: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct FocusRequest {
-    pub organism_id: OrganismId,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ApiError {
@@ -71,43 +17,8 @@ pub struct ApiError {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", content = "data")]
-pub enum ClientCommand {
-    Start {
-        ticks_per_second: u32,
-        #[serde(default)]
-        stream_mode: StreamMode,
-    },
-    Pause,
-    Step {
-        count: u32,
-    },
-    SetFocus {
-        organism_id: OrganismId,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct FocusBrainData {
-    pub turn: u64,
-    pub organism: OrganismState,
-    pub active_action_neuron_id: Option<NeuronId>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct StepProgressData {
-    pub requested_count: u32,
-    pub completed_count: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct LiveMetricsData {
-    pub turn: u64,
-    pub metrics: MetricsSnapshot,
-    pub species_counts: BTreeMap<String, u32>,
-}
-
+/// Render-shaped organism: position + display-relevant scalar state + the
+/// genome-derived visual properties, without the full brain/genome payload.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorldOrganismState {
     pub id: OrganismId,
@@ -153,11 +64,13 @@ impl From<&OrganismState> for WorldOrganismState {
     }
 }
 
+/// Full render snapshot of a world (the canvas feed): every organism, food, and
+/// terrain cell plus the current metrics. Produced from `Simulation::snapshot`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorldSnapshotView {
     pub turn: u64,
     pub rng_seed: u64,
-    pub config: WorldConfig,
+    pub config: sim_types::WorldConfig,
     pub organisms: Vec<WorldOrganismState>,
     pub foods: Vec<FoodState>,
     pub terrain: Vec<TerrainCell>,
@@ -182,6 +95,8 @@ impl From<WorldSnapshot> for WorldSnapshotView {
     }
 }
 
+/// One tick's incremental change, applied by the client-side renderer to
+/// animate between full snapshots.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TickDeltaView {
     pub turn: u64,
@@ -209,14 +124,39 @@ impl From<TickDelta> for TickDeltaView {
     }
 }
 
+/// Frames pushed over the `/worlds/{name}/stream` WebSocket: an initial full
+/// snapshot, then one delta per advanced tick.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data")]
 #[allow(clippy::large_enum_variant)]
-pub enum ServerEvent {
+pub enum StreamFrame {
     StateSnapshot(WorldSnapshotView),
     TickDelta(TickDeltaView),
-    StepProgress(StepProgressData),
-    FocusBrain(FocusBrainData),
-    Metrics(LiveMetricsData),
-    Error(ApiError),
+}
+
+/// The full detail of a single organism (brain + genome), for the inspector
+/// panel's brain visualization. `active_action_neuron_id` is the action neuron
+/// the organism most recently fired.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OrganismDetail {
+    pub turn: u64,
+    pub organism: OrganismState,
+    pub active_action_neuron_id: Option<sim_types::NeuronId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ChampionPoolEntry {
+    pub genome: OrganismGenome,
+    pub source_turn: u64,
+    pub source_created_at_unix_ms: u128,
+    pub generation: u64,
+    pub age_turns: u64,
+    pub reproductions_count: u64,
+    pub consumptions_count: u64,
+    pub energy: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ChampionPoolResponse {
+    pub entries: Vec<ChampionPoolEntry>,
 }

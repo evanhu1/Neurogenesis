@@ -24,6 +24,7 @@ tower-http.workspace = true
 sim-config = { path = "../sim-config" }
 sim-core = { path = "../sim-core" }
 sim-types = { path = "../sim-types" }
+sim-views = { path = "../sim-views" }
 
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json"] }

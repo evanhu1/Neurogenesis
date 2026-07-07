@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { SimulationSessionState } from '../sim/hooks/useSimulationSession';
+import { useEffect, useState } from 'react';
+import type { WorldController } from '../sim/hooks/useWorld';
 import { ControlButton } from './ControlButton';
 
 const MAX_SKIP_COUNT = 1_000_000_000;
@@ -16,12 +16,6 @@ const PauseIcon = (
   </svg>
 );
 
-const BoltIcon = (
-  <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3 w-3 fill-current">
-    <path d="M9.2 1.2 3.4 8.9h3.3l-1 5.9 5.9-7.7H8.3l.9-5.9Z" />
-  </svg>
-);
-
 const INPUT_CLASSES =
   'rounded-lg border border-line bg-surface/60 px-2 py-1 font-mono text-[11px] text-ink/85 outline-none transition focus:border-accent/50 disabled:cursor-not-allowed disabled:opacity-40';
 
@@ -34,29 +28,16 @@ function SectionLabel({ children }: { children: string }) {
 }
 
 type SimulationControlsPanelProps = {
-  simulation: SimulationSessionState;
+  world: WorldController;
 };
 
-export function SimulationControlsPanel({ simulation }: SimulationControlsPanelProps) {
-  const {
-    snapshot,
-    isRunning,
-    isStepPending,
-    stepProgress,
-    speedLevelIndex,
-    speedLevels,
-    streamMode,
-    isFastMode,
-  } = simulation;
+export function SimulationControlsPanel({ world }: SimulationControlsPanelProps) {
+  const { snapshot, isRunning, isStepPending, speedLevelIndex, speedLevels } = world;
   const [skipCountInput, setSkipCountInput] = useState('1000');
   const [seedInput, setSeedInput] = useState('');
 
-  const skipProgress = useMemo(() => {
-    if (!stepProgress || stepProgress.requested_count <= 1) return null;
-    const requested = Math.max(1, stepProgress.requested_count);
-    const completed = Math.min(requested, Math.max(0, stepProgress.completed_count));
-    return { requested, completed, percent: Math.round((completed / requested) * 100) };
-  }, [stepProgress]);
+  // Stepping mutates the file synchronously and is disabled while running.
+  const stepDisabled = isRunning || isStepPending;
 
   useEffect(() => {
     if (!snapshot) return;
@@ -64,15 +45,13 @@ export function SimulationControlsPanel({ simulation }: SimulationControlsPanelP
   }, [snapshot?.rng_seed]);
 
   const runSkip = () => {
-    if (isStepPending) return;
+    if (stepDisabled) return;
     const parsed = Number.parseInt(skipCountInput, 10);
     if (!Number.isFinite(parsed)) return;
     const count = Math.max(1, Math.min(parsed, MAX_SKIP_COUNT));
-    simulation.step(count);
+    world.step(count);
     setSkipCountInput(String(count));
   };
-
-  const isLiveRunning = isRunning && streamMode === 'full';
 
   return (
     <section className="mt-3">
@@ -82,18 +61,9 @@ export function SimulationControlsPanel({ simulation }: SimulationControlsPanelP
         <ControlButton
           variant="primary"
           className="flex-1"
-          icon={isLiveRunning ? PauseIcon : PlayIcon}
-          label={isLiveRunning ? 'Pause' : 'Run'}
-          onClick={simulation.toggleRun}
-          disabled={isStepPending}
-        />
-        <ControlButton
-          className="flex-1"
-          active={isFastMode}
-          icon={BoltIcon}
-          label={isFastMode ? 'Stop Fast' : 'Fast'}
-          onClick={simulation.toggleFastRun}
-          disabled={isStepPending}
+          icon={isRunning ? PauseIcon : PlayIcon}
+          label={isRunning ? 'Pause' : 'Run'}
+          onClick={world.toggleRun}
         />
       </div>
 
@@ -108,10 +78,9 @@ export function SimulationControlsPanel({ simulation }: SimulationControlsPanelP
           value={speedLevelIndex}
           onChange={(evt) => {
             const level = Number.parseInt(evt.target.value, 10);
-            if (Number.isFinite(level)) simulation.setSpeedLevelIndex(level);
+            if (Number.isFinite(level)) world.setSpeedLevelIndex(level);
           }}
-          disabled={isFastMode}
-          className="h-1 min-w-0 flex-1 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+          className="h-1 min-w-0 flex-1 cursor-pointer"
         />
         <span className="w-12 text-right font-mono text-[10px] text-ink/55">
           {speedLevels[speedLevelIndex]} t/s
@@ -120,47 +89,34 @@ export function SimulationControlsPanel({ simulation }: SimulationControlsPanelP
 
       <div className="mt-2 flex items-center gap-1.5">
         <span className="text-[10px] font-medium uppercase tracking-wide text-ink/35">Step</span>
-        <ControlButton label="×1" onClick={() => simulation.step(1)} disabled={isStepPending} />
-        <ControlButton label="×10" onClick={() => simulation.step(10)} disabled={isStepPending} />
-        <ControlButton label="×100" onClick={() => simulation.step(100)} disabled={isStepPending} />
+        <ControlButton label="×1" onClick={() => world.step(1)} disabled={stepDisabled} />
+        <ControlButton label="×10" onClick={() => world.step(10)} disabled={stepDisabled} />
+        <ControlButton label="×100" onClick={() => world.step(100)} disabled={stepDisabled} />
         <input
           aria-label="Skip step count"
           type="number"
           min={1}
           step={1}
           value={skipCountInput}
-          disabled={isStepPending}
+          disabled={stepDisabled}
           onChange={(evt) => setSkipCountInput(evt.target.value)}
           onKeyDown={(evt) => {
             if (evt.key === 'Enter') runSkip();
           }}
           className={`ml-auto w-[72px] ${INPUT_CLASSES}`}
         />
-        <ControlButton label="Skip" onClick={runSkip} disabled={isStepPending} />
+        <ControlButton label="Skip" onClick={runSkip} disabled={stepDisabled} />
       </div>
 
-      {skipProgress && (
-        <div className="mt-2">
-          <div className="flex items-center justify-between font-mono text-[10px] text-ink/35">
-            <span>
-              {skipProgress.completed.toLocaleString()} / {skipProgress.requested.toLocaleString()}
-            </span>
-            <span>{skipProgress.percent}%</span>
-          </div>
-          <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-muted/40">
-            <div
-              className="h-full rounded-full bg-accent/60 transition-[width] duration-200"
-              style={{ width: `${skipProgress.percent}%` }}
-            />
-          </div>
-        </div>
+      {isStepPending && (
+        <div className="mt-2 font-mono text-[10px] text-ink/35">stepping…</div>
       )}
 
       <div className="mt-3">
-        <SectionLabel>Session</SectionLabel>
+        <SectionLabel>World</SectionLabel>
         <div className="mt-1.5 flex items-center gap-1.5">
           <input
-            aria-label="Session seed"
+            aria-label="World seed"
             type="text"
             inputMode="numeric"
             pattern="[0-9]*"
@@ -169,10 +125,10 @@ export function SimulationControlsPanel({ simulation }: SimulationControlsPanelP
             placeholder="Seed"
             className={`min-w-0 flex-1 ${INPUT_CLASSES}`}
           />
-          <ControlButton label="New" onClick={() => void simulation.createSession(seedInput)} />
+          <ControlButton label="New" onClick={() => void world.createWorld(seedInput)} />
           <ControlButton
             label="Save"
-            onClick={() => void simulation.saveChampions()}
+            onClick={() => void world.saveChampions()}
             disabled={!snapshot}
           />
         </div>

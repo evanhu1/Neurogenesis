@@ -3,7 +3,6 @@ import type { LiveMetricsData } from '../../types';
 type SessionOverviewPanelProps = {
   liveMetrics: LiveMetricsData | null;
   isRunning: boolean;
-  isFastMode: boolean;
 };
 
 function StatTile({ label, value }: { label: string; value: string }) {
@@ -17,16 +16,10 @@ function StatTile({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function SessionOverviewPanel({
-  liveMetrics,
-  isRunning,
-  isFastMode,
-}: SessionOverviewPanelProps) {
-  const status = isFastMode
-    ? { label: 'Fast', dotClass: 'bg-amber-500', textClass: 'text-amber-700', pulse: true }
-    : isRunning
-      ? { label: 'Live', dotClass: 'bg-emerald-500', textClass: 'text-emerald-700', pulse: true }
-      : { label: 'Paused', dotClass: 'bg-stone-400', textClass: 'text-ink/45', pulse: false };
+export function SessionOverviewPanel({ liveMetrics, isRunning }: SessionOverviewPanelProps) {
+  const status = isRunning
+    ? { label: 'Live', dotClass: 'bg-emerald-500', textClass: 'text-emerald-700', pulse: true }
+    : { label: 'Paused', dotClass: 'bg-stone-400', textClass: 'text-ink/45', pulse: false };
 
   return (
     <div>

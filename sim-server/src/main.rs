@@ -1,6 +1,15 @@
+//! sim-server — a thin, stateless file-server over `world.bin` files.
+//!
+//! A world is a file on disk under `--world-root`; every request loads it, runs
+//! one command (mirroring the sim-cli verbs via the shared `sim-views` crate),
+//! and — for mutating commands — saves it back. The one stateful surface is the
+//! `/worlds/{name}/stream` WebSocket, which holds a world resident only for the
+//! duration of a live animation feed and persists it on disconnect. There is no
+//! session registry: the file IS the durable state.
+
 use axum::extract::ws::{Message, WebSocket};
-use axum::extract::{Path, State, WebSocketUpgrade};
-use axum::http::StatusCode;
+use axum::extract::{Path, Query, State, WebSocketUpgrade};
+use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
@@ -8,47 +17,154 @@ use clap::Parser;
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use sim_core::{SimError, Simulation};
-use sim_server::{
-    load_default_world_config,
-    protocol::{
-        ApiError, ChampionPoolEntry, ChampionPoolResponse, ClientCommand, CountRequest,
-        CreateSessionRequest, CreateSessionResponse, FocusBrainData, FocusRequest, LiveMetricsData,
-        ServerEvent, SessionMetadata, StepProgressData, StreamMode, WorldSnapshotView,
-    },
+use sim_server::protocol::{
+    ApiError, ChampionPoolEntry, ChampionPoolResponse, OrganismDetail, StreamFrame,
+    WorldSnapshotView,
 };
-use sim_types::{OrganismGenome, OrganismState, SpeciesId, WorldSnapshot};
-use std::collections::{BTreeMap, HashMap};
-use std::fs;
-use std::path::PathBuf;
+use sim_views::{Recorder, ReadCtx};
+use sim_types::{OrganismGenome, OrganismState};
+use std::path::{Path as FsPath, PathBuf};
 use std::sync::{Arc, RwLock as StdRwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::sync::broadcast::error::RecvError;
-use tokio::sync::{broadcast, Mutex, RwLock};
-use tokio::task::JoinHandle;
 use tower_http::cors::CorsLayer;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+/// Reporting-interval width minted for freshly-created worlds and assumed for
+/// worlds whose sidecar is absent. Matches the sim-cli / eval default.
+const DEFAULT_REPORT_EVERY: u64 = 10_000;
+
 #[derive(Clone)]
 struct AppState {
-    sessions: Arc<RwLock<HashMap<Uuid, Arc<Session>>>>,
+    world_root: Arc<PathBuf>,
     champion_pool: Arc<ChampionPoolStore>,
 }
 
-struct Session {
-    metadata: SessionMetadata,
-    simulation: Mutex<Simulation>,
-    events: broadcast::Sender<ServerEvent>,
-    runtime: Mutex<RuntimeState>,
+// ---------------------------------------------------------------------------
+// World-file addressing
+// ---------------------------------------------------------------------------
+
+/// Validate a world name is a safe single path segment (no traversal, no
+/// separators). Names map to `<world_root>/<name>.bin`.
+fn valid_world_name(name: &str) -> Result<(), AppError> {
+    if name.is_empty() || name.len() > 128 {
+        return Err(AppError::BadRequest(
+            "world name must be 1..=128 chars".to_owned(),
+        ));
+    }
+    if name.contains("..") {
+        return Err(AppError::BadRequest(
+            "world name may not contain `..`".to_owned(),
+        ));
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    {
+        return Err(AppError::BadRequest(
+            "world name may only contain [A-Za-z0-9._-]".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
-#[derive(Default)]
-struct RuntimeState {
-    running: bool,
-    ticks_per_second: u32,
-    stream_mode: StreamMode,
-    runner: Option<JoinHandle<()>>,
+fn world_bin_path(root: &FsPath, name: &str) -> PathBuf {
+    root.join(format!("{name}.bin"))
 }
+
+/// A world loaded from disk together with its metric sidecar (if present).
+struct Loaded {
+    sim: Simulation,
+    recorder: Option<Recorder>,
+    report_every: u64,
+}
+
+fn load_bundle(root: &FsPath, name: &str) -> Result<Loaded, AppError> {
+    valid_world_name(name)?;
+    let path = world_bin_path(root, name);
+    if !path.exists() {
+        return Err(AppError::NotFound(format!("world `{name}` not found")));
+    }
+    let path_str = path.to_string_lossy();
+    let sim = sim_views::load_world(&path_str)
+        .map_err(|e| AppError::BadRequest(format!("loading world `{name}`: {e}")))?;
+    let sidecar = sim_views::sibling_metrics_path(&path_str);
+    let (report_every, recorder) = if FsPath::new(&sidecar).exists() {
+        let (report_every, recorder) = sim_views::load_sidecar(&sidecar)
+            .map_err(|e| AppError::Internal(format!("loading metrics for `{name}`: {e}")))?;
+        (report_every, Some(recorder))
+    } else {
+        (DEFAULT_REPORT_EVERY, None)
+    };
+    Ok(Loaded {
+        sim,
+        recorder,
+        report_every,
+    })
+}
+
+fn save_bundle(
+    root: &FsPath,
+    name: &str,
+    sim: &Simulation,
+    recorder: Option<&Recorder>,
+    report_every: u64,
+) -> Result<(), AppError> {
+    let path = world_bin_path(root, name);
+    let path_str = path.to_string_lossy();
+    sim_views::save_world(sim, &path_str)
+        .map_err(|e| AppError::Internal(format!("saving world `{name}`: {e}")))?;
+    if let Some(rec) = recorder {
+        let sidecar = sim_views::sibling_metrics_path(&path_str);
+        sim_views::save_sidecar(report_every, rec, &sidecar)
+            .map_err(|e| AppError::Internal(format!("saving metrics for `{name}`: {e}")))?;
+    }
+    Ok(())
+}
+
+/// Build a JSON `Response` from bytes a `sim-views` read wrote (already a
+/// complete JSON document + trailing newline).
+fn json_bytes_response(bytes: Vec<u8>) -> Response {
+    ([(header::CONTENT_TYPE, "application/json")], bytes).into_response()
+}
+
+/// Run a `sim-views` read against a loaded world, capturing its JSON output.
+fn run_read(
+    loaded: &Loaded,
+    f: impl FnOnce(&ReadCtx, &mut Vec<u8>) -> anyhow::Result<()>,
+) -> Result<Vec<u8>, AppError> {
+    let ctx = ReadCtx {
+        sim: &loaded.sim,
+        recorder: loaded.recorder.as_ref(),
+        report_every: loaded.report_every,
+        format: sim_views::output::Format::Json,
+        scaled: false,
+    };
+    let mut buf = Vec::new();
+    f(&ctx, &mut buf).map_err(|e| AppError::BadRequest(e.to_string()))?;
+    Ok(buf)
+}
+
+/// Load a world on the blocking pool and run a read closure, returning a JSON
+/// response. Reads are pure but touch the filesystem + CPU, so they run off the
+/// async runtime.
+async fn blocking_read(
+    root: Arc<PathBuf>,
+    name: String,
+    f: impl FnOnce(&Loaded) -> Result<Vec<u8>, AppError> + Send + 'static,
+) -> Result<Response, AppError> {
+    let bytes = tokio::task::spawn_blocking(move || {
+        let loaded = load_bundle(&root, &name)?;
+        f(&loaded)
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("read worker join error: {e}")))??;
+    Ok(json_bytes_response(bytes))
+}
+
+// ---------------------------------------------------------------------------
+// Champion pool (persisted set of the best genomes seen; unchanged semantics)
+// ---------------------------------------------------------------------------
 
 const CHAMPION_POOL_SCHEMA_VERSION: u32 = 4;
 const CHAMPION_POOL_MAX_GENOMES: usize = 32;
@@ -74,30 +190,10 @@ struct ChampionGenomeRecord {
 }
 
 struct ChampionPoolStore {
-    /// `None` for ephemeral stores (e.g. `--seed-genome-snapshot` mode); in
-    /// that case any attempt to persist silently no-ops so the session stays
-    /// a read-only scratch space.
+    /// `None` for ephemeral stores (e.g. `--seed-genome-snapshot` mode); in that
+    /// case any attempt to persist silently no-ops so the pool stays read-only.
     pool_path: Option<PathBuf>,
     entries: StdRwLock<Vec<ChampionGenomeRecord>>,
-}
-
-const STEP_PROGRESS_TARGET_BATCHES: u32 = 48;
-const STEP_PROGRESS_MIN_BATCH_SIZE: u32 = 32;
-const STEP_PROGRESS_MAX_BATCH_SIZE: u32 = 2_048;
-const STEP_PROGRESS_TARGET_UPDATES: u32 = 64;
-const UNBOUNDED_TICKS_PER_SECOND: u32 = 0;
-const METRICS_ONLY_STREAM_INTERVAL_TICKS: u32 = 100;
-
-fn step_batch_size(total_count: u32) -> u32 {
-    let target = (total_count / STEP_PROGRESS_TARGET_BATCHES).max(1);
-    target
-        .clamp(STEP_PROGRESS_MIN_BATCH_SIZE, STEP_PROGRESS_MAX_BATCH_SIZE)
-        .min(total_count.max(1))
-}
-
-fn step_progress_stride(total_count: u32) -> u32 {
-    total_count.saturating_add(STEP_PROGRESS_TARGET_UPDATES.saturating_sub(1))
-        / STEP_PROGRESS_TARGET_UPDATES.max(1)
 }
 
 fn now_unix_ms() -> Result<u128, AppError> {
@@ -109,34 +205,6 @@ fn now_unix_ms() -> Result<u128, AppError> {
 
 fn champion_pool_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("champion_pool.json")
-}
-
-fn load_runtime_default_world_config() -> Result<sim_types::WorldConfig, AppError> {
-    load_default_world_config().map_err(|err| {
-        AppError::Internal(format!(
-            "failed to load {}: {err}",
-            sim_server::default_world_config_path().display()
-        ))
-    })
-}
-
-fn build_species_counts(organisms: &[OrganismState]) -> BTreeMap<String, u32> {
-    let mut counts = BTreeMap::<SpeciesId, u32>::new();
-    for organism in organisms {
-        *counts.entry(organism.species_id).or_default() += 1;
-    }
-    counts
-        .into_iter()
-        .map(|(species_id, count)| (species_id.0.to_string(), count))
-        .collect()
-}
-
-fn build_live_metrics_data(simulation: &Simulation) -> LiveMetricsData {
-    LiveMetricsData {
-        turn: simulation.turn(),
-        metrics: simulation.metrics().clone(),
-        species_counts: build_species_counts(simulation.organisms()),
-    }
 }
 
 fn compare_champion_records(
@@ -234,7 +302,7 @@ fn merge_champion_entries(
 impl ChampionPoolStore {
     fn bootstrap(pool_path: PathBuf) -> Result<Self, AppError> {
         if let Some(parent) = pool_path.parent() {
-            fs::create_dir_all(parent).map_err(|err| {
+            std::fs::create_dir_all(parent).map_err(|err| {
                 AppError::Internal(format!(
                     "failed to create champion pool directory {}: {err}",
                     parent.display()
@@ -242,7 +310,7 @@ impl ChampionPoolStore {
             })?;
         }
 
-        let entries = match fs::read(&pool_path) {
+        let entries = match std::fs::read(&pool_path) {
             Ok(bytes) => match serde_json::from_slice::<ChampionPoolFile>(&bytes) {
                 Ok(file) if file.schema_version == CHAMPION_POOL_SCHEMA_VERSION => file.entries,
                 Ok(file) => {
@@ -280,8 +348,8 @@ impl ChampionPoolStore {
     /// Build a read-only pool containing a single genome loaded from a
     /// bincode-encoded evaluation snapshot. Every initial organism will start
     /// with this genome; champion-save endpoints no-op against disk.
-    fn from_snapshot_file(snapshot_path: &std::path::Path) -> Result<Self, AppError> {
-        let bytes = fs::read(snapshot_path).map_err(|err| {
+    fn from_snapshot_file(snapshot_path: &FsPath) -> Result<Self, AppError> {
+        let bytes = std::fs::read(snapshot_path).map_err(|err| {
             AppError::Internal(format!(
                 "failed to read seed genome snapshot {}: {err}",
                 snapshot_path.display()
@@ -388,13 +456,13 @@ impl ChampionPoolStore {
         })?;
 
         let temp_path = pool_path.with_extension("json.tmp");
-        fs::write(&temp_path, encoded).map_err(|err| {
+        std::fs::write(&temp_path, encoded).map_err(|err| {
             AppError::Internal(format!(
                 "failed to write champion pool temp file {}: {err}",
                 temp_path.display()
             ))
         })?;
-        fs::rename(&temp_path, pool_path).map_err(|err| {
+        std::fs::rename(&temp_path, pool_path).map_err(|err| {
             AppError::Internal(format!(
                 "failed to finalize champion pool {}: {err}",
                 pool_path.display()
@@ -404,20 +472,10 @@ impl ChampionPoolStore {
     }
 }
 
-fn snapshot_tick_from_filename(path: &std::path::Path) -> Option<u64> {
+fn snapshot_tick_from_filename(path: &FsPath) -> Option<u64> {
     let stem = path.file_stem()?.to_str()?;
     let digits = stem.strip_prefix('t')?;
     digits.parse().ok()
-}
-
-#[derive(Serialize)]
-struct HealthResponse {
-    status: &'static str,
-}
-
-#[derive(Serialize)]
-struct StepResponse {
-    snapshot: WorldSnapshot,
 }
 
 impl From<ChampionGenomeRecord> for ChampionPoolEntry {
@@ -434,6 +492,10 @@ impl From<ChampionGenomeRecord> for ChampionPoolEntry {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
 
 #[derive(Debug)]
 enum AppError {
@@ -461,12 +523,10 @@ impl IntoResponse for AppError {
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, "bad_request", msg),
             AppError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, "internal", msg),
         };
-
         let error = ApiError {
             code: code.to_owned(),
             message,
         };
-
         (status, Json(error)).into_response()
     }
 }
@@ -477,10 +537,94 @@ impl From<SimError> for AppError {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Request / response bodies
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct HealthResponse {
+    status: &'static str,
+}
+
+/// Result of a mutating world command: the world's name + its fresh render
+/// snapshot, so the client can update the canvas immediately.
+#[derive(Serialize)]
+struct WorldResponse {
+    name: String,
+    snapshot: WorldSnapshotView,
+}
+
+#[derive(Deserialize)]
+struct NewWorldRequest {
+    name: Option<String>,
+    seed: Option<u64>,
+    config: Option<String>,
+    /// Inline `key=value` config overrides (same vocabulary as `sim-cli --set`).
+    #[serde(default)]
+    set: Vec<String>,
+    /// `[world_width, num_organisms]` scale override (marks the world non-canonical).
+    scale: Option<[u32; 2]>,
+    threads: Option<u32>,
+    report_every: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct StepRequest {
+    count: u32,
+}
+
+#[derive(Deserialize)]
+struct RunToRequest {
+    turn: u64,
+}
+
+#[derive(Deserialize)]
+struct TopQuery {
+    n: Option<usize>,
+}
+
+#[derive(Deserialize)]
+struct BrainQuery {
+    view: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct FindQuery {
+    expr: String,
+    limit: Option<usize>,
+    fields: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GenomeQuery {
+    gene: Option<String>,
+    #[serde(default)]
+    drift: bool,
+}
+
+#[derive(Deserialize)]
+struct TimeseriesQuery {
+    cols: Option<String>,
+    last: Option<usize>,
+}
+
+#[derive(Deserialize)]
+struct StreamQuery {
+    /// Ticks per second to stream; 0 (default) means as fast as possible.
+    tps: Option<u32>,
+}
+
+// ---------------------------------------------------------------------------
+// CLI + startup
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Parser)]
 #[command(name = "sim-server")]
-#[command(about = "Simulation server with optional evaluation-snapshot seeding")]
+#[command(about = "Thin file-server over world.bin files")]
 struct Cli {
+    /// Directory holding world files (`<name>.bin` + `<name>.metrics`).
+    #[arg(long, default_value = "artifacts/worlds")]
+    world_root: PathBuf,
     /// Override the default champion pool JSON path.
     #[arg(long)]
     champion_pool_path: Option<PathBuf>,
@@ -512,6 +656,13 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn new_state(cli: &Cli) -> Result<AppState, AppError> {
+    std::fs::create_dir_all(&cli.world_root).map_err(|err| {
+        AppError::Internal(format!(
+            "failed to create world root {}: {err}",
+            cli.world_root.display()
+        ))
+    })?;
+
     let champion_pool = if let Some(snapshot_path) = &cli.seed_genome_snapshot {
         info!(
             "seeding champion pool from snapshot {} (persistence disabled)",
@@ -526,7 +677,7 @@ fn new_state(cli: &Cli) -> Result<AppState, AppError> {
         ChampionPoolStore::bootstrap(pool_path)?
     };
     Ok(AppState {
-        sessions: Arc::new(RwLock::new(HashMap::new())),
+        world_root: Arc::new(cli.world_root.clone()),
         champion_pool: Arc::new(champion_pool),
     })
 }
@@ -534,21 +685,32 @@ fn new_state(cli: &Cli) -> Result<AppState, AppError> {
 fn build_app(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/worlds", get(list_worlds).post(create_world))
+        .route("/worlds/{name}/snapshot", get(get_snapshot))
+        .route("/worlds/{name}/organism/{id}", get(get_organism))
+        .route("/worlds/{name}/step", post(step_world))
+        .route("/worlds/{name}/run-to", post(run_to_world))
+        .route("/worlds/{name}/stream", get(stream_world))
+        .route("/worlds/{name}/champions", post(save_world_champions))
+        .route("/worlds/{name}/state", get(read_state))
+        .route("/worlds/{name}/turn", get(read_turn))
+        .route("/worlds/{name}/pillars", get(read_pillars))
+        .route("/worlds/{name}/eco", get(read_eco))
+        .route("/worlds/{name}/lineage", get(read_lineage))
+        .route("/worlds/{name}/genome", get(read_genome))
+        .route("/worlds/{name}/timeseries", get(read_timeseries))
+        .route("/worlds/{name}/food", get(read_food))
+        .route("/worlds/{name}/inspect/{id}", get(read_inspect))
+        .route("/worlds/{name}/brain/{id}", get(read_brain))
+        .route("/worlds/{name}/decide/{id}", get(read_decide))
+        .route("/worlds/{name}/top/{field}", get(read_top))
+        .route("/worlds/{name}/hist/{field}", get(read_hist))
+        .route("/worlds/{name}/find", get(read_find))
         .route(
-            "/v1/champion-pool",
+            "/champions",
             get(get_champion_pool).delete(clear_champion_pool),
         )
-        .route(
-            "/v1/champion-pool/{index}",
-            delete(delete_champion_pool_entry),
-        )
-        .route("/v1/sessions", post(create_session))
-        .route("/v1/sessions/{id}", get(get_session_metadata))
-        .route("/v1/sessions/{id}/state", get(get_state))
-        .route("/v1/sessions/{id}/step", post(step_session))
-        .route("/v1/sessions/{id}/champions", post(save_session_champions))
-        .route("/v1/sessions/{id}/focus", post(set_focus))
-        .route("/v1/sessions/{id}/stream", get(stream_session))
+        .route("/champions/{index}", delete(delete_champion_pool_entry))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
@@ -556,6 +718,350 @@ fn build_app(state: AppState) -> Router {
 async fn health() -> Json<HealthResponse> {
     Json(HealthResponse { status: "ok" })
 }
+
+// ---------------------------------------------------------------------------
+// World lifecycle + render views
+// ---------------------------------------------------------------------------
+
+async fn list_worlds(State(state): State<AppState>) -> Result<Json<Vec<String>>, AppError> {
+    let root = state.world_root.clone();
+    let names = tokio::task::spawn_blocking(move || -> Result<Vec<String>, AppError> {
+        let mut names = Vec::new();
+        match std::fs::read_dir(root.as_ref().as_path()) {
+            Ok(read_dir) => {
+                for entry in read_dir.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|e| e.to_str()) == Some("bin") {
+                        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                            names.push(stem.to_owned());
+                        }
+                    }
+                }
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(AppError::Internal(err.to_string())),
+        }
+        names.sort();
+        Ok(names)
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("list worker join error: {e}")))??;
+    Ok(Json(names))
+}
+
+async fn create_world(
+    State(state): State<AppState>,
+    Json(req): Json<NewWorldRequest>,
+) -> Result<Json<WorldResponse>, AppError> {
+    let root = state.world_root.clone();
+    let pool = state.champion_pool.clone();
+    let response = tokio::task::spawn_blocking(move || build_new_world(&root, &pool, req))
+        .await
+        .map_err(|e| AppError::Internal(format!("create worker join error: {e}")))??;
+    Ok(Json(response))
+}
+
+fn build_new_world(
+    root: &FsPath,
+    pool: &ChampionPoolStore,
+    req: NewWorldRequest,
+) -> Result<WorldResponse, AppError> {
+    let name = req
+        .name
+        .unwrap_or_else(|| format!("world-{}", Uuid::new_v4().simple()));
+    valid_world_name(&name)?;
+
+    let config_path = req.config.unwrap_or_else(|| {
+        sim_server::default_world_config_path()
+            .to_string_lossy()
+            .into_owned()
+    });
+    let sets: Vec<(String, String)> = req
+        .set
+        .iter()
+        .map(|kv| {
+            kv.split_once('=')
+                .map(|(k, v)| (k.trim().to_owned(), v.trim().to_owned()))
+                .ok_or_else(|| {
+                    AppError::BadRequest(format!("--set wants key=value, got `{kv}`"))
+                })
+        })
+        .collect::<Result<_, _>>()?;
+
+    let mut config = sim_views::world_config_with_overrides(&config_path, &sets)
+        .map_err(|e| AppError::BadRequest(e.to_string()))?;
+    if let Some(threads) = req.threads {
+        config.intent_parallel_threads = threads;
+    }
+    if let Some([width, pop]) = req.scale {
+        config.world_width = width;
+        config.num_organisms = pop;
+    }
+    let report_every = req.report_every.unwrap_or(DEFAULT_REPORT_EVERY);
+    let champions = pool.snapshot_genomes()?;
+    let sim = Simulation::new_with_champion_pool(config, req.seed.unwrap_or(0), champions)?;
+    let recorder = sim_views::start_recording(&sim);
+    save_bundle(root, &name, &sim, Some(&recorder), report_every)?;
+    let snapshot = sim.snapshot().into();
+    Ok(WorldResponse { name, snapshot })
+}
+
+async fn get_snapshot(
+    Path(name): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<WorldSnapshotView>, AppError> {
+    let root = state.world_root.clone();
+    let view = tokio::task::spawn_blocking(move || -> Result<WorldSnapshotView, AppError> {
+        let loaded = load_bundle(&root, &name)?;
+        Ok(loaded.sim.snapshot().into())
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("snapshot worker join error: {e}")))??;
+    Ok(Json(view))
+}
+
+async fn get_organism(
+    Path((name, id)): Path<(String, u64)>,
+    State(state): State<AppState>,
+) -> Result<Json<OrganismDetail>, AppError> {
+    let root = state.world_root.clone();
+    let detail = tokio::task::spawn_blocking(move || -> Result<OrganismDetail, AppError> {
+        let loaded = load_bundle(&root, &name)?;
+        let organism = loaded
+            .sim
+            .focused_organism(sim_types::OrganismId(id))
+            .ok_or_else(|| AppError::NotFound(format!("no live organism with id {id}")))?;
+        let active_action_neuron_id = organism.last_action_taken.neuron_id();
+        Ok(OrganismDetail {
+            turn: loaded.sim.turn(),
+            organism,
+            active_action_neuron_id,
+        })
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("organism worker join error: {e}")))??;
+    Ok(Json(detail))
+}
+
+async fn step_world(
+    Path(name): Path<String>,
+    State(state): State<AppState>,
+    Json(req): Json<StepRequest>,
+) -> Result<Json<WorldResponse>, AppError> {
+    let root = state.world_root.clone();
+    let response = tokio::task::spawn_blocking(move || -> Result<WorldResponse, AppError> {
+        let mut loaded = load_bundle(&root, &name)?;
+        sim_views::advance(&mut loaded.sim, loaded.recorder.as_mut(), req.count.max(1) as u64);
+        save_bundle(&root, &name, &loaded.sim, loaded.recorder.as_ref(), loaded.report_every)?;
+        Ok(WorldResponse {
+            name,
+            snapshot: loaded.sim.snapshot().into(),
+        })
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("step worker join error: {e}")))??;
+    Ok(Json(response))
+}
+
+async fn run_to_world(
+    Path(name): Path<String>,
+    State(state): State<AppState>,
+    Json(req): Json<RunToRequest>,
+) -> Result<Json<WorldResponse>, AppError> {
+    let root = state.world_root.clone();
+    let response = tokio::task::spawn_blocking(move || -> Result<WorldResponse, AppError> {
+        let mut loaded = load_bundle(&root, &name)?;
+        let current = loaded.sim.turn();
+        if req.turn > current {
+            sim_views::advance(&mut loaded.sim, loaded.recorder.as_mut(), req.turn - current);
+            save_bundle(&root, &name, &loaded.sim, loaded.recorder.as_ref(), loaded.report_every)?;
+        }
+        Ok(WorldResponse {
+            name,
+            snapshot: loaded.sim.snapshot().into(),
+        })
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("run-to worker join error: {e}")))??;
+    Ok(Json(response))
+}
+
+// ---------------------------------------------------------------------------
+// CLI-parity reads (forwarded from sim-views as raw JSON)
+// ---------------------------------------------------------------------------
+
+async fn read_state(Path(name): Path<String>, State(state): State<AppState>) -> Result<Response, AppError> {
+    blocking_read(state.world_root.clone(), name, |l| {
+        run_read(l, |c, b| sim_views::state(c, &[], b))
+    })
+    .await
+}
+
+async fn read_turn(Path(name): Path<String>, State(state): State<AppState>) -> Result<Response, AppError> {
+    blocking_read(state.world_root.clone(), name, |l| {
+        run_read(l, |c, b| sim_views::turn(c, &[], b))
+    })
+    .await
+}
+
+async fn read_pillars(Path(name): Path<String>, State(state): State<AppState>) -> Result<Response, AppError> {
+    blocking_read(state.world_root.clone(), name, |l| {
+        run_read(l, |c, b| sim_views::pillars(c, &[], b))
+    })
+    .await
+}
+
+async fn read_eco(Path(name): Path<String>, State(state): State<AppState>) -> Result<Response, AppError> {
+    blocking_read(state.world_root.clone(), name, |l| {
+        run_read(l, |c, b| sim_views::eco(c, &[], b))
+    })
+    .await
+}
+
+async fn read_lineage(Path(name): Path<String>, State(state): State<AppState>) -> Result<Response, AppError> {
+    blocking_read(state.world_root.clone(), name, |l| {
+        run_read(l, |c, b| sim_views::lineage(c, &[], b))
+    })
+    .await
+}
+
+async fn read_food(Path(name): Path<String>, State(state): State<AppState>) -> Result<Response, AppError> {
+    blocking_read(state.world_root.clone(), name, |l| {
+        run_read(l, |c, b| sim_views::food(c, &[], b))
+    })
+    .await
+}
+
+async fn read_genome(
+    Path(name): Path<String>,
+    Query(q): Query<GenomeQuery>,
+    State(state): State<AppState>,
+) -> Result<Response, AppError> {
+    blocking_read(state.world_root.clone(), name, move |l| {
+        let mut args: Vec<&str> = Vec::new();
+        if let Some(gene) = q.gene.as_deref() {
+            args.push("--gene");
+            args.push(gene);
+        }
+        if q.drift {
+            args.push("--drift");
+        }
+        run_read(l, |c, b| sim_views::genome(c, &args, b))
+    })
+    .await
+}
+
+async fn read_timeseries(
+    Path(name): Path<String>,
+    Query(q): Query<TimeseriesQuery>,
+    State(state): State<AppState>,
+) -> Result<Response, AppError> {
+    blocking_read(state.world_root.clone(), name, move |l| {
+        let last = q.last.map(|n| n.to_string());
+        let mut args: Vec<&str> = Vec::new();
+        if let Some(cols) = q.cols.as_deref() {
+            args.push("--cols");
+            args.push(cols);
+        }
+        if let Some(last) = last.as_deref() {
+            args.push("--last");
+            args.push(last);
+        }
+        run_read(l, |c, b| sim_views::timeseries(c, &args, b))
+    })
+    .await
+}
+
+async fn read_inspect(
+    Path((name, id)): Path<(String, u64)>,
+    State(state): State<AppState>,
+) -> Result<Response, AppError> {
+    blocking_read(state.world_root.clone(), name, move |l| {
+        let id = id.to_string();
+        run_read(l, |c, b| sim_views::inspect(c, &[&id], b))
+    })
+    .await
+}
+
+async fn read_decide(
+    Path((name, id)): Path<(String, u64)>,
+    State(state): State<AppState>,
+) -> Result<Response, AppError> {
+    blocking_read(state.world_root.clone(), name, move |l| {
+        let id = id.to_string();
+        run_read(l, |c, b| sim_views::decide(c, &[&id], b))
+    })
+    .await
+}
+
+async fn read_brain(
+    Path((name, id)): Path<(String, u64)>,
+    Query(q): Query<BrainQuery>,
+    State(state): State<AppState>,
+) -> Result<Response, AppError> {
+    blocking_read(state.world_root.clone(), name, move |l| {
+        let id = id.to_string();
+        let view = q.view;
+        let mut args: Vec<&str> = vec![&id];
+        if let Some(view) = view.as_deref() {
+            args.push("--view");
+            args.push(view);
+        }
+        run_read(l, |c, b| sim_views::brain(c, &args, b))
+    })
+    .await
+}
+
+async fn read_top(
+    Path((name, field)): Path<(String, String)>,
+    Query(q): Query<TopQuery>,
+    State(state): State<AppState>,
+) -> Result<Response, AppError> {
+    blocking_read(state.world_root.clone(), name, move |l| {
+        let n = q.n.map(|n| n.to_string());
+        let mut args: Vec<&str> = vec![&field];
+        if let Some(n) = n.as_deref() {
+            args.push(n);
+        }
+        run_read(l, |c, b| sim_views::top(c, &args, b))
+    })
+    .await
+}
+
+async fn read_hist(
+    Path((name, field)): Path<(String, String)>,
+    State(state): State<AppState>,
+) -> Result<Response, AppError> {
+    blocking_read(state.world_root.clone(), name, move |l| {
+        run_read(l, |c, b| sim_views::hist(c, &[&field], b))
+    })
+    .await
+}
+
+async fn read_find(
+    Path(name): Path<String>,
+    Query(q): Query<FindQuery>,
+    State(state): State<AppState>,
+) -> Result<Response, AppError> {
+    blocking_read(state.world_root.clone(), name, move |l| {
+        let limit = q.limit.map(|n| n.to_string());
+        let mut args: Vec<&str> = q.expr.split_whitespace().collect();
+        if let Some(limit) = limit.as_deref() {
+            args.push("--limit");
+            args.push(limit);
+        }
+        if let Some(fields) = q.fields.as_deref() {
+            args.push("--fields");
+            args.push(fields);
+        }
+        run_read(l, |c, b| sim_views::find(c, &args, b))
+    })
+    .await
+}
+
+// ---------------------------------------------------------------------------
+// Champions
+// ---------------------------------------------------------------------------
 
 async fn get_champion_pool(
     State(state): State<AppState>,
@@ -585,390 +1091,121 @@ async fn delete_champion_pool_entry(
     }))
 }
 
-async fn create_session(
-    State(state): State<AppState>,
-    Json(req): Json<CreateSessionRequest>,
-) -> Result<Json<CreateSessionResponse>, AppError> {
-    let config = load_runtime_default_world_config()?;
-    let champion_pool = state.champion_pool.snapshot_genomes()?;
-    let simulation = Simulation::new_with_champion_pool(config, req.seed, champion_pool)?;
-    let response = create_runtime_session(&state, simulation).await?;
-    Ok(Json(response))
-}
-
-async fn create_runtime_session(
-    state: &AppState,
-    simulation: Simulation,
-) -> Result<CreateSessionResponse, AppError> {
-    let now_ms = now_unix_ms()?;
-    let id = Uuid::new_v4();
-    let snapshot = simulation.snapshot();
-    let ticks_per_second = UNBOUNDED_TICKS_PER_SECOND;
-    let metadata = SessionMetadata {
-        id,
-        created_at_unix_ms: now_ms,
-        config: simulation.config().clone(),
-        running: false,
-        ticks_per_second,
-        stream_mode: StreamMode::Full,
-    };
-
-    let (events_tx, _events_rx) = broadcast::channel(1024);
-    let session = Arc::new(Session {
-        metadata: metadata.clone(),
-        simulation: Mutex::new(simulation),
-        events: events_tx,
-        runtime: Mutex::new(RuntimeState {
-            running: false,
-            ticks_per_second,
-            stream_mode: StreamMode::Full,
-            runner: None,
-        }),
-    });
-
-    let mut sessions = state.sessions.write().await;
-    sessions.insert(id, session);
-
-    Ok(CreateSessionResponse {
-        metadata,
-        snapshot: snapshot.into(),
-    })
-}
-
-async fn get_session_metadata(
-    Path(id): Path<Uuid>,
-    State(state): State<AppState>,
-) -> Result<Json<SessionMetadata>, AppError> {
-    let session = get_session(&state, id).await?;
-    let mut metadata = session.metadata.clone();
-    let runtime = session.runtime.lock().await;
-    metadata.running = runtime.running;
-    metadata.ticks_per_second = runtime.ticks_per_second;
-    metadata.stream_mode = runtime.stream_mode;
-    Ok(Json(metadata))
-}
-
-async fn get_state(
-    Path(id): Path<Uuid>,
-    State(state): State<AppState>,
-) -> Result<Json<WorldSnapshotView>, AppError> {
-    let session = get_session(&state, id).await?;
-    let sim = session.simulation.lock().await;
-    Ok(Json(sim.snapshot().into()))
-}
-
-async fn step_session(
-    Path(id): Path<Uuid>,
-    State(state): State<AppState>,
-    Json(req): Json<CountRequest>,
-) -> Result<Json<StepResponse>, AppError> {
-    let session = get_session(&state, id).await?;
-    let mut sim = session.simulation.lock().await;
-    sim.advance_n(req.count.max(1));
-    let snapshot = sim.snapshot();
-    drop(sim);
-
-    let _ = session
-        .events
-        .send(ServerEvent::StateSnapshot(snapshot.clone().into()));
-
-    Ok(Json(StepResponse { snapshot }))
-}
-
-async fn save_session_champions(
-    Path(id): Path<Uuid>,
+async fn save_world_champions(
+    Path(name): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Json<ChampionPoolResponse>, AppError> {
-    let session = get_session(&state, id).await?;
-    let simulation = {
-        let sim = session.simulation.lock().await;
-        sim.clone()
-    };
-    let champion_pool_store = state.champion_pool.clone();
-    let entries = tokio::task::spawn_blocking(move || {
-        if let Err(err) = champion_pool_store.update_from_simulation(&simulation) {
-            warn!("failed to update champion pool from session {id}: {err}");
+    let root = state.world_root.clone();
+    let pool = state.champion_pool.clone();
+    let entries = tokio::task::spawn_blocking(move || -> Result<Vec<ChampionGenomeRecord>, AppError> {
+        let loaded = load_bundle(&root, &name)?;
+        if let Err(err) = pool.update_from_simulation(&loaded.sim) {
+            warn!("failed to update champion pool from world `{name}`: {err}");
         }
-        champion_pool_store.snapshot_entries()
+        pool.snapshot_entries()
     })
     .await
-    .map_err(|err| {
-        AppError::Internal(format!("session champion-save worker join error: {err}"))
-    })??;
+    .map_err(|e| AppError::Internal(format!("champion-save worker join error: {e}")))??;
 
     Ok(Json(ChampionPoolResponse {
         entries: entries.into_iter().map(ChampionPoolEntry::from).collect(),
     }))
 }
 
-async fn set_focus(
-    Path(id): Path<Uuid>,
-    State(state): State<AppState>,
-    Json(req): Json<FocusRequest>,
-) -> Result<Json<WorldSnapshotView>, AppError> {
-    let session = get_session(&state, id).await?;
-    let sim = session.simulation.lock().await;
-    if let Some(org) = sim.focused_organism(req.organism_id) {
-        let active = org.last_action_taken.neuron_id();
-        let _ = session.events.send(ServerEvent::FocusBrain(FocusBrainData {
-            turn: sim.turn(),
-            organism: org,
-            active_action_neuron_id: active,
-        }));
-    }
-    let snapshot = sim.snapshot();
-    drop(sim);
+// ---------------------------------------------------------------------------
+// Live animation stream (the one resident, transient stateful surface)
+// ---------------------------------------------------------------------------
 
-    Ok(Json(snapshot.into()))
-}
-
-async fn stream_session(
+async fn stream_world(
     ws: WebSocketUpgrade,
-    Path(id): Path<Uuid>,
+    Path(name): Path<String>,
+    Query(q): Query<StreamQuery>,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
-    let session = get_session(&state, id).await?;
-    Ok(ws
-        .on_upgrade(move |socket| socket_loop(socket, session))
-        .into_response())
+    valid_world_name(&name)?;
+    // Fail before the upgrade if the world is missing/unreadable.
+    let root = state.world_root.clone();
+    let name_check = name.clone();
+    let root_check = root.clone();
+    tokio::task::spawn_blocking(move || load_bundle(&root_check, &name_check).map(|_| ()))
+        .await
+        .map_err(|e| AppError::Internal(format!("stream preflight join error: {e}")))??;
+
+    let tps = q.tps.unwrap_or(0);
+    Ok(ws.on_upgrade(move |socket| stream_loop(socket, root, name, tps)))
 }
 
-async fn socket_loop(socket: WebSocket, session: Arc<Session>) {
-    let mut rx = session.events.subscribe();
-    let (mut sender, mut receiver) = socket.split();
-
+async fn stream_loop(socket: WebSocket, root: Arc<PathBuf>, name: String, tps: u32) {
+    let (root_load, name_load) = (root.clone(), name.clone());
+    let loaded = match tokio::task::spawn_blocking(move || load_bundle(&root_load, &name_load)).await
     {
-        let sim = session.simulation.lock().await;
-        let runtime = session.runtime.lock().await;
-        let event = match runtime.stream_mode {
-            StreamMode::Full => ServerEvent::StateSnapshot(sim.snapshot().into()),
-            StreamMode::MetricsOnly => ServerEvent::Metrics(build_live_metrics_data(&sim)),
-        };
-        if let Ok(text) = serde_json::to_string(&event) {
-            if sender.send(Message::Text(text.into())).await.is_err() {
-                return;
-            }
+        Ok(Ok(loaded)) => loaded,
+        Ok(Err(err)) => {
+            warn!("stream `{name}` failed to load world: {err}");
+            return;
         }
-    }
-
-    let session_for_send = session.clone();
-    let send_task = tokio::spawn(async move {
-        loop {
-            let event = match rx.recv().await {
-                Ok(event) => event,
-                Err(RecvError::Lagged(skipped)) => {
-                    error!("ws receiver lagged by {skipped} events; sending state snapshot");
-                    let refresh_event = {
-                        let sim = session_for_send.simulation.lock().await;
-                        let runtime = session_for_send.runtime.lock().await;
-                        match runtime.stream_mode {
-                            StreamMode::Full => ServerEvent::StateSnapshot(sim.snapshot().into()),
-                            StreamMode::MetricsOnly => {
-                                ServerEvent::Metrics(build_live_metrics_data(&sim))
-                            }
-                        }
-                    };
-                    if send_ws_event(&mut sender, &refresh_event).await.is_err() {
-                        break;
-                    }
-                    continue;
-                }
-                Err(RecvError::Closed) => break,
-            };
-
-            if send_ws_event(&mut sender, &event).await.is_err() {
-                break;
-            }
+        Err(err) => {
+            error!("stream `{name}` load worker join error: {err}");
+            return;
         }
-    });
+    };
+    let mut sim = loaded.sim;
+    let mut recorder = loaded.recorder;
+    let report_every = loaded.report_every;
 
-    while let Some(message) = receiver.next().await {
-        match message {
-            Ok(Message::Text(text)) => {
-                let command = match serde_json::from_str::<ClientCommand>(&text) {
-                    Ok(cmd) => cmd,
-                    Err(err) => {
-                        let _ = session.events.send(ServerEvent::Error(ApiError {
-                            code: "bad_command".to_owned(),
-                            message: format!("failed to parse command: {err}"),
-                        }));
-                        continue;
-                    }
-                };
-
-                if let Err(err) = handle_command(command, session.clone()).await {
-                    let _ = session.events.send(ServerEvent::Error(ApiError {
-                        code: "command_error".to_owned(),
-                        message: err,
-                    }));
-                }
-            }
-            Ok(Message::Binary(_)) => {}
-            Ok(Message::Ping(_)) => {}
-            Ok(Message::Pong(_)) => {}
-            Ok(Message::Close(_)) => break,
-            Err(err) => {
-                error!("ws receive error: {err}");
-                break;
-            }
-        }
-    }
-
-    send_task.abort();
-}
-
-async fn handle_command(command: ClientCommand, session: Arc<Session>) -> Result<(), String> {
-    match command {
-        ClientCommand::Start {
-            ticks_per_second,
-            stream_mode,
-        } => {
-            session_start(session, ticks_per_second, stream_mode).await;
-            Ok(())
-        }
-        ClientCommand::Pause => {
-            session_pause(&session).await;
-            Ok(())
-        }
-        ClientCommand::Step { count } => {
-            let requested_count = count.max(1);
-            let _ = session
-                .events
-                .send(ServerEvent::StepProgress(StepProgressData {
-                    requested_count,
-                    completed_count: 0,
-                }));
-
-            let batch_size = step_batch_size(requested_count);
-            let progress_stride = step_progress_stride(requested_count).max(1);
-            let mut sim = session.simulation.lock().await;
-            let mut completed_count = 0;
-            let mut next_progress_emit = progress_stride;
-            while completed_count < requested_count {
-                let remaining = requested_count.saturating_sub(completed_count);
-                let batch_count = remaining.min(batch_size);
-                sim.advance_n(batch_count);
-                completed_count = completed_count.saturating_add(batch_count);
-
-                let is_final_batch = completed_count == requested_count;
-                if is_final_batch || completed_count >= next_progress_emit {
-                    next_progress_emit = completed_count.saturating_add(progress_stride);
-                    let _ = session
-                        .events
-                        .send(ServerEvent::StepProgress(StepProgressData {
-                            requested_count,
-                            completed_count,
-                        }));
-                    tokio::task::yield_now().await;
-                }
-            }
-            let snapshot = sim.snapshot();
-            drop(sim);
-            let _ = session
-                .events
-                .send(ServerEvent::StateSnapshot(snapshot.into()));
-            Ok(())
-        }
-        ClientCommand::SetFocus { organism_id } => {
-            let sim = session.simulation.lock().await;
-            if let Some(organism) = sim.focused_organism(organism_id) {
-                let active = organism.last_action_taken.neuron_id();
-                let _ = session.events.send(ServerEvent::FocusBrain(FocusBrainData {
-                    turn: sim.turn(),
-                    organism,
-                    active_action_neuron_id: active,
-                }));
-            }
-            Ok(())
-        }
-    }
-}
-
-async fn session_start(session: Arc<Session>, ticks_per_second: u32, stream_mode: StreamMode) {
-    let mut runtime = session.runtime.lock().await;
-    runtime.ticks_per_second = ticks_per_second;
-    runtime.stream_mode = stream_mode;
-
-    if runtime.running {
+    let (mut sender, mut receiver) = socket.split();
+    let initial = StreamFrame::StateSnapshot(sim.snapshot().into());
+    if send_frame(&mut sender, &initial).await.is_err() {
         return;
     }
 
-    runtime.running = true;
-    let session_for_task = session.clone();
-    runtime.runner = Some(tokio::spawn(async move {
-        loop {
-            let (tps, stream_mode) = {
-                let rt = session_for_task.runtime.lock().await;
-                if !rt.running {
+    let step_delay = if tps > 0 {
+        Duration::from_millis((1000_u64 / tps as u64).max(1))
+    } else {
+        Duration::ZERO
+    };
+
+    loop {
+        tokio::select! {
+            incoming = receiver.next() => {
+                match incoming {
+                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                    _ => {}
+                }
+            }
+            _ = tokio::time::sleep(step_delay) => {
+                let delta = sim_views::tick_recording(&mut sim, recorder.as_mut());
+                if send_frame(&mut sender, &StreamFrame::TickDelta(delta.into()))
+                    .await
+                    .is_err()
+                {
                     break;
                 }
-                (rt.ticks_per_second, rt.stream_mode)
-            };
-
-            match stream_mode {
-                StreamMode::Full => {
-                    let delta = {
-                        let mut sim = session_for_task.simulation.lock().await;
-                        sim.tick()
-                    };
-
-                    let _ = session_for_task
-                        .events
-                        .send(ServerEvent::TickDelta(delta.into()));
-                }
-                StreamMode::MetricsOnly => {
-                    let metrics = {
-                        let mut sim = session_for_task.simulation.lock().await;
-                        sim.advance_n(METRICS_ONLY_STREAM_INTERVAL_TICKS);
-                        build_live_metrics_data(&sim)
-                    };
-                    let _ = session_for_task.events.send(ServerEvent::Metrics(metrics));
-                }
-            }
-
-            if tps > 0 {
-                tokio::time::sleep(Duration::from_millis((1000_u64 / tps as u64).max(1))).await;
-            } else {
-                tokio::task::yield_now().await;
             }
         }
+    }
 
-        let mut rt = session_for_task.runtime.lock().await;
-        rt.running = false;
-        rt.runner = None;
-    }));
+    // Persist the advanced world + sidecar so the stream leaves the file at its
+    // current turn, exactly as a `step`/`run-to` would.
+    let _ = tokio::task::spawn_blocking(move || {
+        if let Err(err) = save_bundle(&root, &name, &sim, recorder.as_ref(), report_every) {
+            warn!("stream `{name}` failed to persist world on close: {err}");
+        }
+    })
+    .await;
 }
 
-async fn send_ws_event(
+async fn send_frame(
     sender: &mut futures::stream::SplitSink<WebSocket, Message>,
-    event: &ServerEvent,
+    frame: &StreamFrame,
 ) -> Result<(), ()> {
-    match serde_json::to_string(event) {
-        Ok(text) => sender
-            .send(Message::Text(text.into()))
-            .await
-            .map_err(|_| ()),
+    match serde_json::to_string(frame) {
+        Ok(text) => sender.send(Message::Text(text.into())).await.map_err(|_| ()),
         Err(err) => {
-            error!("failed to serialize server event: {err}");
+            error!("failed to serialize stream frame: {err}");
             Ok(())
         }
     }
-}
-
-async fn session_pause(session: &Arc<Session>) {
-    let mut runtime = session.runtime.lock().await;
-    runtime.running = false;
-    if let Some(handle) = runtime.runner.take() {
-        handle.abort();
-    }
-}
-
-async fn get_session(state: &AppState, id: Uuid) -> Result<Arc<Session>, AppError> {
-    let sessions = state.sessions.read().await;
-    sessions
-        .get(&id)
-        .cloned()
-        .ok_or_else(|| AppError::NotFound(format!("session {id} not found")))
 }
 
 #[cfg(test)]

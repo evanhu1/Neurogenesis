@@ -3,7 +3,7 @@ import { colorForSpeciesId } from '../../speciesColor';
 import type { MutationRateGenes, OrganismState } from '../../types';
 import { BrainCanvas } from './BrainCanvas';
 
-type InspectorPanelProps = {
+type InspectorContentProps = {
   focusedOrganism: OrganismState | null;
   activeActionNeuronId: number | null;
   onDefocus: () => void;
@@ -75,11 +75,13 @@ function CollapsibleSection({
   );
 }
 
-export function InspectorPanel({
+// Chrome-less inspector body: identity row + organism stats + neural network.
+// Rendered inside the cockpit's "Inspect" tab (the tab strip is the header).
+export function InspectorContent({
   focusedOrganism,
   activeActionNeuronId,
   onDefocus,
-}: InspectorPanelProps) {
+}: InspectorContentProps) {
   const [expandedSections, setExpandedSections] = useState<Record<SectionKey, boolean>>({
     genome: false,
     mutationRates: false,
@@ -162,9 +164,9 @@ export function InspectorPanel({
   }, [focusedOrganism]);
 
   return (
-    <aside className="flex h-full flex-col overflow-hidden rounded-2xl border border-line bg-panel/90 shadow-panel backdrop-blur">
-      <header className="flex shrink-0 items-center justify-between border-b border-line px-3.5 py-2.5">
-        {focusedOrganism ? (
+    <div className="flex h-full min-h-0 flex-col">
+      {focusedOrganism && (
+        <div className="flex shrink-0 items-center justify-between border-b border-line px-3.5 py-2">
           <div className="flex items-center gap-2">
             <span
               className="h-2.5 w-2.5 rounded-full"
@@ -177,26 +179,22 @@ export function InspectorPanel({
               species {focusedOrganism.species_id}
             </span>
           </div>
-        ) : (
-          <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/40">
-            Inspector
-          </h2>
-        )}
-        <button
-          onClick={onDefocus}
-          className="rounded-md p-1 text-ink/25 transition hover:bg-surface/60 hover:text-ink/60"
-          aria-label="Close inspector"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 20 20"
-            fill="currentColor"
-            className="h-4 w-4"
+          <button
+            onClick={onDefocus}
+            className="rounded-md p-1 text-ink/25 transition hover:bg-surface/60 hover:text-ink/60"
+            aria-label="Clear selection"
           >
-            <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-          </svg>
-        </button>
-      </header>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              className="h-4 w-4"
+            >
+              <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       {!summary ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
@@ -266,6 +264,6 @@ export function InspectorPanel({
           </div>
         </>
       )}
-    </aside>
+    </div>
   );
 }

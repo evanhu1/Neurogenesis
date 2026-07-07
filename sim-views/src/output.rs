@@ -1,27 +1,27 @@
-//! Shared output primitives for the CLI: the text/JSON format switch, compact
-//! distribution stats, and token-cheap sparklines. Every command renders
-//! through these so output is uniform and agent-parseable.
+//! Shared output primitives: the text/JSON format switch, compact distribution
+//! stats, and token-cheap sparklines. Every read renders through these so output
+//! is uniform and agent-parseable, identical across the CLI and the server.
 
 use serde_json::{json, Value};
 
-/// Default output format for commands that support both. Flipped globally with
-/// the `format` command or per-command with `--json` / `--text`.
+/// Default output format for commands that support both. Selected per-command
+/// with `--json` / `--text`, or set as a default by the caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum Format {
+pub enum Format {
     #[default]
     Text,
     Json,
 }
 
 impl Format {
-    pub(crate) fn is_json(self) -> bool {
+    pub fn is_json(self) -> bool {
         self == Format::Json
     }
 }
 
 /// Five-number summary of a scalar field across the population.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Stats {
+pub struct Stats {
     pub n: usize,
     pub min: f64,
     pub p50: f64,
@@ -32,7 +32,7 @@ pub(crate) struct Stats {
 
 impl Stats {
     /// Compute over `vals` (does not need to be pre-sorted). `None` if empty.
-    pub(crate) fn of(vals: &[f64]) -> Option<Stats> {
+    pub fn of(vals: &[f64]) -> Option<Stats> {
         if vals.is_empty() {
             return None;
         }
@@ -50,14 +50,14 @@ impl Stats {
         })
     }
 
-    pub(crate) fn text(&self) -> String {
+    pub fn text(&self) -> String {
         format!(
             "min={:.2} p50={:.2} mean={:.2} p90={:.2} max={:.2}",
             self.min, self.p50, self.mean, self.p90, self.max
         )
     }
 
-    pub(crate) fn json(&self) -> Value {
+    pub fn json(&self) -> Value {
         json!({
             "n": self.n,
             "min": self.min,
@@ -82,7 +82,7 @@ const SPARK_LEVELS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇'
 
 /// Render a numeric series as a unicode block sparkline (one char per sample).
 /// Scales to the series' own [min,max]; a flat series renders as the low block.
-pub(crate) fn sparkline(vals: &[f64]) -> String {
+pub fn sparkline(vals: &[f64]) -> String {
     if vals.is_empty() {
         return String::new();
     }
@@ -102,14 +102,14 @@ pub(crate) fn sparkline(vals: &[f64]) -> String {
 }
 
 /// Format an optional metric, printing `NA` when the signal is absent.
-pub(crate) fn opt(value: Option<f64>, decimals: usize) -> String {
+pub fn opt(value: Option<f64>, decimals: usize) -> String {
     value
         .map(|v| format!("{v:.decimals$}"))
         .unwrap_or_else(|| "NA".to_string())
 }
 
 /// JSON-encode an optional metric (null when absent).
-pub(crate) fn opt_json(value: Option<f64>) -> Value {
+pub fn opt_json(value: Option<f64>) -> Value {
     match value {
         Some(v) => json!(v),
         None => Value::Null,

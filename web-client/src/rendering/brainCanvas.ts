@@ -1,4 +1,4 @@
-import type { BrainState } from '../../types';
+import type { BrainState } from '../types';
 
 export type BrainTransform = { x: number; y: number; scale: number };
 

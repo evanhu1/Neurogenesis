@@ -311,8 +311,6 @@ export type MetricsSnapshot = ApiMetricsSnapshot & {
   species_counts: Record<string, number>;
 };
 
-export type StreamMode = 'full' | 'metrics_only';
-
 export type TerrainCell = {
   q: number;
   r: number;
@@ -342,24 +340,15 @@ export type WorldSnapshot = {
   metrics: MetricsSnapshot;
 };
 
-export type ApiSessionMetadata = {
-  id: string;
-  created_at_unix_ms: number;
-  config: WorldConfig;
-  running: boolean;
-  ticks_per_second: number;
-  stream_mode: StreamMode;
-};
-
-export type SessionMetadata = ApiSessionMetadata;
-
-export type ApiCreateSessionResponse = {
-  metadata: ApiSessionMetadata;
+// Result of a mutating world command (create/step/run-to): the world's name +
+// its fresh render snapshot.
+export type ApiWorldResponse = {
+  name: string;
   snapshot: ApiWorldSnapshot;
 };
 
-export type CreateSessionResponse = {
-  metadata: SessionMetadata;
+export type WorldResponse = {
+  name: string;
   snapshot: WorldSnapshot;
 };
 
@@ -446,44 +435,121 @@ export type TickDelta = {
   metrics: ApiMetricsSnapshot;
 };
 
-export type ApiStepProgressData = {
-  requested_count: number;
-  completed_count: number;
-};
-
-export type StepProgressData = ApiStepProgressData;
-
-export type ApiLiveMetricsData = {
-  turn: number;
-  metrics: ApiMetricsSnapshot;
-  species_counts: Record<string, number>;
-};
-
+// Overview tiles source this from the renderer's current snapshot.
 export type LiveMetricsData = {
   turn: number;
   metrics: MetricsSnapshot;
 };
 
-type FocusBrainDataOf<Id> = {
+// `/worlds/{name}/organism/{id}`: the full detail of one organism for the
+// inspector's brain visualization (was FocusBrainData in the session model).
+type OrganismDetailOf<Id> = {
   turn: number;
   organism: OrganismStateOf<Id>;
   active_action_neuron_id: Id | null;
 };
 
-export type ApiFocusBrainData = FocusBrainDataOf<ApiScalarId>;
-export type FocusBrainData = FocusBrainDataOf<number>;
+export type ApiOrganismDetail = OrganismDetailOf<ApiScalarId>;
+export type OrganismDetail = OrganismDetailOf<number>;
 
 export type ApiErrorData = {
   code: string;
   message: string;
 };
 
-export type ApiServerEvent =
+// Frames pushed over the `/worlds/{name}/stream` WebSocket.
+export type ApiStreamFrame =
   | { type: 'StateSnapshot'; data: ApiWorldSnapshot }
-  | { type: 'TickDelta'; data: ApiTickDelta }
-  | { type: 'StepProgress'; data: ApiStepProgressData }
-  | { type: 'FocusBrain'; data: ApiFocusBrainData }
-  | { type: 'Metrics'; data: ApiLiveMetricsData }
-  | { type: 'Error'; data: ApiErrorData };
+  | { type: 'TickDelta'; data: ApiTickDelta };
 
-export type ServerEvent = ApiServerEvent;
+// ---------------------------------------------------------------------------
+// Research reads (CLI-parity JSON reads surfaced in the cockpit). These payloads
+// are plain data with no scalar-id newtypes, so the wire and UI types are one
+// and the same — no normalization needed.
+// ---------------------------------------------------------------------------
+
+export type StatsSummary = {
+  n: number;
+  min: number;
+  p50: number;
+  mean: number;
+  p90: number;
+  max: number;
+};
+
+export type PillarIntervalMetric = {
+  tick: number;
+  action_effectiveness: number | null;
+  plant_consumption_rate: number | null;
+  prey_consumption_rate: number | null;
+  mi_sa: number | null;
+  learning_slope: number | null;
+  pop: number;
+};
+
+export type PillarsView = {
+  window_start_tick: number;
+  window_end_tick: number;
+  intervals: number;
+  partial: boolean;
+  scaled: boolean;
+  plant_consumption_rate: number | null;
+  prey_consumption_rate: number | null;
+  action_effectiveness: number | null;
+  mi_sa: number | null;
+  learning_slope: number | null;
+  granular: {
+    report_every: number;
+    window_start_tick: number;
+    window_end_tick: number;
+    intervals: PillarIntervalMetric[];
+  };
+};
+
+export type EcoTrajectory = {
+  ticks: number;
+  population_series: number[];
+  food_series: number[];
+  births_per_tick: number;
+  deaths_per_tick: number;
+  deaths_by_cause: {
+    total: number;
+    starvation: number;
+    age: number;
+    predation: number;
+    other: number;
+  };
+  consumptions_per_tick: number;
+  predations_per_tick: number;
+  carrying_capacity_est: number;
+};
+
+export type EcoView = {
+  turn: number;
+  population: number;
+  descendants: number;
+  food: { plants: number; corpses: number; total_energy: number };
+  trajectory: EcoTrajectory | null;
+  note?: string;
+};
+
+export type LineageView = {
+  population: number;
+  generation: { stats: StatsSummary | null; histogram: number[] };
+  lineages: { distinct: number; top: { species_id: number; count: number; pct: number }[] };
+  note?: string;
+};
+
+export type GenomeGeneStat = { group: string; stats: StatsSummary | null };
+export type GenomeMutationRate = { mean: number; state: 'hot' | 'cold' };
+export type GenomeView = {
+  population: number;
+  genes: Record<string, GenomeGeneStat>;
+  mutation_rates: Record<string, GenomeMutationRate>;
+  drift_note?: string;
+};
+
+export type TimeseriesData = Record<string, (number | null)[]>;
+
+export type FindRow = Record<string, number | boolean>;
+export type FindResult = { matched: number; shown: number; rows: FindRow[] };

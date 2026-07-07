@@ -1,0 +1,788 @@
+//! sim-views — the shared data plane for the NeuroGenesis research tooling.
+//!
+//! Owns world/metric-sidecar file IO, recording-aware advancement, world
+//! construction, and every read command as a function that renders to a writer
+//! (text or JSON, chosen per call). Both `sim-cli` (agent-facing shell) and
+//! `sim-server` (the human-facing web backend) are thin frontends over this
+//! crate, so the numbers the agent and the researcher see are identical by
+//! construction.
+//!
+//! Read commands take a [`ReadCtx`] (a borrowed view of a loaded world + its
+//! optional metric recorder) and write to any [`std::io::Write`]. They are pure
+//! reads: no world mutation, no `--out`.
+
+pub mod dashboards;
+pub mod inspect_ext;
+pub mod output;
+
+// Flat re-exports so callers use `sim_views::eco` / `sim_views::find` alongside
+// the reads defined directly in this module (`state`, `pillars`, …).
+pub use dashboards::{eco, genome, lineage, timeseries};
+pub use inspect_ext::{brain, decide, find};
+
+use anyhow::{anyhow, Result};
+use output::{opt, opt_json, Format, Stats};
+use serde_json::json;
+use sim_config::{load_world_config_from_path, world_config_from_toml_parts, WorldConfig};
+use sim_core::Simulation;
+use sim_metrics::{
+    compute_pillar_scores, derive_interval_metrics, ingest_tick, register_existing,
+    register_founders, IntervalMetrics, Ledger, OrganismLifetimeRow, PillarScores, TickSummaryRow,
+};
+use sim_types::EntityId;
+use std::fs::File;
+use std::io::{BufReader, BufWriter, Write};
+use std::path::{Path, PathBuf};
+
+/// In-memory metric recorder. Holds the shared per-organism ledger plus the two
+/// raw fact streams the analysis layer consumes (`derive_interval_metrics`):
+/// the per-tick descendant-population line and the lifetime rows of organisms
+/// that died while recording. Survivors are intentionally absent — the interval
+/// layer skips `death_tick == None` rows, exactly as the eval does.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct Recorder {
+    pub ledger: Ledger,
+    pub tick_summary: Vec<TickSummaryRow>,
+    pub lifetimes: Vec<OrganismLifetimeRow>,
+    /// Richer per-recorded-tick ecology samples for `eco`/`timeseries`
+    /// trajectories (the metric `tick_summary` only carries descendant pop).
+    pub samples: Vec<EcoSample>,
+    /// Turn at which recording began. `> 0` means already-alive organisms were
+    /// back-registered with partial lifetime counters (windows are approximate).
+    pub started_turn: u64,
+}
+
+/// One per recorded tick: a cheap, whole-world ecology snapshot from the
+/// `TickDelta` metrics (no extra organism scans), powering `eco`/`timeseries`.
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub struct EcoSample {
+    pub population: u32,
+    pub descendants: u32,
+    pub food: u32,
+    pub births: u32,
+    pub deaths: u32,
+    pub starvations: u32,
+    pub age_deaths: u32,
+    pub predations: u32,
+    pub consumptions: u32,
+    pub reproductions: u32,
+}
+
+/// A borrowed, read-only view of a loaded world plus its optional metric
+/// recorder — the argument every read command takes. `format`/`scaled` carry
+/// the caller's presentation defaults (per-command `--json`/`--text` still
+/// override `format`).
+pub struct ReadCtx<'a> {
+    pub sim: &'a Simulation,
+    pub recorder: Option<&'a Recorder>,
+    pub report_every: u64,
+    pub format: Format,
+    pub scaled: bool,
+}
+
+impl ReadCtx<'_> {
+    /// Compute live pillars over the recorded span using the exact `sim-metrics`
+    /// pipeline. Returns the scores, the interval count, and whether the window
+    /// is partial (recording started after turn 0). `None` when not recording.
+    pub fn live_pillars(&self) -> Option<(PillarScores, usize, bool)> {
+        let rec = self.recorder?;
+        let total_ticks = self.sim.turn();
+        let intervals = derive_interval_metrics(
+            &rec.tick_summary,
+            &rec.lifetimes,
+            self.report_every,
+            total_ticks,
+        );
+        let scores = compute_pillar_scores(&intervals);
+        Some((scores, intervals.len(), rec.started_turn > 0))
+    }
+
+    /// The full per-interval metric series behind the pillar scores — the
+    /// granular data `pillars` reports alongside the windowed means.
+    pub fn live_intervals(&self) -> Option<Vec<IntervalMetrics>> {
+        let rec = self.recorder?;
+        let total_ticks = self.sim.turn();
+        Some(derive_interval_metrics(
+            &rec.tick_summary,
+            &rec.lifetimes,
+            self.report_every,
+            total_ticks,
+        ))
+    }
+}
+
+/// Strip `--json` / `--text` from `args`, returning the effective format (the
+/// per-command flag overriding `default`) and the rest.
+pub fn take_format<'a>(default: Format, args: &[&'a str]) -> (Format, Vec<&'a str>) {
+    let mut fmt = default;
+    let mut rest = Vec::with_capacity(args.len());
+    for &a in args {
+        match a {
+            "--json" => fmt = Format::Json,
+            "--text" => fmt = Format::Text,
+            _ => rest.push(a),
+        }
+    }
+    (fmt, rest)
+}
+
+// ---------------------------------------------------------------------------
+// World / metric-sidecar file IO
+// ---------------------------------------------------------------------------
+
+/// Write to `<path>.tmp` then atomically rename into place, so a crash or write
+/// error mid-save can't truncate an existing file — worlds are often advanced in
+/// place (`--out` defaults to `--in`), so the input is the only copy. Creates
+/// the parent directory and flushes before the rename.
+pub fn atomic_write(
+    path: &str,
+    write: impl FnOnce(&mut BufWriter<File>) -> Result<()>,
+) -> Result<()> {
+    if let Some(parent) = Path::new(path).parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).ok();
+        }
+    }
+    let tmp = format!("{path}.tmp");
+    {
+        let mut w =
+            BufWriter::new(File::create(&tmp).map_err(|e| anyhow!("cannot write `{tmp}`: {e}"))?);
+        write(&mut w)?;
+        w.flush().map_err(|e| anyhow!("flushing `{tmp}`: {e}"))?;
+    }
+    std::fs::rename(&tmp, path).map_err(|e| anyhow!("renaming `{tmp}` -> `{path}`: {e}"))
+}
+
+pub fn load_world(path: &str) -> Result<Simulation> {
+    let file = File::open(path).map_err(|e| anyhow!("cannot open world `{path}`: {e}"))?;
+    Simulation::load(BufReader::new(file)).map_err(|e| anyhow!("loading world `{path}`: {e}"))
+}
+
+pub fn save_world(sim: &Simulation, path: &str) -> Result<()> {
+    atomic_write(path, |w| {
+        sim.save(w)
+            .map_err(|e| anyhow!("saving world `{path}`: {e}"))
+    })
+}
+
+/// Load a metric sidecar: `(report_every, recorder)`, serialized as a CBOR
+/// 2-tuple by [`save_sidecar`].
+pub fn load_sidecar(path: &str) -> Result<(u64, Recorder)> {
+    let file = File::open(path).map_err(|e| anyhow!("cannot open metrics `{path}`: {e}"))?;
+    ciborium::from_reader(BufReader::new(file))
+        .map_err(|e| anyhow!("loading metrics `{path}`: {e}"))
+}
+
+pub fn save_sidecar(report_every: u64, recorder: &Recorder, path: &str) -> Result<()> {
+    atomic_write(path, |w| {
+        // Serialize a borrowed `(report_every, recorder)` tuple — no clone of the
+        // (large) recorder, and no hand-mirrored struct to keep in sync.
+        ciborium::into_writer(&(report_every, recorder), w)
+            .map_err(|e| anyhow!("saving metrics `{path}`: {e}"))
+    })
+}
+
+/// Resolve the metric sidecar path: `None` when `no_metrics`; the explicit path
+/// when given; otherwise the `<world>.metrics` sibling.
+pub fn resolve_metrics_path(
+    world_path: &str,
+    explicit: Option<&str>,
+    no_metrics: bool,
+) -> Option<String> {
+    if no_metrics {
+        return None;
+    }
+    if let Some(p) = explicit {
+        return Some(p.to_string());
+    }
+    Some(sibling_metrics_path(world_path))
+}
+
+/// The `<world>.metrics` sibling path for a world file.
+pub fn sibling_metrics_path(world_path: &str) -> String {
+    PathBuf::from(world_path)
+        .with_extension("metrics")
+        .to_string_lossy()
+        .into_owned()
+}
+
+// ---------------------------------------------------------------------------
+// Config construction
+// ---------------------------------------------------------------------------
+
+/// Build a `WorldConfig` from a config file path + inline `--set` overrides.
+/// No overrides → the plain loader.
+pub fn world_config_with_overrides(
+    config_path: &str,
+    sets: &[(String, String)],
+) -> Result<WorldConfig> {
+    if sets.is_empty() {
+        return load_world_config_from_path(Path::new(config_path));
+    }
+    let world_raw = std::fs::read_to_string(config_path)
+        .map_err(|e| anyhow!("reading config `{config_path}`: {e}"))?;
+    let seed_genome_path = Path::new(config_path).with_file_name("seed_genome.toml");
+    let seed_genome_raw = std::fs::read_to_string(&seed_genome_path)
+        .map_err(|e| anyhow!("reading {}: {e}", seed_genome_path.display()))?;
+    world_config_from_raw_overrides(&world_raw, &seed_genome_raw, sets)
+}
+
+/// The patch+reparse half of [`world_config_with_overrides`], taking raw TOML so
+/// a caller (`sweep`) can read the config files once and reuse them across many
+/// override-sets.
+pub fn world_config_from_raw_overrides(
+    world_raw: &str,
+    seed_genome_raw: &str,
+    sets: &[(String, String)],
+) -> Result<WorldConfig> {
+    let patched = apply_config_overrides(world_raw, sets)?;
+    world_config_from_toml_parts(&patched, seed_genome_raw)
+        .map_err(|e| anyhow!("config after --set failed schema validation: {e}"))
+}
+
+/// Patch a world-config TOML document with `key=value` overrides before parsing.
+/// Keys are matched against any `[section]` table first (the eval config keys are
+/// section-unique, e.g. `food_energy` under `[food]`), then the top level.
+/// Values are coerced to int/float/bool, falling back to string.
+fn apply_config_overrides(world_raw: &str, sets: &[(String, String)]) -> Result<String> {
+    if sets.is_empty() {
+        return Ok(world_raw.to_string());
+    }
+    let mut doc: toml::Table = world_raw
+        .parse()
+        .map_err(|e| anyhow!("config TOML parse failed: {e}"))?;
+    for (key, val) in sets {
+        let value = coerce_toml_value(val);
+        if !set_in_tables(&mut doc, key, &value) {
+            doc.insert(key.clone(), value);
+        }
+    }
+    toml::to_string(&doc).map_err(|e| anyhow!("re-serializing config failed: {e}"))
+}
+
+/// Set `key` in the first `[section]` sub-table that already contains it.
+/// Returns true if a home was found.
+fn set_in_tables(doc: &mut toml::Table, key: &str, value: &toml::Value) -> bool {
+    if doc.contains_key(key) {
+        doc.insert(key.to_string(), value.clone());
+        return true;
+    }
+    for (_, v) in doc.iter_mut() {
+        if let toml::Value::Table(section) = v {
+            if section.contains_key(key) {
+                section.insert(key.to_string(), value.clone());
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn coerce_toml_value(raw: &str) -> toml::Value {
+    if let Ok(i) = raw.parse::<i64>() {
+        return toml::Value::Integer(i);
+    }
+    if let Ok(f) = raw.parse::<f64>() {
+        return toml::Value::Float(f);
+    }
+    if let Ok(b) = raw.parse::<bool>() {
+        return toml::Value::Boolean(b);
+    }
+    toml::Value::String(raw.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// World construction + recording-aware advancement
+// ---------------------------------------------------------------------------
+
+/// Inputs to [`build_world`] — a config path plus the overrides `new` accepts.
+pub struct NewWorldParams {
+    pub config_path: String,
+    pub seed: u64,
+    pub report_every: u64,
+    pub threads: Option<u32>,
+    pub scale: Option<(u32, u32)>,
+    pub sets: Vec<(String, String)>,
+}
+
+/// A freshly constructed world plus the derived flags a caller reports/persists.
+pub struct BuiltWorld {
+    pub sim: Simulation,
+    pub report_every: u64,
+    pub scaled: bool,
+}
+
+/// Construct a world from a config file + inline `--set` overrides + optional
+/// `--scale`/`--threads`. Presentation (the `new` summary line) stays with the
+/// caller; this only builds.
+pub fn build_world(params: &NewWorldParams) -> Result<BuiltWorld> {
+    let mut config = world_config_with_overrides(&params.config_path, &params.sets)?;
+    if let Some(t) = params.threads {
+        config.intent_parallel_threads = t;
+    }
+    if let Some((w, p)) = params.scale {
+        config.world_width = w;
+        config.num_organisms = p;
+    }
+    let sim = Simulation::new(config, params.seed).map_err(|e| anyhow!("{e}"))?;
+    Ok(BuiltWorld {
+        sim,
+        report_every: params.report_every,
+        scaled: params.scale.is_some(),
+    })
+}
+
+/// Begin recording on a world: build a fresh ledger and back-register the live
+/// population (founders exactly at turn 0, otherwise a partial window). Used when
+/// `new` mints a sidecar and when a mutating command finds no existing sidecar.
+pub fn start_recording(sim: &Simulation) -> Recorder {
+    let mut ledger = Ledger::new();
+    let started_turn = sim.turn();
+    if started_turn == 0 {
+        register_founders(&mut ledger, sim.organisms());
+    } else {
+        register_existing(&mut ledger, sim.organisms());
+    }
+    Recorder {
+        ledger,
+        tick_summary: Vec::new(),
+        lifetimes: Vec::new(),
+        samples: Vec::new(),
+        started_turn,
+    }
+}
+
+/// Advance `n` ticks. When a recorder is passed, each tick's delta is fed to the
+/// ledger via the shared `ingest_tick`; otherwise this is the fast,
+/// allocation-free scrub path (delta dropped).
+pub fn advance(sim: &mut Simulation, mut recorder: Option<&mut Recorder>, n: u64) {
+    for _ in 0..n {
+        tick_recording(sim, recorder.as_deref_mut());
+    }
+}
+
+/// Advance the simulation exactly one tick, feeding the delta to the recorder
+/// ledger when one is present, and return the delta. This is the per-tick unit
+/// behind [`advance`]; a resident driver (e.g. the server's live stream) uses
+/// the returned delta to animate while still recording metrics identically.
+pub fn tick_recording(sim: &mut Simulation, recorder: Option<&mut Recorder>) -> sim_types::TickDelta {
+    let delta = sim.tick();
+    if let Some(rec) = recorder {
+        let turn = sim.turn();
+        let deaths = ingest_tick(&mut rec.ledger, turn, &delta, sim.action_records());
+        rec.lifetimes.extend(deaths);
+        let descendants = rec.ledger.descendant_population();
+        rec.tick_summary.push(TickSummaryRow {
+            tick: turn,
+            descendant_population: descendants,
+        });
+        let org_deaths = delta
+            .removed_positions
+            .iter()
+            .filter(|r| matches!(r.entity_id, EntityId::Organism(_)))
+            .count() as u32;
+        rec.samples.push(EcoSample {
+            population: delta.metrics.organisms,
+            descendants,
+            food: sim.foods().len() as u32,
+            births: delta.spawned.len() as u32,
+            deaths: org_deaths,
+            starvations: delta.metrics.starvations_last_turn as u32,
+            age_deaths: delta.metrics.age_deaths_last_turn as u32,
+            predations: delta.metrics.predations_last_turn as u32,
+            consumptions: delta.metrics.consumptions_last_turn as u32,
+            reproductions: delta.metrics.reproductions_last_turn as u32,
+        });
+    }
+    delta
+}
+
+// ---------------------------------------------------------------------------
+// Reads (formerly `impl App` methods in sim-cli/src/main.rs)
+// ---------------------------------------------------------------------------
+
+pub fn turn(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
+    let (fmt, _) = take_format(ctx.format, args);
+    let t = ctx.sim.turn();
+    if fmt.is_json() {
+        writeln!(out, "{}", json!({ "turn": t })).map_err(Into::into)
+    } else {
+        writeln!(out, "turn = {t}").map_err(Into::into)
+    }
+}
+
+pub fn pillars(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
+    let (fmt, _) = take_format(ctx.format, args);
+    let Some((p, n_intervals, partial)) = ctx.live_pillars() else {
+        anyhow::bail!("recording is off; advance a world with a metric sidecar before `pillars`");
+    };
+    let intervals = ctx.live_intervals().unwrap_or_default();
+    if fmt.is_json() {
+        let mut v = pillars_value(&p, n_intervals, partial);
+        v["scaled"] = json!(ctx.scaled);
+        // All the granular data behind the scores: the full per-interval series
+        // (each interval's sub-signals), so the windowed pillar means can be read
+        // against their underlying trajectory.
+        v["granular"] = json!({
+            "report_every": ctx.report_every,
+            "window_start_tick": p.window_start_tick,
+            "window_end_tick": p.window_end_tick,
+            "intervals": serde_json::to_value(&intervals).unwrap_or(serde_json::Value::Null),
+        });
+        return writeln!(out, "{v}").map_err(Into::into);
+    }
+    let tag = match (partial, ctx.scaled) {
+        (true, true) => "  [PARTIAL window; scaled: non-canonical]",
+        (true, false) => "  [PARTIAL window]",
+        (false, true) => "  [scaled: non-canonical]",
+        (false, false) => "",
+    };
+    writeln!(
+        out,
+        "pillars over ({}, {}]  ({n_intervals} interval(s), report_every={}){tag}",
+        p.window_start_tick, p.window_end_tick, ctx.report_every
+    )?;
+    writeln!(
+        out,
+        "  foraging      plant_consumption_rate {}",
+        opt(p.mean_plant_consumption_rate, 4)
+    )?;
+    writeln!(
+        out,
+        "  predation     prey_consumption_rate  {}",
+        opt(p.mean_prey_consumption_rate, 4)
+    )?;
+    writeln!(
+        out,
+        "  intelligence  action_effectiveness {}  mi_sa {}",
+        opt(p.mean_action_effectiveness, 4),
+        opt(p.mean_mi_sa, 4),
+    )?;
+    writeln!(
+        out,
+        "  learning      learning_slope {}",
+        opt(p.mean_learning_slope, 6),
+    )?;
+    // Granular per-interval series behind the scores (the window marked *).
+    writeln!(out, "  granular intervals (tick: eff plant prey mi slope):")?;
+    for m in &intervals {
+        let in_window = m.tick > p.window_start_tick && m.tick <= p.window_end_tick;
+        writeln!(
+            out,
+            "  {}{:>7}: {} {} {} {} {}",
+            if in_window { "*" } else { " " },
+            m.tick,
+            opt(m.action_effectiveness, 3),
+            opt(m.plant_consumption_rate, 4),
+            opt(m.prey_consumption_rate, 4),
+            opt(m.mi_sa, 3),
+            opt(m.learning_slope, 6),
+        )?;
+    }
+    Ok(())
+}
+
+pub fn state(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
+    let (fmt, _) = take_format(ctx.format, args);
+    let pillars = ctx.live_pillars();
+    let scaled = ctx.scaled;
+    let sim = ctx.sim;
+    let orgs = sim.organisms();
+    let pop = orgs.len();
+    let descendants = orgs.iter().filter(|o| o.generation > 0).count();
+    let m = sim.metrics().clone();
+    let turn = sim.turn();
+
+    let energy = Stats::of(&orgs.iter().map(|o| o.energy as f64).collect::<Vec<_>>());
+    let health = Stats::of(&orgs.iter().map(|o| o.health as f64).collect::<Vec<_>>());
+    let age = Stats::of(&orgs.iter().map(|o| o.age_turns as f64).collect::<Vec<_>>());
+    let gen = Stats::of(&orgs.iter().map(|o| o.generation as f64).collect::<Vec<_>>());
+
+    let (plants, corpses, food_energy) = food_summary(sim);
+
+    if fmt.is_json() {
+        let mut v = json!({
+            "turn": turn,
+            "population": pop,
+            "descendants": descendants,
+            "founders": pop - descendants,
+            "energy": energy.map(|s| s.json()),
+            "health": health.map(|s| s.json()),
+            "age_turns": age.map(|s| s.json()),
+            "generation": gen.map(|s| s.json()),
+            "food": { "plants": plants, "corpses": corpses, "total_energy": food_energy },
+            "last_turn": {
+                "consumptions": m.consumptions_last_turn,
+                "predations": m.predations_last_turn,
+                "reproductions": m.reproductions_last_turn,
+                "starvations": m.starvations_last_turn,
+                "age_deaths": m.age_deaths_last_turn,
+            },
+            "scaled": scaled,
+        });
+        if let Some((p, n, partial)) = pillars {
+            v["pillars"] = pillars_value(&p, n, partial);
+        }
+        return writeln!(out, "{v}").map_err(Into::into);
+    }
+
+    let fmt_stats = |s: Option<Stats>| s.map(|s| s.text()).unwrap_or_else(|| "(none)".into());
+    writeln!(
+        out,
+        "turn = {turn}{}",
+        if scaled {
+            "  [scaled: non-canonical]"
+        } else {
+            ""
+        }
+    )?;
+    writeln!(
+        out,
+        "population = {pop}  (descendants gen>0 = {descendants}, founders/injections = {})",
+        pop - descendants
+    )?;
+    writeln!(out, "  energy:     {}", fmt_stats(energy))?;
+    writeln!(out, "  health:     {}", fmt_stats(health))?;
+    writeln!(out, "  age_turns:  {}", fmt_stats(age))?;
+    writeln!(out, "  generation: {}", fmt_stats(gen))?;
+    writeln!(
+        out,
+        "food: plants={plants} corpses={corpses} total_energy={food_energy:.0}"
+    )?;
+    writeln!(
+        out,
+        "last-turn: consumptions={} predations={} reproductions={} starvations={} age_deaths={}",
+        m.consumptions_last_turn,
+        m.predations_last_turn,
+        m.reproductions_last_turn,
+        m.starvations_last_turn,
+        m.age_deaths_last_turn,
+    )?;
+    if let Some((p, _, partial)) = pillars {
+        writeln!(
+            out,
+            "metrics: plant_rate {} | prey_rate {} | action_eff {} | mi_sa {} | learn_slope {}{}",
+            opt(p.mean_plant_consumption_rate, 4),
+            opt(p.mean_prey_consumption_rate, 4),
+            opt(p.mean_action_effectiveness, 4),
+            opt(p.mean_mi_sa, 4),
+            opt(p.mean_learning_slope, 6),
+            if partial { "  [PARTIAL]" } else { "" },
+        )?;
+    }
+    Ok(())
+}
+
+pub fn food(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
+    let (fmt, _) = take_format(ctx.format, args);
+    let sim = ctx.sim;
+    let (plants, corpses, energy) = food_summary(sim);
+    let total = plants + corpses;
+    let cells = (sim.config().world_width as u64).pow(2);
+    let coverage = total as f64 / cells as f64 * 100.0;
+    if fmt.is_json() {
+        return writeln!(
+            out,
+            "{}",
+            json!({
+                "plants": plants,
+                "corpses": corpses,
+                "total": total,
+                "total_energy": energy,
+                "coverage_pct": coverage,
+                "cells": cells,
+            })
+        )
+        .map_err(Into::into);
+    }
+    writeln!(
+        out,
+        "food: plants={plants} corpses={corpses} total={total} total_energy={energy:.0} \
+         coverage={coverage:.3}% of {cells} cells"
+    )
+    .map_err(Into::into)
+}
+
+pub fn inspect(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
+    let id: u64 = args
+        .first()
+        .ok_or_else(|| anyhow!("inspect needs an organism id"))?
+        .parse()?;
+    let sim = ctx.sim;
+    let idx = sim
+        .organisms()
+        .iter()
+        .position(|o| o.id.0 == id)
+        .ok_or_else(|| anyhow!("no live organism with id {id}"))?;
+    let rec = sim.action_records().get(idx).cloned().flatten();
+    let o = &sim.organisms()[idx];
+    writeln!(out, "organism {id}:")?;
+    writeln!(
+        out,
+        "  pos=({}, {}) facing={:?} energy={:.2} health={:.2}/{:.2} age={} gen={} species={} gestating={}",
+        o.q, o.r, o.facing, o.energy, o.health, o.max_health, o.age_turns, o.generation, o.species_id.0, o.is_gestating
+    )?;
+    writeln!(
+        out,
+        "  last_action={:?} consumptions={} (plant={}, prey={}) reproductions={}",
+        o.last_action_taken,
+        o.consumptions_count,
+        o.plant_consumptions_count,
+        o.prey_consumptions_count,
+        o.reproductions_count
+    )?;
+    let g = &o.genome;
+    writeln!(
+        out,
+        "  genome: num_neurons={} synapses={} vision_distance={} | hebb_eta={:.4} juv_scale={:.3} elig_ret={:.3} max_dw={:.4} prune={:.4} | maturity={} gestation={} max_age={}",
+        g.topology.num_neurons,
+        o.brain.synapse_count,
+        g.topology.vision_distance,
+        g.plasticity.hebb_eta_gain,
+        g.plasticity.juvenile_eta_scale,
+        g.plasticity.eligibility_retention,
+        g.plasticity.max_weight_delta_per_tick,
+        g.plasticity.synapse_prune_threshold,
+        g.lifecycle.age_of_maturity,
+        g.lifecycle.gestation_ticks,
+        g.lifecycle.max_organism_age,
+    )?;
+    write!(out, "  action logits:")?;
+    for a in &o.brain.action {
+        write!(out, " {:?}={:.3}", a.action_type, a.logit)?;
+    }
+    writeln!(out)?;
+    if let Some(rec) = rec {
+        writeln!(
+            out,
+            "  this-tick: selected={:?} failed={} food_visible(rays -1/0/+1)={:?} utilization={:.3}",
+            rec.selected_action, rec.action_failed, rec.food_visible, rec.utilization
+        )?;
+    }
+    Ok(())
+}
+
+pub fn top(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
+    let field = *args.first().ok_or_else(|| anyhow!("top needs a field"))?;
+    if !matches!(
+        field,
+        "energy" | "health" | "age" | "generation" | "consumptions" | "reproductions"
+    ) {
+        anyhow::bail!(
+            "unknown field `{field}` (energy|health|age|generation|consumptions|reproductions)"
+        );
+    }
+    let n: usize = args.get(1).map(|s| s.parse()).transpose()?.unwrap_or(10);
+    let sim = ctx.sim;
+    let mut idx: Vec<usize> = (0..sim.organisms().len()).collect();
+    let key = |o: &sim_types::OrganismState| -> f64 {
+        match field {
+            "energy" => o.energy as f64,
+            "health" => o.health as f64,
+            "age" => o.age_turns as f64,
+            "generation" => o.generation as f64,
+            "consumptions" => o.consumptions_count as f64,
+            "reproductions" => o.reproductions_count as f64,
+            _ => f64::NAN,
+        }
+    };
+    let orgs = sim.organisms();
+    idx.sort_by(|&a, &b| key(&orgs[b]).total_cmp(&key(&orgs[a])));
+    writeln!(out, "top {n} by {field}:")?;
+    for &i in idx.iter().take(n) {
+        let o = &orgs[i];
+        writeln!(
+            out,
+            "  id={:<6} {field}={:<12.3} energy={:.1} age={} gen={} consum={} repro={} last={:?}",
+            o.id.0,
+            key(o),
+            o.energy,
+            o.age_turns,
+            o.generation,
+            o.consumptions_count,
+            o.reproductions_count,
+            o.last_action_taken
+        )?;
+    }
+    Ok(())
+}
+
+pub fn hist(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
+    let field = *args.first().ok_or_else(|| anyhow!("hist needs a field"))?;
+    let sim = ctx.sim;
+    let vals: Vec<f64> = sim
+        .organisms()
+        .iter()
+        .map(|o| match field {
+            "energy" => o.energy as f64,
+            "health" => o.health as f64,
+            "age" => o.age_turns as f64,
+            "generation" => o.generation as f64,
+            _ => f64::NAN,
+        })
+        .collect();
+    if vals.iter().any(|v| v.is_nan()) {
+        anyhow::bail!("unknown field `{field}` (energy|health|age|generation)");
+    }
+    if vals.is_empty() {
+        writeln!(out, "(no organisms)")?;
+        return Ok(());
+    }
+    let min = vals.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max = vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let bins = 10usize;
+    let width = ((max - min) / bins as f64).max(f64::MIN_POSITIVE);
+    let mut counts = vec![0u64; bins];
+    for v in &vals {
+        let b = (((v - min) / width) as usize).min(bins - 1);
+        counts[b] += 1;
+    }
+    let peak = counts.iter().copied().max().unwrap_or(1).max(1);
+    writeln!(out, "{field} histogram ({} organisms):", vals.len())?;
+    for (i, c) in counts.iter().enumerate() {
+        let lo = min + i as f64 * width;
+        let hi = lo + width;
+        let bar = "#".repeat((c * 40 / peak) as usize);
+        writeln!(out, "  [{lo:>9.1}, {hi:>9.1}) {c:>8} {bar}")?;
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Shared read helpers
+// ---------------------------------------------------------------------------
+
+/// Shared JSON encoding of the windowed metric readout (used by `pillars` and
+/// `state`). Raw values only — no [0,1] pillar scoring.
+pub(crate) fn pillars_value(
+    p: &PillarScores,
+    n_intervals: usize,
+    partial: bool,
+) -> serde_json::Value {
+    json!({
+        "window_start_tick": p.window_start_tick,
+        "window_end_tick": p.window_end_tick,
+        "intervals": n_intervals,
+        "partial": partial,
+        "plant_consumption_rate": opt_json(p.mean_plant_consumption_rate),
+        "prey_consumption_rate": opt_json(p.mean_prey_consumption_rate),
+        "action_effectiveness": opt_json(p.mean_action_effectiveness),
+        "mi_sa": opt_json(p.mean_mi_sa),
+        "learning_slope": opt_json(p.mean_learning_slope),
+    })
+}
+
+/// Plant/corpse counts and total food energy across the world.
+pub fn food_summary(sim: &Simulation) -> (u64, u64, f64) {
+    let mut plants = 0u64;
+    let mut corpses = 0u64;
+    let mut energy = 0f64;
+    for f in sim.foods() {
+        match f.kind {
+            sim_types::FoodKind::Plant => plants += 1,
+            sim_types::FoodKind::Corpse => corpses += 1,
+        }
+        energy += f.energy as f64;
+    }
+    (plants, corpses, energy)
+}
