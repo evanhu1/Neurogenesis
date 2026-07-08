@@ -1,77 +1,126 @@
-mod analysis;
-mod cli;
-mod comparison;
-mod dataset;
-mod ledger;
-mod orchestration;
-mod output;
-mod report;
-mod types;
+//! sim-evaluation — headless multi-seed evolution harness for the new substrate.
+//!
+//! With no fitness function, progress is measured by **Quality-Diversity**:
+//! after running each seed to a tick budget (or extinction), we build a
+//! MAP-Elites archive over a behavior descriptor and report coverage / QD-score
+//! alongside population and lineage stats. There is no periodic injection — a
+//! seed that goes extinct ends there (its extinction turn is recorded).
+//!
+//! Usage: sim-evaluation [--seeds a,b,c] [--ticks N] [--width W] [--founders F]
+//!                       [--out summary.json]
 
-use anyhow::{anyhow, Result};
-use clap::Parser;
-use cli::{Cli, Command, FeatureOverrides};
-use comparison::{apply_feature_overrides, run_comparison_evaluation};
-use orchestration::run_evaluation_across_seeds;
-use output::{
-    default_output_dir, normalize_seeds, print_comparison_summary, print_evaluation_summary,
-};
-use sim_config::load_world_config_from_path;
-use types::HarnessRunOptions;
+use sim_hexworld::{HexConfig, HexSim};
+use sim_substrate::QdArchive;
 
-fn main() -> Result<()> {
-    let cli = Cli::parse();
-    if cfg!(debug_assertions) {
-        eprintln!(
-            "warning: running sim-evaluation in debug mode; use `cargo run -p sim-evaluation --release -- ...` for much faster runs"
-        );
-    }
+const DEFAULT_SEEDS: [u64; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+const QD_RESOLUTION: usize = 8;
 
-    match cli.command.clone().unwrap_or(Command::Run) {
-        Command::Run => run(cli),
-        Command::Analyze { run } => analysis::cli::analyze_run(&run),
-    }
+#[derive(serde::Serialize)]
+struct SeedReport {
+    seed: u64,
+    final_turn: u64,
+    alive: usize,
+    total_ever: u64,
+    extinct_at: Option<u64>,
+    max_generation: u64,
+    mean_neurons: f32,
+    mean_edges: f32,
+    qd_coverage: usize,
+    qd_score: f32,
 }
 
-fn run(cli: Cli) -> Result<()> {
-    let base_config = load_world_config_from_path(&cli.config)?;
-    let overrides = FeatureOverrides {
-        disable_plasticity: cli.disable_plasticity,
-    };
+#[derive(serde::Serialize)]
+struct Summary {
+    ticks: u64,
+    seeds: Vec<SeedReport>,
+    mean_alive: f32,
+    mean_qd_coverage: f32,
+    extinctions: usize,
+}
 
-    let seeds = normalize_seeds(cli.seeds);
-    if seeds.is_empty() {
-        return Err(anyhow!("sim-evaluation requires at least one seed"));
+fn main() -> anyhow::Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let flags = parse_flags(&args);
+
+    let seeds: Vec<u64> = flags
+        .get("seeds")
+        .map(|s| s.split(',').filter_map(|x| x.trim().parse().ok()).collect())
+        .unwrap_or_else(|| DEFAULT_SEEDS.to_vec());
+    let ticks: u64 = flags.get("ticks").and_then(|s| s.parse().ok()).unwrap_or(5000);
+    let width: u32 = flags.get("width").and_then(|s| s.parse().ok()).unwrap_or(32);
+    let founders: usize = flags.get("founders").and_then(|s| s.parse().ok()).unwrap_or(200);
+
+    let mut reports = Vec::new();
+    for &seed in &seeds {
+        let config = HexConfig {
+            world_width: width,
+            num_founders: founders,
+            ..HexConfig::default()
+        };
+        let mut sim = HexSim::new(config, seed);
+        while sim.turn() < ticks {
+            if !sim.tick() {
+                break;
+            }
+        }
+
+        // Build a QD archive from the final living population.
+        let mut archive = QdArchive::new(QD_RESOLUTION);
+        for body in sim.living_bodies() {
+            let descriptor = sim.behavior_descriptor(body);
+            // Quality proxy: reproductive success ~ generational depth + energy.
+            let quality = body.generation as f32 + body.energy / 100.0;
+            archive.insert(body.genome.clone(), descriptor, quality);
+        }
+        let stats = sim.population_stats();
+        eprintln!(
+            "seed {seed}: turn={} alive={} born={} extinct_at={:?} qd_cov={}",
+            stats.turn, stats.alive, stats.total_ever, stats.extinct_at, archive.coverage()
+        );
+        reports.push(SeedReport {
+            seed,
+            final_turn: stats.turn,
+            alive: stats.alive,
+            total_ever: stats.total_ever,
+            extinct_at: stats.extinct_at,
+            max_generation: stats.max_generation,
+            mean_neurons: stats.mean_neurons,
+            mean_edges: stats.mean_edges,
+            qd_coverage: archive.coverage(),
+            qd_score: archive.qd_score(),
+        });
     }
 
-    let options = HarnessRunOptions {
-        seeds: seeds.clone(),
-        ticks: cli.ticks,
-        report_every: cli.report_every,
-        out_dir: cli.out.unwrap_or_else(|| default_output_dir(&seeds)),
-        title: cli.title,
-        control: cli.control,
+    let n = reports.len().max(1) as f32;
+    let summary = Summary {
+        ticks,
+        mean_alive: reports.iter().map(|r| r.alive as f32).sum::<f32>() / n,
+        mean_qd_coverage: reports.iter().map(|r| r.qd_coverage as f32).sum::<f32>() / n,
+        extinctions: reports.iter().filter(|r| r.extinct_at.is_some()).count(),
+        seeds: reports,
     };
 
-    if cli.compare || overrides.has_overrides() {
-        // The treatment arm is derived from the unmutated base config so that
-        // `--control` (force random actions) only applies to the control arm.
-        let treatment_config = apply_feature_overrides(base_config.clone(), &overrides);
-        let mut control_config = base_config;
-        if cli.control {
-            control_config.force_random_actions = true;
-        }
-        let comparison =
-            run_comparison_evaluation(control_config, treatment_config, &options, &overrides)?;
-        print_comparison_summary(&options.out_dir, &comparison);
+    let json = serde_json::to_string_pretty(&summary)?;
+    if let Some(out) = flags.get("out") {
+        std::fs::write(out, &json)?;
+        eprintln!("wrote {out}");
     } else {
-        let mut config = base_config;
-        if cli.control {
-            config.force_random_actions = true;
-        }
-        let summary = run_evaluation_across_seeds(config, &options)?;
-        print_evaluation_summary(&options.out_dir, &summary);
+        println!("{json}");
     }
-
     Ok(())
+}
+
+fn parse_flags(args: &[String]) -> std::collections::BTreeMap<String, String> {
+    let mut flags = std::collections::BTreeMap::new();
+    let mut i = 0;
+    while i < args.len() {
+        if let Some(key) = args[i].strip_prefix("--") {
+            let val = args.get(i + 1).cloned().unwrap_or_default();
+            flags.insert(key.to_string(), val);
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    flags
 }

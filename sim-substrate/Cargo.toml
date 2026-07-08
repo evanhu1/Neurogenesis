@@ -1,0 +1,16 @@
+[package]
+name = "sim-substrate"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+bincode = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+rand_distr = { workspace = true }
+
+[[example]]
+name = "headless"
+path = "examples/headless.rs"

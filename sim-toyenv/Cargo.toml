@@ -1,0 +1,13 @@
+[package]
+name = "sim-toyenv"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+sim-substrate = { path = "../sim-substrate" }
+rand = { workspace = true }
+
+[[example]]
+name = "headless"
+path = "examples/headless.rs"

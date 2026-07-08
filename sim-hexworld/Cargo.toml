@@ -1,0 +1,23 @@
+[package]
+name = "sim-hexworld"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+sim-substrate = { path = "../sim-substrate" }
+sim-types = { path = "../sim-types" }
+serde = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+
+[dev-dependencies]
+bincode = { workspace = true }
+
+[[example]]
+name = "headless"
+path = "examples/headless.rs"
+
+[[example]]
+name = "simsmoke"
+path = "examples/simsmoke.rs"
