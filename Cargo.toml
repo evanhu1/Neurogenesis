@@ -1,13 +1,12 @@
 [workspace]
 members = [
-  "sim-config",
-  "sim-core",
+  "sim-substrate",
+  "sim-hexworld",
+  "sim-toyenv",
   "sim-evaluation",
-  "sim-metrics",
   "sim-types",
   "sim-server",
   "sim-cli",
-  "sim-views",
 ]
 resolver = "2"
 

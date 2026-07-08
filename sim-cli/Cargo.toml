@@ -8,10 +8,6 @@ license.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-ciborium.workspace = true
-toml.workspace = true
-sim-config = { path = "../sim-config" }
-sim-core = { path = "../sim-core", features = ["instrumentation"] }
-sim-types = { path = "../sim-types", features = ["instrumentation"] }
-sim-metrics = { path = "../sim-metrics" }
-sim-views = { path = "../sim-views" }
+bincode.workspace = true
+sim-substrate = { path = "../sim-substrate" }
+sim-hexworld = { path = "../sim-hexworld" }

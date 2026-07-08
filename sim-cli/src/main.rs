@@ -1,586 +1,311 @@
-//! sim-cli — stateless, world-as-file research CLI for the NeuroGenesis engine.
+//! sim-cli — stateless, world-as-file research CLI for the NeuroGenesis engine
+//! (new substrate). Each invocation reads a `HexSim` world from `--in`, runs one
+//! command, and (for mutating commands) writes the advanced world to `--out`
+//! (default `--in`). Output is JSON.
 //!
-//! Each invocation reads a world from `--in`, runs one command, and (for
-//! mutating commands) writes the advanced world to `--out` (default `--in`).
-//! Metrics live in a `<world>.metrics` sidecar that follows the world. All
-//! world IO, advancement, and read rendering live in the shared `sim-views`
-//! crate (which the web server also uses), so live metrics match the offline
-//! eval and the agent/human views are identical. Output is JSON by default;
-//! `--text` overrides per call.
-//!
-//! See docs/sim-cli.md (usage) and docs/sim-cli-stateless-spec.md + SPEC.md.
+//! Commands:
+//!   new [--seed N] [--width W] [--founders F] [--energy E] --out w.bin
+//!   run-to <turn> --in w.bin [--out w.bin]      # stops early on extinction
+//!   step [N] --in w.bin [--out w.bin]
+//!   state --in w.bin
+//!   inspect <id> --in w.bin
+//!   brain <id> --in w.bin
+//!   genome <id> --in w.bin
+//!   decide <id> --in w.bin
+//!   find <field> <op> <value> --in w.bin        # op: gt lt ge le eq
+//!   lineage --in w.bin
 
-mod dashboards;
-mod sweep;
-
-use anyhow::{anyhow, bail, Result};
-use serde_json::json;
-use sim_core::Simulation;
-use sim_views::output::Format;
-use sim_views::{
-    advance, build_world, load_sidecar, load_world, resolve_metrics_path, save_sidecar, save_world,
-    sibling_metrics_path, start_recording, take_format, NewWorldParams, ReadCtx, Recorder,
-};
-use std::io::{self, BufRead, Write};
-use std::path::{Path, PathBuf};
-
-pub(crate) const DEFAULT_CONFIG: &str = "sim-evaluation/config.toml";
-/// Default reporting-interval width (matches the eval; override at `new`).
-pub(crate) const REPORT_EVERY: u64 = 10_000;
-/// Default directory for run-mode result files (sweep, etc.). Override with the
-/// global `--out-dir` flag. Under `artifacts/` so results survive a session.
-const DEFAULT_OUT_DIR: &str = "artifacts/runs";
-
-/// Build a timestamped result-file path under `out_dir`, creating the directory.
-/// Run modes (sweep, …) write their result artifact here so output is durable
-/// and discoverable rather than scrolled past in stdout.
-pub(crate) fn run_output_path(out_dir: &str, prefix: &str) -> Result<PathBuf> {
-    std::fs::create_dir_all(out_dir)
-        .map_err(|e| anyhow!("cannot create out-dir `{out_dir}`: {e}"))?;
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    // PID suffix so two sweeps started in the same millisecond don't collide.
-    Ok(PathBuf::from(out_dir).join(format!("{prefix}-{stamp}-{}.json", std::process::id())))
-}
-
-/// Commands that advance / create a world and therefore persist it (`--out`,
-/// defaulting to `--in`). Everything else is a pure read.
-fn is_mutating(cmd: &str) -> bool {
-    matches!(cmd, "new" | "step" | "run-to" | "watch")
-}
-
-/// Pure-read commands: read the loaded world, write only stdout, never `--out`.
-/// These are the commands allowed inside `query` batch mode.
-fn is_read_only(cmd: &str) -> bool {
-    matches!(
-        cmd,
-        "turn"
-            | "pillars"
-            | "state"
-            | "eco"
-            | "lineage"
-            | "genome"
-            | "timeseries"
-            | "food"
-            | "inspect"
-            | "top"
-            | "hist"
-            | "find"
-            | "brain"
-            | "decide"
-    )
-}
-
-fn print_help(out: &mut impl Write) -> Result<()> {
-    writeln!(
-        out,
-        "sim-cli — stateless world-as-file research CLI (agent-facing). JSON output by default; `--text` to override.\n\
-         \n\
-         WORLD I/O\n\
-         \x20 --in <world.bin>     read a world (required by every command except `new`)\n\
-         \x20 --out <world.bin>    write the advanced world (mutating cmds; defaults to --in = advance in place)\n\
-         \x20 --metrics <path>     metric sidecar (defaults to the `<world>.metrics` sibling; --no-metrics to disable)\n\
-         \n\
-         MUTATING (persist the world)\n\
-         \x20 new [--config P] [--seed N] [--set k=v]... [--scale W,POP] [--threads K] [--report-every R] --out w.bin\n\
-         \x20 step [N] --in w.bin [--out w.bin]            advance N ticks (default 1)\n\
-         \x20 run-to T --in w.bin [--out w.bin]            advance until turn == T\n\
-         \x20 watch T [--every E] --in w.bin [--out w.bin] advance to T, emitting a metrics row every E ticks\n\
-         \x20 bench [N] --in w.bin                         time N ticks (world discarded)\n\
-         \x20 sweep --grid k=v,v... --seeds N,N --to T [--out-dir D]  parallel grid×seed runs → result file\n\
-         \n\
-         READS (stdout only)\n\
-         \x20 turn | state | pillars | eco | lineage | genome [--gene G] | food --in w.bin\n\
-         \x20 timeseries [--cols LIST] [--last K] --in w.bin\n\
-         \x20 inspect ID | top FIELD [N] | hist FIELD | find EXPR | brain ID [--view V] | decide ID --in w.bin\n\
-         \x20 query --in w.bin                             read-only commands from stdin (one per line), one load\n\
-         \n\
-         pillars/eco-trajectory/timeseries need a metric sidecar (minted by `new`, follows the world).\n\
-         Snapshot/fork a world with `cp`; full reference in docs/sim-cli.md."
-    )
-    .map_err(Into::into)
-}
+use anyhow::{anyhow, bail, Context, Result};
+use serde_json::{json, Value};
+use sim_hexworld::{HexConfig, HexSim};
+use sim_substrate::brain::{EXPLICIT_IDLE_LOGIT_BIAS, MIN_ACTION_TEMPERATURE};
+use std::collections::BTreeMap;
 
 fn main() {
     if let Err(e) = run() {
-        // Structured, single-line error for the agent driving us over the shell.
-        eprintln!("{}", json!({ "error": e.to_string() }));
+        eprintln!("error: {e:#}");
         std::process::exit(1);
     }
 }
 
-/// One-shot entry point. Parses `argv` into `<command> [global flags] [command
-/// args]`, loads the world (and auto-following metric sidecar), runs the single
-/// command, then persists the world + sidecar for mutating commands.
-fn run() -> Result<()> {
-    let argv: Vec<String> = std::env::args().skip(1).collect();
-    let cmd: String = argv.first().cloned().unwrap_or_default();
-    if cmd.is_empty() || cmd == "help" || cmd == "--help" || cmd == "-h" {
-        let mut out = io::stdout().lock();
-        print_help(&mut out)?;
-        return Ok(());
-    }
-    let cmd = cmd.as_str();
+struct Args {
+    command: String,
+    positionals: Vec<String>,
+    flags: BTreeMap<String, String>,
+}
 
-    // Pull global flags (orthogonal to every command) out of the arg stream.
-    let mut in_path: Option<String> = None;
-    let mut out_path: Option<String> = None;
-    let mut metrics_flag: Option<String> = None;
-    let mut out_dir: String = DEFAULT_OUT_DIR.to_string();
-    let mut no_metrics = false;
-    let mut rest: Vec<String> = Vec::new();
-    let mut it = argv.into_iter().skip(1);
-    while let Some(a) = it.next() {
-        match a.as_str() {
-            "--in" => in_path = Some(it.next().ok_or_else(|| anyhow!("--in needs a path"))?),
-            "--out" => out_path = Some(it.next().ok_or_else(|| anyhow!("--out needs a path"))?),
-            "--metrics" => {
-                metrics_flag = Some(it.next().ok_or_else(|| anyhow!("--metrics needs a path"))?)
-            }
-            "--out-dir" => out_dir = it.next().ok_or_else(|| anyhow!("--out-dir needs a path"))?,
-            "--no-metrics" => no_metrics = true,
-            _ => rest.push(a),
+fn parse_args() -> Result<Args> {
+    let raw: Vec<String> = std::env::args().skip(1).collect();
+    if raw.is_empty() {
+        bail!("usage: sim-cli <command> [args] [--in w.bin] [--out w.bin]");
+    }
+    let command = raw[0].clone();
+    let mut positionals = Vec::new();
+    let mut flags = BTreeMap::new();
+    let mut i = 1;
+    while i < raw.len() {
+        let tok = &raw[i];
+        if let Some(key) = tok.strip_prefix("--") {
+            let val = raw.get(i + 1).cloned().unwrap_or_default();
+            flags.insert(key.to_string(), val);
+            i += 2;
+        } else {
+            positionals.push(tok.clone());
+            i += 1;
         }
     }
-    let cmd_args: Vec<&str> = rest.iter().map(String::as_str).collect();
+    Ok(Args {
+        command,
+        positionals,
+        flags,
+    })
+}
 
-    // Run modes that own their world(s) and emit a result file, not --in/--out.
-    if cmd == "sweep" {
-        let mut out = io::stdout().lock();
-        return sweep::run_sweep(&cmd_args, &out_dir, &mut out);
-    }
+fn load(args: &Args) -> Result<HexSim> {
+    let path = args
+        .flags
+        .get("in")
+        .ok_or_else(|| anyhow!("this command needs --in <world.bin>"))?;
+    let bytes = std::fs::read(path).with_context(|| format!("reading {path}"))?;
+    bincode::deserialize(&bytes).with_context(|| format!("decoding world {path}"))
+}
 
-    let mut app = App {
-        sim: None,
-        recorder: None,
-        report_every: REPORT_EVERY,
-        format: Format::Json, // JSON by default for the agent CLI; `--text` overrides.
-        scaled: false,
-    };
-    let mut out = io::stdout().lock();
-    let mutating = is_mutating(cmd);
-
-    if cmd == "new" {
-        // Constructor: build the world from config + overrides; mint a sidecar
-        // unless suppressed. Persisted below.
-        build_world_cli(&mut app, &cmd_args, &mut out)?;
-        if !no_metrics {
-            app.start_recording()?;
-        }
-    } else {
-        let world_path = in_path
-            .clone()
-            .ok_or_else(|| anyhow!("`{cmd}` needs --in <world.bin>"))?;
-        app.sim = Some(load_world(&world_path)?);
-
-        // The metric sidecar follows the world: explicit --metrics, else the
-        // `<world>.metrics` sibling if present. Mutating commands without an
-        // existing sidecar mint a fresh one (back-registering live organisms)
-        // so recording is on by default; --no-metrics opts out.
-        let metrics_path = resolve_metrics_path(&world_path, metrics_flag.as_deref(), no_metrics);
-        if let Some(mp) = metrics_path.as_ref() {
-            if Path::new(mp).exists() {
-                let (report_every, recorder) = load_sidecar(mp)?;
-                app.report_every = report_every;
-                // Warn (on stderr, so stdout JSON stays clean) if the sidecar's
-                // recorded span doesn't reach the world's turn — e.g. the world
-                // was advanced under `--no-metrics`. Pillars/eco are then
-                // computed only over what was recorded, which is easy to misread.
-                let world_turn = app.sim.as_ref().map(|s| s.turn()).unwrap_or(0);
-                let sidecar_last = recorder
-                    .tick_summary
-                    .last()
-                    .map(|r| r.tick)
-                    .unwrap_or(recorder.started_turn);
-                if sidecar_last < world_turn {
-                    eprintln!(
-                        "{}",
-                        json!({ "warning": format!(
-                            "metric sidecar is stale: covers ticks <= {sidecar_last} but world is at turn {world_turn}; \
-                             history-based reads use the recorded span only"
-                        ) })
-                    );
-                }
-                app.recorder = Some(recorder);
-            } else if mutating {
-                app.start_recording()?;
-            }
-        }
-
-        app.run_oneshot(cmd, &cmd_args, &mut out)?;
-        out.flush()?;
-
-        if mutating {
-            let dest = out_path.clone().unwrap_or_else(|| world_path.clone());
-            save_world(app.sim.as_ref().expect("world loaded"), &dest)?;
-            if let Some(rec) = app.recorder.as_ref() {
-                // The sidecar follows the WRITTEN world. On a fork (--out != --in)
-                // it lands beside the fork, so the source world's sidecar is never
-                // overwritten with a higher turn count (which would desync it).
-                let sidecar_dest = if dest != world_path {
-                    sibling_metrics_path(&dest)
-                } else {
-                    metrics_path
-                        .clone()
-                        .expect("recorder present implies a metrics path")
-                };
-                save_sidecar(app.report_every, rec, &sidecar_dest)?;
-            }
-        }
-        return Ok(());
-    }
-
-    // `new` persistence (world + minted sidecar).
-    out.flush()?;
-    let dest = out_path
-        .clone()
-        .ok_or_else(|| anyhow!("`new` needs --out <world.bin>"))?;
-    save_world(app.sim.as_ref().expect("world built"), &dest)?;
-    if let Some(rec) = app.recorder.as_ref() {
-        let mp = resolve_metrics_path(&dest, metrics_flag.as_deref(), no_metrics)
-            .expect("recorder present implies metrics enabled");
-        save_sidecar(app.report_every, rec, &mp)?;
-    }
+fn save(args: &Args, sim: &HexSim) -> Result<()> {
+    let out = args
+        .flags
+        .get("out")
+        .or_else(|| args.flags.get("in"))
+        .ok_or_else(|| anyhow!("mutating command needs --out or --in"))?;
+    let bytes = bincode::serialize(sim).context("encoding world")?;
+    std::fs::write(out, bytes).with_context(|| format!("writing {out}"))?;
     Ok(())
 }
 
-/// CLI-side state: the loaded world, its optional metric recorder, and the
-/// presentation defaults. All heavy lifting (IO, advancement, reads) is
-/// delegated to `sim-views`; this struct just holds the pieces a `ReadCtx`
-/// borrows and the mutating-command loop advances.
-pub(crate) struct App {
-    pub(crate) sim: Option<Simulation>,
-    pub(crate) recorder: Option<Recorder>,
-    pub(crate) report_every: u64,
-    pub(crate) format: Format,
-    pub(crate) scaled: bool,
+fn print(value: Value) {
+    println!("{}", serde_json::to_string_pretty(&value).unwrap());
 }
 
-impl App {
-    fn sim(&mut self) -> Result<&mut Simulation> {
-        self.sim
-            .as_mut()
-            .ok_or_else(|| anyhow!("no world loaded (use --in <world.bin>)"))
-    }
-
-    /// Borrow the loaded world + recorder as a read context for `sim-views`.
-    pub(crate) fn read_ctx(&self) -> Result<ReadCtx<'_>> {
-        Ok(ReadCtx {
-            sim: self
-                .sim
-                .as_ref()
-                .ok_or_else(|| anyhow!("no world loaded (use --in <world.bin>)"))?,
-            recorder: self.recorder.as_ref(),
-            report_every: self.report_every,
-            format: self.format,
-            scaled: self.scaled,
-        })
-    }
-
-    /// Begin recording on the current world (fresh ledger, live population
-    /// back-registered). Used when `new` mints a sidecar and when a mutating
-    /// command finds no existing sidecar to extend.
-    pub(crate) fn start_recording(&mut self) -> Result<()> {
-        let sim = self
-            .sim
-            .as_ref()
-            .ok_or_else(|| anyhow!("no world loaded to record"))?;
-        self.recorder = Some(start_recording(sim));
-        Ok(())
-    }
-
-    /// Advance `n` ticks through the shared recording-aware path.
-    pub(crate) fn advance(&mut self, n: u64) -> Result<()> {
-        let sim = self
-            .sim
-            .as_mut()
-            .ok_or_else(|| anyhow!("no world loaded (use --in <world.bin>)"))?;
-        advance(sim, self.recorder.as_mut(), n);
-        Ok(())
-    }
-
-    /// Run one command against the already-loaded world. `new` is handled by the
-    /// orchestrator (it constructs rather than reads), so it is not here.
-    fn run_oneshot(&mut self, cmd: &str, args: &[&str], out: &mut impl Write) -> Result<()> {
-        if is_read_only(cmd) {
-            return self.run_read(cmd, args, out);
-        }
-        match cmd {
-            "step" => self.step(args, out),
-            "run-to" => self.run_to(args, out),
-            "bench" => self.bench(args, out),
-            "watch" => self.watch(args, out),
-            "query" => self.query(out),
-            other => bail!("unknown command `{other}` (try `help`)"),
-        }
-    }
-
-    /// Dispatch a pure-read command to `sim-views` against a borrowed context.
-    fn run_read(&mut self, cmd: &str, args: &[&str], out: &mut impl Write) -> Result<()> {
-        let ctx = self.read_ctx()?;
-        match cmd {
-            "turn" => sim_views::turn(&ctx, args, out),
-            "pillars" => sim_views::pillars(&ctx, args, out),
-            "state" => sim_views::state(&ctx, args, out),
-            "eco" => sim_views::eco(&ctx, args, out),
-            "lineage" => sim_views::lineage(&ctx, args, out),
-            "genome" => sim_views::genome(&ctx, args, out),
-            "timeseries" => sim_views::timeseries(&ctx, args, out),
-            "food" => sim_views::food(&ctx, args, out),
-            "inspect" => sim_views::inspect(&ctx, args, out),
-            "top" => sim_views::top(&ctx, args, out),
-            "hist" => sim_views::hist(&ctx, args, out),
-            "find" => sim_views::find(&ctx, args, out),
-            "brain" => sim_views::brain(&ctx, args, out),
-            "decide" => sim_views::decide(&ctx, args, out),
-            other => bail!("unknown read command `{other}` (try `help`)"),
-        }
-    }
-
-    /// Batch-read mode: load the world once, then run many pure-read commands
-    /// from stdin (one per line), so a burst of probes pays a single
-    /// deserialize. Each line emits its own result; a failing line emits an
-    /// `{"error": …}` line and the batch continues. Mutating commands are
-    /// rejected (use a real `step`/`run-to` invocation for those).
-    fn query(&mut self, out: &mut impl Write) -> Result<()> {
-        let stdin = io::stdin();
-        for line in stdin.lock().lines() {
-            let line = line?;
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            let mut parts = line.split_whitespace();
-            let sub = parts.next().unwrap_or("");
-            let sub_args: Vec<&str> = parts.collect();
-            let result = if is_read_only(sub) {
-                self.run_read(sub, &sub_args, out)
-            } else {
-                Err(anyhow!(
-                    "`{sub}` is not a read command (not allowed in query)"
-                ))
-            };
-            if let Err(e) = result {
-                writeln!(
-                    out,
-                    "{}",
-                    json!({ "error": e.to_string(), "command": line })
-                )?;
-            }
-            out.flush()?;
-        }
-        Ok(())
-    }
-
-    /// Time `n` ticks through the current advance path (respects the recorder
-    /// state) and report throughput. Advances the simulation by `n`.
-    fn bench(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
-        let (fmt, rest) = take_format(self.format, args);
-        let n: u64 = rest
-            .first()
-            .map(|s| s.parse())
-            .transpose()?
-            .unwrap_or(100_000);
-        if n == 0 {
-            bail!("bench needs N >= 1");
-        }
-        let recording = self.recorder.is_some();
-        let threads = self.sim()?.config().intent_parallel_threads;
-        let start = std::time::Instant::now();
-        self.advance(n)?;
-        let elapsed = start.elapsed().as_secs_f64();
-        let tps = if elapsed > 0.0 {
-            n as f64 / elapsed
-        } else {
-            0.0
-        };
-        let ns_per_tick = if n > 0 { elapsed * 1e9 / n as f64 } else { 0.0 };
-        let turn = self.sim()?.turn();
-        if fmt.is_json() {
-            return writeln!(
-                out,
-                "{}",
-                json!({
-                    "ticks": n,
-                    "seconds": elapsed,
-                    "ticks_per_sec": tps,
-                    "ns_per_tick": ns_per_tick,
-                    "recording": recording,
-                    "threads": threads,
-                    "turn": turn,
-                })
-            )
-            .map_err(Into::into);
-        }
-        writeln!(
-            out,
-            "bench: {n} ticks in {elapsed:.3}s = {tps:.0} ticks/s ({ns_per_tick:.0} ns/tick) \
-             [recording={recording} threads={threads}] turn={turn}{}",
-            if cfg!(debug_assertions) {
-                "  (debug build — rebuild with --release for real throughput)"
-            } else {
-                ""
-            }
-        )
-        .map_err(Into::into)
-    }
-
-    fn step(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
-        let (fmt, rest) = take_format(self.format, args);
-        let n: u64 = rest.first().map(|s| s.parse()).transpose()?.unwrap_or(1);
-        self.advance(n)?;
-        self.emit_turn(fmt, out)
-    }
-
-    fn run_to(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
-        let (fmt, rest) = take_format(self.format, args);
-        let target: u64 = rest
-            .first()
-            .ok_or_else(|| anyhow!("run-to needs a target turn"))?
-            .parse()?;
-        let current = self.sim()?.turn();
-        if target > current {
-            self.advance(target - current)?;
-        }
-        self.emit_turn(fmt, out)
-    }
-
-    pub(crate) fn emit_turn(&mut self, fmt: Format, out: &mut impl Write) -> Result<()> {
-        let t = self.sim()?.turn();
-        if fmt.is_json() {
-            writeln!(out, "{}", json!({ "turn": t })).map_err(Into::into)
-        } else {
-            writeln!(out, "turn = {t}").map_err(Into::into)
-        }
+fn flag_parse<T: std::str::FromStr>(args: &Args, key: &str, default: T) -> Result<T> {
+    match args.flags.get(key) {
+        Some(v) => v.parse().map_err(|_| anyhow!("bad value for --{key}: {v}")),
+        None => Ok(default),
     }
 }
 
-/// `new`: parse the constructor args, build the world via `sim-views`, print the
-/// summary line, and install the world into `app`. Persistence is the caller's.
-fn build_world_cli(app: &mut App, args: &[&str], out: &mut impl Write) -> Result<()> {
-    let mut config_path = DEFAULT_CONFIG.to_string();
-    let mut seed: u64 = 0;
-    let mut report_every: u64 = REPORT_EVERY;
-    let mut threads: Option<u32> = None;
-    let mut scale: Option<(u32, u32)> = None;
-    let mut sets: Vec<(String, String)> = Vec::new();
-    let (fmt, args) = take_format(app.format, args);
-    let mut i = 0;
-    while i < args.len() {
-        match args[i] {
-            "--config" => {
-                config_path = args
-                    .get(i + 1)
-                    .ok_or_else(|| anyhow!("--config needs a path"))?
-                    .to_string();
-                i += 2;
-            }
-            "--seed" => {
-                seed = args
-                    .get(i + 1)
-                    .ok_or_else(|| anyhow!("--seed needs a value"))?
-                    .parse()?;
-                i += 2;
-            }
-            "--report-every" => {
-                report_every = args
-                    .get(i + 1)
-                    .ok_or_else(|| anyhow!("--report-every needs a value"))?
-                    .parse()?;
-                if report_every == 0 {
-                    bail!("--report-every must be >= 1");
-                }
-                i += 2;
-            }
-            "--threads" => {
-                let t: u32 = args
-                    .get(i + 1)
-                    .ok_or_else(|| anyhow!("--threads needs a value"))?
-                    .parse()?;
-                if t == 0 {
-                    bail!("--threads must be >= 1");
-                }
-                threads = Some(t);
-                i += 2;
-            }
-            "--scale" => {
-                let spec = args
-                    .get(i + 1)
-                    .ok_or_else(|| anyhow!("--scale needs WIDTH,POP"))?;
-                let (w, p) = spec
-                    .split_once(',')
-                    .ok_or_else(|| anyhow!("--scale wants WIDTH,POP (e.g. 60,300)"))?;
-                let w: u32 = w.trim().parse().map_err(|_| anyhow!("bad --scale width"))?;
-                let p: u32 = p.trim().parse().map_err(|_| anyhow!("bad --scale pop"))?;
-                if w == 0 || p == 0 {
-                    bail!("--scale width and pop must be >= 1");
-                }
-                scale = Some((w, p));
-                i += 2;
-            }
-            "--set" => {
-                let kv = args
-                    .get(i + 1)
-                    .ok_or_else(|| anyhow!("--set needs key=value"))?;
-                let (k, v) = kv
-                    .split_once('=')
-                    .ok_or_else(|| anyhow!("--set wants key=value (e.g. food_energy=12)"))?;
-                sets.push((k.trim().to_string(), v.trim().to_string()));
-                i += 2;
-            }
-            other => bail!("unknown new arg `{other}`"),
+fn body_id_arg(args: &Args) -> Result<u64> {
+    args.positionals
+        .first()
+        .ok_or_else(|| anyhow!("this command needs an organism id"))?
+        .parse()
+        .context("organism id must be an integer")
+}
+
+fn run() -> Result<()> {
+    let args = parse_args()?;
+    match args.command.as_str() {
+        "new" => cmd_new(&args),
+        "run-to" => cmd_run_to(&args),
+        "step" => cmd_step(&args),
+        "state" => cmd_state(&args),
+        "inspect" => cmd_inspect(&args),
+        "brain" => cmd_brain(&args),
+        "genome" => cmd_genome(&args),
+        "decide" => cmd_decide(&args),
+        "find" => cmd_find(&args),
+        "lineage" => cmd_lineage(&args),
+        other => bail!("unknown command '{other}'"),
+    }
+}
+
+fn cmd_new(args: &Args) -> Result<()> {
+    let config = HexConfig {
+        world_width: flag_parse(args, "width", HexConfig::default().world_width)?,
+        num_founders: flag_parse(args, "founders", HexConfig::default().num_founders)?,
+        founder_energy: flag_parse(args, "energy", HexConfig::default().founder_energy)?,
+        ..HexConfig::default()
+    };
+    let seed = flag_parse(args, "seed", 0u64)?;
+    let sim = HexSim::new(config, seed);
+    save(args, &sim)?;
+    print(json!({
+        "created": true, "seed": seed, "width": config.world_width,
+        "founders": config.num_founders, "alive": sim.alive_count(),
+    }));
+    Ok(())
+}
+
+fn cmd_run_to(args: &Args) -> Result<()> {
+    let target: u64 = args
+        .positionals
+        .first()
+        .ok_or_else(|| anyhow!("run-to needs a target turn"))?
+        .parse()
+        .context("target turn must be an integer")?;
+    let mut sim = load(args)?;
+    let mut extinct = false;
+    while sim.turn() < target {
+        if !sim.tick() {
+            extinct = true;
+            break;
         }
     }
+    save(args, &sim)?;
+    print(json!({
+        "turn": sim.turn(), "alive": sim.alive_count(),
+        "extinct": extinct, "extinct_at": sim.extinct_at,
+    }));
+    Ok(())
+}
 
-    let built = build_world(&NewWorldParams {
-        config_path: config_path.clone(),
-        seed,
-        report_every,
-        threads,
-        scale,
-        sets: sets.clone(),
-    })?;
-    let sim = built.sim;
-    let scaled = built.scaled;
-    if fmt.is_json() {
-        writeln!(
-            out,
-            "{}",
-            json!({
-                "config": config_path,
-                "seed": seed,
-                "report_every": report_every,
-                "threads": sim.config().intent_parallel_threads,
-                "world_width": sim.config().world_width,
-                "num_organisms": sim.config().num_organisms,
-                "food_energy": sim.config().food_energy,
-                "overrides": sets.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>(),
-                "turn": 0,
-                "population": sim.organisms().len(),
-                "scaled": scaled,
-            })
-        )?;
-    } else {
-        let scaled_tag = if scaled {
-            "  [scaled: non-canonical]"
-        } else {
-            ""
-        };
-        writeln!(
-            out,
-            "created config={config_path} seed={seed} report_every={report_every} threads={}: world_width={} num_organisms={} food_energy={} turn=0 population={}{scaled_tag}",
-            sim.config().intent_parallel_threads,
-            sim.config().world_width,
-            sim.config().num_organisms,
-            sim.config().food_energy,
-            sim.organisms().len(),
-        )?;
+fn cmd_step(args: &Args) -> Result<()> {
+    let n: u64 = args.positionals.first().map(|s| s.parse()).transpose()?.unwrap_or(1);
+    let mut sim = load(args)?;
+    let mut extinct = false;
+    for _ in 0..n {
+        if !sim.tick() {
+            extinct = true;
+            break;
+        }
     }
-    app.sim = Some(sim);
-    app.recorder = None;
-    app.report_every = report_every;
-    app.scaled = scaled;
+    save(args, &sim)?;
+    print(json!({ "turn": sim.turn(), "alive": sim.alive_count(), "extinct": extinct }));
+    Ok(())
+}
+
+fn cmd_state(args: &Args) -> Result<()> {
+    let sim = load(args)?;
+    print(serde_json::to_value(sim.population_stats())?);
+    Ok(())
+}
+
+fn cmd_inspect(args: &Args) -> Result<()> {
+    let sim = load(args)?;
+    let id = body_id_arg(args)?;
+    let (_, body) = sim
+        .body_by_id(id)
+        .ok_or_else(|| anyhow!("no living organism with id {id}"))?;
+    let h = &body.genome.header;
+    print(json!({
+        "id": body.id,
+        "energy": body.energy,
+        "health": body.health,
+        "age_turns": body.age_turns,
+        "generation": body.generation,
+        "is_gestating": body.is_gestating,
+        "brain": { "neurons": body.brain.neurons.len(), "edges": body.brain.edges.len(),
+                   "inputs": body.brain.input_count, "hidden": body.brain.hidden_count,
+                   "outputs": body.brain.output_count },
+        "cppn": { "nodes": body.genome.cppn.nodes.len(), "conns": body.genome.cppn.conns.len() },
+        "morphology": body.morphology,
+        "lifecycle": { "age_of_maturity": h.lifecycle.age_of_maturity,
+                       "gestation_ticks": h.lifecycle.gestation_ticks,
+                       "max_organism_age": h.lifecycle.max_organism_age },
+        "plasticity": { "hebb_eta_gain": h.plasticity.hebb_eta_gain,
+                        "juvenile_eta_scale": h.plasticity.juvenile_eta_scale,
+                        "eligibility_retention": h.plasticity.eligibility_retention },
+    }));
+    Ok(())
+}
+
+fn cmd_brain(args: &Args) -> Result<()> {
+    let sim = load(args)?;
+    let id = body_id_arg(args)?;
+    let (_, body) = sim
+        .body_by_id(id)
+        .ok_or_else(|| anyhow!("no living organism with id {id}"))?;
+    // BrainNet derives Serialize — hand back the full phenotype network.
+    print(serde_json::to_value(&body.brain)?);
+    Ok(())
+}
+
+fn cmd_genome(args: &Args) -> Result<()> {
+    let sim = load(args)?;
+    let id = body_id_arg(args)?;
+    let (_, body) = sim
+        .body_by_id(id)
+        .ok_or_else(|| anyhow!("no living organism with id {id}"))?;
+    print(serde_json::to_value(&body.genome)?);
+    Ok(())
+}
+
+fn cmd_decide(args: &Args) -> Result<()> {
+    let sim = load(args)?;
+    let id = body_id_arg(args)?;
+    let (handle, body) = sim
+        .body_by_id(id)
+        .ok_or_else(|| anyhow!("no living organism with id {id}"))?;
+    let obs = sim.observe_body(handle);
+    let mut brain = body.brain.clone();
+    let logits: Vec<f32> = brain.step(&obs).to_vec();
+    let catalog = sim.catalog();
+    let temperature = 1.0f32;
+    let t = temperature.max(MIN_ACTION_TEMPERATURE);
+    let max_logit = logits.iter().copied().fold(EXPLICIT_IDLE_LOGIT_BIAS, f32::max);
+    let mut sum = ((EXPLICIT_IDLE_LOGIT_BIAS - max_logit) / t).exp();
+    for &l in &logits {
+        sum += ((l - max_logit) / t).exp();
+    }
+    let mut actions = Vec::new();
+    for (slot, &logit) in logits.iter().enumerate() {
+        let actuator = body
+            .action_layout
+            .actuator_indices
+            .get(slot)
+            .map(|&ai| catalog.actuators[ai].key.clone())
+            .unwrap_or_else(|| format!("slot{slot}"));
+        let prob = ((logit - max_logit) / t).exp() / sum;
+        actions.push(json!({ "action": actuator, "logit": logit, "prob": prob }));
+    }
+    let idle_prob = ((EXPLICIT_IDLE_LOGIT_BIAS - max_logit) / t).exp() / sum;
+    print(json!({ "id": id, "actions": actions, "idle_prob": idle_prob, "observation": obs }));
+    Ok(())
+}
+
+fn cmd_find(args: &Args) -> Result<()> {
+    let sim = load(args)?;
+    if args.positionals.len() < 3 {
+        bail!("find needs: <field> <op> <value>  (op: gt lt ge le eq)");
+    }
+    let field = &args.positionals[0];
+    let op = &args.positionals[1];
+    let value: f64 = args.positionals[2].parse().context("value must be a number")?;
+    let mut matches = Vec::new();
+    for body in sim.living_bodies() {
+        let field_val = match field.as_str() {
+            "energy" => body.energy as f64,
+            "health" => body.health as f64,
+            "age" => body.age_turns as f64,
+            "generation" => body.generation as f64,
+            "neurons" => body.brain.neurons.len() as f64,
+            "edges" => body.brain.edges.len() as f64,
+            other => bail!("unknown field '{other}'"),
+        };
+        let hit = match op.as_str() {
+            "gt" => field_val > value,
+            "lt" => field_val < value,
+            "ge" => field_val >= value,
+            "le" => field_val <= value,
+            "eq" => (field_val - value).abs() < f64::EPSILON,
+            other => bail!("unknown op '{other}' (use gt lt ge le eq)"),
+        };
+        if hit {
+            matches.push(json!({ "id": body.id, field.clone(): field_val }));
+        }
+    }
+    print(json!({ "field": field, "op": op, "value": value, "count": matches.len(), "matches": matches }));
+    Ok(())
+}
+
+fn cmd_lineage(args: &Args) -> Result<()> {
+    let sim = load(args)?;
+    let mut hist: BTreeMap<u64, u64> = BTreeMap::new();
+    for body in sim.living_bodies() {
+        *hist.entry(body.generation).or_insert(0) += 1;
+    }
+    let generations: Vec<Value> = hist
+        .iter()
+        .map(|(gen, count)| json!({ "generation": gen, "count": count }))
+        .collect();
+    print(json!({ "alive": sim.alive_count(), "generations": generations }));
     Ok(())
 }
