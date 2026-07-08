@@ -1,5 +1,10 @@
 # Turn Optimization Log
 
+> **📎 Historical log.** Records tick-hot-path optimization work on the
+> pre-redesign `sim-core` engine (now removed). Kept as a record; the current
+> engine lives in `sim-substrate`/`sim-hexworld`.
+
+
 ## Baseline
 
 - Date: 2026-04-12

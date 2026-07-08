@@ -6,98 +6,99 @@
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/evanhu1/Neurogenesis)
 
-This is a neuroevolution artificial-life simulation built in Rust. 2,000 digital
-creatures spawn into a world with the simplest possible brains: **zero hidden
-neurons and ten synapses.** Then ecology (energy, food, predators, and death)
-and evolution (mutation and selection) "train" intelligent brains over thousands
-of generations.
+This is a neuroevolution artificial-life simulation built in Rust. Digital
+creatures spawn into a world carrying a compact **generative genome** — a small
+CPPN program that *grows* a brain. Then ecology (energy, food, predators, and
+death) and evolution (mutation, sexual crossover, and selection) "train"
+intelligent brains over thousands of generations. No fitness function, no
+generations counter, no target — just survival and reproduction.
 
-![A live Neurogenesis run: each triangle is an organism driven by its own neural network. The right panel shows the live brain of a selected organism.](docs/demo.gif)
-
-_In this demo run, ~1,300 generations evolved brains to **9 inter neurons and
-25+ synapses**, learning to search for food, predate other organisms and run
-from predators._
+![A live Neurogenesis run: each organism is driven by its own neural network. The right panel shows the live brain of a selected organism.](docs/demo.gif)
 
 </div>
 
 ## How brains evolve
 
-The seed genome has **0 inter neurons**. There is no hidden layer at the start;
-sensors wire straight to actions. Over generations, NEAT-style structural
-mutations add neurons and synapses, runtime plasticity tunes the weights during
-each organism's lifetime, and selection decides what was worth the metabolic
-cost.
+The genome is **not** a list of synapses. It is an indirectly-encoding
+**CPPN** (Compositional Pattern Producing Network, the HyperNEAT lineage) that is
+queried across a spatial substrate to *develop* the phenotype: which senses and
+actuators grow, where hidden neurons sit, how they wire, and how each synapse
+learns. Over generations, NEAT-style structural mutations complexify the CPPN,
+crossover recombines two parents, within-life Hebbian plasticity tunes the
+developed weights, and selection decides what was worth the metabolic cost.
+
+Because the encoding is generative, there are **no blind spots**: the sensory /
+actuator interface, brain size, morphology, plasticity distribution, and the
+mutation rates themselves are all heritable and all evolvable.
 
 |                              The world up close                              |                                      A brain, mid-life                                      |
 | :--------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------: |
-| ![Close-up of the hex world: organisms, plants, and terrain](docs/world.png) | ![Organism inspector showing live stats and the evolved neural network](docs/inspector.png) |
+| ![Close-up of the hex world: organisms, plants, and terrain](docs/world.png) | ![Organism inspector showing live stats and the developed neural network](docs/inspector.png) |
 
 ## Why
 
 The brain is the only existence proof of general intelligence, and it was
-produced by evolution. It took ~600 million years from the first neuron, but
-nature had to solve problems we don't: physical embodiment, scarce energy,
-generation times measured in years, and 2 billion years just to assemble the
-molecular machinery of reproduction itself.
+produced by evolution. Evolution _in silico_ rewrites nature's constraints:
+generations take seconds, populations are observable down to the synapse, and any
+run can be replayed exactly from its seed. Can a well-designed evolutionary search
+over brain-like systems be a path to AGI? This project is an attempt to find out.
 
-Evolution _in silico_ rewrites those constraints. Generations take seconds,
-populations are observable down to the synapse, and any run can be replayed
-exactly from its seed. Can a well-designed evolutionary search over brain-like
-systems be a path to AGI? This project is an attempt to find out.
+## Core ideas
 
-## Core features
+**The substrate is environment-agnostic.** The genome, the developmental map, the
+brain runtime, the operators, and the population driver live in `sim-substrate`
+and know nothing about any world. A world is an `Environment` implementation that
+supplies *physics only*. The hex ecology (`sim-hexworld`) is the first
+environment; a hex-free 1-D "Chemotaxis Ribbon" (`sim-toyenv`) runs on the
+**unchanged** substrate as a decoupling proof.
 
-**The engine**
+**The genome (indirect / generative encoding).**
 
-- Deterministic and multithreaded at the same time: every random choice is a
-  stateless hash of `(seed, turn, organism IDs)`, so the parallel plasticity
-  pass cannot reorder history. Fixed config + seed reproduces the same world,
-  tick for tick, on a given build.
-- Thousands of ticks per second of whole-world simulation on a laptop (a
-  30-second Fast-mode burst covered 230,000 ticks, ~7,700 t/s). The tick hot
-  path is allocation-conscious Rust: parallel vectors, binary search, and
-  rejection sampling instead of hash maps and scans.
-- A Criterion benchmark (`turn_throughput`) tracks engine speed.
+- A CPPN program plus a small header of direct scalars. `develop()` expands it
+  into the phenotype via ES-HyperNEAT: interface selection (which sensors/
+  actuators express), an adaptive quadtree that discovers hidden neurons, and a
+  link-expression gate (LEO) that decides connectivity separately from weight.
+- **Plasticity is painted per connection** by the CPPN (adaptive-HyperNEAT), not
+  a single global knob.
+- Node/connection identity is a 64-bit structural hash, so crossover aligns
+  homologous genes deterministically under parallel, continuous-birth reproduction.
 
-**The brain**
+**The brain.**
 
 - Lifetime learning is **unsupervised Hebbian plasticity** — no reward, no value
-  head, no dopamine. A covariance rule (Δw = η·eligibility − decay·w)
-  accumulates centered pre/post coactivation into a per-synapse eligibility
-  trace, decayed by an evolvable retention gene. The same rule runs everywhere:
-  between inter neurons and at the motor boundary (inter→action), where the
-  squashed action logit stands in as the postsynaptic activation.
-- Juveniles learn at 2× the adult rate (an evolvable critical period); synapse
-  pruning only activates at maturity.
-- Thinking costs energy. Metabolism scales with neuron count and vision range,
-  plus Kleiber mass^0.75 body scaling, so every neuron a lineage keeps has to
-  pay for itself.
-- The interface to the world: 18 sensory neurons in (3 vision rays × 4 channels
-  of RGB + shape, plus contact, energy, health, energy flux, and
-  proprioception), 6 action neurons out (turn, move, eat, attack, reproduce),
-  selected by softmax sampling.
+  head. A centered-covariance rule accumulates pre/post coactivation into a
+  per-synapse eligibility trace, gently modulated by within-tick energy change,
+  with an evolvable juvenile critical period and maturity-gated pruning. Learned
+  weights are **discarded at reproduction** (non-Lamarckian).
+- Leaky-integrator neurons (evolvable time constants), a Padé `fast_tanh`, and
+  softmax action selection with an implicit Idle option.
+- Thinking costs energy: metabolism scales with neuron count, vision range, and
+  Kleiber mass^0.75 body scaling, so every neuron a lineage keeps must pay for
+  itself.
 
-**Evolution**
+**Evolution.**
 
-- NEAT-style structural mutation: add a synapse, remove a synapse, split an edge
-  into a new neuron. New synapses are drawn uniformly at random from the
-  unconnected (pre, post) pairs.
-- Meta-mutation: per-operator mutation rates are themselves genes.
-- A persistent champion pool seeds new worlds from the best genomes of past
-  sessions, and periodic injections of fresh seed genomes keep diversity
-  flowing.
+- **Sexual, embodied reproduction**: mating is an in-world action — two adjacent
+  organisms mate, producing a crossover-then-mutate offspring born nearby.
+- NEAT-style structural mutation of the CPPN (add connection, add node by
+  splitting an edge, perturb weights/biases/activations).
+- Meta-mutation: per-operator mutation rates are themselves genes, evolved in
+  logit space with a zero-absorbing floor.
+- A **Quality-Diversity (MAP-Elites)** champion archive keeps the best genome per
+  behavioral niche; coverage / QD-score is the open-ended progress signal that
+  replaces a fitness curve.
 
-**The ecology**
+**The ecology.**
 
-- A 250×250 toroidal hex grid with Perlin-noise terrain walls, a hidden
-  fertility map, and event-driven plant regrowth. One entity per cell.
-- Energy enters only as plants (a fixed yield each) and drains through
-  metabolism; eating transfers an item's energy in full. There is no population
-  cap — thermodynamics regulates the population.
-- Predation is real and every kill leaves a corpse worth eating, so death feeds
-  the food web — a corpse carries 80% of its owner's leftover energy.
-- No species registry, no speciation bookkeeping, no hand-written fitness
-  target. Selection pressure comes from the ecology itself.
+- A toroidal hex grid with value-noise terrain walls, spikes, a hidden fertility
+  map, and event-driven plant regrowth. One entity per cell.
+- Energy enters only as plants and drains through metabolism; predation leaves a
+  corpse worth eating, so death feeds the food web. A zero-sum social-color field
+  couples neighbors by hue.
+- **No population cap and no periodic injection** — thermodynamics regulates the
+  population, and a world that goes extinct **stays extinct** (the run ends there).
+- No species registry, no hand-written fitness target. Selection pressure comes
+  from the ecology itself.
 
 ## Run it in 60 seconds
 
@@ -110,57 +111,67 @@ cargo run -p sim-server
 # 2. Frontend (new shell; npm install on first run)
 cd web-client && npm install && npm run dev
 
-# 3. Open http://127.0.0.1:5173 and press Run
+# 3. Open http://127.0.0.1:5173
 ```
 
 ![The Neurogenesis lab: world view, population telemetry, simulation controls, and the organism inspector](docs/hero.png)
 
 Things to try:
 
-- **Fast mode** — rendering pauses and the engine runs flat out (hundreds of
-  thousands of ticks in minutes). Switch back to live view to inspect what the
-  population evolved during the burst.
-- **Click an organism** — live brain activity, genome, and per-operator mutation
-  rates.
-- **Save champions** — the server keeps a persistent champion-genome pool and
-  bootstraps new worlds from it, so progress compounds across sessions.
+- **Play / Pause / Step** — the server auto-ticks in the background; pause to
+  study a moment, or step one tick at a time.
+- **Click an organism** — its live stats, CPPN genome summary, and the developed
+  brain network (excitatory/inhibitory synapses).
+- **Save champions** — the server keeps a Quality-Diversity champion archive
+  keyed by behavior; saved genomes can seed future worlds via
+  `--seed-genome-snapshot`.
 
-## Measuring whether intelligence is actually emerging
+## Prove it works, headlessly
 
-`sim-evaluation` runs multi-seed, hundreds-of-thousands-of-ticks benchmarks
-where the sim emits raw facts to partitioned Parquet and every metric is derived
-post-hoc. The report card is four deliberately hard-to-game competence axes,
-each pooled from descendant lifetimes: **foraging** and **predation**
-(plant/prey consumptions per action), **intelligence** (successful action rate ×
-Miller-Madow mutual information MI(S;A) between sensed state and action), and
-**learning** (within-life slope of action success vs age — does the organism
-improve over its own lifetime?). Change the analysis and re-derive every report
-without re-running the experiment. A random-action control (`--control`) keeps
-the numbers honest — it should score ≈0 on every axis (MI and the learning slope
-both collapse to zero under random behaviour).
-
-![Evaluation report with pillar scores for foraging, predation, intelligence, and learning](docs/evaluation.png)
+Every environment ships a deterministic example that asserts a live, reproducing
+population and byte-identical results across identical-seed runs:
 
 ```bash
-# Default 8-seed evolution-loop benchmark → report.html / timeseries.csv / summary.json
-cargo run -p sim-evaluation --release --
-
-# Custom seeds
-cargo run -p sim-evaluation --release -- --seed 42,123,7
-
-# Random-action control (should score ~0 on every pillar)
-cargo run -p sim-evaluation --release -- --control
-
-# Quick smoke run
-cargo run -p sim-evaluation --release -- --ticks 1000 --report-every 250
-
-# Re-derive reports from a persisted dataset without re-running the sim
-cargo run -p sim-evaluation --release -- analyze latest
-cargo run -p sim-evaluation --release -- analyze 20260416T002137Z   # timestamp prefix
-cargo run -p sim-evaluation --release -- analyze <path>             # run root or seed dir
+cargo run -p sim-substrate --example headless --release   # substrate ring-life
+cargo run -p sim-hexworld  --example headless --release   # hex proof-of-life
+cargo run -p sim-hexworld  --example simsmoke --release   # save/load + extinction
+cargo run -p sim-toyenv    --example headless --release   # decoupling proof
 ```
 
-Artifacts land under `artifacts/evaluation/...`.
+## Measuring whether intelligence is emerging
+
+With no fitness function, progress is measured by **behavioral coverage**.
+`sim-evaluation` runs multi-seed headless experiments, builds a Quality-Diversity
+(MAP-Elites) archive over a behavior descriptor, and reports coverage / QD-score
+alongside population and lineage depth per seed. A seed that goes extinct records
+its extinction turn.
+
+```bash
+# Default 8-seed evaluation → JSON summary on stdout
+cargo run -p sim-evaluation --release --
+
+# Custom seeds / horizon / world
+cargo run -p sim-evaluation --release -- --seeds 42,123,7 --ticks 5000 --width 32
+
+# Write the summary to a file
+cargo run -p sim-evaluation --release -- --out summary.json
+```
+
+## The research CLI
+
+`sim-cli` is a stateless, world-as-file research tool: a world is an explicit
+`world.bin`, each call runs one command, output is JSON. Full reference in
+[`docs/sim-cli.md`](docs/sim-cli.md).
+
+```bash
+cargo build -p sim-cli --release
+BIN=./target/release/sim-cli
+$BIN new --seed 7 --out artifacts/w.bin
+$BIN run-to 500 --in artifacts/w.bin      # stops early on extinction
+$BIN state   --in artifacts/w.bin
+$BIN lineage --in artifacts/w.bin
+$BIN inspect <id> --in artifacts/w.bin    # brain / genome / decide / find too
+```
 
 ## Development
 
@@ -169,25 +180,23 @@ cargo check --workspace   # fast compile check
 cargo test --workspace    # run all tests
 make fmt                  # format
 make lint                 # clippy, warnings as errors
-cargo bench -p sim-core --bench turn_throughput   # engine throughput benchmark
 ```
 
-Workspace layout: `sim-types` (shared domain types), `sim-config` (world +
-seed-genome TOML baselines), `sim-core` (the deterministic engine), `sim-server`
-(Axum HTTP + WebSocket), `web-client` (React + Tailwind + Vite canvas UI),
-`sim-evaluation` (headless evaluation harness).
+Workspace layout: `sim-substrate` (environment-agnostic genome / develop / brain
+/ operators / driver / QD archive), `sim-hexworld` (hex ecology + the
+serializable `HexSim` world), `sim-toyenv` (second environment), `sim-types`
+(generic value types), `sim-server` (Axum REST backend), `web-client` (React +
+Vite canvas UI), `sim-evaluation` (headless QD harness).
 
-The canonical tick order lives in `sim-core/src/turn/mod.rs::Simulation::tick`;
-treat it as the source of truth for phase ordering.
+The canonical tick order lives in
+`sim-substrate/src/driver.rs::PopulationDriver::tick`; treat it as the source of
+truth for phase ordering. See [`docs/SYSTEMS.md`](docs/SYSTEMS.md) for a full
+tour of the brain, evolution, and ecology mechanisms.
 
 Server flags:
 
-- `--champion-pool-path <path>` — override the default `champion_pool.json` used
-  for champion persistence.
-- `--seed-genome-snapshot <path.bin>` — boot every organism from a single
-  evaluation-snapshot genome (`.../genomes/tNNNNNN.bin`); champion saves no-op
-  for the session.
-
-Config baselines live in `sim-config/config.toml` and
-`sim-config/seed_genome.toml` (the evaluation copies in `sim-evaluation/` are
-kept in sync with them).
+- `--seed N` / `--width W` / `--founders F` / `--port P`.
+- `--champion-pool-path <path.json>` — Quality-Diversity champion archive
+  (default `champion_pool.json`).
+- `--seed-genome-snapshot <path.bin>` — seed every founder from one bincode
+  `sim_substrate::Genome` (e.g. a saved champion).

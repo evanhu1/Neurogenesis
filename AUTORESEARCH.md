@@ -1,5 +1,13 @@
 # autoresearch
 
+> **⚠️ Built on the pre-redesign metrics stack — needs rework.** This autonomous
+> research loop drove the old `sim-cli pillars` / `sim-metrics` ETL and the
+> direct-encoded genome, all removed in the substrate redesign. The methodology
+> below is preserved for reference, but the concrete commands and metrics
+> (`pillars`, the four competence axes, the metric sidecar, `sweep`) no longer
+> exist. Reworking it against the new stack means driving `sim-evaluation`'s
+> Quality-Diversity coverage / QD-score and the lean `sim-cli` reads instead.
+
 Autonomous experimentation loop for NeuroGenesis — a neuroevolution simulation
 where organisms with neural-network brains evolve on a hex grid to forage,
 reproduce, and survive.

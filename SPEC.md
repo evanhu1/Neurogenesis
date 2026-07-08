@@ -1,5 +1,12 @@
 # sim-cli v2 — Specification
 
+> **⚠️ Historical / superseded.** This spec predates the substrate redesign and
+> describes the previous stateful, `Simulation`-in-memory `sim-cli` built on the
+> `sim-metrics` ETL / `pillars` stack (all removed). The current CLI is a lean,
+> **stateless world-as-file** tool — see `docs/sim-cli.md` for the live command
+> reference. Kept for design-history context only.
+
+
 ## Overview
 
 `sim-cli` is a headless, stateful command client for the NeuroGenesis engine,

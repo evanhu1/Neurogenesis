@@ -5,6 +5,14 @@ description: Start or resume autonomous research on the NeuroGenesis simulation.
 
 # autoresearch — you are the PLANNER
 
+> **⚠️ NEEDS REWORK after the substrate redesign.** This skill drives the removed
+> `sim-cli pillars` / `sim-metrics` "competence axes" and the direct-encoded
+> genome. Those commands and metrics no longer exist. Before running this loop,
+> its measurement layer must be re-pointed at the current stack — `sim-evaluation`
+> Quality-Diversity coverage / QD-score and the lean `sim-cli` reads
+> (`state`/`inspect`/`brain`/`genome`/`find`/`lineage`). Treat everything below as
+> methodology, not runnable commands.
+
 You run autonomous research to improve the NeuroGenesis simulation's competence
 metrics. The model is **planner + a fleet of iterative research agents**:
 

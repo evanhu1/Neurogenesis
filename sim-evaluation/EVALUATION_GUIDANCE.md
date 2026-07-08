@@ -1,5 +1,12 @@
 # Evaluation Guidance
 
+> **⚠️ Pre-redesign context.** Written for the old Parquet-ETL `sim-evaluation`
+> and its four competence "pillars", both removed. The current harness reports
+> **Quality-Diversity** coverage / QD-score across seeds (no pillars, no Parquet).
+> The horizon/adaptation-time intuitions below still transfer; the specific
+> metrics do not.
+
+
 ## 1. The evaluation horizon is a trap
 
 **Short-horizon evaluations systematically penalize changes that require

@@ -1,4 +1,4 @@
-.PHONY: fmt lint test check perf-test evaluate web-install web-build start
+.PHONY: fmt lint test check examples evaluate web-install web-build start
 
 fmt:
 	cargo fmt --all
@@ -12,8 +12,13 @@ check:
 test:
 	cargo test --workspace
 
-perf-test:
-	cargo test -p sim-core --release performance_regression -- --ignored --nocapture
+# Deterministic proof-of-life examples (each asserts a live, reproducing
+# population and byte-identical results across identical-seed runs).
+examples:
+	cargo run -p sim-substrate --example headless --release
+	cargo run -p sim-hexworld  --example headless --release
+	cargo run -p sim-hexworld  --example simsmoke --release
+	cargo run -p sim-toyenv    --example headless --release
 
 evaluate:
 	cargo run -p sim-evaluation --release -- $(ARGS)
