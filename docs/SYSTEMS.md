@@ -1,236 +1,223 @@
 # Systems & Mechanisms
 
-A master list of the major systems across the **brain**, **evolution**, and
-**ecology**, accurate to the current engine. Two systems were deliberately
-removed and are **not** present anywhere below: the actor-critic / TD-learning /
-dopamine / genetic-reward system, and the 2D cartesian "spatial brain" (neuron
-coordinates, distance-biased wiring, and per-synapse wiring-length metabolism).
+A master list of the major systems across the **genome**, **brain**, **evolution**,
+and **ecology**, accurate to the current engine after the substrate redesign.
 
-File pointers cite the owning module + function/constant; line numbers drift, so
-the symbol names are the durable reference.
+The defining property of the current design is the **substrate/environment
+split**: the genome, developmental map, brain runtime, operators, and tick loop
+live in `sim-substrate` and know nothing about any world. A world is an
+`Environment` implementation (`sim-hexworld`, `sim-toyenv`) that supplies physics
+only, reading bodies through an immutable `BodyView` and requesting changes
+through an `EffectSink`.
+
+File pointers cite the owning module + type/function; line numbers drift, so the
+symbol names are the durable reference.
+
+---
+
+## The Genome (indirect / generative encoding)
+
+`sim-substrate/src/{cppn,genome}.rs`. The genome is **not** a list of synapses; it
+is a compact program that *develops* into the phenotype.
+
+- **`Genome`** = `{ cppn: CppnGenome, header: HeaderGenes }`.
+- **`CppnGenome`** (`cppn.rs`) — a NEAT-style graph: `CppnNodeGene`s (id, kind,
+  activation ∈ {Tanh, Sigmoid, Gaussian, Sin, Abs, Linear}, bias) and
+  `CppnConnGene`s (innovation, from, to, weight, enabled). **Fixed I/O**: 11
+  inputs (two 3-D substrate coordinates `x1,y1,z1 / x2,y2,z2`, their deltas,
+  euclidean distance, a bias lane) and 6 outputs — `W` (weight), `LEO`
+  (link-expression), `NBIAS` (neuron bias), `LTC` (log time constant), `AFF`
+  (affordance), `PLR` (per-edge plasticity-rate scale).
+- **Structural-hash identity** (`rng.rs::hash_conn`/`hash_node`). Connection and
+  split-node ids are domain-separated 64-bit hashes of their structure, **not** a
+  global innovation counter — so crossover aligns homologous genes
+  deterministically under parallel, continuous-birth reproduction.
+- **`HeaderGenes`** (`genome.rs`) — direct scalars the CPPN does not paint:
+  global plasticity (`hebb_eta_gain` [0,0.2], `juvenile_eta_scale` [0,4],
+  `eligibility_retention` [0,1], `max_weight_delta_per_tick` [0.005,0.5],
+  `synapse_prune_threshold`), lifecycle (`age_of_maturity`, `gestation_ticks`
+  0–10, `max_organism_age`), develop params (AFF/LEO thresholds, weight scale,
+  quadtree depth, variance threshold, `max_neurons`/`max_edges`), a normalized
+  `morphology` vector aligned to the environment's morphology schema, and the
+  15-gene `MutationRates` block.
+- **Flat form** — `bincode::serialize(&genome)`; canonicalized (conns
+  innovation-sorted, nodes by id) so it is bit-stable and cacheable.
+
+---
+
+## Development: genotype → phenotype
+
+`sim-substrate/src/develop.rs::develop(&Genome, &SubstrateCatalog, &DevelopConfig)`.
+Pure and RNG-free (so it is identical on every thread and cacheable by CPPN
+content hash). ES-HyperNEAT pipeline:
+
+1. **Compile** the CPPN (topological sort).
+2. **Interface selection** — for each catalog sensor/actuator, self-probe the CPPN
+   (`x1==x2`) and read `AFF`; it expresses iff `AFF > aff_threshold`. A **viability
+   floor** forces the top-`AFF` candidate if none cross, so no organism is
+   degenerate. Expressed sensors/actuators define the observation- and
+   action-vector layouts (`ObsLayout`/`ActionLayout`).
+3. **Hidden-neuron discovery** — an adaptive quadtree over the hidden plane
+   subdivides where CPPN-output variance is high (bounded per birth by
+   `quadtree_depth`/`max_neurons`, unbounded across generations); high-variance
+   leaf centers become hidden neurons.
+4. **Connections** — for each candidate `(src,tgt)` pair, query the CPPN; add an
+   edge iff `LEO > leo_threshold`, with weight `clamp(W · weight_scale)` and a
+   per-edge `plasticity_scale` from `PLR` (hybrid adaptive-HyperNEAT).
+5. Neuron bias/α from `NBIAS`/`LTC`; **prune dangling** hidden neurons; enforce
+   hard neuron/edge rails; assemble a `BrainNet`.
+
+`Phenotype = { brain: BrainNet, obs_layout, action_layout, morphology_values }`.
 
 ---
 
 ## The Brain
 
-A 3-layer feedforward+recurrent network — **sensory → inter → action** — built
-once at birth from the genome, then tuned over the organism's life by
-unsupervised Hebbian plasticity. `sim-core/src/brain/`.
+`sim-substrate/src/brain.rs`. A developed network of input / hidden / output
+neurons, tuned over the organism's life by unsupervised Hebbian plasticity. The
+neuron math is ported verbatim from the pre-redesign engine.
 
-- **Structure & expression** (`brain/expression.rs::express_genome`). 18 fixed
-  sensory neurons (IDs `0..18`), `num_neurons` evolvable inter neurons (IDs
-  `1000+`), 6 action neurons (IDs `2000+`). Inter→inter self-edges are allowed
-  and act as gated memory (the presynaptic inter's *previous-tick* activation is
-  read). Neurons are never added/removed after birth; only synapses are pruned.
-
-- **Sensory system** (`brain/sensing.rs::encode_sensory_inputs`). 18 receptors:
-  **3 vision rays** (offsets −1/0/+1 relative to facing) × **4 channels**
-  (R, G, B, Shape) = 12, plus `ContactAhead`, `Energy` (`e/(e+max_health)`),
-  `Health` (`h/max_health`), `EnergyDelta` (`tanh(Δe/max_health)` since last
-  sensing), and two proprioceptive flags `LastActionForward` / `LastActionEat`.
-
-- **Vision raycasting** (`sensing.rs::scan_ray`). Each ray marches hex cells up
-  to `vision_distance`, opacity-blending occupant/terrain color with linear
-  distance falloff `(max−d+1)/max` and accumulating `remaining_visibility *=
-  (1−opacity)` until visibility is exhausted. Toroidal-wrapped.
-
-- **Forward evaluation** (`brain/evaluation.rs::evaluate_brain`). Sensory
-  activations fan into inter inputs; each inter neuron is a **leaky integrator**:
-  `state = (1−α)·state + α·input`, `activation = fast_tanh(state)`. Then inter
-  activations fan into other inter neurons and into action logits; action biases
-  are added last. `fast_tanh` (`brain/mod.rs`) is a Padé approximation clamped to
-  ±1.
-
-- **Inter-neuron dynamics / time constants** (`genome/scalar.rs::inter_alpha_from_log_time_constant`).
-  `τ = exp(log_τ).clamp(0.1, 10.0)`, `α = 1 − exp(−1/τ)`. Low τ → fast,
-  reactive neuron; high τ → slow, integrating memory. `log_τ` is per-neuron and
-  evolvable; default ≈ −1.204 (τ ≈ 0.3).
-
-- **Action selection** (`evaluation.rs::sample_action_from_logits`). Softmax over
-  the 6 action logits **plus an implicit Idle option** (`EXPLICIT_IDLE_LOGIT_BIAS
-  = −0.01`), temperature `action_temperature` (clamped ≥ `1e-6`), categorically
-  sampled with a deterministic per-organism uniform draw. `Idle` is not a neuron
-  — it is the always-present "do nothing" outcome.
-
-- **Plasticity — Hebbian covariance rule** (`brain/plasticity.rs`). No reward, no
-  gating. Per edge: `pending = (pre − pre_mean)·(post − post_mean)` (centered
-  covariance; the post term at the motor boundary is `fast_tanh(action_logit)`).
-  Eligibility is a decaying sum `elig = eligibility_retention·elig + pending`,
-  and the weight moves by `Δw = clamp(η·elig − 0.001·w, ±max_weight_delta_per_tick)`
-  then `constrain_weight`. Activation means are EMAs with `ACTIVATION_MEAN_ALPHA
-  = 0.05` (~20-tick window).
-
-- **Critical period** (`plasticity.rs::learning_rate_scale`). Before
-  `age_of_maturity`, the effective learning rate is scaled by
-  `juvenile_eta_scale` (evolvable, default 0.5); mature organisms learn at full
-  `hebb_eta_gain`.
-
-- **Synapse pruning** (`plasticity.rs::prune_low_weight_synapses`). Every
-  `SYNAPSE_PRUNE_INTERVAL_TICKS = 10` ticks **and only after maturity**, drop
-  edges unless `|w| ≥ synapse_prune_threshold` or `|elig| ≥ 2·threshold`.
-
-- **Gestation lock** (`brain/pending_action.rs`). Choosing `Reproduce` puts the
-  organism into `PendingActionKind::Reproduce` for `gestation_ticks` turns,
-  during which it neither acts nor learns.
+- **Forward pass** (`BrainNet::step`). Inputs take the observation vector; hidden
+  neurons are **leaky integrators** reading their *previous-tick* activation:
+  `state = (1−α)·state + α·input`, `activation = fast_tanh(state)`; outputs then
+  read the freshly-updated hidden + input activations to form action logits.
+- **Time constants** (`inter_alpha_from_log_time_constant`). `τ = exp(log_τ)
+  .clamp(0.1,10)`, `α = 1 − exp(−1/τ)`. Painted per hidden neuron by the CPPN's
+  `LTC` output.
+- **Action selection** (`sample_action`). Softmax over the expressed action logits
+  **plus an implicit Idle** (`EXPLICIT_IDLE_LOGIT_BIAS = −0.01`), temperature
+  clamped ≥ `1e-6`, categorically sampled with a deterministic per-organism draw.
+  The embodiment layer samples so the `(seed,turn,id)` hash stays out of the
+  substrate.
+- **Plasticity — Hebbian covariance rule** (`plasticity.rs`). No reward. Per edge:
+  `pending = (pre − pre_mean)·(post − post_mean)` (the output post term is
+  `fast_tanh(logit)`); eligibility is a decaying sum
+  `elig = eligibility_retention·elig + pending`; the weight moves by
+  `Δw = clamp(plasticity_scale · m · η · elig − 0.001·w, ±max_weight_delta_per_tick)`
+  then `constrain_weight`. `m` is a bounded within-tick energy-delta neuromodulator
+  (`NEUROMOD_GAIN = 0.04`, band `[0.85,1.15]`), and `plasticity_scale` is the
+  CPPN's per-edge `PLR`. Activation means are EMAs (`ACTIVATION_MEAN_ALPHA = 0.05`).
+- **Critical period & pruning**. Before `age_of_maturity` the learning rate is
+  scaled by `juvenile_eta_scale`; every 10 ticks after maturity, edges below
+  `synapse_prune_threshold` (by weight or eligibility) are dropped.
+- **Non-Lamarckian**. Learned weights are runtime-only and **discarded at
+  reproduction** — the genome breeds, not the trained brain.
 
 ---
 
 ## Evolution
 
-Open-ended neuroevolution with no explicit fitness function. `sim-core/src/genome/`.
+`sim-substrate/src/operators.rs`. Open-ended neuroevolution with no explicit
+fitness function.
 
-- **Genome structure** (`sim-types/src/lib.rs::OrganismGenome`). Four gene groups:
-  - *Topology:* `num_neurons`, `num_synapses`, `vision_distance`.
-  - *Lifecycle:* `body_color` (sensed RGB phenotype), `age_of_maturity`,
-    `gestation_ticks` (0–10), `max_organism_age`.
-  - *Plasticity:* `hebb_eta_gain` [0,0.2], `juvenile_eta_scale` [0,4],
-    `eligibility_retention` [0,1] (def 0.95), `max_weight_delta_per_tick`
-    [0.005,0.5] (def 0.05), `synapse_prune_threshold` [0,1].
-  - *Brain topology:* `inter_biases[]`, `inter_log_time_constants[]`,
-    `action_biases[6]`, `edges[]` (sorted, unique `(pre,post)`).
-  - *Mutation rates:* 16 per-operator rates (see meta-mutation).
-
-- **Seed genome** (`genome/seed.rs::generate_seed_genome`). Fresh founders start
-  with the configured `num_neurons` (baseline **0** inter neurons), random biases
-  and time constants, **0 edges**, then `reconcile_synapse_count` adds
-  `num_synapses` uniformly-random synapses. Sensors wire straight to actions.
-
-- **Structural mutations** (`genome/topology.rs`).
-  - *Add synapse* — pick a uniformly-random unconnected `(pre,post)` pair
-    (`synapse_creation.rs::add_synapse_genes`, priority `−ln(U)` per candidate,
-    smallest wins); weight log-normal, 80% excitatory.
-  - *Remove synapse* — delete a random edge.
-  - *Remove neuron* — drop a random inter neuron, its bias/τ, and incident edges;
-    remap higher IDs down by one (keeps edges sorted).
-  - *Split edge into neuron* — pick an edge weighted by `|w|`, insert a new inter
-    neuron whose bias/τ average the endpoints (perturbed by
-    `NEW_NEURON_PERTURBATION_SCALE = 0.5`), rewire `pre→new` (w=1) and
-    `new→post` (old w).
-
-- **Weight, bias & scalar mutations** (`genome/scalar.rs`, `genome/mod.rs`). Weight
-  perturbation is multiplicative log-normal with a 10% full-replacement chance;
-  inter/action biases and `log_τ` perturb a per-neuron fraction (`*_PERTURB_NEURON_RATE
-  = 0.8`); lifecycle/plasticity scalars use clamped-Gaussian or log-normal
-  (`LARGE_UNBOUNDED_LOG_STDDEV = 0.1`) steps; body color drifts at a fixed 0.1
-  rate.
-
-- **Meta-mutation** (`genome/mutation_rates.rs`). The 16 mutation-rate genes are
-  themselves evolvable. 1–3 are mutated per offspring in **logit space** with a
-  pull toward the seed baseline (`META_MUTATION_BASELINE_PULL = 0.15`), an
-  exploration tail (10% chance, wider σ), and an exploration floor. **Zero is
-  absorbing** — a rate inherited as exactly 0 hard-disables that operator for the
-  lineage.
-
-- **Reproduction & inheritance** (`turn/reproduction.rs`, `spawn/organisms.rs`).
-  Requires intent + `energy ≥ transfer` + `age ≥ age_of_maturity` + a free target
-  cell. Parent pays `offspring_transfer_energy(gestation_ticks) = 100 +
-  100·gestation_ticks`, gestates, then the offspring spawns behind the parent
-  (opposite facing, `generation+1`) from a **`mutate_genome`'d clone**. Blocked
-  births are recorded, not retried indefinitely.
-
-- **Champion pool** (`sim-server/src/main.rs`). Up to 32 unique best genomes
-  persisted to `champion_pool.json`, ranked by generation → reproductions →
-  consumptions → energy → age → recency. New worlds seed organisms from the pool;
-  progress compounds across sessions.
-
-- **Periodic injection** (`spawn/organisms.rs::enqueue_periodic_injections`). Every
-  `periodic_injection_interval_turns`, drop `periodic_injection_count` fresh seed
-  genomes via rejection sampling — keeps diversity flowing and guards against
-  extinction.
-
-- **Selection** — purely ecological. No fitness target, no species registry, no
-  speciation bookkeeping. What survives and out-reproduces in the world is what
-  propagates.
-
-- **Determinism & sanitization** (`genome/mod.rs::mutate_genome`,
-  `genome/sanitization.rs`). Each operator is gated by exactly one RNG draw in a
-  fixed order (new gates are appended so existing draw prefixes stay stable);
-  `align_genome_vectors` clamps lengths/values, drops invalid or non-finite
-  edges, and keeps edges sorted-unique on every intake path.
+- **`mutate`** — a frozen, append-only gate sequence (each operator gated by one
+  RNG draw so existing draw prefixes stay stable): header scalar perturbations,
+  CPPN structural ops (perturb/replace weights, add-connection, add-node =
+  split an edge, toggle-enable, mutate-activation, perturb-bias), then
+  meta-mutation of the rate block.
+- **Meta-mutation** — the 15 `MutationRates` genes are evolvable, mutated in
+  **logit space** with a pull toward the seed baseline
+  (`META_MUTATION_BASELINE_PULL = 0.15`) and an exploration tail. **Zero is
+  absorbing** — a rate inherited as 0 hard-disables that operator for the lineage.
+- **`crossover`** — NEAT innovation-aligned: walk both connection lists in
+  innovation-sorted order; matching genes coin-flip from either parent,
+  disjoint/excess from the fitter parent; header crossed per-scalar. One
+  deterministic offspring.
+- **`reproduce`** — sexual: `crossover(a,b) → mutate`.
+- **Champion archive** (`qd.rs::QdArchive`, used by `sim-server`/`sim-evaluation`).
+  A **Quality-Diversity MAP-Elites** grid keyed by a normalized behavior
+  descriptor, keeping the highest-quality elite per niche. `coverage` (occupied
+  cells) and `qd_score` (summed quality) are the open-ended progress signal.
+- **Selection** — purely ecological. No fitness target, no generations counter, no
+  species registry. What survives and out-reproduces is what propagates.
 
 ---
 
-## Ecology
+## The tick loop
 
-A closed-energy ecosystem on a hex world where lossy digestion is the only sink.
-`sim-core/src/turn/`, `sim-core/src/spawn/`, `sim-core/src/metabolism.rs`.
+`sim-substrate/src/driver.rs::PopulationDriver::tick` — the canonical phase order.
+The driver owns the `Vec<Body>`, the RNG streams, brain eval, plasticity, and all
+cross-organism bookkeeping; the environment supplies physics.
 
-- **Tick pipeline** (`turn/mod.rs::Simulation::tick` — canonical phase order):
-  1. **Lifecycle** — charge passive metabolism; starvation & old-age deaths.
-  2. **Intents** — evaluate every brain in parallel, select actions.
-  3. **Reproduction** — decrement gestation, queue births.
-  4. **Move resolution** — deterministic conflict resolution.
-  5. **Commit** — apply moves, spike damage, eating, predation, corpse spawning.
-  6. **Age** — increment ages.
-  7. **Spawn** — resolve queued offspring + periodic injections.
-  8. **Plasticity** — runtime weight updates (skips newborns/gestating).
-  9. **Metrics** — tally actions, consumptions, predations, deaths.
+1. **Metabolism + lifecycle** — charge `env.metabolic_cost`; starvation / zero-
+   health / old-age deaths; `env.on_deaths` (corpses).
+2. **Sensing + action** — `env.observe` fills each obs vector; `brain.step`
+   produces logits; `sample_action` picks an action with a `(seed,turn,id)` hash.
+3. **Mating** — gather `Mate` intents (`env.mate_intent`), pair deterministically
+   by `(target, confidence desc, id asc)`, set gestation.
+4. **Action resolution** — `env.decode_intents` + `env.resolve_actions`; effects
+   applied in handle order.
+5. **World step** — `env.step_world` (food, hazards, social field).
+6. **Gestation + births** — countdown gestation; on completion,
+   `reproduce(parent, partner)` and place via `env.place_birth`.
+7. **Age + plasticity** — increment ages; run `plasticity_step` for eligible bodies.
 
-- **World & grid** (`grid.rs`). Toroidal `world_width × world_width` hex grid in
-  axial `(q,r)`, row-major indexing, **one entity per cell** (organism, food, or
-  wall) via an occupancy vector.
+**Determinism**: every RNG draw is seeded from `(seed, turn, phase)` or hashed
+from `(seed, turn, id)`, and every cross-organism decision is handle-ordered
+serial code, so parallelism cannot reorder history — and save→load→advance is
+byte-identical (`HexSim` bincode round-trip).
 
-- **Terrain** (`spawn/world.rs`). **Walls/mountains** from single-octave Perlin
-  noise above `terrain_threshold`; **spikes** from a per-cell hash above
-  `spike_density`. Spikes deal `SPIKE_DAMAGE_FRACTION = 0.10` of max-health per
-  tick during commit.
+**No periodic injection**: the driver only seeds founders. A world that reaches
+zero living organisms is **extinct** — `HexSim::tick()` records `extinct_at` and
+becomes a no-op, and all run loops stop there.
 
-- **Food / plant ecology** (`spawn/food.rs`). A **hidden fertility map** (Perlin ×
-  per-cell jitter ≥ `food_fertility_threshold`) decides where plants can ever
-  grow. Regrowth is **event-driven**: eating a plant schedules a refill at
-  `turn + regrowth_interval ± jitter` (a `BTreeMap` queue), retried if the cell
-  is occupied. Plants carry `food_energy`; corpses carry the dead organism's
-  remaining energy.
+---
 
-- **Energy economy** (`turn/mod.rs`, `spawn/food.rs`). Energy is created by plant
-  regrowth (each plant holds `config.food_energy`) and drained by metabolism;
-  **eating transfers a food item's energy in full** (no digestion multiplier).
-  Corpses are discounted at creation, not at the bite: a corpse stores
-  `CORPSE_ENERGY_RETENTION = 0.80` of the dead organism's leftover energy
-  (`spawn_corpse_at_cell`). No hard population cap — thermodynamics regulates
-  standing population.
+## The hex ecology (`sim-hexworld`)
 
-- **Metabolism** (`metabolism.rs`). Per-tick passive cost
-  `= passive_metabolism_cost_per_unit · (inter + sensory neuron counts +
-  vision_distance/3 + coeff · max_health^0.75)`. Kleiber `^0.75` body scaling;
-  **no per-synapse cost** (removed) — every *neuron* a lineage keeps must pay for
-  itself.
+A closed-energy ecosystem on a hex world, implemented as an `Environment`.
+`sim-hexworld/src/{lib,grid,catalog,sim}.rs`.
 
-- **Movement & intent resolution** (`turn/moves.rs`). Move candidates targeting a
-  free cell are sorted by `(target cell, confidence desc, organism_id asc)` and
-  deduped per cell, so the highest-confidence organism wins and ties break by ID
-  — fully deterministic and parallel-safe. Turning rotates facing; Forward steps
-  one hex.
+- **World & grid** (`grid.rs`, `lib.rs`). Toroidal `width × width` hex grid in
+  axial `(q,r)`, one entity per cell (organism, food, wall) via per-cell arrays.
+  Value-noise terrain places **walls** (high noise) and **spikes** (a mid band),
+  plus a per-cell fertility field.
+- **Catalog** (`catalog.rs`) — the substrate interface the world exposes: **18
+  sensors** (12 vision = 3 ray offsets × 4 channels R/G/B/Shape, `ContactAhead`,
+  and interoceptive `Energy`/`Health`/`EnergyDelta`/`LastActionForward`/
+  `LastActionEat`), **6 actuators** (TurnLeft, TurnRight, Forward, Eat, Attack,
+  **Mate**; Idle is implicit), and a **morphology** schema (body_color RGB,
+  vision_distance, and a directly-evolvable `size` dial).
+- **Vision raycasting** (`lib.rs::scan_ray`, ported). Each ray marches hex cells
+  up to `vision_distance`, opacity-blending occupant/terrain color with linear
+  distance falloff and accumulating remaining visibility until exhausted.
+- **Metabolism** (`metabolic_cost`, ported). Per-tick cost scales with neuron
+  count + vision range + Kleiber `max_health^0.75` body mass, with a homeostatic
+  low-energy downregulation.
+- **Movement** — Forward requests are resolved deterministically by
+  `(target cell, confidence desc, handle asc)`, one winner per cell.
+- **Predation** — `Attack` into an occupied cell succeeds with probability
+  `clamp(attacker_size / prey_size, 0, 1)` (a deterministic roll); a lethal hit
+  transfers the prey's retained energy to the attacker and suppresses the corpse
+  (`CORPSE_ENERGY_RETENTION = 0.80`), so energy is conserved.
+- **Food** — event-driven plant regrowth on fertile empty cells; corpses (dead
+  organisms) drop food carrying 80% of leftover energy. `Eat` consumes the cell
+  ahead.
+- **Social-color field** — a zero-sum, hue-keyed energy transfer between hex
+  neighbors (`Σ sin(hue_self − hue_neighbor)`), antisymmetric so it conserves
+  energy.
+- **`HexSim`** (`sim.rs`) — the concrete, serializable world (`{ driver, world,
+  config, extinct_at }`) that the CLI/server/evaluation load, tick, and save. It
+  exposes `population_stats`, `render_snapshot`, `behavior_descriptor` (for the QD
+  archive), and per-organism reads.
 
-- **Predation** (`turn/commit.rs`). On `Attack` into an occupied cell, success
-  probability `= clamp(predator_size / prey_size, 0, 1)` resolved by a
-  deterministic hash; on success the prey loses `ATTACK_DAMAGE_FRACTION = 0.5` of
-  the **attacker's** max-health, so bigger predators hit harder regardless of how
-  tough the prey is. No direct energy transfer — a kill leaves a **corpse** that
-  must be eaten, so death feeds the food web.
+---
 
-- **Consumption** (`turn/commit.rs`). `Eat` into a food cell removes it, credits
-  the lossy energy fraction, and (for plants) schedules regrowth. `Idle`
-  regenerates `HEALTH_REGEN_FRACTION = 0.10` of max-health.
+## The second environment (`sim-toyenv`)
 
-- **Health & death** (`turn/lifecycle.rs`, `turn/commit.rs`). Deaths come from
-  starvation (`energy ≤ 0`), old age (`age ≥ max_organism_age`), or damage
-  (`health ≤ 0` from spikes/predation). Old-age and damage deaths leave a corpse;
-  starvation does not.
-
-- **Determinism** (`turn/mod.rs`). Every stochastic choice (action sampling,
-  predation rolls) is a stateless hash of `(seed, turn, organism IDs)`, so the
-  parallel passes can't reorder history: fixed config + seed reproduces the world
-  tick-for-tick on a given build.
+The "Chemotaxis Ribbon" — a 1-D toroidal ribbon with a drifting scalar nutrient
+field, sensors `{gradient_sign, local_concentration, energy, crowding}`, actuators
+`{move_left, move_right, eat, mate}`, morphology `{metabolic_thrift, gut_capacity}`
+(no color, no vision, no health). It runs on the **unchanged** `sim-substrate` and
+exists to prove the substrate carries no hex/embodiment assumptions.
 
 ---
 
 ## A unifying quantity: "size"
 
-`sim_types::get_size(organism) = offspring_transfer_energy(gestation_ticks) = 100
-+ 100·gestation_ticks` is a single evolvable body-size dial that simultaneously
-sets an organism's **max-health/energy budget**, its **predation size-ratio**
-(attacker vs. prey) and the **damage it deals when attacking** (`0.5 ·
-max_health`), the **energy it invests per offspring**, and its **Kleiber
-metabolic cost**. Evolving `gestation_ticks` therefore trades reproductive
-investment, combat weight, durability, and upkeep all at once.
+In the hex world, `size` is a directly-evolvable morphology dial (decoupled from
+gestation, which the substrate header owns) that simultaneously sets an organism's
+**max-health/energy budget**, its **predation size-ratio** (attacker vs. prey) and
+the **damage it deals** (`0.5 · max_health`), the **energy it invests per
+offspring**, and its **Kleiber metabolic cost**. Evolving `size` trades combat
+weight, durability, reproductive investment, and upkeep all at once.

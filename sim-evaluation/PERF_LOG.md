@@ -1,5 +1,9 @@
 # Sim-Evaluation Performance Log
 
+> **📎 Historical log.** Records performance work on the old Parquet-ETL
+> `sim-evaluation` (now a lean Quality-Diversity harness). Kept as a record.
+
+
 Goal: cut a 100k-tick evaluation time by 5x. Baseline measured against
 `--seed 42 --ticks 10000` so iterations don't blow the budget.
 

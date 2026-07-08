@@ -1,5 +1,11 @@
 # sim-cli redesign — stateless, file-state, agent-native
 
+> **⚠️ Historical / superseded.** This proposal predates the substrate redesign.
+> The stateless world-as-file *shape* it argued for did land, but the concrete
+> commands, the CBOR world format, the metric sidecar, and the `sim-metrics`
+> pillars it references are gone. See `docs/sim-cli.md` for the current CLI.
+
+
 **Status:** proposal (spec). **Audience:** implementer (human or agent).
 **Supersedes:** the interactive stdin REPL shape described in `docs/sim-cli.md`.
 

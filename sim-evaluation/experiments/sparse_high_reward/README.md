@@ -1,5 +1,9 @@
 # Sparse High-Reward Food Experiment
 
+> **⚠️ Superseded.** Targets the removed `sim-config`/`sim-core` config fields and
+> the old evaluation harness; does not apply to the current stack.
+
+
 Treatment config for testing whether a much sparser plant landscape with much higher per-plant energy pushes evolution toward better navigation/foraging or more predation.
 
 Design:

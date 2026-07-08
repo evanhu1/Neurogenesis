@@ -1,5 +1,12 @@
 # Autonomous research operating procedure (NeuroGenesis)
 
+> **⚠️ Built on the pre-redesign metrics stack.** The concrete gates and metrics
+> here (`pillars`, the competence axes, the `sim-metrics` ETL) were removed in
+> the substrate redesign; the general operating procedure is kept for reference,
+> but the measurement layer now needs to be rebuilt on `sim-evaluation`'s
+> Quality-Diversity outputs.
+
+
 Distilled from AsterLab's "Scaling autonomous research to thousands of agents"
 (planner→worker→subagent hierarchy, Cluster-Elites archive, surface-area
 decomposition, warm/frozen baselines, handoff loops) and mapped onto **this**
