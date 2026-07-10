@@ -54,6 +54,13 @@ pub fn eco(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
     let pop = sim.organisms().len() as u64;
     let descendants = sim.organisms().iter().filter(|o| o.generation > 0).count() as u64;
     let (plants, corpses, food_energy) = crate::food_summary(sim);
+    let food_tiles = sim.food_tile_count();
+    let habitable_cells = sim.habitable_cell_count();
+    let realized_food_tile_fraction = if habitable_cells == 0 {
+        0.0
+    } else {
+        food_tiles as f64 / habitable_cells as f64
+    };
 
     // Point-in-time block (always present).
     let recorder = ctx.recorder;
@@ -65,6 +72,12 @@ pub fn eco(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
             "population": pop,
             "descendants": descendants,
             "food": { "plants": plants, "corpses": corpses, "total_energy": food_energy },
+            "food_tiles": {
+                "selected": food_tiles,
+                "habitable_cells": habitable_cells,
+                "realized_fraction": realized_food_tile_fraction,
+                "configured_fraction": sim.config().food_tile_fraction,
+            },
         });
         if let Some(rec) = recorder.filter(|_| have_traj) {
             let s = &rec.samples;
@@ -92,7 +105,7 @@ pub fn eco(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
                     "starvation": starv,
                     "age": aged,
                     "predation": preyed,
-                    // total - itemized (e.g. spike-hazard kills, not separately counted)
+                    // total - itemized deaths, if any future cause is not separately counted
                     "other": deaths.saturating_sub(starv + aged + preyed),
                 },
                 "consumptions_per_tick": mean(&cons),
@@ -268,13 +281,12 @@ pub fn genome(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> 
     let sim = ctx.sim;
     let orgs = sim.organisms();
 
-    // (name, group, extractor). num_neurons is the genome gene; synapses use the
-    // expressed brain count (genome.topology.num_synapses is the wiring budget
-    // gene, but brain.synapse_count is the realized count).
+    // (name, group, extractor). Structural counts are derived from the
+    // canonical direct graph; synapses use the expressed runtime count.
     type Extractor = fn(&OrganismState) -> f64;
     let genes: &[(&str, &str, Extractor)] = &[
         ("num_neurons", "topology", |o| {
-            o.genome.topology.num_neurons as f64
+            o.genome.hidden_node_count() as f64
         }),
         ("num_synapses", "topology", |o| o.brain.synapse_count as f64),
         ("vision_distance", "topology", |o| {
@@ -306,57 +318,6 @@ pub fn genome(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> 
         }),
     ];
 
-    // Mutation-rate genes: summarized as hot/cold.
-    type MutExtractor = fn(&OrganismState) -> f64;
-    let mut_genes: &[(&str, MutExtractor)] = &[
-        ("age_of_maturity", |o| {
-            o.genome.mutation_rates.age_of_maturity as f64
-        }),
-        ("gestation_ticks", |o| {
-            o.genome.mutation_rates.gestation_ticks as f64
-        }),
-        ("max_organism_age", |o| {
-            o.genome.mutation_rates.max_organism_age as f64
-        }),
-        ("vision_distance", |o| {
-            o.genome.mutation_rates.vision_distance as f64
-        }),
-        ("hebb_eta_gain", |o| {
-            o.genome.mutation_rates.hebb_eta_gain as f64
-        }),
-        ("juvenile_eta_scale", |o| {
-            o.genome.mutation_rates.juvenile_eta_scale as f64
-        }),
-        ("inter_bias", |o| o.genome.mutation_rates.inter_bias as f64),
-        ("inter_update_rate", |o| {
-            o.genome.mutation_rates.inter_update_rate as f64
-        }),
-        ("eligibility_retention", |o| {
-            o.genome.mutation_rates.eligibility_retention as f64
-        }),
-        ("synapse_prune_threshold", |o| {
-            o.genome.mutation_rates.synapse_prune_threshold as f64
-        }),
-        ("synapse_weight_perturbation", |o| {
-            o.genome.mutation_rates.synapse_weight_perturbation as f64
-        }),
-        ("add_synapse", |o| {
-            o.genome.mutation_rates.add_synapse as f64
-        }),
-        ("remove_synapse", |o| {
-            o.genome.mutation_rates.remove_synapse as f64
-        }),
-        ("remove_neuron", |o| {
-            o.genome.mutation_rates.remove_neuron as f64
-        }),
-        ("add_neuron_split_edge", |o| {
-            o.genome.mutation_rates.add_neuron_split_edge as f64
-        }),
-        ("max_weight_delta_per_tick", |o| {
-            o.genome.mutation_rates.max_weight_delta_per_tick as f64
-        }),
-    ];
-
     let collect = |f: Extractor| -> Vec<f64> { orgs.iter().map(f).collect() };
 
     // Single-gene mode.
@@ -364,10 +325,7 @@ pub fn genome(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> 
         let found = genes.iter().find(|(g, _, _)| *g == name);
         let vals = match found {
             Some((_, _, f)) => collect(*f),
-            None => match mut_genes.iter().find(|(g, _)| *g == name) {
-                Some((_, f)) => orgs.iter().map(f).collect(),
-                None => return Err(anyhow!("unknown gene `{name}`")),
-            },
+            None => return Err(anyhow!("unknown gene `{name}`")),
         };
         let stats = Stats::of(&vals);
         if fmt.is_json() {
@@ -399,21 +357,9 @@ pub fn genome(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> 
                 json!({ "group": group, "stats": s.map(|s| s.json()) }),
             );
         }
-        // Mutation rates: report mean + hot/cold classification.
-        let mut mut_obj = serde_json::Map::new();
-        let floor = 1e-6;
-        for (name, f) in mut_genes {
-            let vals: Vec<f64> = orgs.iter().map(f).collect();
-            let m = mean(&vals);
-            mut_obj.insert(
-                (*name).to_string(),
-                json!({ "mean": m, "state": if m > floor * 10.0 { "hot" } else { "cold" } }),
-            );
-        }
         let mut v = json!({
             "population": orgs.len(),
             "genes": gene_obj,
-            "mutation_rates": mut_obj,
         });
         if let Some(n) = drift_note {
             v["drift_note"] = json!(n);
@@ -433,28 +379,6 @@ pub fn genome(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> 
             None => writeln!(out, "    {name:<26} (none)")?,
         }
     }
-    writeln!(out, "  [mutation_rates] (hot = mean above floor)")?;
-    let floor = 1e-6;
-    let mut hot: Vec<(&str, f64)> = Vec::new();
-    let mut cold: Vec<&str> = Vec::new();
-    for (name, f) in mut_genes {
-        let m = mean(&orgs.iter().map(f).collect::<Vec<_>>());
-        if m > floor * 10.0 {
-            hot.push((name, m));
-        } else {
-            cold.push(name);
-        }
-    }
-    hot.sort_by(|a, b| b.1.total_cmp(&a.1));
-    write!(out, "    hot:")?;
-    if hot.is_empty() {
-        write!(out, " (none)")?;
-    }
-    for (n, m) in &hot {
-        write!(out, " {n}={m:.5}")?;
-    }
-    writeln!(out)?;
-    writeln!(out, "    cold ({}): {}", cold.len(), cold.join(", "))?;
     if let Some(n) = drift_note {
         writeln!(out, "  {n}")?;
     }
@@ -538,7 +462,7 @@ pub fn timeseries(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<
             "prey_consumption_rate" => |m| m.prey_consumption_rate.unwrap_or(f64::NAN),
             "mi_sa" => |m| m.mi_sa.unwrap_or(f64::NAN),
             "learning_slope" => |m| m.learning_slope.unwrap_or(f64::NAN),
-            "pop" => |m| m.pop as f64,
+            "interval_descendants" => |m| m.pop as f64,
             _ => return None,
         };
         Some(intervals.iter().map(f).collect())
@@ -552,7 +476,8 @@ pub fn timeseries(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<
             anyhow!(
                 "unknown column `{name}`; valid: population descendants food births \
                  deaths consumptions predations reproductions action_effectiveness \
-                 plant_consumption_rate prey_consumption_rate mi_sa learning_slope pop"
+                 plant_consumption_rate prey_consumption_rate mi_sa learning_slope \
+                 interval_descendants"
             )
         })?;
         if let Some(k) = last {

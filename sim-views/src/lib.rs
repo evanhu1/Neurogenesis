@@ -29,16 +29,15 @@ use sim_metrics::{
     compute_pillar_scores, derive_interval_metrics, ingest_tick, register_existing,
     register_founders, IntervalMetrics, Ledger, OrganismLifetimeRow, PillarScores, TickSummaryRow,
 };
-use sim_types::EntityId;
+use sim_types::{EntityId, OrganismGenome};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-/// In-memory metric recorder. Holds the shared per-organism ledger plus the two
-/// raw fact streams the analysis layer consumes (`derive_interval_metrics`):
-/// the per-tick descendant-population line and the lifetime rows of organisms
-/// that died while recording. Survivors are intentionally absent — the interval
-/// layer skips `death_tick == None` rows, exactly as the eval does.
+/// In-memory metric recorder. Holds the shared per-organism ledger plus raw
+/// tick, lifetime, and reproduction fact streams. Survivors are intentionally
+/// absent from `lifetimes` — the interval layer skips `death_tick == None`
+/// rows, exactly as the eval does.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Recorder {
     pub ledger: Ledger,
@@ -303,6 +302,8 @@ pub struct NewWorldParams {
     pub threads: Option<u32>,
     pub scale: Option<(u32, u32)>,
     pub sets: Vec<(String, String)>,
+    /// Optional exact founder genomes (e.g. a NEAT champion snapshot).
+    pub champion_pool: Vec<OrganismGenome>,
 }
 
 /// A freshly constructed world plus the derived flags a caller reports/persists.
@@ -324,7 +325,10 @@ pub fn build_world(params: &NewWorldParams) -> Result<BuiltWorld> {
         config.world_width = w;
         config.num_organisms = p;
     }
-    let sim = Simulation::new(config, params.seed).map_err(|e| anyhow!("{e}"))?;
+    let mut sim =
+        Simulation::new_with_champion_pool(config, params.seed, params.champion_pool.clone())
+            .map_err(|e| anyhow!("{e}"))?;
+    sim.set_experiment_scaled(params.scale.is_some());
     Ok(BuiltWorld {
         sim,
         report_every: params.report_every,
@@ -365,7 +369,10 @@ pub fn advance(sim: &mut Simulation, mut recorder: Option<&mut Recorder>, n: u64
 /// ledger when one is present, and return the delta. This is the per-tick unit
 /// behind [`advance`]; a resident driver (e.g. the server's live stream) uses
 /// the returned delta to animate while still recording metrics identically.
-pub fn tick_recording(sim: &mut Simulation, recorder: Option<&mut Recorder>) -> sim_types::TickDelta {
+pub fn tick_recording(
+    sim: &mut Simulation,
+    recorder: Option<&mut Recorder>,
+) -> sim_types::TickDelta {
     let delta = sim.tick();
     if let Some(rec) = recorder {
         let turn = sim.turn();
@@ -494,11 +501,22 @@ pub fn state(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
     let turn = sim.turn();
 
     let energy = Stats::of(&orgs.iter().map(|o| o.energy as f64).collect::<Vec<_>>());
-    let health = Stats::of(&orgs.iter().map(|o| o.health as f64).collect::<Vec<_>>());
+    let health = sim
+        .config()
+        .predation_enabled
+        .then(|| Stats::of(&orgs.iter().map(|o| o.health as f64).collect::<Vec<_>>()))
+        .flatten();
     let age = Stats::of(&orgs.iter().map(|o| o.age_turns as f64).collect::<Vec<_>>());
     let gen = Stats::of(&orgs.iter().map(|o| o.generation as f64).collect::<Vec<_>>());
 
     let (plants, corpses, food_energy) = food_summary(sim);
+    let food_tiles = sim.food_tile_count();
+    let habitable_cells = sim.habitable_cell_count();
+    let realized_food_tile_fraction = if habitable_cells == 0 {
+        0.0
+    } else {
+        food_tiles as f64 / habitable_cells as f64
+    };
 
     if fmt.is_json() {
         let mut v = json!({
@@ -511,12 +529,31 @@ pub fn state(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
             "age_turns": age.map(|s| s.json()),
             "generation": gen.map(|s| s.json()),
             "food": { "plants": plants, "corpses": corpses, "total_energy": food_energy },
+            "food_tiles": {
+                "selected": food_tiles,
+                "habitable_cells": habitable_cells,
+                "realized_fraction": realized_food_tile_fraction,
+                "configured_fraction": sim.config().food_tile_fraction,
+            },
+            "brain_dynamics": {
+                "leaky_neurons_enabled": sim.config().leaky_neurons_enabled,
+                "runtime_plasticity_enabled": sim.config().runtime_plasticity_enabled,
+                "predation_enabled": sim.config().predation_enabled,
+                "health_enabled": sim.config().predation_enabled,
+                "active_sensory_inputs": sim_types::SensoryReceptor::active(sim.config().predation_enabled).count(),
+                "active_actions_excluding_idle": sim_types::ActionType::active(sim.config().predation_enabled).count(),
+            },
             "last_turn": {
                 "consumptions": m.consumptions_last_turn,
+                "plant_consumptions": m.plant_consumptions_last_turn,
                 "predations": m.predations_last_turn,
                 "reproductions": m.reproductions_last_turn,
                 "starvations": m.starvations_last_turn,
                 "age_deaths": m.age_deaths_last_turn,
+            },
+            "totals": {
+                "consumptions": m.total_consumptions,
+                "plant_consumptions": m.total_plant_consumptions,
             },
             "scaled": scaled,
         });
@@ -542,7 +579,15 @@ pub fn state(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
         pop - descendants
     )?;
     writeln!(out, "  energy:     {}", fmt_stats(energy))?;
-    writeln!(out, "  health:     {}", fmt_stats(health))?;
+    writeln!(
+        out,
+        "  health:     {}",
+        if sim.config().predation_enabled {
+            fmt_stats(health)
+        } else {
+            "(disabled)".into()
+        }
+    )?;
     writeln!(out, "  age_turns:  {}", fmt_stats(age))?;
     writeln!(out, "  generation: {}", fmt_stats(gen))?;
     writeln!(
@@ -551,12 +596,18 @@ pub fn state(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
     )?;
     writeln!(
         out,
-        "last-turn: consumptions={} predations={} reproductions={} starvations={} age_deaths={}",
+        "last-turn: consumptions={} (plant={}) predations={} reproductions={} starvations={} age_deaths={}",
         m.consumptions_last_turn,
+        m.plant_consumptions_last_turn,
         m.predations_last_turn,
         m.reproductions_last_turn,
         m.starvations_last_turn,
         m.age_deaths_last_turn,
+    )?;
+    writeln!(
+        out,
+        "cumulative: consumptions={} (plant={})",
+        m.total_consumptions, m.total_plant_consumptions,
     )?;
     if let Some((p, _, partial)) = pillars {
         writeln!(
@@ -604,10 +655,14 @@ pub fn food(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
 }
 
 pub fn inspect(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
-    let id: u64 = args
+    let (fmt, rest) = take_format(ctx.format, args);
+    let id: u64 = rest
         .first()
         .ok_or_else(|| anyhow!("inspect needs an organism id"))?
         .parse()?;
+    if let Some(arg) = rest.get(1) {
+        anyhow::bail!("unknown inspect arg `{arg}`");
+    }
     let sim = ctx.sim;
     let idx = sim
         .organisms()
@@ -616,6 +671,49 @@ pub fn inspect(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()>
         .ok_or_else(|| anyhow!("no live organism with id {id}"))?;
     let rec = sim.action_records().get(idx).cloned().flatten();
     let o = &sim.organisms()[idx];
+    if fmt.is_json() {
+        let action_logits: Vec<_> = o
+            .brain
+            .action
+            .iter()
+            .map(|a| json!({ "action": a.action_type, "logit": a.logit }))
+            .collect();
+        let value = json!({
+            "id": o.id.0,
+            "position": { "q": o.q, "r": o.r },
+            "facing": o.facing,
+            "energy": o.energy,
+            "health": o.health,
+            "max_health": o.max_health,
+            "age": o.age_turns,
+            "generation": o.generation,
+            "species": o.species_id.0,
+            "gestating": o.is_gestating,
+            "last_action": o.last_action_taken,
+            "consumptions": {
+                "total": o.consumptions_count,
+                "plant": o.plant_consumptions_count,
+                "prey": o.prey_consumptions_count,
+            },
+            "reproductions": o.reproductions_count,
+            "genome": {
+                "hidden_nodes": o.genome.hidden_node_count(),
+                "synapses": o.brain.synapse_count,
+                "vision_distance": o.genome.topology.vision_distance,
+                "hebb_eta": o.genome.plasticity.hebb_eta_gain,
+                "juvenile_eta_scale": o.genome.plasticity.juvenile_eta_scale,
+                "eligibility_retention": o.genome.plasticity.eligibility_retention,
+                "max_weight_delta_per_tick": o.genome.plasticity.max_weight_delta_per_tick,
+                "synapse_prune_threshold": o.genome.plasticity.synapse_prune_threshold,
+                "age_of_maturity": o.genome.lifecycle.age_of_maturity,
+                "gestation_ticks": o.genome.lifecycle.gestation_ticks,
+                "max_organism_age": o.genome.lifecycle.max_organism_age,
+            },
+            "action_logits": action_logits,
+            "last_decision": rec,
+        });
+        return writeln!(out, "{value}").map_err(Into::into);
+    }
     writeln!(out, "organism {id}:")?;
     writeln!(
         out,
@@ -635,7 +733,7 @@ pub fn inspect(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()>
     writeln!(
         out,
         "  genome: num_neurons={} synapses={} vision_distance={} | hebb_eta={:.4} juv_scale={:.3} elig_ret={:.3} max_dw={:.4} prune={:.4} | maturity={} gestation={} max_age={}",
-        g.topology.num_neurons,
+        g.hidden_node_count(),
         o.brain.synapse_count,
         g.topology.vision_distance,
         g.plasticity.hebb_eta_gain,
@@ -663,7 +761,8 @@ pub fn inspect(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()>
 }
 
 pub fn top(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
-    let field = *args.first().ok_or_else(|| anyhow!("top needs a field"))?;
+    let (fmt, rest) = take_format(ctx.format, args);
+    let field = *rest.first().ok_or_else(|| anyhow!("top needs a field"))?;
     if !matches!(
         field,
         "energy" | "health" | "age" | "generation" | "consumptions" | "reproductions"
@@ -672,7 +771,10 @@ pub fn top(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
             "unknown field `{field}` (energy|health|age|generation|consumptions|reproductions)"
         );
     }
-    let n: usize = args.get(1).map(|s| s.parse()).transpose()?.unwrap_or(10);
+    let n: usize = rest.get(1).map(|s| s.parse()).transpose()?.unwrap_or(10);
+    if let Some(arg) = rest.get(2) {
+        anyhow::bail!("unknown top arg `{arg}`");
+    }
     let sim = ctx.sim;
     let mut idx: Vec<usize> = (0..sim.organisms().len()).collect();
     let key = |o: &sim_types::OrganismState| -> f64 {
@@ -687,7 +789,36 @@ pub fn top(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
         }
     };
     let orgs = sim.organisms();
-    idx.sort_by(|&a, &b| key(&orgs[b]).total_cmp(&key(&orgs[a])));
+    idx.sort_by(|&a, &b| {
+        key(&orgs[b])
+            .total_cmp(&key(&orgs[a]))
+            .then_with(|| orgs[a].id.cmp(&orgs[b].id))
+    });
+    if fmt.is_json() {
+        let rows: Vec<_> = idx
+            .iter()
+            .take(n)
+            .map(|&i| {
+                let o = &orgs[i];
+                json!({
+                    "id": o.id.0,
+                    "value": key(o),
+                    "energy": o.energy,
+                    "age": o.age_turns,
+                    "generation": o.generation,
+                    "consumptions": o.consumptions_count,
+                    "reproductions": o.reproductions_count,
+                    "last_action": o.last_action_taken,
+                })
+            })
+            .collect();
+        return writeln!(
+            out,
+            "{}",
+            json!({ "field": field, "requested": n, "rows": rows })
+        )
+        .map_err(Into::into);
+    }
     writeln!(out, "top {n} by {field}:")?;
     for &i in idx.iter().take(n) {
         let o = &orgs[i];
@@ -708,7 +839,11 @@ pub fn top(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
 }
 
 pub fn hist(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
-    let field = *args.first().ok_or_else(|| anyhow!("hist needs a field"))?;
+    let (fmt, rest) = take_format(ctx.format, args);
+    let field = *rest.first().ok_or_else(|| anyhow!("hist needs a field"))?;
+    if let Some(arg) = rest.get(1) {
+        anyhow::bail!("unknown hist arg `{arg}`");
+    }
     let sim = ctx.sim;
     let vals: Vec<f64> = sim
         .organisms()
@@ -725,11 +860,34 @@ pub fn hist(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
         anyhow::bail!("unknown field `{field}` (energy|health|age|generation)");
     }
     if vals.is_empty() {
+        if fmt.is_json() {
+            return writeln!(out, "{}", json!({ "field": field, "n": 0, "bins": [] }))
+                .map_err(Into::into);
+        }
         writeln!(out, "(no organisms)")?;
         return Ok(());
     }
     let min = vals.iter().cloned().fold(f64::INFINITY, f64::min);
     let max = vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    if min == max {
+        if fmt.is_json() {
+            return writeln!(
+                out,
+                "{}",
+                json!({
+                    "field": field,
+                    "n": vals.len(),
+                    "min": min,
+                    "max": max,
+                    "bins": [{ "lo": min, "hi": max, "count": vals.len(), "inclusive": true }],
+                })
+            )
+            .map_err(Into::into);
+        }
+        writeln!(out, "{field} histogram ({} organisms):", vals.len())?;
+        writeln!(out, "  [{min:>9.1}] {:>8} {}", vals.len(), "#".repeat(40))?;
+        return Ok(());
+    }
     let bins = 10usize;
     let width = ((max - min) / bins as f64).max(f64::MIN_POSITIVE);
     let mut counts = vec![0u64; bins];
@@ -738,6 +896,23 @@ pub fn hist(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
         counts[b] += 1;
     }
     let peak = counts.iter().copied().max().unwrap_or(1).max(1);
+    if fmt.is_json() {
+        let rendered: Vec<_> = counts
+            .iter()
+            .enumerate()
+            .map(|(i, count)| {
+                let lo = min + i as f64 * width;
+                let hi = lo + width;
+                json!({ "lo": lo, "hi": hi, "count": count })
+            })
+            .collect();
+        return writeln!(
+            out,
+            "{}",
+            json!({ "field": field, "n": vals.len(), "min": min, "max": max, "bins": rendered })
+        )
+        .map_err(Into::into);
+    }
     writeln!(out, "{field} histogram ({} organisms):", vals.len())?;
     for (i, c) in counts.iter().enumerate() {
         let lo = min + i as f64 * width;

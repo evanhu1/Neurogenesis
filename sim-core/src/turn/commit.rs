@@ -53,8 +53,6 @@ impl<'a> CommitPhaseContext<'a> {
     fn run(mut self, gestation_started_this_tick: &mut Vec<bool>) -> CommitResult {
         self.apply_facing_and_action_costs();
         self.apply_moves();
-        self.apply_spike_hazards();
-        self.apply_social_color_mortality();
         self.resolve_interactions();
         self.finalize(gestation_started_this_tick);
         self.result
@@ -93,188 +91,12 @@ impl<'a> CommitPhaseContext<'a> {
 
             self.sim.occupancy[from_idx] = None;
             self.sim.occupancy[to_idx] = Some(Occupant::Organism(resolution.actor_id));
-            self.sim.visual_map[to_idx] = self.sim.visual_map[from_idx];
-            self.sim.visual_map[from_idx] = self.sim.visual_map_base[from_idx];
             let organism = &mut self.sim.organisms[resolution.actor_idx];
             organism.q = resolution.to.0;
             organism.r = resolution.to.1;
-            // Dir3: moving INTO a spike cell is a self-harming move — the
-            // organism still enters (and takes spike damage in
-            // `apply_spike_hazards`), but the Forward is NOT marked successful,
-            // so action_effectiveness penalizes blundering into a hazard and
-            // rewards routing around it.
             #[cfg(feature = "instrumentation")]
-            if !self.sim.spike_map[to_idx] {
-                self.sim.mark_action_succeeded(resolution.actor_idx);
-            }
+            self.sim.mark_action_succeeded(resolution.actor_idx);
         }
-    }
-
-    fn apply_spike_hazards(&mut self) {
-        for idx in 0..self.sim.organisms.len() {
-            if self.dead_organisms[idx] {
-                continue;
-            }
-            let (q, r, max_health, current_health, organism_id, corpse_energy) = {
-                let organism = &self.sim.organisms[idx];
-                (
-                    organism.q,
-                    organism.r,
-                    organism.max_health.max(1.0),
-                    organism.health.max(0.0),
-                    organism.id,
-                    organism.energy.max(0.0),
-                )
-            };
-            let cell_idx = r as usize * self.world_width_usize + q as usize;
-            if !self.sim.spike_map[cell_idx] {
-                continue;
-            }
-
-            let spike_damage = (max_health * SPIKE_DAMAGE_FRACTION).min(current_health);
-            let organism = &mut self.sim.organisms[idx];
-            organism.health = (organism.health - spike_damage).max(0.0);
-            organism.damage_taken_last_turn += spike_damage;
-
-            if organism.health <= 0.0 {
-                self.mark_organism_dead(idx, organism_id, cell_idx, (q, r), corpse_energy);
-            }
-        }
-    }
-
-    /// Social color-cyclic adjacency mortality ("social hue pressure").
-    ///
-    /// Each living organism takes pure damage (health loss — never energy
-    /// gain/transfer) from its ≤6 hex-adjacent organisms whose body-color hue
-    /// *dominates* it on the color wheel:
-    ///
-    /// ```text
-    /// damage(o) = SOCIAL_DAMAGE * Σ_{n ∈ neighbors(o)} max(0, sin(hue_n - hue_o))
-    /// ```
-    ///
-    /// `sin(hue_n - hue_o) > 0` ⟺ n's hue leads o's by 0..180° ⟺ n dominates o.
-    /// This is antisymmetric (if n hurts o, o does not hurt n by the same
-    /// pairing) — an intransitive rock-paper-scissors on the color wheel with no
-    /// dominant hue — and frequency-dependent (the damage depends on the colors
-    /// of whoever is around you), so the population hue can keep winding instead
-    /// of converging. Death drops a corpse, exactly like spike/starvation/age
-    /// deaths (reuses `mark_organism_dead`).
-    ///
-    /// Determinism: damage is a pure function of persisted, *pre-damage* state
-    /// (post-move occupancy + each organism's body color). Neither positions nor
-    /// body colors are mutated by this phase, and the per-organism damage never
-    /// reads any organism's health, so the computation is order-independent. We
-    /// still compute every organism's damage into a snapshot buffer first, then
-    /// apply in index order, so the result can never depend on iteration order.
-    /// No RNG is drawn. `SOCIAL_DAMAGE == 0.0` ⇒ every damage is 0 ⇒ no health
-    /// changes and no deaths ⇒ byte-identical to baseline.
-    fn apply_social_color_mortality(&mut self) {
-        if SOCIAL_DAMAGE == 0.0 {
-            return;
-        }
-        let org_count = self.sim.organisms.len();
-        let world_width = self.world_width_usize as i32;
-
-        // Snapshot: per-organism social damage, computed from pre-damage state.
-        let mut social_damage = std::mem::take(&mut self.sim.turn_scratch.social_damage);
-        social_damage.clear();
-        social_damage.resize(org_count, 0.0_f32);
-
-        for idx in 0..org_count {
-            if self.dead_organisms[idx] {
-                continue;
-            }
-            let organism = &self.sim.organisms[idx];
-            let self_hue = sim_types::color_hue(organism.genome.lifecycle.body_color);
-            let (q, r) = (organism.q, organism.r);
-
-            let mut accum = 0.0_f32;
-            for &facing in FacingDirection::ALL {
-                let (nq, nr) = hex_neighbor((q, r), facing, world_width);
-                let cell_idx = nr as usize * self.world_width_usize + nq as usize;
-                let Some(Occupant::Organism(neighbor_id)) = self.sim.occupancy[cell_idx] else {
-                    continue;
-                };
-                let Some(neighbor_idx) = organism_index_by_id(&self.sim.organisms, neighbor_id)
-                else {
-                    continue;
-                };
-                // A neighbor that already died earlier this commit (spike) still
-                // occupies its cell here only if its corpse hasn't replaced it;
-                // `kill_organism` clears occupancy on death, so a live occupant
-                // is genuinely alive. Guard anyway for robustness.
-                if self.dead_organisms[neighbor_idx] {
-                    continue;
-                }
-                let neighbor_hue = sim_types::color_hue(
-                    self.sim.organisms[neighbor_idx].genome.lifecycle.body_color,
-                );
-                // FULL antisymmetric sin (not max(0)): flow TO self is positive
-                // when self DOMINATES the neighbor on the hue wheel. The pair's
-                // two contributions cancel (sin(a-b) = -sin(b-a)), so the energy
-                // transfer is ZERO-SUM (conservative — not "ease").
-                accum += (self_hue - neighbor_hue).sin();
-            }
-            social_damage[idx] = SOCIAL_DAMAGE * accum;
-        }
-
-        // Apply as a zero-sum energy TRANSFER: a dominated organism (surrounded
-        // by leading hues) bleeds energy and starves via the normal lifecycle; a
-        // dominant one gains and out-reproduces. The per-pair flows are exactly
-        // antisymmetric (sin(a-b) = -sin(b-a)), so the *intended* net flow is 0.
-        // But a dominated organism can only pay what energy it has: simply
-        // capping its loss at zero while still crediting its dominant neighbors
-        // the full positive flow would CREATE energy from nothing — and that
-        // happens precisely in the low-energy (near-starvation) adjacencies that
-        // are common, silently turning a conservative transfer into "ease". To
-        // stay strictly conservative we close the books globally: sum what the
-        // losers can actually afford to surrender, then scale the winners' gains
-        // down to match, so total energy removed == total energy added.
-        //
-        // Determinism: both passes read only the *pre-transfer* energy snapshot
-        // (a loser reads its own energy, never a neighbor's mutated value; a
-        // winner reads no energy at all), so the result is order-independent.
-        let mut gross_in = 0.0_f32;
-        let mut afford_out = 0.0_f32;
-        for idx in 0..org_count {
-            if self.dead_organisms[idx] {
-                continue;
-            }
-            let flow = social_damage[idx];
-            if flow > 0.0 {
-                gross_in += flow;
-            } else if flow < 0.0 {
-                afford_out += (-flow).min(self.sim.organisms[idx].energy.max(0.0));
-            }
-        }
-        // Winners share only the energy the losers could actually give up.
-        // `scale` never exceeds 1.0, so a gain is only ever reduced, never
-        // amplified; any residual fp imbalance can therefore only destroy a
-        // sliver of energy, never create it.
-        let scale = if gross_in > 0.0 {
-            (afford_out / gross_in).min(1.0)
-        } else {
-            0.0
-        };
-        for idx in 0..org_count {
-            if self.dead_organisms[idx] {
-                continue;
-            }
-            let flow = social_damage[idx];
-            if flow == 0.0 {
-                continue;
-            }
-            let organism = &mut self.sim.organisms[idx];
-            if flow < 0.0 {
-                // Loser pays at most its available energy (floored at 0).
-                let loss = (-flow).min(organism.energy.max(0.0));
-                organism.energy -= loss;
-            } else {
-                organism.energy += flow * scale;
-            }
-        }
-
-        self.sim.turn_scratch.social_damage = social_damage;
     }
 
     fn resolve_interactions(&mut self) {
@@ -291,7 +113,9 @@ impl<'a> CommitPhaseContext<'a> {
                 Some(Occupant::Food(food_id)) if intent.wants_eat => {
                     self.consume_food(idx, target_idx, food_id);
                 }
-                Some(Occupant::Organism(prey_id)) if intent.wants_attack => {
+                Some(Occupant::Organism(prey_id))
+                    if self.sim.config.predation_enabled && intent.wants_attack =>
+                {
                     self.resolve_attack_damage(idx, prey_id, target_idx);
                 }
                 None | Some(Occupant::Wall) => {}
@@ -305,8 +129,8 @@ impl<'a> CommitPhaseContext<'a> {
             return;
         };
         if food_idx >= self.removed_food.len() {
-            // Corpses spawned earlier in this commit (spike hazards / attack
-            // kills) live past the buffer sized at commit start; they are
+            // Corpses spawned earlier in this commit by attack kills live past
+            // the buffer sized at commit start; they are
             // edible, so grow lazily instead of conflating "spawned this tick"
             // with "already consumed".
             self.removed_food.resize(self.sim.foods.len(), false);
@@ -320,7 +144,6 @@ impl<'a> CommitPhaseContext<'a> {
         let food = self.sim.foods[food_idx].clone();
         self.removed_food[food_idx] = true;
         self.sim.occupancy[target_idx] = None;
-        self.sim.visual_map[target_idx] = self.sim.visual_map_base[target_idx];
         if food.kind == FoodKind::Plant {
             self.sim.schedule_food_regrowth(target_idx);
         }
@@ -333,6 +156,7 @@ impl<'a> CommitPhaseContext<'a> {
             FoodKind::Plant => {
                 predator.plant_consumptions_count =
                     predator.plant_consumptions_count.saturating_add(1);
+                self.result.plant_consumptions += 1;
             }
             FoodKind::Corpse => {
                 predator.prey_consumptions_count =
@@ -431,7 +255,7 @@ impl<'a> CommitPhaseContext<'a> {
             }
 
             // Suppress the corpse: the prey was eaten, not left behind. Other
-            // death paths (starvation / age / spike) still drop a corpse.
+            // starvation and age deaths still drop a corpse.
             self.kill_organism(
                 prey_idx,
                 prey_id,
@@ -443,20 +267,8 @@ impl<'a> CommitPhaseContext<'a> {
         }
     }
 
-    fn mark_organism_dead(
-        &mut self,
-        organism_idx: usize,
-        organism_id: OrganismId,
-        cell_idx: usize,
-        position: (i32, i32),
-        corpse_energy: f32,
-    ) {
-        self.kill_organism(organism_idx, organism_id, cell_idx, position, corpse_energy, true);
-    }
-
-    /// Death bookkeeping shared by every death path. `spawn_corpse` is `true`
-    /// for starvation / old-age / spike deaths (the body is left to be eaten);
-    /// it is `false` only for a predation kill, where the attacker has already
+    /// Commit-phase death bookkeeping. `spawn_corpse` is false for a predation
+    /// kill, where the attacker has already
     /// consumed the prey's energy directly (see `resolve_attack_damage`), so no
     /// corpse is left behind. Corpse spawning draws no RNG, so suppressing it on
     /// the predation path does not perturb the deterministic RNG stream.
@@ -480,7 +292,6 @@ impl<'a> CommitPhaseContext<'a> {
             r: position.1,
         });
         self.sim.occupancy[cell_idx] = None;
-        self.sim.visual_map[cell_idx] = self.sim.visual_map_base[cell_idx];
         if spawn_corpse {
             if let Some(corpse) = self.sim.spawn_corpse_at_cell(cell_idx, corpse_energy) {
                 self.result.food_spawned.push(corpse);
@@ -489,7 +300,7 @@ impl<'a> CommitPhaseContext<'a> {
     }
 
     fn finalize(&mut self, gestation_started_this_tick: &mut Vec<bool>) {
-        // Gestating parents killed during commit (spike hazards or predation)
+        // Gestating parents killed during commit by predation
         // must still report a failed reproduction before their pending action
         // is compacted away, mirroring the starvation/old-age path in
         // lifecycle_phase.
@@ -498,16 +309,17 @@ impl<'a> CommitPhaseContext<'a> {
                 continue;
             }
             let organism = &self.sim.organisms[idx];
-            self.result.reproduction_events.push(ReproductionEvent {
-                parent_id: organism.id,
-                parent_species_id: organism.species_id,
-                parent_age_turns: organism.age_turns,
-                parent_generation: organism.generation,
-                investment_energy: self.sim.pending_actions[idx].reproduction_energy(),
-                parent_energy_after_event: organism.energy,
-                child_id: None,
-                failure_cause: Some(ReproductionFailureCause::ParentDied),
-            });
+            let pending_reproduction = self.sim.pending_reproductions[idx]
+                .as_ref()
+                .expect("Reproduce pending action must carry reproduction metadata");
+            self.result
+                .reproduction_events
+                .push(pending_reproduction.event(
+                    organism,
+                    self.sim.pending_actions[idx].reproduction_energy(),
+                    None,
+                    Some(ReproductionFailureCause::ParentDied),
+                ));
         }
 
         self.sim

@@ -26,16 +26,31 @@ fn champion_pool_init_reset_and_replay_are_deterministic() {
     cfg.num_organisms = 32;
 
     let mut champion_a = test_genome();
-    champion_a.topology.num_neurons = 2;
     champion_a.topology.vision_distance = 7;
-    champion_a.brain.inter_biases = vec![0.1, -0.2];
-    champion_a.brain.inter_log_time_constants = vec![0.0, 0.2];
+    champion_a.brain.hidden_nodes = vec![
+        HiddenNodeGene {
+            id: seed_hidden_gene_node_id(0),
+            bias: 0.1,
+            log_time_constant: 0.0,
+        },
+        HiddenNodeGene {
+            id: seed_hidden_gene_node_id(1),
+            bias: -0.2,
+            log_time_constant: 0.2,
+        },
+    ];
 
     let mut champion_b = champion_a.clone();
-    champion_b.topology.num_neurons = 3;
     champion_b.topology.vision_distance = 9;
-    champion_b.brain.inter_biases = vec![0.3, -0.4, 0.5];
-    champion_b.brain.inter_log_time_constants = vec![0.0, 0.1, 0.2];
+    champion_b.brain.hidden_nodes = [(0.3, 0.0), (-0.4, 0.1), (0.5, 0.2)]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (bias, log_time_constant))| HiddenNodeGene {
+            id: seed_hidden_gene_node_id(index as u32),
+            bias,
+            log_time_constant,
+        })
+        .collect();
 
     let champion_pool = vec![champion_a.clone(), champion_b.clone()];
     let mut run = Simulation::new_with_champion_pool(cfg.clone(), 2026, champion_pool.clone())
@@ -69,10 +84,16 @@ fn reset_preserves_champion_pool_bootstrap_behavior() {
     cfg.num_organisms = 16;
 
     let mut champion = test_genome();
-    champion.topology.num_neurons = 4;
     champion.topology.vision_distance = 10;
-    champion.brain.inter_biases = vec![0.0, 0.1, 0.2, 0.3];
-    champion.brain.inter_log_time_constants = vec![0.0, 0.1, 0.2, 0.3];
+    champion.brain.hidden_nodes = [0.0, 0.1, 0.2, 0.3]
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| HiddenNodeGene {
+            id: seed_hidden_gene_node_id(index as u32),
+            bias: value,
+            log_time_constant: value,
+        })
+        .collect();
 
     let mut sim = Simulation::new_with_champion_pool(cfg, 99, vec![champion.clone()])
         .expect("simulation should initialize");
@@ -89,14 +110,14 @@ fn reset_preserves_champion_pool_bootstrap_behavior() {
 }
 
 #[test]
-fn higher_food_fertility_threshold_reduces_initial_plant_supply() {
+fn higher_food_tile_fraction_increases_initial_plant_supply() {
     let mut dense_cfg = stable_test_config();
     dense_cfg.world_width = 48;
     dense_cfg.num_organisms = 1;
-    dense_cfg.food_fertility_threshold = 0.6;
+    dense_cfg.food_tile_fraction = 0.6;
 
     let mut sparse_cfg = dense_cfg.clone();
-    sparse_cfg.food_fertility_threshold = 0.9;
+    sparse_cfg.food_tile_fraction = 0.1;
 
     let dense = Simulation::new(dense_cfg, 2026).expect("simulation should initialize");
     let sparse = Simulation::new(sparse_cfg, 2026).expect("simulation should initialize");
@@ -106,29 +127,6 @@ fn higher_food_fertility_threshold_reduces_initial_plant_supply() {
 
     assert!(
         sparse_food < dense_food,
-        "raising the fertility threshold should reduce initial plant supply: dense={dense_food} sparse={sparse_food}"
-    );
-}
-
-#[test]
-fn stronger_food_fertility_jitter_reduces_initial_plant_supply() {
-    let mut baseline_cfg = stable_test_config();
-    baseline_cfg.world_width = 48;
-    baseline_cfg.num_organisms = 1;
-    baseline_cfg.food_fertility_threshold = 0.6;
-    baseline_cfg.food_fertility_jitter_strength = 1.0;
-
-    let mut patchy_cfg = baseline_cfg.clone();
-    patchy_cfg.food_fertility_jitter_strength = 2.0;
-
-    let baseline = Simulation::new(baseline_cfg, 2026).expect("simulation should initialize");
-    let patchy = Simulation::new(patchy_cfg, 2026).expect("simulation should initialize");
-
-    let baseline_food = baseline.snapshot().foods.len();
-    let patchy_food = patchy.snapshot().foods.len();
-
-    assert!(
-        patchy_food < baseline_food,
-        "raising fertility jitter strength should reduce initial plant supply: baseline={baseline_food} patchy={patchy_food}"
+        "lowering the food tile fraction should reduce initial plant supply: dense={dense_food} sparse={sparse_food}"
     );
 }

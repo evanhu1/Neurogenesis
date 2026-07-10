@@ -7,7 +7,7 @@ mod snapshot;
 
 #[cfg(feature = "instrumentation")]
 use crate::brain::scan_rays;
-use crate::brain::{action_index, evaluate_brain, BrainEvalContext, BrainScratch, ACTION_COUNT};
+use crate::brain::{action_index, evaluate_brain, BrainEvalContext, BrainScratch};
 use crate::grid::{hex_neighbor, opposite_direction, rotate_left, rotate_right, wrap_position};
 use crate::plasticity::{apply_runtime_weight_updates, compute_pending_coactivations};
 use crate::spawn::{ReproductionSpawn, SpawnRequest, CORPSE_ENERGY_RETENTION};
@@ -22,7 +22,6 @@ use sim_types::ActionRecord;
 use sim_types::{
     ActionType, EntityId, FacingDirection, FoodKind, FoodState, Occupant, OrganismFacing,
     OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, ReproductionEvent, TickDelta,
-    VisualProperties,
 };
 use std::sync::Arc;
 #[cfg(feature = "profiling")]
@@ -31,19 +30,7 @@ use std::time::Instant;
 const RNG_TURN_MIX: u64 = 0x9E37_79B9_7F4A_7C15;
 const RNG_ORGANISM_MIX: u64 = 0xBF58_476D_1CE4_E5B9;
 const RNG_PREY_MIX: u64 = 0x2545_F491_4F6C_DD1D;
-const SPIKE_DAMAGE_FRACTION: f32 = 0.10;
 const ATTACK_DAMAGE_FRACTION: f32 = 0.5;
-/// Per-tick strength of the social color-cyclic adjacency ENERGY TRANSFER
-/// (see `CommitPhaseContext::apply_social_color_mortality`). Each living
-/// organism's net energy change is `SOCIAL_DAMAGE * Σ sin(hue_self - hue_neighbor)`
-/// over its ≤6 hex-adjacent organisms — energy flows from hue-DOMINATED to
-/// hue-DOMINANT organisms. The full antisymmetric `sin` makes the transfer
-/// ZERO-SUM (conservative — not "ease"; the energy>=0 clamp only ever destroys
-/// energy, never creates it). Zero-sum preserves the antisymmetric structure a
-/// sustained intransitive cycle needs, which the prior PURE-DAMAGE variant broke
-/// (all-damage ⇒ race-to-dominant-hue ⇒ convergence/lock). Dense + strong +
-/// frequency-dependent. `0.0` ⇒ the phase is a no-op, byte-identical to baseline.
-const SOCIAL_DAMAGE: f32 = 1.0;
 const HEALTH_REGEN_FRACTION: f32 = 0.10;
 const INTENT_PARALLEL_MIN_LEN: usize = 64;
 
@@ -99,10 +86,6 @@ pub(crate) struct TurnScratch {
     move_candidates: Vec<(usize, MoveCandidate)>,
     move_resolutions: Vec<MoveResolution>,
     intents: Vec<OrganismIntent>,
-    /// Per-organism social color-cyclic adjacency damage, computed from a
-    /// pre-damage snapshot in `apply_social_color_mortality` then applied in
-    /// index order so the result is order-independent.
-    social_damage: Vec<f32>,
 }
 
 #[derive(Default)]
@@ -113,6 +96,7 @@ struct CommitResult {
     food_spawned: Vec<FoodState>,
     reproduction_events: Vec<ReproductionEvent>,
     consumptions: u64,
+    plant_consumptions: u64,
     predations: u64,
     actions_applied: u64,
 }
@@ -175,6 +159,7 @@ impl Simulation {
             reproduction_state.apply_triggers(
                 &mut self.organisms,
                 &mut self.pending_actions,
+                &mut self.pending_reproductions,
                 &intents,
                 &self.occupancy,
                 world_width,
@@ -215,13 +200,10 @@ impl Simulation {
         let (spawned, reproductions) = profile_turn_phase!(TurnPhase::Spawn, {
             let spawn_requests = reproduction_state.spawn_requests_mut();
             let reproduction_spawn_count = spawn_requests.len();
-            self.enqueue_periodic_injections(spawn_requests);
-            // Outcomes are aligned 1:1 with the request queue (reproductions
-            // first, then injections). Reproduction requests target cells that
-            // queue_completions verified empty and reserved, and nothing
-            // mutates occupancy in between, so they must all succeed; enforce
-            // that loudly so child-event attribution can never silently
-            // misalign onto injection organisms.
+            // Reproduction requests target cells that queue_completions verified
+            // empty and reserved, and nothing mutates occupancy in between, so
+            // they must all succeed; enforce that loudly so child-event
+            // attribution can never silently misalign.
             let spawn_results = self.resolve_spawn_requests(spawn_requests);
             assert!(
                 spawn_results[..reproduction_spawn_count]
@@ -252,8 +234,10 @@ impl Simulation {
             // birth completions are not actions (see reproductions_last_turn).
             self.metrics.actions_applied_last_turn = commit.actions_applied;
             self.metrics.consumptions_last_turn = commit.consumptions;
+            self.metrics.plant_consumptions_last_turn = commit.plant_consumptions;
             self.metrics.predations_last_turn = commit.predations;
             self.metrics.total_consumptions += commit.consumptions;
+            self.metrics.total_plant_consumptions += commit.plant_consumptions;
             self.metrics.reproductions_last_turn = reproductions;
             self.metrics.starvations_last_turn = starvations;
             self.metrics.age_deaths_last_turn = age_deaths;
@@ -409,16 +393,13 @@ fn deterministic_predation_sample(
     sample as f32 / ((1_u32 << 24) - 1) as f32
 }
 
-fn uniform_random_action(action_sample: f32) -> ActionType {
-    // Sample over the same action support as the real policy: the six action
-    // neurons in `ActionType::ALL` plus explicit Idle, which
-    // `sample_action_from_logits` reaches via its `idle_weight` term.
-    const RANDOM_ACTION_BUCKETS: usize = ACTION_COUNT + 1;
-    let scaled = action_sample.clamp(0.0, 1.0 - f32::EPSILON) * RANDOM_ACTION_BUCKETS as f32;
-    let idx = (scaled.floor() as usize).min(RANDOM_ACTION_BUCKETS - 1);
-    ActionType::ALL
-        .get(idx)
-        .copied()
+fn uniform_random_action(action_sample: f32, predation_enabled: bool) -> ActionType {
+    let active_count = ActionType::active(predation_enabled).count();
+    let buckets = active_count + 1;
+    let scaled = action_sample.clamp(0.0, 1.0 - f32::EPSILON) * buckets as f32;
+    let idx = (scaled.floor() as usize).min(buckets - 1);
+    ActionType::active(predation_enabled)
+        .nth(idx)
         .unwrap_or(ActionType::Idle)
 }
 

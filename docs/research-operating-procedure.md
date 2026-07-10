@@ -43,7 +43,7 @@ once "collapsed because it could not compare experiments across different source
 of change." **One worker = one lever-family.** For us the lever-families are:
 
 - **food ecology** — `food_energy`, `food_regrowth_interval`,
-  `food_fertility_threshold`
+  `food_tile_fraction`
 - **metabolism / lifecycle** — `passive_metabolism_cost_per_unit`,
   `move_action_energy_cost`, `action_temperature`
 - **corpse / predation mechanics** — (engine levers; code-level, slower loop)

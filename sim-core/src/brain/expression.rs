@@ -1,26 +1,20 @@
 use super::*;
 
-pub(crate) fn express_genome(genome: &OrganismGenome) -> BrainState {
-    // `align_genome_vectors` forces every genome vector to its exact target
-    // length on all paths into expression (seed generation, mutation,
-    // external-genome intake) — fail fast instead of silently expressing
-    // zero-bias / default-alpha neurons.
-    let num_inter = genome.topology.num_neurons as usize;
-    debug_assert_eq!(genome.brain.inter_biases.len(), num_inter);
-    debug_assert_eq!(genome.brain.inter_log_time_constants.len(), num_inter);
+pub(crate) fn express_genome(genome: &OrganismGenome, predation_enabled: bool) -> BrainState {
+    // Heritable node IDs are stable structural hashes. The runtime remains a
+    // dense array machine: canonical node order is remapped to compact
+    // `NeuronId`s once at birth.
+    let num_inter = genome.brain.hidden_nodes.len();
 
-    let sensory = sensory_receptors_in_order()
+    let sensory = sensory_receptors_in_order(predation_enabled)
         .map(|(sensory_id, receptor)| make_sensory_neuron(sensory_id, receptor))
         .collect::<Vec<_>>();
 
     let mut inter = Vec::with_capacity(num_inter);
-    for i in 0..genome.topology.num_neurons {
-        let idx = i as usize;
-        let bias = genome.brain.inter_biases[idx];
-        let log_time_constant = genome.brain.inter_log_time_constants[idx];
-        let alpha = inter_alpha_from_log_time_constant(log_time_constant);
+    for (index, gene) in genome.brain.hidden_nodes.iter().enumerate() {
+        let alpha = inter_alpha_from_log_time_constant(gene.log_time_constant);
         inter.push(InterNeuronState {
-            neuron: make_neuron(inter_neuron_id(i), NeuronType::Inter, bias),
+            neuron: make_neuron(inter_neuron_id(index as u32), NeuronType::Inter, gene.bias),
             state: 0.0,
             alpha,
             synapses: Vec::new(),
@@ -67,10 +61,14 @@ pub(crate) fn make_action_neuron(id: u32, action_type: ActionType) -> ActionNeur
     }
 }
 
-fn sensory_receptors_in_order() -> impl Iterator<Item = (u32, SensoryReceptor)> {
-    SensoryReceptor::ordered()
-        .enumerate()
-        .map(|(idx, receptor)| (idx as u32, receptor))
+fn sensory_receptors_in_order(
+    predation_enabled: bool,
+) -> impl Iterator<Item = (u32, SensoryReceptor)> {
+    SensoryReceptor::active(predation_enabled).filter_map(|receptor| {
+        receptor
+            .neuron_id()
+            .map(|neuron_id| (neuron_id.0, receptor))
+    })
 }
 
 fn wire_birth_synapses_from_genome(
@@ -78,42 +76,57 @@ fn wire_birth_synapses_from_genome(
     sensory: &mut [SensoryNeuronState],
     inter: &mut [InterNeuronState],
 ) {
-    let max_inter_id = INTER_ID_BASE + inter.len() as u32;
-    let max_action_id = ACTION_ID_BASE + ACTION_COUNT_U32;
-
     for edge in &genome.brain.edges {
-        let post_is_inter = (INTER_ID_BASE..max_inter_id).contains(&edge.post_neuron_id.0);
-        let post_is_action = (ACTION_ID_BASE..max_action_id).contains(&edge.post_neuron_id.0);
-        if !(post_is_inter || post_is_action) {
+        if !edge.enabled {
             continue;
         }
+        let Some(pre_runtime_id) = runtime_neuron_id(genome, edge.pre_node_id) else {
+            continue;
+        };
+        let Some(post_runtime_id) = runtime_neuron_id(genome, edge.post_node_id) else {
+            continue;
+        };
 
-        if edge.pre_neuron_id.0 < SENSORY_COUNT {
-            let Some(pre) = sensory.get_mut(edge.pre_neuron_id.0 as usize) else {
+        if pre_runtime_id.0 < SENSORY_COUNT {
+            let Some(pre) = sensory.get_mut(pre_runtime_id.0 as usize) else {
                 continue;
             };
-            pre.synapses.push(runtime_edge_from_gene(edge));
+            pre.synapses.push(runtime_edge_from_gene(
+                edge,
+                pre_runtime_id,
+                post_runtime_id,
+            ));
             continue;
         }
 
-        if !(INTER_ID_BASE..max_inter_id).contains(&edge.pre_neuron_id.0) {
+        let Some(pre_index) = crate::topology::inter_index(pre_runtime_id, inter.len()) else {
             continue;
-        }
+        };
         // Inter-neuron self-edges are preserved: `evaluate_brain` reads the
         // presynaptic inter's previous-tick activation before updating state,
         // so a self-edge acts as a gated memory retention term.
-        let pre_idx = (edge.pre_neuron_id.0 - INTER_ID_BASE) as usize;
-        let Some(pre) = inter.get_mut(pre_idx) else {
+        let Some(pre) = inter.get_mut(pre_index) else {
             continue;
         };
-        pre.synapses.push(runtime_edge_from_gene(edge));
+        pre.synapses.push(runtime_edge_from_gene(
+            edge,
+            pre_runtime_id,
+            post_runtime_id,
+        ));
     }
 
-    // Genome edges are sorted by (pre, post) with unique keys — sanitization
-    // runs on every path into expression (seed generation, mutation,
-    // external-genome intake) — and edges are pushed per pre-neuron in genome
-    // iteration order, so every per-pre list is already sorted by post ID.
-    // Partition-based routing and plasticity assume this invariant.
+    // Innovation order is unrelated to dense runtime IDs. Restore the runtime
+    // per-source post-ID ordering required by partition-based routing.
+    for neuron in sensory.iter_mut() {
+        neuron
+            .synapses
+            .sort_unstable_by_key(|edge| edge.post_neuron_id);
+    }
+    for neuron in inter.iter_mut() {
+        neuron
+            .synapses
+            .sort_unstable_by_key(|edge| edge.post_neuron_id);
+    }
     if cfg!(debug_assertions) {
         for sensory_neuron in sensory.iter() {
             crate::topology::debug_assert_sorted_by_post_neuron_id(&sensory_neuron.synapses);
@@ -124,14 +137,33 @@ fn wire_birth_synapses_from_genome(
     }
 }
 
-fn runtime_edge_from_gene(gene: &SynapseGene) -> SynapseEdge {
+fn runtime_neuron_id(genome: &OrganismGenome, gene_id: GeneNodeId) -> Option<NeuronId> {
+    if let Some(index) = sensory_gene_node_index(gene_id) {
+        return (index < SENSORY_COUNT).then_some(NeuronId(index));
+    }
+    if let Some(index) = action_gene_node_index(gene_id) {
+        return (index < ACTION_COUNT).then(|| action_neuron_id(index));
+    }
+    let index = genome
+        .brain
+        .hidden_nodes
+        .binary_search_by_key(&gene_id, |node| node.id)
+        .ok()?;
+    Some(inter_neuron_id(index as u32))
+}
+
+fn runtime_edge_from_gene(
+    gene: &SynapseGene,
+    pre_neuron_id: NeuronId,
+    post_neuron_id: NeuronId,
+) -> SynapseEdge {
     // Gene weights are already constrained: `sanitize_synapse_genes` clamps
     // every retained edge and spatial-prior additions sample within
     // [SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX].
     debug_assert_eq!(gene.weight, constrain_weight(gene.weight));
     SynapseEdge {
-        pre_neuron_id: gene.pre_neuron_id,
-        post_neuron_id: gene.post_neuron_id,
+        pre_neuron_id,
+        post_neuron_id,
         weight: gene.weight,
         eligibility: 0.0,
         pending_coactivation: 0.0,

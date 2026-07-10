@@ -6,12 +6,6 @@ const DEFAULT_WORLD_CONFIG_REL_PATH: &str = "config.toml";
 const DEFAULT_SEED_GENOME_CONFIG_REL_PATH: &str = "seed_genome.toml";
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
-pub struct PopulationDefaults {
-    pub periodic_injection_interval_turns: u32,
-    pub periodic_injection_count: u32,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, PartialEq)]
 pub struct LifecycleDefaults {
     pub passive_metabolism_cost_per_unit: f32,
     pub body_mass_metabolic_cost_coeff: f32,
@@ -29,28 +23,21 @@ pub struct FoodRegrowthDefaults {
 pub struct TerrainDefaults {
     pub terrain_noise_scale: f32,
     pub terrain_threshold: f32,
-    pub spike_density: f32,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, PartialEq)]
-pub struct EvolutionDefaults {
-    pub global_mutation_rate_modifier: f32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
 pub struct FlagsDefaults {
-    pub meta_mutation_enabled: bool,
     pub runtime_plasticity_enabled: bool,
+    pub leaky_neurons_enabled: bool,
+    pub predation_enabled: bool,
     pub force_random_actions: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
 pub struct WorldConfigDefaults {
-    pub population: PopulationDefaults,
     pub lifecycle: LifecycleDefaults,
     pub food_regrowth: FoodRegrowthDefaults,
     pub terrain: TerrainDefaults,
-    pub evolution: EvolutionDefaults,
     pub flags: FlagsDefaults,
 }
 
@@ -65,24 +52,15 @@ pub struct SeedGenomeConfigDefaults {
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
 pub struct TerrainGenerationPolicy {
     pub terrain_seed_mix: u64,
-    pub spike_seed_mix: u64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
 pub struct FoodEcologyPolicy {
-    pub fertility_seed_mix: u64,
-    pub fertility_jitter_seed_mix: u64,
-    pub fertility_noise_scale: f64,
-    pub fertility_threshold: f64,
-    pub fertility_jitter_strength: f64,
+    pub food_tile_seed_mix: u64,
 }
 
 pub fn world_config_defaults() -> WorldConfigDefaults {
     WorldConfigDefaults {
-        population: PopulationDefaults {
-            periodic_injection_interval_turns: 100,
-            periodic_injection_count: 100,
-        },
         lifecycle: LifecycleDefaults {
             passive_metabolism_cost_per_unit: 0.005,
             body_mass_metabolic_cost_coeff: 1.0,
@@ -96,14 +74,11 @@ pub fn world_config_defaults() -> WorldConfigDefaults {
         terrain: TerrainDefaults {
             terrain_noise_scale: 0.02,
             terrain_threshold: 0.86,
-            spike_density: 0.05,
-        },
-        evolution: EvolutionDefaults {
-            global_mutation_rate_modifier: 1.0,
         },
         flags: FlagsDefaults {
-            meta_mutation_enabled: true,
             runtime_plasticity_enabled: true,
+            leaky_neurons_enabled: false,
+            predation_enabled: false,
             force_random_actions: false,
         },
     }
@@ -124,17 +99,12 @@ pub fn seed_genome_config_defaults() -> SeedGenomeConfigDefaults {
 pub fn terrain_generation_policy() -> TerrainGenerationPolicy {
     TerrainGenerationPolicy {
         terrain_seed_mix: 0xA5A5_A5A5_u64,
-        spike_seed_mix: 0xCBBB_9D5D_C105_9ED8,
     }
 }
 
 pub fn food_ecology_policy() -> FoodEcologyPolicy {
     FoodEcologyPolicy {
-        fertility_seed_mix: 0x6A09_E667_F3BC_C909,
-        fertility_jitter_seed_mix: 0x510E_527F_9B05_688C,
-        fertility_noise_scale: 0.012,
-        fertility_threshold: 0.6,
-        fertility_jitter_strength: 1.0,
+        food_tile_seed_mix: 0x6A09_E667_F3BC_C909,
     }
 }
 
@@ -155,40 +125,12 @@ pub struct SeedGenomeConfig {
     #[serde(default = "default_max_weight_delta_per_tick")]
     pub max_weight_delta_per_tick: f32,
     pub synapse_prune_threshold: f32,
-    pub mutation_rate_age_of_maturity: f32,
-    pub mutation_rate_gestation_ticks: f32,
-    pub mutation_rate_max_organism_age: f32,
-    pub mutation_rate_vision_distance: f32,
-    #[serde(default)]
-    pub mutation_rate_hebb_eta_gain: f32,
-    #[serde(default)]
-    pub mutation_rate_juvenile_eta_scale: f32,
-    pub mutation_rate_inter_bias: f32,
-    pub mutation_rate_inter_update_rate: f32,
-    pub mutation_rate_eligibility_retention: f32,
-    pub mutation_rate_synapse_prune_threshold: f32,
-    #[serde(default)]
-    pub mutation_rate_synapse_weight_perturbation: f32,
-    #[serde(default)]
-    pub mutation_rate_add_synapse: f32,
-    #[serde(default)]
-    pub mutation_rate_remove_synapse: f32,
-    #[serde(default)]
-    pub mutation_rate_remove_neuron: f32,
-    #[serde(default)]
-    pub mutation_rate_add_neuron_split_edge: f32,
-    #[serde(default)]
-    pub mutation_rate_max_weight_delta_per_tick: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorldConfig {
     pub world_width: u32,
     pub num_organisms: u32,
-    #[serde(default = "default_periodic_injection_interval_turns")]
-    pub periodic_injection_interval_turns: u32,
-    #[serde(default = "default_periodic_injection_count")]
-    pub periodic_injection_count: u32,
     pub food_energy: f32,
     #[serde(default = "default_passive_metabolism_cost_per_unit")]
     pub passive_metabolism_cost_per_unit: f32,
@@ -203,22 +145,18 @@ pub struct WorldConfig {
     pub food_regrowth_interval: u32,
     #[serde(default = "default_food_regrowth_jitter")]
     pub food_regrowth_jitter: u32,
-    #[serde(default = "default_food_fertility_threshold")]
-    pub food_fertility_threshold: f32,
-    #[serde(default = "default_food_fertility_jitter_strength")]
-    pub food_fertility_jitter_strength: f32,
+    #[serde(default = "default_food_tile_fraction")]
+    pub food_tile_fraction: f32,
     #[serde(default = "default_terrain_noise_scale")]
     pub terrain_noise_scale: f32,
     #[serde(default = "default_terrain_threshold")]
     pub terrain_threshold: f32,
-    #[serde(default = "default_spike_density")]
-    pub spike_density: f32,
-    #[serde(default = "default_global_mutation_rate_modifier")]
-    pub global_mutation_rate_modifier: f32,
-    #[serde(default = "default_meta_mutation_enabled")]
-    pub meta_mutation_enabled: bool,
     #[serde(default = "default_runtime_plasticity_enabled")]
     pub runtime_plasticity_enabled: bool,
+    #[serde(default = "default_leaky_neurons_enabled")]
+    pub leaky_neurons_enabled: bool,
+    #[serde(default = "default_predation_enabled")]
+    pub predation_enabled: bool,
     #[serde(default = "default_force_random_actions")]
     pub force_random_actions: bool,
     pub seed_genome_config: SeedGenomeConfig,
@@ -231,8 +169,6 @@ impl WorldConfig {
         Self {
             world_width: 100,
             num_organisms: 2_000,
-            periodic_injection_interval_turns: 0,
-            periodic_injection_count: 0,
             food_energy: 10.0,
             passive_metabolism_cost_per_unit: 0.005,
             body_mass_metabolic_cost_coeff: 1.0,
@@ -241,14 +177,12 @@ impl WorldConfig {
             intent_parallel_threads: 8,
             food_regrowth_interval: 10,
             food_regrowth_jitter: 2,
-            food_fertility_threshold: 0.6,
-            food_fertility_jitter_strength: 1.0,
+            food_tile_fraction: 0.4,
             terrain_noise_scale: 0.02,
             terrain_threshold: 1.0,
-            spike_density: 0.0,
-            global_mutation_rate_modifier: 1.0,
-            meta_mutation_enabled: true,
             runtime_plasticity_enabled: true,
+            leaky_neurons_enabled: false,
+            predation_enabled: false,
             force_random_actions: false,
             seed_genome_config: SeedGenomeConfig {
                 num_neurons: 20,
@@ -262,22 +196,6 @@ impl WorldConfig {
                 eligibility_retention: 0.9,
                 max_weight_delta_per_tick: 0.05,
                 synapse_prune_threshold: 0.01,
-                mutation_rate_age_of_maturity: 0.05,
-                mutation_rate_gestation_ticks: 0.05,
-                mutation_rate_max_organism_age: 0.05,
-                mutation_rate_vision_distance: 0.04,
-                mutation_rate_hebb_eta_gain: 0.05,
-                mutation_rate_juvenile_eta_scale: 0.05,
-                mutation_rate_inter_bias: 0.2,
-                mutation_rate_inter_update_rate: 0.12,
-                mutation_rate_eligibility_retention: 0.05,
-                mutation_rate_synapse_prune_threshold: 0.05,
-                mutation_rate_synapse_weight_perturbation: 0.1,
-                mutation_rate_add_synapse: 0.05,
-                mutation_rate_remove_synapse: 0.05,
-                mutation_rate_remove_neuron: 0.02,
-                mutation_rate_add_neuron_split_edge: 0.05,
-                mutation_rate_max_weight_delta_per_tick: 0.05,
             },
         }
     }
@@ -287,8 +205,6 @@ impl WorldConfig {
         Self {
             world_width: 10,
             num_organisms: 10,
-            periodic_injection_interval_turns: 0,
-            periodic_injection_count: 0,
             food_energy: 10.0,
             passive_metabolism_cost_per_unit: 0.005,
             body_mass_metabolic_cost_coeff: 1.0,
@@ -297,14 +213,12 @@ impl WorldConfig {
             intent_parallel_threads: 8,
             food_regrowth_interval: 10,
             food_regrowth_jitter: 2,
-            food_fertility_threshold: 0.6,
-            food_fertility_jitter_strength: 1.0,
+            food_tile_fraction: 0.4,
             terrain_noise_scale: 0.02,
             terrain_threshold: 1.0,
-            spike_density: 0.0,
-            global_mutation_rate_modifier: 1.0,
-            meta_mutation_enabled: true,
             runtime_plasticity_enabled: true,
+            leaky_neurons_enabled: false,
+            predation_enabled: false,
             force_random_actions: false,
             seed_genome_config: SeedGenomeConfig {
                 num_neurons: 1,
@@ -318,22 +232,6 @@ impl WorldConfig {
                 eligibility_retention: 0.9,
                 max_weight_delta_per_tick: 0.05,
                 synapse_prune_threshold: 0.01,
-                mutation_rate_age_of_maturity: 0.0,
-                mutation_rate_gestation_ticks: 0.0,
-                mutation_rate_max_organism_age: 0.0,
-                mutation_rate_vision_distance: 0.0,
-                mutation_rate_hebb_eta_gain: 0.0,
-                mutation_rate_juvenile_eta_scale: 0.0,
-                mutation_rate_inter_bias: 0.0,
-                mutation_rate_inter_update_rate: 0.0,
-                mutation_rate_eligibility_retention: 0.0,
-                mutation_rate_synapse_prune_threshold: 0.0,
-                mutation_rate_synapse_weight_perturbation: 0.0,
-                mutation_rate_add_synapse: 0.0,
-                mutation_rate_remove_synapse: 0.0,
-                mutation_rate_remove_neuron: 0.0,
-                mutation_rate_add_neuron_split_edge: 0.0,
-                mutation_rate_max_weight_delta_per_tick: 0.0,
             },
         }
     }
@@ -346,7 +244,6 @@ struct WorldConfigToml {
     lifecycle: WorldLifecycleToml,
     food: WorldFoodToml,
     terrain: WorldTerrainToml,
-    evolution: WorldEvolutionToml,
     flags: WorldFlagsToml,
 }
 
@@ -358,10 +255,6 @@ struct WorldGeometryToml {
 #[derive(Debug, Clone, Deserialize)]
 struct WorldPopulationToml {
     num_organisms: u32,
-    #[serde(default = "default_periodic_injection_interval_turns")]
-    periodic_injection_interval_turns: u32,
-    #[serde(default = "default_periodic_injection_count")]
-    periodic_injection_count: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -384,10 +277,8 @@ struct WorldFoodToml {
     food_regrowth_interval: u32,
     #[serde(default = "default_food_regrowth_jitter")]
     food_regrowth_jitter: u32,
-    #[serde(default = "default_food_fertility_threshold")]
-    food_fertility_threshold: f32,
-    #[serde(default = "default_food_fertility_jitter_strength")]
-    food_fertility_jitter_strength: f32,
+    #[serde(default = "default_food_tile_fraction")]
+    food_tile_fraction: f32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -396,22 +287,16 @@ struct WorldTerrainToml {
     terrain_noise_scale: f32,
     #[serde(default = "default_terrain_threshold")]
     terrain_threshold: f32,
-    #[serde(default = "default_spike_density")]
-    spike_density: f32,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct WorldEvolutionToml {
-    #[serde(default = "default_global_mutation_rate_modifier")]
-    global_mutation_rate_modifier: f32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 struct WorldFlagsToml {
-    #[serde(default = "default_meta_mutation_enabled")]
-    meta_mutation_enabled: bool,
     #[serde(default = "default_runtime_plasticity_enabled")]
     runtime_plasticity_enabled: bool,
+    #[serde(default = "default_leaky_neurons_enabled")]
+    leaky_neurons_enabled: bool,
+    #[serde(default = "default_predation_enabled")]
+    predation_enabled: bool,
     #[serde(default = "default_force_random_actions")]
     force_random_actions: bool,
 }
@@ -421,8 +306,6 @@ impl WorldConfigToml {
         WorldConfig {
             world_width: self.world.world_width,
             num_organisms: self.population.num_organisms,
-            periodic_injection_interval_turns: self.population.periodic_injection_interval_turns,
-            periodic_injection_count: self.population.periodic_injection_count,
             food_energy: self.food.food_energy,
             passive_metabolism_cost_per_unit: self.lifecycle.passive_metabolism_cost_per_unit,
             body_mass_metabolic_cost_coeff: self.lifecycle.body_mass_metabolic_cost_coeff,
@@ -431,14 +314,12 @@ impl WorldConfigToml {
             intent_parallel_threads: self.lifecycle.intent_parallel_threads,
             food_regrowth_interval: self.food.food_regrowth_interval,
             food_regrowth_jitter: self.food.food_regrowth_jitter,
-            food_fertility_threshold: self.food.food_fertility_threshold,
-            food_fertility_jitter_strength: self.food.food_fertility_jitter_strength,
+            food_tile_fraction: self.food.food_tile_fraction,
             terrain_noise_scale: self.terrain.terrain_noise_scale,
             terrain_threshold: self.terrain.terrain_threshold,
-            spike_density: self.terrain.spike_density,
-            global_mutation_rate_modifier: self.evolution.global_mutation_rate_modifier,
-            meta_mutation_enabled: self.flags.meta_mutation_enabled,
             runtime_plasticity_enabled: self.flags.runtime_plasticity_enabled,
+            leaky_neurons_enabled: self.flags.leaky_neurons_enabled,
+            predation_enabled: self.flags.predation_enabled,
             force_random_actions: self.flags.force_random_actions,
             seed_genome_config,
         }
@@ -523,27 +404,14 @@ pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
     if config.food_regrowth_interval == 0 {
         return Err("food_regrowth_interval must be greater than zero".to_owned());
     }
-    if !(0.0..=1.0).contains(&config.food_fertility_threshold) {
-        return Err("food_fertility_threshold must be in [0.0, 1.0]".to_owned());
-    }
-    if !config.food_fertility_jitter_strength.is_finite()
-        || config.food_fertility_jitter_strength < 1.0
-    {
-        return Err("food_fertility_jitter_strength must be finite and >= 1".to_owned());
+    if !(0.0..=1.0).contains(&config.food_tile_fraction) {
+        return Err("food_tile_fraction must be in [0.0, 1.0]".to_owned());
     }
     if config.terrain_noise_scale <= 0.0 {
         return Err("terrain_noise_scale must be greater than zero".to_owned());
     }
     if !(0.0..=1.0).contains(&config.terrain_threshold) {
         return Err("terrain_threshold must be in [0.0, 1.0]".to_owned());
-    }
-    if !(0.0..=1.0).contains(&config.spike_density) {
-        return Err("spike_density must be in [0.0, 1.0]".to_owned());
-    }
-    if !config.global_mutation_rate_modifier.is_finite()
-        || config.global_mutation_rate_modifier < 0.0
-    {
-        return Err("global_mutation_rate_modifier must be finite and >= 0".to_owned());
     }
     if !config.seed_genome_config.juvenile_eta_scale.is_finite()
         || config.seed_genome_config.juvenile_eta_scale < 0.0
@@ -593,22 +461,8 @@ fn default_food_regrowth_jitter() -> u32 {
     world_config_defaults().food_regrowth.jitter
 }
 
-fn default_food_fertility_threshold() -> f32 {
-    food_ecology_policy().fertility_threshold as f32
-}
-
-fn default_food_fertility_jitter_strength() -> f32 {
-    food_ecology_policy().fertility_jitter_strength as f32
-}
-
-fn default_periodic_injection_interval_turns() -> u32 {
-    world_config_defaults()
-        .population
-        .periodic_injection_interval_turns
-}
-
-fn default_periodic_injection_count() -> u32 {
-    world_config_defaults().population.periodic_injection_count
+fn default_food_tile_fraction() -> f32 {
+    0.4
 }
 
 fn default_passive_metabolism_cost_per_unit() -> f32 {
@@ -631,10 +485,6 @@ fn default_terrain_threshold() -> f32 {
     world_config_defaults().terrain.terrain_threshold
 }
 
-fn default_spike_density() -> f32 {
-    world_config_defaults().terrain.spike_density
-}
-
 fn default_action_temperature() -> f32 {
     world_config_defaults().lifecycle.action_temperature
 }
@@ -643,18 +493,16 @@ fn default_intent_parallel_threads() -> u32 {
     world_config_defaults().lifecycle.intent_parallel_threads
 }
 
-fn default_global_mutation_rate_modifier() -> f32 {
-    world_config_defaults()
-        .evolution
-        .global_mutation_rate_modifier
-}
-
-fn default_meta_mutation_enabled() -> bool {
-    world_config_defaults().flags.meta_mutation_enabled
-}
-
 fn default_runtime_plasticity_enabled() -> bool {
     world_config_defaults().flags.runtime_plasticity_enabled
+}
+
+fn default_leaky_neurons_enabled() -> bool {
+    world_config_defaults().flags.leaky_neurons_enabled
+}
+
+fn default_predation_enabled() -> bool {
+    world_config_defaults().flags.predation_enabled
 }
 
 fn default_force_random_actions() -> bool {

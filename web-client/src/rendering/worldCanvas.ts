@@ -1,11 +1,10 @@
 import type { FacingDirection, WorldOrganismState, WorldSnapshot } from '../types';
 
 const SQRT_3 = Math.sqrt(3);
-// Natural-world palette: grassland earth with subtle per-cell tonal variation,
-// gray rock mountains, and reddish thorn (spike) cells.
+// Natural-world palette: grassland earth with subtle per-cell tonal variation
+// and gray rock mountains.
 const EARTH_VARIANTS = ['#b9c98f', '#b1c287', '#c1cf98', '#aabd80'];
 const MOUNTAIN_VARIANTS = ['#a39d8f', '#998f7f', '#aaa496'];
-const SPIKE_COLOR = 'rgba(158, 74, 46, 0.55)';
 const BASE_HEX_SIZE_AT_900PX = 8;
 const BASE_HEX_MIN_SIZE_PX = 6;
 const BASE_HEX_REFERENCE_CANVAS_PX = 900;
@@ -59,8 +58,7 @@ const GESTATING_GLOW_BLUR_SCALE = 0.9;
 const GESTATING_GLOW_MIN_BLUR_PX = 4;
 
 const TERRAIN_NONE = 0;
-const TERRAIN_SPIKE = 1;
-const TERRAIN_WALL = 2;
+const TERRAIN_WALL = 1;
 
 type HexLayout = {
   size: number;
@@ -306,8 +304,7 @@ function getTerrainMask(cache: WorldRenderCache, snapshot: WorldSnapshot): Uint8
 
   const mask = new Uint8Array(worldWidth * worldWidth);
   for (const cell of snapshot.terrain) {
-    mask[cellIndex(worldWidth, cell.q, cell.r)] =
-      cell.terrain_type === 'Mountain' ? TERRAIN_WALL : TERRAIN_SPIKE;
+    mask[cellIndex(worldWidth, cell.q, cell.r)] = TERRAIN_WALL;
   }
   cache.terrainMask = { worldWidth, terrainSeed, mask };
   return mask;
@@ -505,8 +502,7 @@ function renderTerrainLayer(
   const wallHexes = MOUNTAIN_VARIANTS.map((color) =>
     getHexSprite(cache, canvas, size, color, WALL_STROKE_COLOR, 0),
   );
-  const spikeHex = getHexSprite(cache, canvas, size, SPIKE_COLOR, GRID_STROKE_COLOR, 0);
-  if (earthHexes.some((sprite) => !sprite) || wallHexes.some((sprite) => !sprite) || !spikeHex) {
+  if (earthHexes.some((sprite) => !sprite) || wallHexes.some((sprite) => !sprite)) {
     return;
   }
 
@@ -517,10 +513,9 @@ function renderTerrainLayer(
   }
   for (let index = 0; index < geometry.centerXs.length; index += 1) {
     if (terrainMask[index] === TERRAIN_NONE) continue;
-    const sprite =
-      terrainMask[index] === TERRAIN_WALL
-        ? (wallHexes[cellVariant(index, geometry.worldWidth, MOUNTAIN_VARIANTS.length)] as HexSprite)
-        : spikeHex;
+    const sprite = wallHexes[
+      cellVariant(index, geometry.worldWidth, MOUNTAIN_VARIANTS.length)
+    ] as HexSprite;
     drawHexSpriteAt(ctx, sprite, geometry.centerXs[index], geometry.centerYs[index]);
   }
 }
@@ -702,14 +697,6 @@ function renderVisibleTerrain(
   ctx.strokeStyle = GRID_STROKE_COLOR;
   ctx.lineWidth = GRID_STROKE_WIDTH;
   ctx.stroke();
-
-  ctx.beginPath();
-  forEachVisibleCell(geometry, range, (index, centerX, centerY) => {
-    if (terrainMask[index] !== TERRAIN_SPIKE) return;
-    traceHex(ctx, centerX, centerY, size);
-  });
-  ctx.fillStyle = SPIKE_COLOR;
-  ctx.fill();
 
   for (let variant = 0; variant < MOUNTAIN_VARIANTS.length; variant += 1) {
     ctx.beginPath();

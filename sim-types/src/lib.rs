@@ -16,6 +16,154 @@ id_newtype!(SpeciesId, u64);
 id_newtype!(NeuronId, u32);
 id_newtype!(FoodId, u64);
 
+/// Stable identity of a node in the heritable graph.
+///
+/// This is deliberately distinct from [`NeuronId`]. `GeneNodeId` survives
+/// structural mutation and crossover, while `NeuronId` is a dense index in an
+/// expressed runtime brain. Human-readable formats encode this as a decimal
+/// string so structural hashes remain exact in JavaScript clients.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct GeneNodeId(pub u64);
+
+/// Stable historical identity of a heritable connection gene.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct InnovationId(pub u64);
+
+macro_rules! impl_stable_u64_id_serde {
+    ($name:ident) => {
+        impl Serialize for $name {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                if serializer.is_human_readable() {
+                    serializer.serialize_str(&self.0.to_string())
+                } else {
+                    serializer.serialize_u64(self.0)
+                }
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                if !deserializer.is_human_readable() {
+                    return u64::deserialize(deserializer).map(Self);
+                }
+
+                struct StableIdVisitor;
+
+                impl<'de> serde::de::Visitor<'de> for StableIdVisitor {
+                    type Value = u64;
+
+                    fn expecting(
+                        &self,
+                        formatter: &mut std::fmt::Formatter<'_>,
+                    ) -> std::fmt::Result {
+                        formatter.write_str("a decimal u64 string or integer")
+                    }
+
+                    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
+                        Ok(value)
+                    }
+
+                    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        value.parse().map_err(E::custom)
+                    }
+                }
+
+                deserializer.deserialize_any(StableIdVisitor).map(Self)
+            }
+        }
+    };
+}
+
+impl_stable_u64_id_serde!(GeneNodeId);
+impl_stable_u64_id_serde!(InnovationId);
+
+// Gene-node roles occupy separate high-bit domains. The 62-bit payload keeps
+// fixed interface IDs directly decodable while split-created hidden IDs use a
+// large deterministic hash space.
+const GENE_NODE_DOMAIN_SHIFT: u32 = 62;
+const GENE_NODE_PAYLOAD_MASK: u64 = (1_u64 << GENE_NODE_DOMAIN_SHIFT) - 1;
+const SENSOR_GENE_NODE_DOMAIN: u64 = 0;
+const ACTION_GENE_NODE_DOMAIN: u64 = 1;
+const SEED_HIDDEN_GENE_NODE_DOMAIN: u64 = 2;
+const SPLIT_HIDDEN_GENE_NODE_DOMAIN: u64 = 3;
+const CONNECTION_INNOVATION_DOMAIN: u64 = 0x434f_4e4e_5f49_4e4e;
+const SPLIT_NODE_HASH_DOMAIN: u64 = 0x5350_4c49_545f_4e4f;
+
+const fn mix_u64(mut value: u64) -> u64 {
+    value ^= value >> 30;
+    value = value.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value ^= value >> 27;
+    value = value.wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^ (value >> 31)
+}
+
+pub const fn sensory_gene_node_id(index: u32) -> GeneNodeId {
+    GeneNodeId((SENSOR_GENE_NODE_DOMAIN << GENE_NODE_DOMAIN_SHIFT) | index as u64)
+}
+
+pub const fn action_gene_node_id(index: usize) -> GeneNodeId {
+    GeneNodeId((ACTION_GENE_NODE_DOMAIN << GENE_NODE_DOMAIN_SHIFT) | index as u64)
+}
+
+pub const fn seed_hidden_gene_node_id(index: u32) -> GeneNodeId {
+    GeneNodeId((SEED_HIDDEN_GENE_NODE_DOMAIN << GENE_NODE_DOMAIN_SHIFT) | index as u64)
+}
+
+pub const fn split_hidden_gene_node_id(parent_innovation: InnovationId) -> GeneNodeId {
+    let payload = mix_u64(SPLIT_NODE_HASH_DOMAIN ^ parent_innovation.0) & GENE_NODE_PAYLOAD_MASK;
+    GeneNodeId((SPLIT_HIDDEN_GENE_NODE_DOMAIN << GENE_NODE_DOMAIN_SHIFT) | payload)
+}
+
+pub const fn connection_innovation_id(
+    pre_node_id: GeneNodeId,
+    post_node_id: GeneNodeId,
+) -> InnovationId {
+    let with_pre = mix_u64(CONNECTION_INNOVATION_DOMAIN ^ pre_node_id.0);
+    InnovationId(mix_u64(
+        with_pre ^ post_node_id.0.wrapping_add(0x9e37_79b9_7f4a_7c15),
+    ))
+}
+
+pub const fn gene_node_domain(id: GeneNodeId) -> u64 {
+    id.0 >> GENE_NODE_DOMAIN_SHIFT
+}
+
+pub const fn sensory_gene_node_index(id: GeneNodeId) -> Option<u32> {
+    if gene_node_domain(id) != SENSOR_GENE_NODE_DOMAIN {
+        return None;
+    }
+    let payload = id.0 & GENE_NODE_PAYLOAD_MASK;
+    if payload > u32::MAX as u64 {
+        return None;
+    }
+    Some(payload as u32)
+}
+
+pub const fn action_gene_node_index(id: GeneNodeId) -> Option<usize> {
+    if gene_node_domain(id) != ACTION_GENE_NODE_DOMAIN {
+        return None;
+    }
+    let payload = id.0 & GENE_NODE_PAYLOAD_MASK;
+    if payload > usize::MAX as u64 {
+        return None;
+    }
+    Some(payload as usize)
+}
+
+pub const fn is_hidden_gene_node_id(id: GeneNodeId) -> bool {
+    let domain = gene_node_domain(id);
+    domain == SEED_HIDDEN_GENE_NODE_DOMAIN || domain == SPLIT_HIDDEN_GENE_NODE_DOMAIN
+}
+
 pub const INTER_NEURON_ID_BASE: u32 = 1000;
 pub const ACTION_NEURON_ID_BASE: u32 = 2000;
 pub const MAX_GESTATION_TICKS: u8 = 10;
@@ -52,6 +200,17 @@ impl ActionType {
         ActionType::Reproduce,
     ];
 
+    pub fn active(predation_enabled: bool) -> impl Iterator<Item = ActionType> {
+        Self::ALL
+            .iter()
+            .copied()
+            .filter(move |action| predation_enabled || *action != ActionType::Attack)
+    }
+
+    pub const fn is_enabled(self, predation_enabled: bool) -> bool {
+        predation_enabled || !matches!(self, ActionType::Attack)
+    }
+
     /// Stable per-action index used by dataset encodings and histograms:
     /// declaration order including `Idle` (`0..=6`).
     pub const fn index(self) -> usize {
@@ -80,7 +239,7 @@ impl ActionType {
 }
 
 #[cfg(feature = "instrumentation")]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ActionRecord {
     pub organism_id: OrganismId,
     pub selected_action: ActionType,
@@ -138,23 +297,6 @@ pub enum NeuronType {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
-pub struct RgbColor {
-    pub r: f32,
-    pub g: f32,
-    pub b: f32,
-}
-
-impl RgbColor {
-    pub fn clamped(self) -> Self {
-        Self {
-            r: self.r.clamp(0.0, 1.0),
-            g: self.g.clamp(0.0, 1.0),
-            b: self.b.clamp(0.0, 1.0),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 pub struct VisualProperties {
     pub r: f32,
     pub g: f32,
@@ -180,12 +322,10 @@ pub enum EntityType {
     Food,
     Organism,
     Wall,
-    Spikes,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TerrainType {
-    Spikes,
     Mountain,
 }
 
@@ -198,6 +338,9 @@ pub enum EntityId {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ReproductionFailureCause {
+    InsufficientEnergy,
+    Immature,
+    BirthTargetBlockedByWall,
     BlockedBirth,
     ParentDied,
 }
@@ -215,65 +358,42 @@ pub struct ReproductionEvent {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum VisionChannel {
-    Red,
-    Green,
-    Blue,
-    Shape,
-}
-
-impl VisionChannel {
-    pub const ALL: [VisionChannel; 4] = [
-        VisionChannel::Red,
-        VisionChannel::Green,
-        VisionChannel::Blue,
-        VisionChannel::Shape,
-    ];
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "receptor_type")]
 pub enum SensoryReceptor {
-    VisionRay {
-        ray_offset: i8,
-        channel: VisionChannel,
-    },
+    FoodRay { ray_offset: i8 },
     ContactAhead,
     Energy,
+    OrganismRay { ray_offset: i8 },
     Health,
-    EnergyDelta,
-    LastActionForward,
-    LastActionEat,
 }
 
 impl SensoryReceptor {
     /// Fixed relative ray offsets around facing direction.
     pub const VISION_RAY_OFFSETS: [i8; 3] = [-1, 0, 1];
-    pub const VISION_CHANNEL_COUNT: u32 = VisionChannel::ALL.len() as u32;
-    pub const SCALAR_NEURON_COUNT: u32 = 6;
-    pub const VISION_NEURON_COUNT: u32 =
-        (Self::VISION_RAY_OFFSETS.len() as u32) * Self::VISION_CHANNEL_COUNT;
-    pub const TOTAL_NEURON_COUNT: u32 = Self::VISION_NEURON_COUNT + Self::SCALAR_NEURON_COUNT;
+    pub const BASELINE_NEURON_COUNT: u32 = 5;
+    pub const TOTAL_NEURON_COUNT: u32 = 9;
 
     pub fn ordered() -> impl Iterator<Item = Self> {
         Self::VISION_RAY_OFFSETS
             .into_iter()
-            .flat_map(|ray_offset| {
-                VisionChannel::ALL
+            .map(|ray_offset| Self::FoodRay { ray_offset })
+            .chain([Self::ContactAhead, Self::Energy])
+            .chain(
+                Self::VISION_RAY_OFFSETS
                     .into_iter()
-                    .map(move |channel| Self::VisionRay {
-                        ray_offset,
-                        channel,
-                    })
-            })
-            .chain([
-                Self::ContactAhead,
-                Self::Energy,
-                Self::Health,
-                Self::EnergyDelta,
-                Self::LastActionForward,
-                Self::LastActionEat,
-            ])
+                    .map(|ray_offset| Self::OrganismRay { ray_offset }),
+            )
+            .chain([Self::Health])
+    }
+
+    pub fn active(predation_enabled: bool) -> impl Iterator<Item = Self> {
+        Self::ordered().filter(move |receptor| {
+            predation_enabled || !matches!(receptor, Self::OrganismRay { .. } | Self::Health)
+        })
+    }
+
+    pub const fn is_predation_only(self) -> bool {
+        matches!(self, Self::OrganismRay { .. } | Self::Health)
     }
 
     pub fn current_index(self) -> Option<usize> {
@@ -291,71 +411,28 @@ impl SensoryReceptor {
 
 #[cfg(test)]
 mod tests {
-    use super::{SensoryReceptor, VisionChannel};
+    use super::SensoryReceptor;
 
     #[test]
-    fn sensory_receptors_include_forward_rgb_plus_scalar_sensors() {
+    fn sensory_receptors_have_five_input_baseline_and_optional_predation_inputs() {
         let receptors = SensoryReceptor::ordered().collect::<Vec<_>>();
-        assert_eq!(receptors.len(), 18);
+        assert_eq!(receptors.len(), 9);
         assert_eq!(
             receptors,
             vec![
-                SensoryReceptor::VisionRay {
-                    ray_offset: -1,
-                    channel: VisionChannel::Red,
-                },
-                SensoryReceptor::VisionRay {
-                    ray_offset: -1,
-                    channel: VisionChannel::Green,
-                },
-                SensoryReceptor::VisionRay {
-                    ray_offset: -1,
-                    channel: VisionChannel::Blue,
-                },
-                SensoryReceptor::VisionRay {
-                    ray_offset: -1,
-                    channel: VisionChannel::Shape,
-                },
-                SensoryReceptor::VisionRay {
-                    ray_offset: 0,
-                    channel: VisionChannel::Red,
-                },
-                SensoryReceptor::VisionRay {
-                    ray_offset: 0,
-                    channel: VisionChannel::Green,
-                },
-                SensoryReceptor::VisionRay {
-                    ray_offset: 0,
-                    channel: VisionChannel::Blue,
-                },
-                SensoryReceptor::VisionRay {
-                    ray_offset: 0,
-                    channel: VisionChannel::Shape,
-                },
-                SensoryReceptor::VisionRay {
-                    ray_offset: 1,
-                    channel: VisionChannel::Red,
-                },
-                SensoryReceptor::VisionRay {
-                    ray_offset: 1,
-                    channel: VisionChannel::Green,
-                },
-                SensoryReceptor::VisionRay {
-                    ray_offset: 1,
-                    channel: VisionChannel::Blue,
-                },
-                SensoryReceptor::VisionRay {
-                    ray_offset: 1,
-                    channel: VisionChannel::Shape,
-                },
+                SensoryReceptor::FoodRay { ray_offset: -1 },
+                SensoryReceptor::FoodRay { ray_offset: 0 },
+                SensoryReceptor::FoodRay { ray_offset: 1 },
                 SensoryReceptor::ContactAhead,
                 SensoryReceptor::Energy,
+                SensoryReceptor::OrganismRay { ray_offset: -1 },
+                SensoryReceptor::OrganismRay { ray_offset: 0 },
+                SensoryReceptor::OrganismRay { ray_offset: 1 },
                 SensoryReceptor::Health,
-                SensoryReceptor::EnergyDelta,
-                SensoryReceptor::LastActionForward,
-                SensoryReceptor::LastActionEat,
             ]
         );
+        assert_eq!(SensoryReceptor::active(false).count(), 5);
+        assert_eq!(SensoryReceptor::active(true).count(), 9);
     }
 }
 
@@ -375,14 +452,11 @@ pub fn offspring_transfer_energy(gestation_ticks: u8) -> f32 {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TopologyGenes {
-    pub num_neurons: u32,
-    pub num_synapses: u32,
     pub vision_distance: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LifecycleGenes {
-    pub body_color: RgbColor,
     #[serde(default = "default_age_of_maturity")]
     pub age_of_maturity: u32,
     #[serde(default = "default_gestation_ticks")]
@@ -405,49 +479,21 @@ pub struct PlasticityGenes {
     pub synapse_prune_threshold: f32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct MutationRateGenes {
-    #[serde(default)]
-    pub age_of_maturity: f32,
-    #[serde(default)]
-    pub gestation_ticks: f32,
-    #[serde(default)]
-    pub max_organism_age: f32,
-    #[serde(default)]
-    pub vision_distance: f32,
-    #[serde(default)]
-    pub hebb_eta_gain: f32,
-    #[serde(default)]
-    pub juvenile_eta_scale: f32,
-    #[serde(default)]
-    pub inter_bias: f32,
-    #[serde(default)]
-    pub inter_update_rate: f32,
-    #[serde(default)]
-    pub eligibility_retention: f32,
-    #[serde(default)]
-    pub synapse_prune_threshold: f32,
-    #[serde(default)]
-    pub synapse_weight_perturbation: f32,
-    #[serde(default)]
-    pub add_synapse: f32,
-    #[serde(default)]
-    pub remove_synapse: f32,
-    #[serde(default)]
-    pub remove_neuron: f32,
-    #[serde(default)]
-    pub add_neuron_split_edge: f32,
-    #[serde(default)]
-    pub max_weight_delta_per_tick: f32,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BrainTopology {
-    pub inter_biases: Vec<f32>,
-    pub inter_log_time_constants: Vec<f32>,
+    pub hidden_nodes: Vec<HiddenNodeGene>,
     #[serde(default)]
     pub action_biases: Vec<f32>,
     pub edges: Vec<SynapseGene>,
+}
+
+/// Heritable hidden-node parameters keyed by a stable structural identity.
+/// Runtime brains remap these IDs to dense [`NeuronId`] values at birth.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct HiddenNodeGene {
+    pub id: GeneNodeId,
+    pub bias: f32,
+    pub log_time_constant: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -455,25 +501,30 @@ pub struct OrganismGenome {
     pub topology: TopologyGenes,
     pub lifecycle: LifecycleGenes,
     pub plasticity: PlasticityGenes,
-    #[serde(default)]
-    pub mutation_rates: MutationRateGenes,
     pub brain: BrainTopology,
 }
 
 impl OrganismGenome {
+    pub fn hidden_node_count(&self) -> usize {
+        self.brain.hidden_nodes.len()
+    }
+
+    pub fn enabled_connection_count(&self) -> usize {
+        self.brain.edges.iter().filter(|edge| edge.enabled).count()
+    }
+
+    pub fn encoded_connection_count(&self) -> usize {
+        self.brain.edges.len()
+    }
+
     /// Canonical test-only fixture used across unit tests, benches, and integration tests.
     /// Callers mutate specific fields after construction as needed. Adding a new field on
     /// `OrganismGenome` means updating only this one builder.
     pub fn test_fixture() -> Self {
         let action_count = ActionType::ALL.len();
         Self {
-            topology: TopologyGenes {
-                num_neurons: 1,
-                num_synapses: 0,
-                vision_distance: 2,
-            },
+            topology: TopologyGenes { vision_distance: 2 },
             lifecycle: LifecycleGenes {
-                body_color: RgbColor::default(),
                 age_of_maturity: 0,
                 gestation_ticks: 2,
                 max_organism_age: 500,
@@ -485,10 +536,12 @@ impl OrganismGenome {
                 max_weight_delta_per_tick: 0.05,
                 synapse_prune_threshold: 0.01,
             },
-            mutation_rates: MutationRateGenes::default(),
             brain: BrainTopology {
-                inter_biases: vec![0.0],
-                inter_log_time_constants: vec![0.0],
+                hidden_nodes: vec![HiddenNodeGene {
+                    id: seed_hidden_gene_node_id(0),
+                    bias: 0.0,
+                    log_time_constant: 0.0,
+                }],
                 action_biases: vec![0.0; action_count],
                 edges: Vec::new(),
             },
@@ -501,9 +554,11 @@ impl OrganismGenome {
 /// [`SynapseEdge`].
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct SynapseGene {
-    pub pre_neuron_id: NeuronId,
-    pub post_neuron_id: NeuronId,
+    pub innovation: InnovationId,
+    pub pre_node_id: GeneNodeId,
+    pub post_node_id: GeneNodeId,
     pub weight: f32,
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -638,9 +693,8 @@ pub struct OrganismState {
     pub health: f32,
     #[serde(default)]
     pub max_health: f32,
-    /// Energy stash captured at sensing time so the EnergyDelta sensor reads a
-    /// sensing-to-sensing delta (spanning eat/attack/action-cost changes),
-    /// rolled forward at the start of every tick's sensing pass.
+    /// Energy stash captured at sensing time for the post-action plasticity
+    /// reward signal, rolled forward at the start of every tick's sensing pass.
     #[serde(default)]
     pub energy_at_last_sensing: f32,
     #[serde(default)]
@@ -720,21 +774,6 @@ pub fn get_size(organism: &OrganismState) -> f32 {
     offspring_transfer_energy(organism.genome.lifecycle.gestation_ticks)
 }
 
-/// Hue angle (radians, in (-π, π]) of a body color on the RGB color wheel.
-/// Used by the cyclic (intransitive) social color-dominance mortality term:
-/// because dominance is `sin(hue_neighbor - hue_self)` — antisymmetric, so no
-/// hue beats all others — the fitness optimum keeps rotating (endogenous
-/// non-stationarity). Pure and deterministic. Greys (zero chroma) map to
-/// angle 0 (neutral).
-pub fn color_hue(c: RgbColor) -> f32 {
-    let two_r_minus_g_minus_b = 2.0 * c.r - c.g - c.b;
-    let sqrt3_g_minus_b = 3.0_f32.sqrt() * (c.g - c.b);
-    if two_r_minus_g_minus_b == 0.0 && sqrt3_g_minus_b == 0.0 {
-        return 0.0;
-    }
-    sqrt3_g_minus_b.atan2(two_r_minus_g_minus_b)
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FoodState {
     pub id: FoodId,
@@ -753,8 +792,12 @@ pub struct MetricsSnapshot {
     pub synapse_ops_last_turn: u64,
     pub actions_applied_last_turn: u64,
     pub consumptions_last_turn: u64,
+    /// Plant-food consumptions only; excludes corpses and direct predation.
+    pub plant_consumptions_last_turn: u64,
     pub predations_last_turn: u64,
     pub total_consumptions: u64,
+    /// Cumulative plant-food consumptions since the world was reset.
+    pub total_plant_consumptions: u64,
     pub reproductions_last_turn: u64,
     pub starvations_last_turn: u64,
     pub age_deaths_last_turn: u64,
@@ -822,16 +865,13 @@ pub struct TickDelta {
 pub const ORGANISM_SHAPE: f32 = 0.2;
 pub const PLANT_SHAPE: f32 = 0.4;
 pub const CORPSE_SHAPE: f32 = 0.6;
-pub const SPIKE_SHAPE: f32 = 0.8;
 pub const MOUNTAIN_SHAPE: f32 = 1.0;
 
-pub const SPIKE_VISION_OPACITY: f32 = 0.25;
-
-pub fn organism_visual(color: RgbColor) -> VisualProperties {
+pub fn organism_visual() -> VisualProperties {
     VisualProperties {
-        r: color.r,
-        g: color.g,
-        b: color.b,
+        r: 0.15,
+        g: 0.45,
+        b: 0.95,
         opacity: ORGANISM_VISUAL_OPACITY,
         shape: ORGANISM_SHAPE,
     }
@@ -859,13 +899,6 @@ pub fn food_visual(kind: FoodKind) -> VisualProperties {
 
 pub fn terrain_visual(terrain_type: TerrainType) -> VisualProperties {
     match terrain_type {
-        TerrainType::Spikes => VisualProperties {
-            r: 1.0,
-            g: 0.0,
-            b: 0.0,
-            opacity: SPIKE_VISION_OPACITY,
-            shape: SPIKE_SHAPE,
-        },
         TerrainType::Mountain => VisualProperties {
             r: 0.0,
             g: 0.0,

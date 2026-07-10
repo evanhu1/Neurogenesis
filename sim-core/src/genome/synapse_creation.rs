@@ -1,52 +1,52 @@
 use super::sanitization::is_valid_synapse_pair;
 use super::*;
 
+#[derive(Clone, Copy)]
+struct Candidate {
+    priority: f32,
+    innovation: InnovationId,
+    pre: GeneNodeId,
+    post: GeneNodeId,
+}
+
 pub(super) fn add_synapse_genes<R: Rng + ?Sized>(
     genome: &mut OrganismGenome,
     add_count: usize,
+    predation_enabled: bool,
     rng: &mut R,
 ) {
     if add_count == 0 {
         return;
     }
 
-    // Both call sites (mutate_add_synapse, reconcile_synapse_count) maintain
-    // the edge list sorted by (pre, post) with unique keys, so existing-pair
-    // membership is a binary search instead of building a HashSet.
-    debug_assert!(genome.brain.edges.windows(2).all(|w| {
-        (w[0].pre_neuron_id, w[0].post_neuron_id) < (w[1].pre_neuron_id, w[1].post_neuron_id)
-    }));
+    debug_assert!(genome
+        .brain
+        .edges
+        .windows(2)
+        .all(|w| w[0].innovation < w[1].innovation));
 
     if add_count == 1 {
-        // Common case (one add-synapse mutation per offspring): single-pass
-        // minimum selection, no candidate Vec and no sort.
-        let mut best: Option<(f32, NeuronId, NeuronId)> = None;
-        for_each_candidate(genome, rng, |candidate| {
-            let replace = match best {
-                None => true,
-                Some(current) => candidate_cmp(&candidate, &current) == Ordering::Less,
-            };
-            if replace {
+        let mut best: Option<Candidate> = None;
+        for_each_candidate(genome, predation_enabled, rng, |candidate| {
+            if best
+                .as_ref()
+                .is_none_or(|current| candidate_cmp(&candidate, current) == Ordering::Less)
+            {
                 best = Some(candidate);
             }
         });
-        if let Some((_, pre_id, post_id)) = best {
-            genome.brain.edges.push(SynapseGene {
-                pre_neuron_id: pre_id,
-                post_neuron_id: post_id,
-                weight: sample_synapse_weight(INITIAL_SYNAPSE_EXCITATORY_PROBABILITY, rng),
-            });
+        if let Some(candidate) = best {
+            insert_or_reenable(genome, candidate, rng);
         }
         return;
     }
 
     let mut weighted_candidates = Vec::new();
-    for_each_candidate(genome, rng, |candidate| weighted_candidates.push(candidate));
+    for_each_candidate(genome, predation_enabled, rng, |candidate| {
+        weighted_candidates.push(candidate)
+    });
 
-    // Select the `add_count` smallest candidates, then sort only that slice so
-    // the selected set and insertion order match a full sort exactly (the
-    // comparator is a total order over unique (pre, post) pairs).
-    let selected: &mut [(f32, NeuronId, NeuronId)] = if add_count < weighted_candidates.len() {
+    let selected: &mut [Candidate] = if add_count < weighted_candidates.len() {
         let (top, _, _) = weighted_candidates.select_nth_unstable_by(add_count, candidate_cmp);
         top
     } else {
@@ -54,74 +54,102 @@ pub(super) fn add_synapse_genes<R: Rng + ?Sized>(
     };
     selected.sort_unstable_by(candidate_cmp);
 
-    for &mut (_, pre_id, post_id) in selected {
-        genome.brain.edges.push(SynapseGene {
-            pre_neuron_id: pre_id,
-            post_neuron_id: post_id,
-            weight: sample_synapse_weight(INITIAL_SYNAPSE_EXCITATORY_PROBABILITY, rng),
-        });
+    for candidate in selected.iter().copied() {
+        insert_or_reenable(genome, candidate, rng);
     }
 }
 
-fn candidate_cmp(a: &(f32, NeuronId, NeuronId), b: &(f32, NeuronId, NeuronId)) -> Ordering {
-    a.0.total_cmp(&b.0)
-        .then_with(|| a.1.cmp(&b.1))
-        .then_with(|| a.2.cmp(&b.2))
+fn insert_or_reenable<R: Rng + ?Sized>(
+    genome: &mut OrganismGenome,
+    candidate: Candidate,
+    rng: &mut R,
+) {
+    match genome
+        .brain
+        .edges
+        .binary_search_by_key(&candidate.innovation, |edge| edge.innovation)
+    {
+        Ok(index) => {
+            let edge = &mut genome.brain.edges[index];
+            if (edge.pre_node_id, edge.post_node_id) != (candidate.pre, candidate.post) {
+                // A true innovation collision is not an existing copy of this
+                // connection. Reject it in release rather than re-enabling an
+                // unrelated structural locus.
+                return;
+            }
+            edge.enabled = true;
+        }
+        Err(index) => genome.brain.edges.insert(
+            index,
+            SynapseGene {
+                innovation: candidate.innovation,
+                pre_node_id: candidate.pre,
+                post_node_id: candidate.post,
+                weight: sample_synapse_weight(INITIAL_SYNAPSE_EXCITATORY_PROBABILITY, rng),
+                enabled: true,
+            },
+        ),
+    }
 }
 
-/// Enumerates every valid, not-yet-connected (pre, post) pair, drawing one
-/// uniform-without-replacement priority per candidate. With no spatial prior,
-/// every candidate is weighted equally, so the `add_count` smallest priorities
-/// are a uniform random sample of the unconnected pairs.
+fn candidate_cmp(a: &Candidate, b: &Candidate) -> Ordering {
+    a.priority
+        .total_cmp(&b.priority)
+        .then_with(|| a.innovation.cmp(&b.innovation))
+        .then_with(|| a.pre.cmp(&b.pre))
+        .then_with(|| a.post.cmp(&b.post))
+}
+
+/// Enumerate every valid missing or disabled structural connection. Disabled
+/// genes retain their innovation identity and can therefore be re-enabled
+/// without manufacturing a second historical marker for the same endpoints.
 fn for_each_candidate<R: Rng + ?Sized>(
     genome: &OrganismGenome,
+    predation_enabled: bool,
     rng: &mut R,
-    mut visit: impl FnMut((f32, NeuronId, NeuronId)),
+    mut visit: impl FnMut(Candidate),
 ) {
-    let num_neurons = genome.topology.num_neurons;
-    let all_presynaptic = (0..SENSORY_COUNT)
-        .map(NeuronId)
-        .chain((0..num_neurons).map(inter_neuron_id));
+    let all_presynaptic = SensoryReceptor::active(predation_enabled)
+        .filter_map(SensoryReceptor::neuron_id)
+        .map(|id| sensory_gene_node_id(id.0))
+        .chain(genome.brain.hidden_nodes.iter().map(|node| node.id));
 
-    // Candidates are enumerated in strictly ascending (pre, post) order and the
-    // edge list is sorted by the same key, so existing-pair membership is a
-    // single forward merge cursor instead of a binary search per pair.
-    let edges = &genome.brain.edges;
-    let mut cursor = 0usize;
-
-    for pre_id in all_presynaptic {
-        for post_id in post_ids(num_neurons) {
-            // By construction every enumerated pair is valid: pre IDs are
-            // exactly the sensory + enabled-inter ranges, post IDs the
-            // enabled-inter + action ranges, and inter self-edges are
-            // permitted (see `is_valid_synapse_pair`), so no release-mode
-            // filtering is needed in this O((S+N)·(N+A)) loop.
-            debug_assert!(is_valid_synapse_pair(pre_id, post_id, num_neurons));
-            while cursor < edges.len()
-                && (edges[cursor].pre_neuron_id, edges[cursor].post_neuron_id) < (pre_id, post_id)
-            {
-                cursor += 1;
+    for pre in all_presynaptic {
+        for post in post_ids(genome, predation_enabled) {
+            debug_assert!(is_valid_synapse_pair(genome, pre, post));
+            let innovation = connection_innovation_id(pre, post);
+            let existing = genome
+                .brain
+                .edges
+                .binary_search_by_key(&innovation, |edge| edge.innovation)
+                .ok()
+                .map(|index| &genome.brain.edges[index]);
+            if let Some(edge) = existing {
+                // Same identity but different endpoints is a structural-hash
+                // collision. It is neither missing nor a re-enable candidate.
+                if (edge.pre_node_id, edge.post_node_id) != (pre, post) || edge.enabled {
+                    continue;
+                }
             }
-            if cursor < edges.len()
-                && (edges[cursor].pre_neuron_id, edges[cursor].post_neuron_id) == (pre_id, post_id)
-            {
-                cursor += 1;
-                continue;
-            }
-            let priority = uniform_priority(rng);
-            visit((priority, pre_id, post_id));
+            visit(Candidate {
+                priority: uniform_priority(rng),
+                innovation,
+                pre,
+                post,
+            });
         }
     }
 }
 
-pub(super) fn sample_lognormal_weight<R: Rng + ?Sized>(rng: &mut R) -> f32 {
-    sample_synapse_weight(0.5, rng)
-}
-
-fn post_ids(num_neurons: u32) -> impl Iterator<Item = NeuronId> {
-    let inter = (0..num_neurons).map(inter_neuron_id);
-    let actions = (0..ACTION_COUNT).map(action_neuron_id);
-    inter.chain(actions)
+fn post_ids(
+    genome: &OrganismGenome,
+    predation_enabled: bool,
+) -> impl Iterator<Item = GeneNodeId> + '_ {
+    genome.brain.hidden_nodes.iter().map(|node| node.id).chain(
+        ActionType::active(predation_enabled)
+            .filter_map(ActionType::neuron_id)
+            .map(|id| action_gene_node_id((id.0 - ACTION_ID_BASE) as usize)),
+    )
 }
 
 fn uniform_priority<R: Rng + ?Sized>(rng: &mut R) -> f32 {

@@ -1,6 +1,5 @@
 use super::support::*;
 use super::*;
-use crate::brain::{ACTION_ID_BASE, INTER_ID_BASE};
 use crate::grid::rotate_left;
 
 #[test]
@@ -48,23 +47,36 @@ fn reproduction_offspring_behavior_starts_from_genome_not_parent_runtime_state()
     let mut sim = Simulation::new(cfg, 31).expect("simulation should initialize");
     let mut parent =
         make_single_action_organism(0, 3, 3, FacingDirection::East, ActionType::Idle, 0.8, 500.0);
-    parent.genome.brain.inter_biases = vec![0.9];
-    parent.genome.brain.inter_log_time_constants = vec![0.0];
+    parent.genome.brain.hidden_nodes = vec![HiddenNodeGene {
+        id: seed_hidden_gene_node_id(0),
+        bias: 0.9,
+        log_time_constant: 0.0,
+    }];
     parent.genome.brain.edges = ActionType::ALL
         .iter()
         .copied()
         .enumerate()
-        .map(|(idx, action_type)| SynapseGene {
-            pre_neuron_id: NeuronId(INTER_ID_BASE),
-            post_neuron_id: NeuronId(ACTION_ID_BASE + idx as u32),
-            weight: if action_type == ActionType::TurnLeft {
-                1.5
-            } else {
-                -1.5
-            },
+        .map(|(idx, action_type)| {
+            let pre_node_id = seed_hidden_gene_node_id(0);
+            let post_node_id = action_gene_node_id(idx);
+            SynapseGene {
+                innovation: connection_innovation_id(pre_node_id, post_node_id),
+                pre_node_id,
+                post_node_id,
+                weight: if action_type == ActionType::TurnLeft {
+                    1.5
+                } else {
+                    -1.5
+                },
+                enabled: true,
+            }
         })
         .collect();
-    parent.genome.topology.num_synapses = parent.genome.brain.edges.len() as u32;
+    parent
+        .genome
+        .brain
+        .edges
+        .sort_unstable_by_key(|edge| edge.innovation);
     parent.brain.inter[0].neuron.activation = 1.0;
     parent.brain.inter[0].state = 1.0;
     for action_neuron in &mut parent.brain.action {

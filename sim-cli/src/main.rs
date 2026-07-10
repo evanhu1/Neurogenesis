@@ -11,7 +11,9 @@
 //! See docs/sim-cli.md (usage) and docs/sim-cli-stateless-spec.md + SPEC.md.
 
 mod dashboards;
+mod neat;
 mod sweep;
+mod tui;
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::json;
@@ -84,18 +86,23 @@ fn print_help(out: &mut impl Write) -> Result<()> {
          \x20 --metrics <path>     metric sidecar (defaults to the `<world>.metrics` sibling; --no-metrics to disable)\n\
          \n\
          MUTATING (persist the world)\n\
-         \x20 new [--config P] [--seed N] [--set k=v]... [--scale W,POP] [--threads K] [--report-every R] --out w.bin\n\
+         \x20 new [--config P] [--seed N] [--seed-genome-snapshot P] [--set k=v]... [--scale W,POP] [--threads K] [--report-every R] --out w.bin\n\
          \x20 step [N] --in w.bin [--out w.bin]            advance N ticks (default 1)\n\
          \x20 run-to T --in w.bin [--out w.bin]            advance until turn == T\n\
          \x20 watch T [--every E] --in w.bin [--out w.bin] advance to T, emitting a metrics row every E ticks\n\
          \x20 bench [N] --in w.bin                         time N ticks (world discarded)\n\
          \x20 sweep --grid k=v,v... --seeds N,N --to T [--out-dir D]  parallel grid×seed runs → result file\n\
+         \x20 neat [--population N] [--generations N] [--episode-ticks T] [--world-seeds N,N] [--audit-seeds N,N] [--holdout-seeds N,N] [--audit-levels N,N] [--audit-every N] [--scale W,POP] [--param k=v]  canonical generational NEAT → result json + champion world.bin\n\
+         \x20 neat analyze RESULT.json [RESULT2.json ...]    derive trend, saturation, lesion, and innovation diagnostics\n\
          \n\
          READS (stdout only)\n\
          \x20 turn | state | pillars | eco | lineage | genome [--gene G] | food --in w.bin\n\
          \x20 timeseries [--cols LIST] [--last K] --in w.bin\n\
          \x20 inspect ID | top FIELD [N] | hist FIELD | find EXPR | brain ID [--view V] | decide ID --in w.bin\n\
          \x20 query --in w.bin                             read-only commands from stdin (one per line), one load\n\
+         \n\
+         INTERACTIVE (human-facing, not for agents)\n\
+         \x20 tui --in w.bin | tui --new [--seed N] [--set k=v]...  split-pane REPL over a resident world; explicit `save`\n\
          \n\
          pillars/eco-trajectory/timeseries need a metric sidecar (minted by `new`, follows the world).\n\
          Snapshot/fork a world with `cp`; full reference in docs/sim-cli.md."
@@ -151,6 +158,16 @@ fn run() -> Result<()> {
         let mut out = io::stdout().lock();
         return sweep::run_sweep(&cmd_args, &out_dir, &mut out);
     }
+    if cmd == "neat" {
+        let mut out = io::stdout().lock();
+        return neat::run_neat_cli(&cmd_args, &out_dir, &mut out);
+    }
+    // Human-facing interactive mode: a resident world driven from a split-pane
+    // TUI, as opposed to the agent-facing one-shot commands below. `--in` is a
+    // global flag (already pulled above), so hand it through explicitly.
+    if cmd == "tui" {
+        return tui::run_tui_cli(&cmd_args, in_path.as_deref());
+    }
 
     let mut app = App {
         sim: None,
@@ -173,7 +190,9 @@ fn run() -> Result<()> {
         let world_path = in_path
             .clone()
             .ok_or_else(|| anyhow!("`{cmd}` needs --in <world.bin>"))?;
-        app.sim = Some(load_world(&world_path)?);
+        let sim = load_world(&world_path)?;
+        app.scaled = sim.experiment_scaled();
+        app.sim = Some(sim);
 
         // The metric sidecar follows the world: explicit --metrics, else the
         // `<world>.metrics` sibling if present. Mutating commands without an
@@ -303,7 +322,7 @@ impl App {
 
     /// Run one command against the already-loaded world. `new` is handled by the
     /// orchestrator (it constructs rather than reads), so it is not here.
-    fn run_oneshot(&mut self, cmd: &str, args: &[&str], out: &mut impl Write) -> Result<()> {
+    pub(crate) fn run_oneshot(&mut self, cmd: &str, args: &[&str], out: &mut impl Write) -> Result<()> {
         if is_read_only(cmd) {
             return self.run_read(cmd, args, out);
         }
@@ -318,7 +337,7 @@ impl App {
     }
 
     /// Dispatch a pure-read command to `sim-views` against a borrowed context.
-    fn run_read(&mut self, cmd: &str, args: &[&str], out: &mut impl Write) -> Result<()> {
+    pub(crate) fn run_read(&mut self, cmd: &str, args: &[&str], out: &mut impl Write) -> Result<()> {
         let ctx = self.read_ctx()?;
         match cmd {
             "turn" => sim_views::turn(&ctx, args, out),
@@ -346,6 +365,7 @@ impl App {
     /// rejected (use a real `step`/`run-to` invocation for those).
     fn query(&mut self, out: &mut impl Write) -> Result<()> {
         let stdin = io::stdin();
+        let mut failures = 0usize;
         for line in stdin.lock().lines() {
             let line = line?;
             let line = line.trim();
@@ -363,6 +383,7 @@ impl App {
                 ))
             };
             if let Err(e) = result {
+                failures += 1;
                 writeln!(
                     out,
                     "{}",
@@ -370,6 +391,9 @@ impl App {
                 )?;
             }
             out.flush()?;
+        }
+        if failures > 0 {
+            bail!("query completed with {failures} failed command(s)");
         }
         Ok(())
     }
@@ -441,6 +465,9 @@ impl App {
             .ok_or_else(|| anyhow!("run-to needs a target turn"))?
             .parse()?;
         let current = self.sim()?.turn();
+        if target < current {
+            bail!("run-to target {target} is behind current turn {current}");
+        }
         if target > current {
             self.advance(target - current)?;
         }
@@ -459,12 +486,13 @@ impl App {
 
 /// `new`: parse the constructor args, build the world via `sim-views`, print the
 /// summary line, and install the world into `app`. Persistence is the caller's.
-fn build_world_cli(app: &mut App, args: &[&str], out: &mut impl Write) -> Result<()> {
+pub(crate) fn build_world_cli(app: &mut App, args: &[&str], out: &mut impl Write) -> Result<()> {
     let mut config_path = DEFAULT_CONFIG.to_string();
     let mut seed: u64 = 0;
     let mut report_every: u64 = REPORT_EVERY;
     let mut threads: Option<u32> = None;
     let mut scale: Option<(u32, u32)> = None;
+    let mut seed_genome_snapshot: Option<String> = None;
     let mut sets: Vec<(String, String)> = Vec::new();
     let (fmt, args) = take_format(app.format, args);
     let mut i = 0;
@@ -505,6 +533,14 @@ fn build_world_cli(app: &mut App, args: &[&str], out: &mut impl Write) -> Result
                 threads = Some(t);
                 i += 2;
             }
+            "--seed-genome-snapshot" => {
+                seed_genome_snapshot = Some(
+                    args.get(i + 1)
+                        .ok_or_else(|| anyhow!("--seed-genome-snapshot needs a path"))?
+                        .to_string(),
+                );
+                i += 2;
+            }
             "--scale" => {
                 let spec = args
                     .get(i + 1)
@@ -534,6 +570,15 @@ fn build_world_cli(app: &mut App, args: &[&str], out: &mut impl Write) -> Result
         }
     }
 
+    let champion_pool = if let Some(path) = seed_genome_snapshot.as_deref() {
+        let file = std::fs::File::open(path)
+            .map_err(|e| anyhow!("cannot open seed genome snapshot `{path}`: {e}"))?;
+        let genome = bincode::deserialize_from(file)
+            .map_err(|e| anyhow!("cannot decode seed genome snapshot `{path}`: {e}"))?;
+        vec![genome]
+    } else {
+        Vec::new()
+    };
     let built = build_world(&NewWorldParams {
         config_path: config_path.clone(),
         seed,
@@ -541,6 +586,7 @@ fn build_world_cli(app: &mut App, args: &[&str], out: &mut impl Write) -> Result
         threads,
         scale,
         sets: sets.clone(),
+        champion_pool,
     })?;
     let sim = built.sim;
     let scaled = built.scaled;

@@ -59,7 +59,7 @@ impl From<&OrganismState> for WorldOrganismState {
             plant_consumptions_count: organism.plant_consumptions_count,
             prey_consumptions_count: organism.prey_consumptions_count,
             reproductions_count: organism.reproductions_count,
-            visual: organism_visual(organism.genome.lifecycle.body_color),
+            visual: organism_visual(),
         }
     }
 }

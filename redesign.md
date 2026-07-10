@@ -1,13 +1,28 @@
 # Redesign: an environment-agnostic, indirectly-encoded evolutionary substrate
 
+> **Current scope (July 2026): deferred.** The active baseline is now canonical,
+> generational NEAT in `sim-neat`: a run-owned historical innovation registry,
+> fitter-parent matching/disjoint/excess crossover, compatibility speciation,
+> fitness sharing, elitism/stagnation protection, and incremental topology
+> complexification. `sim-core` is only the deterministic episodic evaluator.
+> Selection currently has one explicit objective—mean offspring observed alive
+> at maturity over
+> fixed world seeds—and every candidate is a clonal colony with plasticity,
+> in-world mutation, founder diversification, and injection frozen off. The
+> earlier action-module crossover gate is retained as a negative experiment,
+> not the active design. CPPN/development, environment abstraction, plasticity
+> redesign, and QD expansion remain out of scope until the NEAT baseline and
+> its mutation-only ablation establish whether crossover adds value.
+
 ## Context
 
-**Why.** The NeuroGenesis genome is today a **direct-encoded struct tree**
-(`OrganismGenome` = one `SynapseGene` per synapse, a fixed 18-sensor / 6-action
-interface, an 18/inter/6 neuron-id layout). Reproduction is **asexual
-clone-and-mutate**; there is no crossover; the sensory/action interface cannot
-evolve; and the brain is **hardwired to the hex world** (raycasting, RGB+Shape
-vision, hex facing baked into sensing). The genome therefore has structural
+**Why (historical motivation for the deferred architecture below).** The
+NeuroGenesis genome is a **direct-encoded struct tree**
+(`OrganismGenome` = one `SynapseGene` per synapse, a fixed 15-sensor / 6-action
+interface, a 15/inter/6 neuron-id layout). The active NEAT outer loop now
+crosses and complexifies that direct brain graph, but the sensory/action
+interface still cannot evolve and the brain is **hardwired to the hex world**
+(raycasting, categorical entity vision, hex facing baked into sensing). The genome therefore has structural
 _blind spots_ — whole dimensions of the phenotype (which senses/actuators exist,
 how big the brain can get, how plasticity is distributed) that evolution cannot
 reach.
@@ -266,7 +281,7 @@ trait Environment {
 actuators: [...], morphology: [MorphologyParam{key,min,max,default}] }`.
 
 **Catalog / coordinate design (fracture mitigation).** Assign substrate
-coordinates so geometric proximity tracks functional similarity: the 3×4 vision
+coordinates so geometric proximity tracks functional similarity: the 3×3 vision
 receptors laid out on an exteroceptive plane by offset×channel; interoceptive
 scalars on a _separate_ plane; each functional group tagged by its own
 bias-input lane. This is what keeps the CPPN's forced geometric regularity
@@ -275,26 +290,22 @@ working _for_ us instead of against us.
 ### Hex world mapping (`sim-hexworld`)
 
 - **Physics** (`step_world`/`resolve_actions`/`on_deaths`): toroidal hex grid +
-  occupancy, Perlin terrain/walls, spikes, fertility map + BTreeMap food
+  occupancy, Perlin terrain/walls, deterministic random food tiles + BTreeMap food
   regrowth, plants/corpses, Kleiber metabolism
   (`BODY_MASS_METABOLIC_EXPONENT
   =0.75`, `sim-core/src/metabolism.rs`),
   predation (size-ratio deterministic hash `deterministic_predation_sample`,
-  kept verbatim in a shared `determinism` util), **zero-sum** social-color
-  transfer (`apply_social_color_mortality`; note: its _header doc comment is
-  stale_ — the code does an antisymmetric `sin`-weighted **energy transfer**,
-  not pure damage — carry the corrected understanding, not the comment).
-- **Sensor catalog** (from `SensoryReceptor`, 18 receptors): 12 vision (3 ray
-  offsets × 4 channels — channels are **Red/Green/Blue/Shape**, not RGB-only) +
-  `ContactAhead` + interoceptive `Energy`/`Health`/`EnergyDelta`/
-  `LastActionForward`/`LastActionEat`. `observe` runs the existing `scan_ray`
-  raycast (which lives in **`sim-core/src/brain/sensing.rs`**, not
-  `src/sensing.rs`).
+  kept verbatim in a shared `determinism` util).
+- **Sensor catalog** (from `SensoryReceptor`): the default treatment has five
+  receptors — three food rays (left/forward/right), `ContactAhead`, and
+  interoceptive `Energy`. `predation_enabled=true` adds three organism rays and
+  `Health`. `observe` runs the existing `scan_ray` raycast (which lives in
+  **`sim-core/src/brain/sensing.rs`**, not `src/sensing.rs`).
 - **Actuator catalog** (from `ActionType`; the enum has 7 variants — `Idle` + 6
   contingent in `ActionType::ALL`): TurnLeft, TurnRight, Forward, Eat, Attack,
   and **`Mate`** (replaces solo `Reproduce`; targets the cell ahead like
   Eat/Attack). Idle stays implicit via the idle logit bias.
-- **Morphology schema**: body_color (RGB), vision_distance, age_of_maturity,
+- **Morphology schema**: vision_distance, age_of_maturity,
   gestation_ticks, max_organism_age. **`size` stays derived** from
   gestation_ticks via `offspring_transfer_energy` (=
   `100 + 100·gestation_ticks`) — computed once in `derive_body_params`, cached
@@ -365,7 +376,7 @@ proof of decoupling.
 
 | Area                                                                                                                       | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sim-types/src/lib.rs`                                                                                                     | **Delete** direct-encoding types (`OrganismGenome`, `TopologyGenes`, `LifecycleGenes`, `PlasticityGenes`, `MutationRateGenes`, `BrainTopology`, `SynapseGene`/`SynapseEdge`, `BrainState` + neuron states, `NeuronId` layout consts `INTER_NEURON_ID_BASE=1000`/`ACTION_NEURON_ID_BASE=2000`, `ActionType`/`SensoryReceptor`/`VisionChannel` fixed enums, `ActionRecord`). CPPN + expressed-net types live in `sim-substrate`. **Keep** ids, `RgbColor`, `VisualProperties`, terrain/food/entity, `MetricsSnapshot`/`TickDelta`/`WorldSnapshot`. `OrganismState.genome/.brain` retype (they are its last two fields, L664-665). |
+| `sim-types/src/lib.rs`                                                                                                     | **Delete** direct-encoding types (`OrganismGenome`, `TopologyGenes`, `LifecycleGenes`, `PlasticityGenes`, `MutationRateGenes`, `BrainTopology`, `SynapseGene`/`SynapseEdge`, `BrainState` + neuron states, `NeuronId` layout consts `INTER_NEURON_ID_BASE=1000`/`ACTION_NEURON_ID_BASE=2000`, `ActionType`/`SensoryReceptor` fixed enums, `ActionRecord`). CPPN + expressed-net types live in `sim-substrate`. **Keep** ids, `VisualProperties`, terrain/food/entity, `MetricsSnapshot`/`TickDelta`/`WorldSnapshot`. `OrganismState.genome/.brain` retype (they are its last two fields, L664-665). |
 | `sim-config`                                                                                                               | `SeedGenomeConfig` (`num_neurons`/`num_synapses`/`vision_distance` + lifecycle/plasticity/16 mutation-rate scalars) → **seed-CPPN + header descriptor**. Rewrite `sim-config/seed_genome.toml`; keep `sim-evaluation`'s TOMLs in sync (CLAUDE.md).                                                                                                                                                                                                                                                                                                                                                                              |
 | `sim-core/genome/*`, `brain/*`                                                                                             | Replaced by `sim-substrate`. `express_genome` (in **`brain/expression.rs`**) → `develop()`; `scan_ray` (in **`brain/sensing.rs`**) moves into `sim-hexworld` and feeds an obs vector.                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `sim-core/turn/reproduction.rs`, `spawn/organisms.rs`                                                                      | Asexual → embodied sexual mating (two parents, crossover+mutate).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -442,10 +453,9 @@ Strangler-fig ordering confines the non-compiling stretch to Phase 4 (the shared
    (Aug-2025) — indirect-encoding control-transfer buffer + conservative
    morphology mutation rates; Phase-2 check that morphology-mutated newborns are
    viable.
-6. **Porting the coupled ecology** (`size` mega-dial, zero-sum social-color) —
-   compute derived body params once, read from cache; keep RNG-free functions
-   verbatim; gate the port behind a golden byte-diff of preserved behaviors
-   (metabolism/spikes/predation/social-color) vs current sim.
+6. **Porting the coupled ecology** (`size` mega-dial) — compute derived body
+   params once, read from cache; gate the port behind a golden byte-diff of
+   preserved metabolism and predation behavior.
 7. **Deterministic mating under parallelism** — all cross-organism decisions and
    RNG draws confined to serial phases ordered by `(cell,confidence,id)`;
    1-vs-N-thread test asserts identical child genomes and population.

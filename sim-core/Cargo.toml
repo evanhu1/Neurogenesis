@@ -10,6 +10,7 @@ profiling = []
 instrumentation = ["sim-types/instrumentation"]
 
 [dependencies]
+anyhow.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 serde.workspace = true

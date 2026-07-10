@@ -21,8 +21,8 @@ use sim_server::protocol::{
     ApiError, ChampionPoolEntry, ChampionPoolResponse, OrganismDetail, StreamFrame,
     WorldSnapshotView,
 };
-use sim_views::{Recorder, ReadCtx};
 use sim_types::{OrganismGenome, OrganismState};
+use sim_views::{ReadCtx, Recorder};
 use std::path::{Path as FsPath, PathBuf};
 use std::sync::{Arc, RwLock as StdRwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -166,7 +166,7 @@ async fn blocking_read(
 // Champion pool (persisted set of the best genomes seen; unchanged semantics)
 // ---------------------------------------------------------------------------
 
-const CHAMPION_POOL_SCHEMA_VERSION: u32 = 4;
+const CHAMPION_POOL_SCHEMA_VERSION: u32 = 5;
 const CHAMPION_POOL_MAX_GENOMES: usize = 32;
 const CHAMPION_POOL_MAX_CANDIDATES_PER_WORLD: usize = 32;
 
@@ -335,7 +335,7 @@ impl ChampionPoolStore {
                 return Err(AppError::Internal(format!(
                     "failed to read champion pool {}: {err}",
                     pool_path.display()
-                )))
+                )));
             }
         };
 
@@ -782,9 +782,7 @@ fn build_new_world(
         .map(|kv| {
             kv.split_once('=')
                 .map(|(k, v)| (k.trim().to_owned(), v.trim().to_owned()))
-                .ok_or_else(|| {
-                    AppError::BadRequest(format!("--set wants key=value, got `{kv}`"))
-                })
+                .ok_or_else(|| AppError::BadRequest(format!("--set wants key=value, got `{kv}`")))
         })
         .collect::<Result<_, _>>()?;
 
@@ -851,8 +849,18 @@ async fn step_world(
     let root = state.world_root.clone();
     let response = tokio::task::spawn_blocking(move || -> Result<WorldResponse, AppError> {
         let mut loaded = load_bundle(&root, &name)?;
-        sim_views::advance(&mut loaded.sim, loaded.recorder.as_mut(), req.count.max(1) as u64);
-        save_bundle(&root, &name, &loaded.sim, loaded.recorder.as_ref(), loaded.report_every)?;
+        sim_views::advance(
+            &mut loaded.sim,
+            loaded.recorder.as_mut(),
+            req.count.max(1) as u64,
+        );
+        save_bundle(
+            &root,
+            &name,
+            &loaded.sim,
+            loaded.recorder.as_ref(),
+            loaded.report_every,
+        )?;
         Ok(WorldResponse {
             name,
             snapshot: loaded.sim.snapshot().into(),
@@ -873,8 +881,18 @@ async fn run_to_world(
         let mut loaded = load_bundle(&root, &name)?;
         let current = loaded.sim.turn();
         if req.turn > current {
-            sim_views::advance(&mut loaded.sim, loaded.recorder.as_mut(), req.turn - current);
-            save_bundle(&root, &name, &loaded.sim, loaded.recorder.as_ref(), loaded.report_every)?;
+            sim_views::advance(
+                &mut loaded.sim,
+                loaded.recorder.as_mut(),
+                req.turn - current,
+            );
+            save_bundle(
+                &root,
+                &name,
+                &loaded.sim,
+                loaded.recorder.as_ref(),
+                loaded.report_every,
+            )?;
         }
         Ok(WorldResponse {
             name,
@@ -890,42 +908,60 @@ async fn run_to_world(
 // CLI-parity reads (forwarded from sim-views as raw JSON)
 // ---------------------------------------------------------------------------
 
-async fn read_state(Path(name): Path<String>, State(state): State<AppState>) -> Result<Response, AppError> {
+async fn read_state(
+    Path(name): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Response, AppError> {
     blocking_read(state.world_root.clone(), name, |l| {
         run_read(l, |c, b| sim_views::state(c, &[], b))
     })
     .await
 }
 
-async fn read_turn(Path(name): Path<String>, State(state): State<AppState>) -> Result<Response, AppError> {
+async fn read_turn(
+    Path(name): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Response, AppError> {
     blocking_read(state.world_root.clone(), name, |l| {
         run_read(l, |c, b| sim_views::turn(c, &[], b))
     })
     .await
 }
 
-async fn read_pillars(Path(name): Path<String>, State(state): State<AppState>) -> Result<Response, AppError> {
+async fn read_pillars(
+    Path(name): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Response, AppError> {
     blocking_read(state.world_root.clone(), name, |l| {
         run_read(l, |c, b| sim_views::pillars(c, &[], b))
     })
     .await
 }
 
-async fn read_eco(Path(name): Path<String>, State(state): State<AppState>) -> Result<Response, AppError> {
+async fn read_eco(
+    Path(name): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Response, AppError> {
     blocking_read(state.world_root.clone(), name, |l| {
         run_read(l, |c, b| sim_views::eco(c, &[], b))
     })
     .await
 }
 
-async fn read_lineage(Path(name): Path<String>, State(state): State<AppState>) -> Result<Response, AppError> {
+async fn read_lineage(
+    Path(name): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Response, AppError> {
     blocking_read(state.world_root.clone(), name, |l| {
         run_read(l, |c, b| sim_views::lineage(c, &[], b))
     })
     .await
 }
 
-async fn read_food(Path(name): Path<String>, State(state): State<AppState>) -> Result<Response, AppError> {
+async fn read_food(
+    Path(name): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Response, AppError> {
     blocking_read(state.world_root.clone(), name, |l| {
         run_read(l, |c, b| sim_views::food(c, &[], b))
     })
@@ -1097,15 +1133,16 @@ async fn save_world_champions(
 ) -> Result<Json<ChampionPoolResponse>, AppError> {
     let root = state.world_root.clone();
     let pool = state.champion_pool.clone();
-    let entries = tokio::task::spawn_blocking(move || -> Result<Vec<ChampionGenomeRecord>, AppError> {
-        let loaded = load_bundle(&root, &name)?;
-        if let Err(err) = pool.update_from_simulation(&loaded.sim) {
-            warn!("failed to update champion pool from world `{name}`: {err}");
-        }
-        pool.snapshot_entries()
-    })
-    .await
-    .map_err(|e| AppError::Internal(format!("champion-save worker join error: {e}")))??;
+    let entries =
+        tokio::task::spawn_blocking(move || -> Result<Vec<ChampionGenomeRecord>, AppError> {
+            let loaded = load_bundle(&root, &name)?;
+            if let Err(err) = pool.update_from_simulation(&loaded.sim) {
+                warn!("failed to update champion pool from world `{name}`: {err}");
+            }
+            pool.snapshot_entries()
+        })
+        .await
+        .map_err(|e| AppError::Internal(format!("champion-save worker join error: {e}")))??;
 
     Ok(Json(ChampionPoolResponse {
         entries: entries.into_iter().map(ChampionPoolEntry::from).collect(),
@@ -1137,18 +1174,18 @@ async fn stream_world(
 
 async fn stream_loop(socket: WebSocket, root: Arc<PathBuf>, name: String, tps: u32) {
     let (root_load, name_load) = (root.clone(), name.clone());
-    let loaded = match tokio::task::spawn_blocking(move || load_bundle(&root_load, &name_load)).await
-    {
-        Ok(Ok(loaded)) => loaded,
-        Ok(Err(err)) => {
-            warn!("stream `{name}` failed to load world: {err}");
-            return;
-        }
-        Err(err) => {
-            error!("stream `{name}` load worker join error: {err}");
-            return;
-        }
-    };
+    let loaded =
+        match tokio::task::spawn_blocking(move || load_bundle(&root_load, &name_load)).await {
+            Ok(Ok(loaded)) => loaded,
+            Ok(Err(err)) => {
+                warn!("stream `{name}` failed to load world: {err}");
+                return;
+            }
+            Err(err) => {
+                error!("stream `{name}` load worker join error: {err}");
+                return;
+            }
+        };
     let mut sim = loaded.sim;
     let mut recorder = loaded.recorder;
     let report_every = loaded.report_every;
@@ -1200,7 +1237,10 @@ async fn send_frame(
     frame: &StreamFrame,
 ) -> Result<(), ()> {
     match serde_json::to_string(frame) {
-        Ok(text) => sender.send(Message::Text(text.into())).await.map_err(|_| ()),
+        Ok(text) => sender
+            .send(Message::Text(text.into()))
+            .await
+            .map_err(|_| ()),
         Err(err) => {
             error!("failed to serialize stream frame: {err}");
             Ok(())
@@ -1212,8 +1252,9 @@ async fn send_frame(
 mod tests {
     use super::*;
     use sim_types::{
-        inter_neuron_id, ActionType, BrainState, FacingDirection, OrganismId, SensoryReceptor,
-        SpeciesId, SynapseGene,
+        action_gene_node_id, connection_innovation_id, seed_hidden_gene_node_id,
+        sensory_gene_node_id, ActionType, BrainState, FacingDirection, HiddenNodeGene, OrganismId,
+        SensoryReceptor, SpeciesId, SynapseGene,
     };
 
     fn make_record(
@@ -1224,10 +1265,14 @@ mod tests {
     ) -> ChampionGenomeRecord {
         let mut genome = OrganismGenome::test_fixture();
         genome.lifecycle.max_organism_age = u32::MAX;
-        genome.topology.num_neurons = generation as u32 + 1;
         genome.topology.vision_distance = generation as u32 + 2;
-        genome.brain.inter_biases = vec![generation as f32];
-        genome.brain.inter_log_time_constants = vec![generation as f32 * 0.1];
+        genome.brain.hidden_nodes = (0..generation as u32 + 1)
+            .map(|index| HiddenNodeGene {
+                id: seed_hidden_gene_node_id(index),
+                bias: generation as f32,
+                log_time_constant: generation as f32 * 0.1,
+            })
+            .collect();
 
         ChampionGenomeRecord {
             genome,
@@ -1329,39 +1374,59 @@ mod tests {
 
     #[test]
     fn champion_persistence_round_trip_preserves_brain_layout_and_edges() {
-        let food_receptor = SensoryReceptor::VisionRay {
-            ray_offset: 0,
-            channel: sim_types::VisionChannel::Green,
-        };
-        let blue_receptor = SensoryReceptor::VisionRay {
-            ray_offset: 0,
-            channel: sim_types::VisionChannel::Blue,
-        };
+        let food_receptor = SensoryReceptor::FoodRay { ray_offset: 0 };
+        let organism_receptor = SensoryReceptor::OrganismRay { ray_offset: 0 };
         let forward_action = ActionType::Forward;
         let attack_action = ActionType::Attack;
 
         let mut record = make_record(4, 2, 3, 25.0);
-        record.genome.topology.num_neurons = 2;
-        record.genome.brain.inter_biases = vec![0.1, -0.2];
-        record.genome.brain.inter_log_time_constants = vec![0.0, 0.3];
-        record.genome.brain.edges = vec![
-            SynapseGene {
-                pre_neuron_id: food_receptor.neuron_id().unwrap(),
-                post_neuron_id: inter_neuron_id(0),
-                weight: 0.75,
+        record.genome.brain.hidden_nodes = vec![
+            HiddenNodeGene {
+                id: seed_hidden_gene_node_id(0),
+                bias: 0.1,
+                log_time_constant: 0.0,
             },
-            SynapseGene {
-                pre_neuron_id: blue_receptor.neuron_id().unwrap(),
-                post_neuron_id: attack_action.neuron_id().unwrap(),
-                weight: -0.5,
-            },
-            SynapseGene {
-                pre_neuron_id: inter_neuron_id(0),
-                post_neuron_id: forward_action.neuron_id().unwrap(),
-                weight: 1.25,
+            HiddenNodeGene {
+                id: seed_hidden_gene_node_id(1),
+                bias: -0.2,
+                log_time_constant: 0.3,
             },
         ];
-        record.genome.topology.num_synapses = record.genome.brain.edges.len() as u32;
+        let edge = |pre_node_id, post_node_id, weight| SynapseGene {
+            innovation: connection_innovation_id(pre_node_id, post_node_id),
+            pre_node_id,
+            post_node_id,
+            weight,
+            enabled: true,
+        };
+        let action_index = |action| {
+            ActionType::ALL
+                .iter()
+                .position(|candidate| *candidate == action)
+                .unwrap()
+        };
+        record.genome.brain.edges = vec![
+            edge(
+                sensory_gene_node_id(food_receptor.current_index().unwrap() as u32),
+                seed_hidden_gene_node_id(0),
+                0.75,
+            ),
+            edge(
+                sensory_gene_node_id(organism_receptor.current_index().unwrap() as u32),
+                action_gene_node_id(action_index(attack_action)),
+                -0.5,
+            ),
+            edge(
+                seed_hidden_gene_node_id(0),
+                action_gene_node_id(action_index(forward_action)),
+                1.25,
+            ),
+        ];
+        record
+            .genome
+            .brain
+            .edges
+            .sort_unstable_by_key(|edge| edge.innovation);
 
         let json = serde_json::to_vec(&record).expect("record should serialize");
         let decoded: ChampionGenomeRecord =

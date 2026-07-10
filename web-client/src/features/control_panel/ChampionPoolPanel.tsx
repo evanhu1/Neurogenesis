@@ -50,7 +50,8 @@ export function ChampionPoolPanel({
                 {formatEnergy(entry.energy)}e
               </span>
               <span className="font-mono text-[10px] text-ink/25">
-                {entry.genome.topology.num_neurons}n/{entry.genome.topology.num_synapses}s
+                {entry.genome.brain.hidden_nodes.length}n/
+                {entry.genome.brain.edges.filter((edge) => edge.enabled).length}s
               </span>
               <button
                 type="button"

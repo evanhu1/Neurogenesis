@@ -3,7 +3,6 @@ use sim_types::{ActionType, BrainState, NeuronId, SensoryReceptor, SynapseEdge};
 
 pub(crate) const SENSORY_COUNT: u32 = SensoryReceptor::TOTAL_NEURON_COUNT;
 pub(crate) const ACTION_COUNT: usize = ActionType::ALL.len();
-pub(crate) const ACTION_COUNT_U32: u32 = ACTION_COUNT as u32;
 // Single source of truth for the wire-visible neuron-ID layout lives in
 // sim-types; these are local aliases, not independent definitions.
 pub(crate) const INTER_ID_BASE: u32 = sim_types::INTER_NEURON_ID_BASE;
@@ -20,18 +19,6 @@ pub(crate) fn action_index(action: ActionType) -> usize {
 
 pub(crate) fn action_neuron_id(index: usize) -> NeuronId {
     NeuronId(ACTION_ID_BASE + index as u32)
-}
-
-pub(crate) fn is_sensory_id(id: NeuronId) -> bool {
-    id.0 < SENSORY_COUNT
-}
-
-pub(crate) fn is_inter_id(id: NeuronId, num_neurons: u32) -> bool {
-    (INTER_ID_BASE..INTER_ID_BASE + num_neurons).contains(&id.0)
-}
-
-pub(crate) fn is_action_id(id: NeuronId) -> bool {
-    (ACTION_ID_BASE..ACTION_ID_BASE + ACTION_COUNT_U32).contains(&id.0)
 }
 
 pub(crate) fn inter_index(id: NeuronId, num_neurons: usize) -> Option<usize> {

@@ -148,10 +148,6 @@ impl Simulation {
                         "occupancy must point at wall for blocked terrain cells",
                     );
                 }
-                debug_assert!(
-                    !(blocked && self.spike_map[idx]),
-                    "cell cannot simultaneously be wall terrain and spikes",
-                );
             }
         }
     }
@@ -172,10 +168,9 @@ impl Simulation {
         }
 
         self.occupancy[cell_idx] = Some(Occupant::Organism(organism.id));
-        self.visual_map[cell_idx] =
-            sim_types::organism_visual(organism.genome.lifecycle.body_color);
         self.organisms.push(organism);
         self.pending_actions.push(PendingActionState::default());
+        self.pending_reproductions.push(None);
         true
     }
 

@@ -326,7 +326,7 @@ impl PlasticityStepParams {
         // plasticity pass) minus the energy stashed during this tick's sensing
         // pass. Reuses the already-persisted `energy_at_last_sensing` (only ever
         // written at sensing time), so reading it here neither allocates new
-        // state nor disturbs the EnergyDelta sensor.
+        // state used by the sensing pass.
         let energy_delta = organism.energy - organism.energy_at_last_sensing;
         let learning_modulator = energy_delta_neuromodulator(energy_delta);
 

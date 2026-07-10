@@ -9,12 +9,7 @@ export type OrganismId = number;
 export type SpeciesId = number;
 export type FoodId = number;
 export type NeuronId = number;
-
-export type RgbColor = {
-  r: number;
-  g: number;
-  b: number;
-};
+export type StableGeneId = string;
 
 export type VisualProperties = {
   r: number;
@@ -34,8 +29,7 @@ export type ActionType =
   | 'Reproduce';
 
 export type FoodKind = 'Plant' | 'Corpse';
-export type TerrainType = 'Spikes' | 'Mountain';
-export type VisionChannel = 'Red' | 'Green' | 'Blue' | 'Shape';
+export type TerrainType = 'Mountain';
 
 export type NeuronType = 'Sensory' | 'Inter' | 'Action';
 
@@ -48,13 +42,10 @@ export type FacingDirection =
   | 'SouthEast';
 
 export type TopologyGenes = {
-  num_neurons: number;
-  num_synapses: number;
   vision_distance: number;
 };
 
 export type LifecycleGenes = {
-  body_color: RgbColor;
   age_of_maturity: number;
   gestation_ticks: number;
   max_organism_age: number;
@@ -68,31 +59,11 @@ export type PlasticityGenes = {
   synapse_prune_threshold: number;
 };
 
-export type MutationRateGenes = {
-  age_of_maturity: number;
-  gestation_ticks: number;
-  max_organism_age: number;
-  vision_distance: number;
-  hebb_eta_gain: number;
-  juvenile_eta_scale: number;
-  inter_bias: number;
-  inter_update_rate: number;
-  eligibility_retention: number;
-  synapse_prune_threshold: number;
-  synapse_weight_perturbation: number;
-  add_synapse: number;
-  remove_synapse: number;
-  remove_neuron: number;
-  add_neuron_split_edge: number;
-  max_weight_delta_per_tick: number;
-};
-
 // SeedGenomeConfig wire format stays flat (Rust SeedGenomeConfig is not nested).
 export type SeedGenomeConfig = {
   num_neurons: number;
   num_synapses: number;
   vision_distance: number;
-  body_color: RgbColor;
   age_of_maturity: number;
   gestation_ticks: number;
   max_organism_age: number;
@@ -101,42 +72,25 @@ export type SeedGenomeConfig = {
   eligibility_retention: number;
   max_weight_delta_per_tick: number;
   synapse_prune_threshold: number;
-  mutation_rate_age_of_maturity: number;
-  mutation_rate_gestation_ticks: number;
-  mutation_rate_max_organism_age: number;
-  mutation_rate_vision_distance: number;
-  mutation_rate_hebb_eta_gain: number;
-  mutation_rate_juvenile_eta_scale: number;
-  mutation_rate_inter_bias: number;
-  mutation_rate_inter_update_rate: number;
-  mutation_rate_eligibility_retention: number;
-  mutation_rate_synapse_prune_threshold: number;
-  mutation_rate_synapse_weight_perturbation: number;
-  mutation_rate_add_synapse: number;
-  mutation_rate_remove_synapse: number;
-  mutation_rate_remove_neuron: number;
-  mutation_rate_add_neuron_split_edge: number;
-  mutation_rate_max_weight_delta_per_tick: number;
 };
 
 export type WorldConfig = {
   world_width: number;
   num_organisms: number;
-  periodic_injection_interval_turns: number;
-  periodic_injection_count: number;
   food_energy: number;
   passive_metabolism_cost_per_unit: number;
   body_mass_metabolic_cost_coeff: number;
   move_action_energy_cost: number;
   action_temperature: number;
+  intent_parallel_threads: number;
   food_regrowth_interval: number;
   food_regrowth_jitter: number;
+  food_tile_fraction: number;
   terrain_noise_scale: number;
   terrain_threshold: number;
-  spike_density: number;
-  global_mutation_rate_modifier: number;
-  meta_mutation_enabled: boolean;
   runtime_plasticity_enabled: boolean;
+  leaky_neurons_enabled: boolean;
+  predation_enabled: boolean;
   force_random_actions: boolean;
   seed_genome_config: SeedGenomeConfig;
 };
@@ -151,33 +105,38 @@ type SynapseEdgeOf<Id> = {
 export type ApiSynapseEdge = SynapseEdgeOf<ApiScalarId>;
 export type SynapseEdge = SynapseEdgeOf<NeuronId>;
 
-// Heritable synapse gene: wiring + weight only (no runtime plasticity state).
-type SynapseGeneOf<Id> = {
-  pre_neuron_id: Id;
-  post_neuron_id: Id;
+export type HiddenNodeGene = {
+  id: StableGeneId;
+  bias: number;
+  log_time_constant: number;
+};
+
+// Heritable connection identity is stable across structural mutation. Runtime
+// brains separately use dense numeric NeuronId values.
+export type SynapseGene = {
+  innovation: StableGeneId;
+  pre_node_id: StableGeneId;
+  post_node_id: StableGeneId;
   weight: number;
+  enabled: boolean;
 };
 
-export type ApiSynapseGene = SynapseGeneOf<ApiScalarId>;
-export type SynapseGene = SynapseGeneOf<NeuronId>;
+export type ApiSynapseGene = SynapseGene;
 
-type BrainTopologyGenesOf<Id> = {
-  inter_biases: number[];
-  inter_log_time_constants: number[];
+export type BrainTopologyGenes = {
+  hidden_nodes: HiddenNodeGene[];
   action_biases: number[];
-  edges: SynapseGeneOf<Id>[];
+  edges: SynapseGene[];
 };
 
-type OrganismGenomeOf<Id> = {
+export type OrganismGenome = {
   topology: TopologyGenes;
   lifecycle: LifecycleGenes;
   plasticity: PlasticityGenes;
-  mutation_rates: MutationRateGenes;
-  brain: BrainTopologyGenesOf<Id>;
+  brain: BrainTopologyGenes;
 };
 
-export type ApiOrganismGenome = OrganismGenomeOf<ApiScalarId>;
-export type OrganismGenome = OrganismGenomeOf<NeuronId>;
+export type ApiOrganismGenome = OrganismGenome;
 
 type NeuronStateOf<Id> = {
   neuron_id: Id;
@@ -190,9 +149,10 @@ export type ApiNeuronState = NeuronStateOf<ApiScalarId>;
 export type NeuronState = NeuronStateOf<NeuronId>;
 
 export type SensoryReceptor =
-  | { receptor_type: 'VisionRay'; ray_offset: number; channel: VisionChannel }
+  | { receptor_type: 'FoodRay'; ray_offset: number }
   | { receptor_type: 'ContactAhead' }
   | { receptor_type: 'Energy' }
+  | { receptor_type: 'OrganismRay'; ray_offset: number }
   | { receptor_type: 'Health' };
 
 type SensoryNeuronStateOf<Id> = {
@@ -252,7 +212,7 @@ type OrganismStateOf<Id> = {
   last_action_taken: ActionType;
   base_metabolic_cost: number;
   brain: BrainStateOf<Id>;
-  genome: OrganismGenomeOf<Id>;
+  genome: OrganismGenome;
 };
 
 export type ApiOrganismState = OrganismStateOf<ApiScalarId>;
@@ -299,8 +259,10 @@ export type ApiMetricsSnapshot = {
   synapse_ops_last_turn: number;
   actions_applied_last_turn: number;
   consumptions_last_turn: number;
+  plant_consumptions_last_turn: number;
   predations_last_turn: number;
   total_consumptions: number;
+  total_plant_consumptions: number;
   reproductions_last_turn: number;
   starvations_last_turn: number;
   age_deaths_last_turn: number;
@@ -352,8 +314,8 @@ export type WorldResponse = {
   snapshot: WorldSnapshot;
 };
 
-type ChampionPoolEntryOf<Id> = {
-  genome: OrganismGenomeOf<Id>;
+export type ChampionPoolEntry = {
+  genome: OrganismGenome;
   source_turn: number;
   source_created_at_unix_ms: number;
   generation: number;
@@ -363,8 +325,7 @@ type ChampionPoolEntryOf<Id> = {
   energy: number;
 };
 
-export type ApiChampionPoolEntry = ChampionPoolEntryOf<ApiScalarId>;
-export type ChampionPoolEntry = ChampionPoolEntryOf<NeuronId>;
+export type ApiChampionPoolEntry = ChampionPoolEntry;
 
 export type ApiChampionPoolResponse = {
   entries: ApiChampionPoolEntry[];
@@ -381,7 +342,12 @@ type EntityIdOf<Id> =
 export type ApiEntityId = EntityIdOf<ApiScalarId>;
 export type EntityId = EntityIdOf<number>;
 
-export type ReproductionFailureCause = 'BlockedBirth' | 'ParentDied';
+export type ReproductionFailureCause =
+  | 'InsufficientEnergy'
+  | 'Immature'
+  | 'BirthTargetBlockedByWall'
+  | 'BlockedBirth'
+  | 'ParentDied';
 
 export type ApiReproductionEvent = {
   parent_id: ApiScalarId;
@@ -541,11 +507,9 @@ export type LineageView = {
 };
 
 export type GenomeGeneStat = { group: string; stats: StatsSummary | null };
-export type GenomeMutationRate = { mean: number; state: 'hot' | 'cold' };
 export type GenomeView = {
   population: number;
   genes: Record<string, GenomeGeneStat>;
-  mutation_rates: Record<string, GenomeMutationRate>;
   drift_note?: string;
 };
 

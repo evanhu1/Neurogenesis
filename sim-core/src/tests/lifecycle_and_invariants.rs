@@ -4,15 +4,14 @@ use super::*;
 #[test]
 fn state_invariants_hold_across_multi_turn_mixed_ecology_and_spawn_flow() {
     let mut cfg = test_config(8, 5);
+    cfg.predation_enabled = true;
     cfg.food_regrowth_interval = 2;
     cfg.food_regrowth_jitter = 0;
 
     let mut sim = Simulation::new(cfg, 20).expect("simulation should initialize");
     let wall_idx = sim.cell_index(3, 1);
-    let spike_idx = sim.cell_index(2, 1);
     sim.terrain_map[wall_idx] = true;
     sim.occupancy[wall_idx] = Some(Occupant::Wall);
-    sim.spike_map[spike_idx] = true;
 
     configure_sim(
         &mut sim,
@@ -71,8 +70,8 @@ fn state_invariants_hold_across_multi_turn_mixed_ecology_and_spawn_flow() {
     );
 
     let food_idx = sim.cell_index(2, 4);
-    sim.food_fertility = vec![false; sim.occupancy.len()];
-    sim.food_fertility[food_idx] = true;
+    sim.food_tiles = vec![false; sim.occupancy.len()];
+    sim.food_tiles[food_idx] = true;
     sim.food_regrowth_due_turn = vec![u64::MAX; sim.occupancy.len()];
     sim.food_regrowth_schedule.clear();
     sim.foods.push(sim_types::FoodState {

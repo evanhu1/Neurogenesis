@@ -49,23 +49,21 @@ impl Simulation {
                     age_corpse_spawns.push((cell_idx, organism.energy.max(0.0)));
                 }
                 if self.pending_actions[idx].kind == PendingActionKind::Reproduce {
-                    reproduction_events.push(ReproductionEvent {
-                        parent_id: organism.id,
-                        parent_species_id: organism.species_id,
-                        parent_age_turns: organism.age_turns,
-                        parent_generation: organism.generation,
-                        investment_energy: self.pending_actions[idx].reproduction_energy(),
-                        parent_energy_after_event: organism.energy,
-                        child_id: None,
-                        failure_cause: Some(ReproductionFailureCause::ParentDied),
-                    });
+                    let pending_reproduction = self.pending_reproductions[idx]
+                        .as_ref()
+                        .expect("Reproduce pending action must carry reproduction metadata");
+                    reproduction_events.push(pending_reproduction.event(
+                        organism,
+                        self.pending_actions[idx].reproduction_energy(),
+                        None,
+                        Some(ReproductionFailureCause::ParentDied),
+                    ));
                 }
                 if dead.is_empty() {
                     dead.resize(organism_count, false);
                 }
                 dead[idx] = true;
                 self.occupancy[cell_idx] = None;
-                self.visual_map[cell_idx] = self.visual_map_base[cell_idx];
                 removed_positions.push(RemovedEntityPosition {
                     entity_id: EntityId::Organism(organism.id),
                     q: organism.q,

@@ -102,8 +102,8 @@ fn food_ecology_cycles_consumption_and_regrowth_on_fertile_tile() {
 
     let target = (2, 1);
     let target_idx = sim.cell_index(target.0, target.1);
-    sim.food_fertility = vec![false; sim.occupancy.len()];
-    sim.food_fertility[target_idx] = true;
+    sim.food_tiles = vec![false; sim.occupancy.len()];
+    sim.food_tiles[target_idx] = true;
     sim.food_regrowth_due_turn = vec![u64::MAX; sim.occupancy.len()];
     sim.food_regrowth_schedule.clear();
     sim.foods.push(sim_types::FoodState {
@@ -175,42 +175,6 @@ fn move_resolution_blocks_wall_cells() {
 }
 
 #[test]
-fn moving_onto_spikes_applies_same_tick_health_damage() {
-    let cfg = test_config(5, 1);
-    let mut sim = Simulation::new(cfg, 2031).expect("simulation should initialize");
-    configure_sim(
-        &mut sim,
-        vec![make_organism(
-            0,
-            1,
-            1,
-            FacingDirection::East,
-            true,
-            false,
-            false,
-            0.9,
-            50.0,
-        )],
-    );
-    let spike_idx = sim.cell_index(2, 1);
-    sim.spike_map[spike_idx] = true;
-
-    let delta = tick_once(&mut sim);
-    assert_eq!(
-        move_map(&delta).get(&OrganismId(0)),
-        Some(&((1, 1), (2, 1)))
-    );
-    let organism = sim
-        .organisms
-        .iter()
-        .find(|item| item.id == OrganismId(0))
-        .expect("organism should survive spike damage");
-    assert_eq!((organism.q, organism.r), (2, 1));
-    assert_eq!(organism.damage_taken_last_turn, 5.0);
-    assert_eq!(organism.health, 45.0);
-}
-
-#[test]
 fn eat_only_interacts_with_food() {
     let cfg = test_config(5, 2);
     let mut sim = Simulation::new(cfg, 204).expect("simulation should initialize");
@@ -242,7 +206,8 @@ fn eat_only_interacts_with_food() {
 
 #[test]
 fn attack_only_interacts_with_organisms_and_kills_on_success() {
-    let cfg = test_config(5, 2);
+    let mut cfg = test_config(5, 2);
+    cfg.predation_enabled = true;
     let mut sim = Simulation::new(cfg, 205).expect("simulation should initialize");
     let mut predator = make_single_action_organism(
         0,
@@ -273,7 +238,8 @@ fn attack_only_interacts_with_organisms_and_kills_on_success() {
 
 #[test]
 fn lethal_attack_spawns_corpse_food_without_feeding_attacker() {
-    let cfg = test_config(5, 2);
+    let mut cfg = test_config(5, 2);
+    cfg.predation_enabled = true;
     let mut sim = Simulation::new(cfg, 206).expect("simulation should initialize");
     let mut prey =
         make_single_action_organism(1, 2, 1, FacingDirection::East, ActionType::Idle, 0.1, 50.0);

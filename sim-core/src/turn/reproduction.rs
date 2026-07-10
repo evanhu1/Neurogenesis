@@ -1,14 +1,10 @@
 use super::*;
+use crate::PendingReproductionState;
 use sim_types::{offspring_transfer_energy, ReproductionEvent, ReproductionFailureCause};
 
 #[derive(Clone, Copy)]
 struct PendingBirthEvent {
-    parent_id: OrganismId,
-    parent_species_id: sim_types::SpeciesId,
-    parent_age_turns: u64,
-    parent_generation: u64,
-    investment_energy: f32,
-    parent_energy_after_event: f32,
+    event: ReproductionEvent,
 }
 
 pub(super) struct ReproductionPhaseState {
@@ -53,24 +49,23 @@ impl ReproductionPhaseState {
     ) -> (Vec<ReproductionEvent>, Vec<bool>) {
         debug_assert_eq!(self.successful_births.len(), reproduction_spawned.len());
         for (birth, child) in self.successful_births.drain(..).zip(reproduction_spawned) {
-            self.reproduction_events.push(ReproductionEvent {
-                parent_id: birth.parent_id,
-                parent_species_id: birth.parent_species_id,
-                parent_age_turns: birth.parent_age_turns,
-                parent_generation: birth.parent_generation,
-                investment_energy: birth.investment_energy,
-                parent_energy_after_event: birth.parent_energy_after_event,
-                child_id: Some(child.id),
-                failure_cause: None,
-            });
+            let mut event = birth.event;
+            event.child_id = Some(child.id);
+            self.reproduction_events.push(event);
         }
         (self.reproduction_events, self.gestation_started_this_tick)
     }
 
+    // Clonal reproduction: an initiator produces an exact copy of its own
+    // genome. There is no mate selection, crossover, or in-world mutation —
+    // all genetic variation is owned by the generational NEAT outer loop
+    // (`crate::evolution`); the world only evaluates fixed genomes.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn apply_triggers(
         &mut self,
         organisms: &mut [OrganismState],
         pending_actions: &mut [PendingActionState],
+        pending_reproductions: &mut [Option<PendingReproductionState>],
         intents: &[OrganismIntent],
         occupancy: &[Option<Occupant>],
         world_width: i32,
@@ -78,12 +73,14 @@ impl ReproductionPhaseState {
             sim_types::ActionRecord,
         >],
     ) {
+        debug_assert_eq!(pending_reproductions.len(), organisms.len());
+
         for intent in intents {
             let org_idx = intent.idx;
-            let organism = &mut organisms[org_idx];
             if !intent.wants_reproduce {
                 continue;
             }
+            let organism = &organisms[org_idx];
             // Invariant: a reproduce intent can never coincide with an active
             // Reproduce pending. wants_reproduce requires turns_remaining == 0
             // at intent time (locked_intent otherwise), and queue_completions
@@ -92,24 +89,18 @@ impl ReproductionPhaseState {
             // phase with turns_remaining == 0.
             debug_assert_ne!(pending_actions[org_idx].kind, PendingActionKind::Reproduce);
 
+            if let Some(cause) = local_reproduction_failure(organism, occupancy, world_width) {
+                self.reproduction_events
+                    .push(rejected_reproduction_event(organism, cause));
+                continue;
+            }
             let transfer_energy =
                 offspring_transfer_energy(organism.genome.lifecycle.gestation_ticks);
-            let parent_energy = organism.energy;
-            if parent_energy < transfer_energy {
-                continue;
-            }
-            let maturity_age = u64::from(organism.genome.lifecycle.age_of_maturity);
-            if organism.age_turns < maturity_age {
-                continue;
-            }
-            let (q, r) = reproduction_target(world_width, organism.q, organism.r, organism.facing);
-            if matches!(
-                occupancy_snapshot_cell(occupancy, world_width, q, r),
-                Some(Occupant::Wall)
-            ) {
-                continue;
-            }
 
+            let base_genome = organism.genome.clone();
+            let offspring_generation = organism.generation.saturating_add(1);
+
+            let organism = &mut organisms[org_idx];
             organism.energy -= transfer_energy;
             organism.reproductions_count = organism.reproductions_count.saturating_add(1);
             organism.is_gestating = true;
@@ -118,6 +109,12 @@ impl ReproductionPhaseState {
                 turns_remaining: organism.genome.lifecycle.gestation_ticks,
                 reproduction_energy_bits: transfer_energy.to_bits(),
             };
+            debug_assert!(pending_reproductions[org_idx].is_none());
+            pending_reproductions[org_idx] = Some(PendingReproductionState {
+                base_genome,
+                offspring_generation,
+                parent_age_turns_at_conception: organism.age_turns,
+            });
             self.gestation_started_this_tick[org_idx] =
                 organism.genome.lifecycle.gestation_ticks > 0;
             #[cfg(feature = "instrumentation")]
@@ -133,60 +130,93 @@ impl ReproductionPhaseState {
         // Few completions per tick: a linear scan over a small vec beats hashing.
         let mut reserved_spawn_cells: Vec<(i32, i32)> = Vec::new();
 
-        for (idx, pending_action) in sim.pending_actions.iter_mut().enumerate() {
-            if pending_action.kind != PendingActionKind::Reproduce {
+        for idx in 0..sim.pending_actions.len() {
+            if sim.pending_actions[idx].kind != PendingActionKind::Reproduce {
                 continue;
             }
             if self.gestation_started_this_tick[idx] {
                 continue;
             }
 
-            if pending_action.turns_remaining > 0 {
-                pending_action.turns_remaining = pending_action.turns_remaining.saturating_sub(1);
+            if sim.pending_actions[idx].turns_remaining > 0 {
+                sim.pending_actions[idx].turns_remaining =
+                    sim.pending_actions[idx].turns_remaining.saturating_sub(1);
             }
-            if pending_action.turns_remaining > 0 {
+            if sim.pending_actions[idx].turns_remaining > 0 {
                 continue;
             }
 
+            let pending_action = sim.pending_actions[idx];
+            let pending_reproduction = sim.pending_reproductions[idx]
+                .take()
+                .expect("Reproduce pending action must carry reproduction metadata");
             let parent = &sim.organisms[idx];
             let (q, r) = reproduction_target(world_width, parent.q, parent.r, parent.facing);
+            let event = pending_reproduction.event(
+                parent,
+                pending_action.reproduction_energy(),
+                None,
+                None,
+            );
             if occupancy_snapshot_cell(&sim.occupancy, world_width, q, r).is_none()
                 && !reserved_spawn_cells.contains(&(q, r))
             {
                 reserved_spawn_cells.push((q, r));
                 self.spawn_requests
                     .push(SpawnRequest::Reproduction(Box::new(ReproductionSpawn {
-                        parent_genome: parent.genome.clone(),
-                        parent_generation: parent.generation,
+                        offspring_genome: pending_reproduction.base_genome,
+                        offspring_generation: pending_reproduction.offspring_generation,
                         parent_species_id: parent.species_id,
                         parent_facing: parent.facing,
                         offspring_starting_energy: pending_action.reproduction_energy(),
                         q,
                         r,
                     })));
-                self.successful_births.push(PendingBirthEvent {
-                    parent_id: parent.id,
-                    parent_species_id: parent.species_id,
-                    parent_age_turns: parent.age_turns,
-                    parent_generation: parent.generation,
-                    investment_energy: pending_action.reproduction_energy(),
-                    parent_energy_after_event: parent.energy,
-                });
+                self.successful_births.push(PendingBirthEvent { event });
             } else {
-                self.reproduction_events.push(ReproductionEvent {
-                    parent_id: parent.id,
-                    parent_species_id: parent.species_id,
-                    parent_age_turns: parent.age_turns,
-                    parent_generation: parent.generation,
-                    investment_energy: pending_action.reproduction_energy(),
-                    parent_energy_after_event: parent.energy,
-                    child_id: None,
-                    failure_cause: Some(ReproductionFailureCause::BlockedBirth),
-                });
+                let mut event = event;
+                event.failure_cause = Some(ReproductionFailureCause::BlockedBirth);
+                self.reproduction_events.push(event);
             }
 
             sim.organisms[idx].is_gestating = false;
-            *pending_action = PendingActionState::default();
+            sim.pending_actions[idx] = PendingActionState::default();
         }
+    }
+}
+
+fn local_reproduction_failure(
+    organism: &OrganismState,
+    occupancy: &[Option<Occupant>],
+    world_width: i32,
+) -> Option<ReproductionFailureCause> {
+    let transfer_energy = offspring_transfer_energy(organism.genome.lifecycle.gestation_ticks);
+    if organism.energy < transfer_energy {
+        return Some(ReproductionFailureCause::InsufficientEnergy);
+    }
+    if organism.age_turns < u64::from(organism.genome.lifecycle.age_of_maturity) {
+        return Some(ReproductionFailureCause::Immature);
+    }
+    let (q, r) = reproduction_target(world_width, organism.q, organism.r, organism.facing);
+    matches!(
+        occupancy_snapshot_cell(occupancy, world_width, q, r),
+        Some(Occupant::Wall)
+    )
+    .then_some(ReproductionFailureCause::BirthTargetBlockedByWall)
+}
+
+fn rejected_reproduction_event(
+    organism: &OrganismState,
+    cause: ReproductionFailureCause,
+) -> ReproductionEvent {
+    ReproductionEvent {
+        parent_id: organism.id,
+        parent_species_id: organism.species_id,
+        parent_age_turns: organism.age_turns,
+        parent_generation: organism.generation,
+        investment_energy: 0.0,
+        parent_energy_after_event: organism.energy,
+        child_id: None,
+        failure_cause: Some(cause),
     }
 }

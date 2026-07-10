@@ -258,9 +258,6 @@ export function GenomeTab({ worldName, revision, active }: TabProps) {
     }
     return [...byGroup.entries()];
   }, [g]);
-  const mutations = Object.entries(g?.mutation_rates ?? {});
-  const hot = mutations.filter(([, m]) => m.state === 'hot').sort((a, b) => b[1].mean - a[1].mean);
-  const cold = mutations.filter(([, m]) => m.state === 'cold');
 
   return (
     <TabFrame state={{ loading: read.loading, error: read.error, hasData: !!g }}>
@@ -281,29 +278,7 @@ export function GenomeTab({ worldName, revision, active }: TabProps) {
               </dl>
             </div>
           ))}
-          <div className="space-y-1.5">
-            <SectionLabel>Mutation rates</SectionLabel>
-            {hot.length > 0 ? (
-              <div className="space-y-1">
-                {hot.map(([name, m]) => (
-                  <div key={name} className="flex items-center gap-2 text-[10px]">
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
-                    <span className="flex-1 truncate text-ink/55">{name}</span>
-                    <span className="font-mono text-ink/60">{fmt(m.mean, 5)}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-[10px] text-ink/30">No hot mutation rates.</p>
-            )}
-            {cold.length > 0 && (
-              <p className="text-[10px] leading-4 text-ink/30">
-                <span className="uppercase tracking-wide">cold ({cold.length}):</span>{' '}
-                {cold.map(([name]) => name).join(', ')}
-              </p>
-            )}
-            {g.drift_note && <p className="text-[10px] text-ink/30">{g.drift_note}</p>}
-          </div>
+          {g.drift_note && <p className="text-[10px] text-ink/30">{g.drift_note}</p>}
         </>
       )}
     </TabFrame>

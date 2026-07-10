@@ -5,10 +5,9 @@ use crate::brain::sensing::encode_sensory_inputs;
 pub(crate) struct BrainEvalContext<'a> {
     pub(crate) world_width: i32,
     pub(crate) occupancy: &'a [Option<Occupant>],
-    pub(crate) spike_map: &'a [bool],
-    pub(crate) spike_visual_map: &'a [VisualProperties],
-    pub(crate) visual_map: &'a [VisualProperties],
     pub(crate) vision_distance: u32,
+    pub(crate) leaky_neurons_enabled: bool,
+    pub(crate) predation_enabled: bool,
     pub(crate) action_temperature: f32,
     pub(crate) action_sample: f32,
 }
@@ -27,9 +26,6 @@ pub(crate) fn evaluate_brain(
         organism,
         context.world_width,
         context.occupancy,
-        context.spike_map,
-        context.spike_visual_map,
-        context.visual_map,
         context.vision_distance,
     );
     #[cfg(feature = "instrumentation")]
@@ -91,10 +87,12 @@ pub(crate) fn evaluate_brain(
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
     for (idx, neuron) in brain.inter.iter_mut().enumerate() {
-        let alpha = neuron.alpha;
-        // `neuron.state` still holds the previous-tick value: nothing between
-        // the accumulation loops and here writes inter state.
-        neuron.state = (1.0 - alpha) * neuron.state + alpha * scratch.inter_inputs[idx];
+        neuron.state = if context.leaky_neurons_enabled {
+            let alpha = neuron.alpha;
+            (1.0 - alpha) * neuron.state + alpha * scratch.inter_inputs[idx]
+        } else {
+            scratch.inter_inputs[idx]
+        };
         neuron.neuron.activation = super::fast_tanh(neuron.state);
     }
     #[cfg(feature = "profiling")]
@@ -125,6 +123,7 @@ pub(crate) fn evaluate_brain(
         EXPLICIT_IDLE_LOGIT_BIAS,
         context.action_temperature,
         context.action_sample,
+        context.predation_enabled,
         &mut scratch.action_probabilities,
     );
     scratch.selected_action_index = match sampled_action {
@@ -143,13 +142,24 @@ fn sample_action_from_logits(
     idle_bias: f32,
     action_temperature: f32,
     action_sample: f32,
+    predation_enabled: bool,
     action_probabilities: &mut [f32; ACTION_COUNT],
 ) -> ActionType {
     let temperature = action_temperature.max(MIN_ACTION_TEMPERATURE);
-    let max_logit = action_logits.iter().copied().fold(idle_bias, f32::max);
+    let max_logit = action_logits
+        .iter()
+        .copied()
+        .enumerate()
+        .filter(|(idx, _)| ActionType::ALL[*idx].is_enabled(predation_enabled))
+        .map(|(_, logit)| logit)
+        .fold(idle_bias, f32::max);
     let mut weights = [0.0_f32; ACTION_COUNT];
     let mut weight_sum = 0.0_f32;
     for (idx, logit) in action_logits.iter().copied().enumerate() {
+        if !ActionType::ALL[idx].is_enabled(predation_enabled) {
+            action_probabilities[idx] = 0.0;
+            continue;
+        }
         let scaled = (logit - max_logit) / temperature;
         let weight = scaled.exp();
         weights[idx] = weight;

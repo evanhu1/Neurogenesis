@@ -1,0 +1,45 @@
+# Canonical Gate 1-3 experiment: outer-loop brain evolution only.
+# Run paired_clone and crossover as matched-seed arms through
+# `sim-cli sweep --gate crossover`; the gate runner rejects invariant drift.
+
+[world]
+world_width = 25
+
+[population]
+num_organisms = 200
+periodic_injection_interval_turns = 0
+periodic_injection_count = 0
+
+[lifecycle]
+passive_metabolism_cost_per_unit = 0.001
+body_mass_metabolic_cost_coeff = 1.0
+move_action_energy_cost = 0.1
+action_temperature = 0.08
+intent_parallel_threads = 1
+
+[food]
+food_energy = 300
+food_regrowth_interval = 200
+food_regrowth_jitter = 50
+food_tile_fraction = 0.4
+
+[terrain]
+terrain_noise_scale = 0.01
+terrain_threshold = 0.70
+
+[evolution]
+global_mutation_rate_modifier = 1.0
+reproduction_mode = "paired_clone"
+founder_genome_mode = "shared_ancestor"
+founder_diversification_rounds = 2
+crossover_scope = "brain_only"
+crossover_strategy = "action_modules"
+crossover_probability = 0.5
+mate_compatibility_threshold = 0.6
+
+[flags]
+meta_mutation_enabled = false
+runtime_plasticity_enabled = false
+leaky_neurons_enabled = false
+predation_enabled = false
+force_random_actions = false

@@ -10,3 +10,6 @@ sim-server/worlds/
 artifacts/
 .autoresearch_archive/
 sim-evaluation/reports/
+# Stray scratch worlds at the repo root (put real worlds under artifacts/)
+/in.bin
+/in.metrics

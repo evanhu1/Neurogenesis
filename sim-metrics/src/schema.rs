@@ -2,8 +2,8 @@
 //! dataset schema — `sim-evaluation` derives its Arrow/Parquet columns from
 //! their `serde` shape, and `sim-cli` accumulates the same rows in memory.
 //!
-//! The dataset is deliberately minimal: a per-tick population line and a
-//! per-organism lifetime row carry every fact the analysis layer consumes.
+//! The dataset is deliberately compact: per-tick population, per-organism
+//! lifetime, and per-reproduction rows carry every fact the analysis consumes.
 
 use serde::{Deserialize, Serialize};
 use sim_types::{ActionType, SensoryReceptor};

@@ -7,8 +7,8 @@ use crate::{take_format, ReadCtx};
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
 use sim_types::{
-    ActionType, NeuronId, OrganismState, SensoryReceptor, SynapseEdge, VisionChannel,
-    ACTION_NEURON_ID_BASE, INTER_NEURON_ID_BASE,
+    ActionType, NeuronId, OrganismState, SensoryReceptor, SynapseEdge, ACTION_NEURON_ID_BASE,
+    INTER_NEURON_ID_BASE,
 };
 use std::io::Write;
 
@@ -326,7 +326,6 @@ fn is_field(name: &str) -> bool {
             | "vision"
             | "hebb_eta"
             | "gestating"
-            | "hue"
     )
 }
 
@@ -345,11 +344,10 @@ fn org_field(o: &OrganismState, name: &str) -> f64 {
         "plant" => o.plant_consumptions_count as f64,
         "prey" => o.prey_consumptions_count as f64,
         "reproductions" => o.reproductions_count as f64,
-        "neurons" => o.genome.topology.num_neurons as f64,
+        "neurons" => o.genome.hidden_node_count() as f64,
         "synapses" => o.brain.synapse_count as f64,
         "vision" => o.genome.topology.vision_distance as f64,
         "hebb_eta" => o.genome.plasticity.hebb_eta_gain as f64,
-        "hue" => sim_types::color_hue(o.genome.lifecycle.body_color) as f64,
         "gestating" => {
             if o.is_gestating {
                 1.0
@@ -367,7 +365,7 @@ fn field_text(o: &OrganismState, name: &str) -> String {
         | "reproductions" | "neurons" | "synapses" | "vision" | "gestating" => {
             format!("{}", org_field(o, name) as i64)
         }
-        "hebb_eta" | "hue" => format!("{:.4}", org_field(o, name)),
+        "hebb_eta" => format!("{:.4}", org_field(o, name)),
         _ => format!("{:.2}", org_field(o, name)),
     }
 }
@@ -445,7 +443,12 @@ impl Predicate {
         // consume `field op value` triples separated by and/or.
         let mut flat: Vec<String> = Vec::new();
         for &t in tokens {
-            split_comparison_token(t, &mut flat);
+            // Shell quoting deliberately preserves a whole expression as one
+            // argv item (`find 'age == 50'`). Normalize its internal whitespace
+            // exactly like the unquoted multi-argument spelling.
+            for part in t.split_whitespace() {
+                split_comparison_token(part, &mut flat);
+            }
         }
         let mut iter = flat.iter().map(String::as_str).peekable();
 
@@ -575,33 +578,27 @@ fn neuron_label(id: NeuronId) -> String {
 
 fn receptor_label(r: &SensoryReceptor) -> String {
     match r {
-        SensoryReceptor::VisionRay {
-            ray_offset,
-            channel,
-        } => {
+        SensoryReceptor::FoodRay { ray_offset } => {
             let side = match ray_offset {
                 -1 => "L",
                 0 => "F",
                 1 => "R",
-                other => return format!("vis{other}:{}", channel_label(*channel)),
+                other => return format!("Food{other}"),
             };
-            format!("vis{side}:{}", channel_label(*channel))
+            format!("Food{side}")
         }
         SensoryReceptor::ContactAhead => "ContactAhead".into(),
         SensoryReceptor::Energy => "Energy".into(),
+        SensoryReceptor::OrganismRay { ray_offset } => {
+            let side = match ray_offset {
+                -1 => "L",
+                0 => "F",
+                1 => "R",
+                other => return format!("Organism{other}"),
+            };
+            format!("Organism{side}")
+        }
         SensoryReceptor::Health => "Health".into(),
-        SensoryReceptor::EnergyDelta => "EnergyDelta".into(),
-        SensoryReceptor::LastActionForward => "LastActForward".into(),
-        SensoryReceptor::LastActionEat => "LastActEat".into(),
-    }
-}
-
-fn channel_label(c: VisionChannel) -> &'static str {
-    match c {
-        VisionChannel::Red => "R",
-        VisionChannel::Green => "G",
-        VisionChannel::Blue => "B",
-        VisionChannel::Shape => "Shape",
     }
 }
 

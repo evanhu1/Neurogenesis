@@ -72,10 +72,7 @@ fn forced_brain(
 fn forced_brain_with_action(preferred_action: ActionType, confidence: f32) -> BrainState {
     let sensory = vec![make_sensory_neuron(
         0,
-        SensoryReceptor::VisionRay {
-            ray_offset: 0,
-            channel: sim_types::VisionChannel::Green,
-        },
+        SensoryReceptor::FoodRay { ray_offset: 0 },
     )];
     let inter_id = NeuronId(1000);
     let inter_bias = confidence;
@@ -222,8 +219,8 @@ pub(super) fn reproduction_request_from_parent(
         sim.config.world_width as i32,
     );
     SpawnRequest::Reproduction(Box::new(ReproductionSpawn {
-        parent_genome: parent.genome.clone(),
-        parent_generation: parent.generation,
+        offspring_genome: parent.genome.clone(),
+        offspring_generation: parent.generation.saturating_add(1),
         parent_species_id: parent.species_id,
         parent_facing: parent.facing,
         offspring_starting_energy: sim_types::offspring_transfer_energy(
@@ -246,8 +243,8 @@ pub(super) fn reproduction_request_at(
         .find(|organism| organism.id == parent_id)
         .expect("parent should exist for reproduction request");
     SpawnRequest::Reproduction(Box::new(ReproductionSpawn {
-        parent_genome: parent.genome.clone(),
-        parent_generation: parent.generation,
+        offspring_genome: parent.genome.clone(),
+        offspring_generation: parent.generation.saturating_add(1),
         parent_species_id: parent.species_id,
         parent_facing: parent.facing,
         offspring_starting_energy: sim_types::offspring_transfer_energy(
@@ -266,6 +263,7 @@ pub(super) fn configure_sim(sim: &mut Simulation, mut organisms: Vec<OrganismSta
     organisms.sort_by_key(|organism| organism.id);
     sim.organisms = organisms;
     sim.pending_actions = vec![PendingActionState::default(); sim.organisms.len()];
+    sim.pending_reproductions = (0..sim.organisms.len()).map(|_| None).collect();
     sim.foods.clear();
     sim.next_food_id = 0;
     sim.next_organism_id = sim

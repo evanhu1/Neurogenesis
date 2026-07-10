@@ -1,12 +1,6 @@
 use super::*;
 use crate::metabolism::refresh_organism_base_metabolic_cost;
 
-/// Rejection-sampling attempt budget per requested periodic-injection spawn.
-/// 64 attempts per spawn keeps the expected shortfall negligible down to
-/// ~10% open-cell density while bounding work in crowded worlds, where fewer
-/// than the configured count may be queued.
-const INJECTION_SAMPLE_ATTEMPTS_PER_SPAWN: usize = 64;
-
 impl Simulation {
     /// Resolves queued spawn requests, returning outcomes aligned 1:1 with the
     /// drained queue order: `Some(organism)` for each request that spawned and
@@ -19,39 +13,18 @@ impl Simulation {
         let mut spawned = Vec::with_capacity(queue.len());
         for request in queue.drain(..) {
             let organism = match request {
-                SpawnRequest::Reproduction(mut reproduction) => {
-                    mutate_genome(
-                        &mut reproduction.parent_genome,
-                        &self.config.seed_genome_config,
-                        self.config.global_mutation_rate_modifier,
-                        self.config.meta_mutation_enabled,
-                        &mut self.rng,
-                    );
+                SpawnRequest::Reproduction(reproduction) => {
+                    // Clonal birth: the child inherits the parent genome exactly.
+                    // All genetic variation is owned by the NEAT outer loop.
                     self.build_organism(
-                        reproduction.parent_genome,
+                        reproduction.offspring_genome,
                         OrganismSpawnParams {
                             species_id: Some(reproduction.parent_species_id),
                             q: reproduction.q,
                             r: reproduction.r,
-                            generation: reproduction.parent_generation.saturating_add(1),
+                            generation: reproduction.offspring_generation,
                             facing: opposite_direction(reproduction.parent_facing),
                             starting_energy_override: Some(reproduction.offspring_starting_energy),
-                        },
-                    )
-                }
-                SpawnRequest::PeriodicInjection(injection) => {
-                    let genome =
-                        generate_seed_genome(&self.config.seed_genome_config, &mut self.rng);
-                    let facing = self.random_facing();
-                    self.build_organism(
-                        genome,
-                        OrganismSpawnParams {
-                            species_id: None,
-                            q: injection.q,
-                            r: injection.r,
-                            generation: 0,
-                            facing,
-                            starting_energy_override: None,
                         },
                     )
                 }
@@ -71,61 +44,6 @@ impl Simulation {
         spawned
     }
 
-    pub(crate) fn enqueue_periodic_injections(&mut self, queue: &mut Vec<SpawnRequest>) {
-        let interval = self.config.periodic_injection_interval_turns as u64;
-        let count = self.config.periodic_injection_count as usize;
-        if interval == 0 || count == 0 {
-            return;
-        }
-
-        let next_turn = self.turn.saturating_add(1);
-        if !next_turn.is_multiple_of(interval) {
-            return;
-        }
-
-        let width = self.config.world_width as usize;
-        // Cells already targeted by queued spawn requests (plus the cells
-        // picked below), kept as a small sorted vec probed via binary search
-        // instead of a world-capacity bool buffer.
-        let mut reserved: Vec<usize> = queue
-            .iter()
-            .map(|request| {
-                let (q, r) = request.target_position();
-                r as usize * width + q as usize
-            })
-            .collect();
-        reserved.sort_unstable();
-
-        // Deterministic rejection sampling: draw uniformly random cell
-        // indices from the simulation RNG and keep the first `count` distinct
-        // cells that are unoccupied and unreserved. This replaces the former
-        // full-grid scan + partial_shuffle (which allocated a world-capacity
-        // position vec); the RNG draw sequence differs from that scheme but
-        // is still a pure function of (config, seed, sim state), so fixed
-        // config + seed yields identical results.
-        let capacity = self.occupancy.len();
-        let max_attempts = count.saturating_mul(INJECTION_SAMPLE_ATTEMPTS_PER_SPAWN);
-        let mut picked = 0usize;
-        for _ in 0..max_attempts {
-            if picked == count {
-                break;
-            }
-            let idx = self.rng.random_range(0..capacity);
-            if self.occupancy[idx].is_some() {
-                continue;
-            }
-            let Err(insert_at) = reserved.binary_search(&idx) else {
-                continue;
-            };
-            reserved.insert(insert_at, idx);
-            picked += 1;
-            queue.push(SpawnRequest::PeriodicInjection(PeriodicInjectionSpawn {
-                q: (idx % width) as i32,
-                r: (idx / width) as i32,
-            }));
-        }
-    }
-
     pub(crate) fn spawn_initial_population(&mut self) {
         let mut open_positions = self.empty_positions();
         open_positions.shuffle(&mut self.rng);
@@ -135,8 +53,17 @@ impl Simulation {
             let (q, r) = open_positions
                 .pop()
                 .expect("initial population requires at least one unique cell per organism");
+            // Founders draw from the champion pool when one is provided (NEAT
+            // seeds a clonal colony from a single candidate; the server seeds a
+            // diverse population from its pool), otherwise from a fresh seed
+            // genome. In-world variation no longer exists — genetic diversity is
+            // owned by the NEAT outer loop.
             let genome = if self.champion_pool.is_empty() {
-                generate_seed_genome(&self.config.seed_genome_config, &mut self.rng)
+                generate_seed_genome(
+                    &self.config.seed_genome_config,
+                    self.config.predation_enabled,
+                    &mut self.rng,
+                )
             } else {
                 let idx = self.rng.random_range(0..self.champion_pool.len());
                 self.champion_pool[idx].clone()
@@ -163,11 +90,11 @@ impl Simulation {
         mut genome: OrganismGenome,
         params: OrganismSpawnParams,
     ) -> OrganismState {
+        restrict_predation_genes(&mut genome, self.config.predation_enabled);
         genome.topology.vision_distance = genome
             .topology
             .vision_distance
             .clamp(MIN_MUTATED_VISION_DISTANCE, MAX_MUTATED_VISION_DISTANCE);
-        genome.lifecycle.body_color = genome.lifecycle.body_color.clamped();
         let id = self.alloc_organism_id();
         // Founders (no inherited species) take their own ID as species ID.
         let species_id = params.species_id.unwrap_or(SpeciesId(id.0));
@@ -195,7 +122,7 @@ impl Simulation {
             base_metabolic_cost: 0.0,
             #[cfg(feature = "instrumentation")]
             instrumentation: Default::default(),
-            brain: express_genome(&genome),
+            brain: express_genome(&genome, self.config.predation_enabled),
             genome,
         };
         refresh_organism_base_metabolic_cost(
@@ -228,3 +155,4 @@ impl Simulation {
         positions
     }
 }
+

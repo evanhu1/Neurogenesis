@@ -11,7 +11,8 @@
 //! in-memory ledger output).
 
 use crate::schema::{
-    OrganismLifetimeRow, TickSummaryRow, ACTION_COUNT, DESCENDANT_CODE, JOINT_LEN, SENSORY_BIN_COUNT,
+    OrganismLifetimeRow, TickSummaryRow, ACTION_COUNT, DESCENDANT_CODE, JOINT_LEN,
+    SENSORY_BIN_COUNT,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;

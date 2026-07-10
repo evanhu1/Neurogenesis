@@ -50,8 +50,8 @@ export function computeBrainLayout(
       id: neuron.neuron.neuron_id,
       type: 'sensory',
       label:
-        neuron.receptor_type === 'VisionRay'
-          ? `Vision[${neuron.ray_offset ?? 0}]: ${neuron.channel ?? 'Red'}`
+        neuron.receptor_type === 'FoodRay' || neuron.receptor_type === 'OrganismRay'
+          ? `${neuron.receptor_type}[${neuron.ray_offset ?? 0}]`
           : neuron.receptor_type,
       value: neuron.neuron.activation,
       bias: neuron.neuron.bias,

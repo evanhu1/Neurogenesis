@@ -1,7 +1,7 @@
 //! Drives the simulation and funnels everything it emits into the on-disk
-//! dataset: a per-tick population line and a per-organism lifetime row written
-//! at death (or end-of-run). Pillars, comparisons and reports are produced
-//! afterwards by the analysis layer reading the same dataset.
+//! dataset: per-tick population, per-reproduction, and per-organism lifetime
+//! facts. Pillars, comparisons and reports are produced afterwards by the
+//! analysis layer reading the same dataset.
 
 use crate::analysis::{
     analyze, average_pillar_scores, average_timeseries, write_aggregate_artifacts,
@@ -16,13 +16,12 @@ use crate::types::{
 };
 use anyhow::{anyhow, Result};
 use chrono::Utc;
+use ring::digest::{digest, SHA256};
 use sim_core::Simulation;
 use sim_metrics::{ingest_tick, register_founders};
-use sim_types::{OrganismState, WorldConfig};
-use std::collections::hash_map::DefaultHasher;
+use sim_types::WorldConfig;
 use std::collections::{HashMap, VecDeque};
 use std::fs;
-use std::hash::{Hash, Hasher};
 use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex};
@@ -249,7 +248,7 @@ fn run_single_seed_evaluation(
     for row in ledger.drain_survivors() {
         writer.emit_organism_lifetime(row);
     }
-    let state_hash = state_hash(sim.organisms());
+    let state_hash = state_hash(&sim)?;
     let manifest = Manifest {
         schema_version: SCHEMA_VERSION,
         seed: options.seed,
@@ -371,19 +370,27 @@ fn format_duration_compact(duration: Duration) -> String {
     }
 }
 
-pub(crate) fn state_hash(organisms: &[OrganismState]) -> String {
-    let population_count = organisms.len() as u64;
-    let sum_ids = organisms
-        .iter()
-        .map(|o| o.id.0)
-        .fold(0_u64, |acc, value| acc.wrapping_add(value));
-    let total_energy = organisms.iter().map(|o| o.energy as f64).sum::<f64>();
+/// SHA-256 fingerprint of the complete persisted simulation state.
+///
+/// `Simulation::save` is the canonical world serialization used by sim-cli;
+/// it includes the config, turn, RNG, id counters, organisms and genomes,
+/// pending actions, ecology, occupancy, and metrics while intentionally
+/// excluding behavior-neutral transient instrumentation/threading buffers.
+/// Hashing those bytes catches divergence that the former population/id/energy
+/// aggregate could not observe.
+pub(crate) fn state_hash(sim: &Simulation) -> Result<String> {
+    let mut bytes = Vec::new();
+    sim.save(&mut bytes)
+        .map_err(|error| anyhow!("serializing final simulation state for hashing: {error}"))?;
 
-    let mut hasher = DefaultHasher::new();
-    population_count.hash(&mut hasher);
-    sum_ids.hash(&mut hasher);
-    total_energy.to_bits().hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
+    let hash = digest(&SHA256, &bytes);
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(hash.as_ref().len() * 2);
+    for &byte in hash.as_ref() {
+        encoded.push(HEX[(byte >> 4) as usize] as char);
+        encoded.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    Ok(encoded)
 }
 
 fn default_worker_threads(seed_count: usize) -> usize {
@@ -421,8 +428,6 @@ mod tests {
         let cfg = WorldConfig {
             world_width: 40,
             num_organisms: 300,
-            periodic_injection_interval_turns: 0,
-            periodic_injection_count: 0,
             force_random_actions: false,
             ..Default::default()
         };

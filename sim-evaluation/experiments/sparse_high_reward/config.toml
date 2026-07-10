@@ -16,13 +16,11 @@ intent_parallel_threads = 8
 food_energy = 400
 food_regrowth_interval = 200
 food_regrowth_jitter = 50
-food_fertility_threshold = 0.6
-food_fertility_jitter_strength = 4.0
+food_tile_fraction = 0.4
 
 [terrain]
 terrain_noise_scale = 0.01
 terrain_threshold = 0.70
-spike_density = 0.10
 
 [evolution]
 global_mutation_rate_modifier = 1.0
@@ -31,4 +29,6 @@ global_mutation_rate_modifier = 1.0
 [flags]
 meta_mutation_enabled = true
 runtime_plasticity_enabled = true
+leaky_neurons_enabled = false
+predation_enabled = false
 force_random_actions = false

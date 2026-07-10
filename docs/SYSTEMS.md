@@ -17,26 +17,31 @@ A 3-layer feedforward+recurrent network — **sensory → inter → action** —
 once at birth from the genome, then tuned over the organism's life by
 unsupervised Hebbian plasticity. `sim-core/src/brain/`.
 
-- **Structure & expression** (`brain/expression.rs::express_genome`). 18 fixed
-  sensory neurons (IDs `0..18`), `num_neurons` evolvable inter neurons (IDs
-  `1000+`), 6 action neurons (IDs `2000+`). Inter→inter self-edges are allowed
+- **Structure & expression** (`brain/expression.rs::express_genome`). The default
+  interface has 5 sensory neurons (stable IDs `0..5`); enabling
+  `predation_enabled` adds 4 predation-only receptors (stable IDs `5..9`).
+  `num_neurons` evolvable inter neurons use IDs `1000+`, and action neurons use
+  IDs `2000+`. Inter→inter self-edges are allowed
   and act as gated memory (the presynaptic inter's *previous-tick* activation is
   read). Neurons are never added/removed after birth; only synapses are pruned.
 
-- **Sensory system** (`brain/sensing.rs::encode_sensory_inputs`). 18 receptors:
-  **3 vision rays** (offsets −1/0/+1 relative to facing) × **4 channels**
-  (R, G, B, Shape) = 12, plus `ContactAhead`, `Energy` (`e/(e+max_health)`),
-  `Health` (`h/max_health`), `EnergyDelta` (`tanh(Δe/max_health)` since last
-  sensing), and two proprioceptive flags `LastActionForward` / `LastActionEat`.
+- **Sensory system** (`brain/sensing.rs::encode_sensory_inputs`). The default
+  five receptors are three `FoodRay`s (offsets −1/0/+1 relative to facing),
+  `ContactAhead`, and `Energy` (`e/(e+max_health)`). With
+  `predation_enabled=true`, three `OrganismRay`s and `Health`
+  (`h/max_health`) are added.
 
-- **Vision raycasting** (`sensing.rs::scan_ray`). Each ray marches hex cells up
-  to `vision_distance`, opacity-blending occupant/terrain color with linear
-  distance falloff `(max−d+1)/max` and accumulating `remaining_visibility *=
-  (1−opacity)` until visibility is exhausted. Toroidal-wrapped.
+- **Vision raycasting** (`sensing.rs::scan_ray`). Each ray marches toroidally up
+  to `vision_distance`, stops at the nearest occupied cell, and reports food or
+  an organism with linear distance falloff `(max−d+1)/max`. Walls and the first
+  visible nonmatching entity occlude anything behind them. Organisms have no
+  color phenotype and brains receive no RGB input.
 
 - **Forward evaluation** (`brain/evaluation.rs::evaluate_brain`). Sensory
-  activations fan into inter inputs; each inter neuron is a **leaky integrator**:
-  `state = (1−α)·state + α·input`, `activation = fast_tanh(state)`. Then inter
+  activations fan into inter inputs. By default (`leaky_neurons_enabled=false`),
+  each inter neuron uses the instantaneous NEAT-style activation
+  `activation=fast_tanh(input)`. With the flag enabled it instead uses
+  `state=(1−α)·state+α·input`, `activation=fast_tanh(state)`. Then inter
   activations fan into other inter neurons and into action logits; action biases
   are added last. `fast_tanh` (`brain/mod.rs`) is a Padé approximation clamped to
   ±1.
@@ -47,9 +52,13 @@ unsupervised Hebbian plasticity. `sim-core/src/brain/`.
   evolvable; default ≈ −1.204 (τ ≈ 0.3).
 
 - **Action selection** (`evaluation.rs::sample_action_from_logits`). Softmax over
-  the 6 action logits **plus an implicit Idle option** (`EXPLICIT_IDLE_LOGIT_BIAS
-  = −0.01`), temperature `action_temperature` (clamped ≥ `1e-6`), categorically
-  sampled with a deterministic per-organism uniform draw. `Idle` is not a neuron
+  5 active action logits by default, or all 6 when `predation_enabled=true`,
+  **plus an implicit Idle option** (`EXPLICIT_IDLE_LOGIT_BIAS = −0.01`). Attack
+  has zero sampling probability while the flag is off. Health damage,
+  regeneration, organism vision, the Health receptor, and predation resolution
+  are part of the same flag treatment; the retained health fields are inert
+  storage in the baseline. Sampling uses `action_temperature` (clamped ≥
+  `1e-6`) and a deterministic per-organism uniform draw. `Idle` is not a neuron
   — it is the always-present "do nothing" outcome.
 
 - **Plasticity — Hebbian covariance rule** (`brain/plasticity.rs`). No reward, no
@@ -81,8 +90,8 @@ Open-ended neuroevolution with no explicit fitness function. `sim-core/src/genom
 
 - **Genome structure** (`sim-types/src/lib.rs::OrganismGenome`). Four gene groups:
   - *Topology:* `num_neurons`, `num_synapses`, `vision_distance`.
-  - *Lifecycle:* `body_color` (sensed RGB phenotype), `age_of_maturity`,
-    `gestation_ticks` (0–10), `max_organism_age`.
+  - *Lifecycle:* `age_of_maturity`, `gestation_ticks` (0–10),
+    `max_organism_age`.
   - *Plasticity:* `hebb_eta_gain` [0,0.2], `juvenile_eta_scale` [0,4],
     `eligibility_retention` [0,1] (def 0.95), `max_weight_delta_per_tick`
     [0.005,0.5] (def 0.05), `synapse_prune_threshold` [0,1].
@@ -111,8 +120,7 @@ Open-ended neuroevolution with no explicit fitness function. `sim-core/src/genom
   perturbation is multiplicative log-normal with a 10% full-replacement chance;
   inter/action biases and `log_τ` perturb a per-neuron fraction (`*_PERTURB_NEURON_RATE
   = 0.8`); lifecycle/plasticity scalars use clamped-Gaussian or log-normal
-  (`LARGE_UNBOUNDED_LOG_STDDEV = 0.1`) steps; body color drifts at a fixed 0.1
-  rate.
+  (`LARGE_UNBOUNDED_LOG_STDDEV = 0.1`) steps.
 
 - **Meta-mutation** (`genome/mutation_rates.rs`). The 16 mutation-rate genes are
   themselves evolvable. 1–3 are mutated per offspring in **logit space** with a
@@ -160,7 +168,7 @@ A closed-energy ecosystem on a hex world where lossy digestion is the only sink.
   2. **Intents** — evaluate every brain in parallel, select actions.
   3. **Reproduction** — decrement gestation, queue births.
   4. **Move resolution** — deterministic conflict resolution.
-  5. **Commit** — apply moves, spike damage, eating, predation, corpse spawning.
+  5. **Commit** — apply moves, eating, predation, corpse spawning.
   6. **Age** — increment ages.
   7. **Spawn** — resolve queued offspring + periodic injections.
   8. **Plasticity** — runtime weight updates (skips newborns/gestating).
@@ -170,14 +178,14 @@ A closed-energy ecosystem on a hex world where lossy digestion is the only sink.
   axial `(q,r)`, row-major indexing, **one entity per cell** (organism, food, or
   wall) via an occupancy vector.
 
-- **Terrain** (`spawn/world.rs`). **Walls/mountains** from single-octave Perlin
-  noise above `terrain_threshold`; **spikes** from a per-cell hash above
-  `spike_density`. Spikes deal `SPIKE_DAMAGE_FRACTION = 0.10` of max-health per
-  tick during commit.
+- **Terrain** (`spawn/world.rs`). Impassable walls/mountains come from
+  single-octave Perlin noise above `terrain_threshold`. There are no damaging
+  hazard tiles.
 
-- **Food / plant ecology** (`spawn/food.rs`). A **hidden fertility map** (Perlin ×
-  per-cell jitter ≥ `food_fertility_threshold`) decides where plants can ever
-  grow. Regrowth is **event-driven**: eating a plant schedules a refill at
+- **Food / plant ecology** (`spawn/food.rs`). Exactly `food_tile_fraction` of
+  non-wall cells are selected by a deterministic, seed-keyed random ranking as
+  persistent plant tiles; there is no spatial noise field or fertility jitter.
+  Regrowth is **event-driven**: eating a plant schedules a refill at
   `turn + regrowth_interval ± jitter` (a `BTreeMap` queue), retried if the cell
   is occupied. Plants carry `food_energy`; corpses carry the dead organism's
   remaining energy.
@@ -214,8 +222,8 @@ A closed-energy ecosystem on a hex world where lossy digestion is the only sink.
   regenerates `HEALTH_REGEN_FRACTION = 0.10` of max-health.
 
 - **Health & death** (`turn/lifecycle.rs`, `turn/commit.rs`). Deaths come from
-  starvation (`energy ≤ 0`), old age (`age ≥ max_organism_age`), or damage
-  (`health ≤ 0` from spikes/predation). Old-age and damage deaths leave a corpse;
+  starvation (`energy ≤ 0`), old age (`age ≥ max_organism_age`), or predation
+  damage. Old-age and damage deaths leave a corpse;
   starvation does not.
 
 - **Determinism** (`turn/mod.rs`). Every stochastic choice (action sampling,

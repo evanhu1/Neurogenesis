@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { colorForSpeciesId } from '../../speciesColor';
-import type { MutationRateGenes, OrganismState } from '../../types';
+import type { OrganismState } from '../../types';
 import { BrainCanvas } from './BrainCanvas';
 
 type InspectorContentProps = {
@@ -9,25 +9,15 @@ type InspectorContentProps = {
   onDefocus: () => void;
 };
 
-type MutationRateItem = {
-  key: keyof MutationRateGenes;
-  label: string;
-  value: number;
-};
-
 type StatItem = {
   label: string;
   value: string;
 };
 
-type SectionKey = 'genome' | 'mutationRates';
+type SectionKey = 'genome';
 
 function formatFloat(value: number, digits = 3): string {
   return Number.isFinite(value) ? value.toFixed(digits) : 'n/a';
-}
-
-function formatPercent(value: number): string {
-  return `${(value * 100).toFixed(1)}%`;
 }
 
 function StatGrid({ stats }: { stats: StatItem[] }) {
@@ -84,7 +74,6 @@ export function InspectorContent({
 }: InspectorContentProps) {
   const [expandedSections, setExpandedSections] = useState<Record<SectionKey, boolean>>({
     genome: false,
-    mutationRates: false,
   });
 
   const setSectionOpen = (key: SectionKey, isOpen: boolean) => {
@@ -98,34 +87,6 @@ export function InspectorContent({
     if (!focusedOrganism) return null;
     const genome = focusedOrganism.genome;
     const brain = focusedOrganism.brain;
-
-    const mutationRates: MutationRateItem[] = [
-      { key: 'age_of_maturity', label: 'Age Mat', value: genome.mutation_rates.age_of_maturity },
-      { key: 'gestation_ticks', label: 'Gest', value: genome.mutation_rates.gestation_ticks },
-      { key: 'vision_distance', label: 'Vision', value: genome.mutation_rates.vision_distance },
-      { key: 'inter_bias', label: 'Bias', value: genome.mutation_rates.inter_bias },
-      { key: 'inter_update_rate', label: 'Update', value: genome.mutation_rates.inter_update_rate },
-      {
-        key: 'eligibility_retention',
-        label: 'Elig Ret',
-        value: genome.mutation_rates.eligibility_retention,
-      },
-      {
-        key: 'synapse_prune_threshold',
-        label: 'Prune',
-        value: genome.mutation_rates.synapse_prune_threshold,
-      },
-      {
-        key: 'synapse_weight_perturbation',
-        label: 'Wt Perturb',
-        value: genome.mutation_rates.synapse_weight_perturbation,
-      },
-      {
-        key: 'add_neuron_split_edge',
-        label: 'Split Edge',
-        value: genome.mutation_rates.add_neuron_split_edge,
-      },
-    ];
 
     return {
       coreStats: [
@@ -148,8 +109,8 @@ export function InspectorContent({
         { label: 'Synapses', value: String(brain.synapse_count) },
       ] satisfies StatItem[],
       genomeStats: [
-        { label: 'Neurons', value: String(genome.topology.num_neurons) },
-        { label: 'Synapses', value: String(genome.topology.num_synapses) },
+        { label: 'Neurons', value: String(genome.brain.hidden_nodes.length) },
+        { label: 'Synapses', value: String(genome.brain.edges.filter((edge) => edge.enabled).length) },
         { label: 'Vision', value: String(genome.topology.vision_distance) },
         { label: 'Maturity', value: String(genome.lifecycle.age_of_maturity) },
         { label: 'Gestation', value: String(genome.lifecycle.gestation_ticks) },
@@ -159,7 +120,6 @@ export function InspectorContent({
         { label: 'Elig Ret', value: formatFloat(genome.plasticity.eligibility_retention, 3) },
         { label: 'Prune Thr', value: formatFloat(genome.plasticity.synapse_prune_threshold, 3) },
       ] satisfies StatItem[],
-      mutationRates,
     };
   }, [focusedOrganism]);
 
@@ -220,32 +180,6 @@ export function InspectorContent({
               onToggle={(isOpen) => setSectionOpen('genome', isOpen)}
             >
               <StatGrid stats={summary.genomeStats} />
-            </CollapsibleSection>
-
-            <CollapsibleSection
-              title="Mutation Rates"
-              open={expandedSections.mutationRates}
-              onToggle={(isOpen) => setSectionOpen('mutationRates', isOpen)}
-            >
-              <div className="space-y-1">
-                {summary.mutationRates.map((entry) => {
-                  const clamped = Math.max(0, Math.min(1, entry.value));
-                  return (
-                    <div key={entry.key} className="flex items-center gap-2 text-[10px]">
-                      <span className="w-16 shrink-0 text-ink/35">{entry.label}</span>
-                      <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted/40">
-                        <div
-                          className="h-full rounded-full bg-accent/50"
-                          style={{ width: `${clamped * 100}%` }}
-                        />
-                      </div>
-                      <span className="w-10 shrink-0 text-right font-mono text-ink/40">
-                        {formatPercent(entry.value)}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
             </CollapsibleSection>
           </div>
 

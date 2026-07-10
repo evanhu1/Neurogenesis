@@ -42,11 +42,8 @@ function normalizeOrganismGenome(genome: ApiOrganismGenome): OrganismGenome {
     ...genome,
     brain: {
       ...genome.brain,
-      edges: genome.brain.edges.map((edge) => ({
-        ...edge,
-        pre_neuron_id: unwrapId(edge.pre_neuron_id),
-        post_neuron_id: unwrapId(edge.post_neuron_id),
-      })),
+      hidden_nodes: genome.brain.hidden_nodes.map((node) => ({ ...node })),
+      edges: genome.brain.edges.map((edge) => ({ ...edge })),
     },
   };
 }
@@ -181,4 +178,3 @@ export function normalizeOrganismDetail(data: ApiOrganismDetail): OrganismDetail
     active_action_neuron_id: unwrapNullableId(data.active_action_neuron_id),
   };
 }
-

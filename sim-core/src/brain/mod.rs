@@ -10,16 +10,14 @@ use crate::topology::{
     refresh_action_synapse_starts_and_count,
 };
 use sim_types::{
-    ActionNeuronState, ActionType, BrainState, InterNeuronState, NeuronId, NeuronState, NeuronType,
-    Occupant, OrganismGenome, OrganismId, OrganismState, SensoryNeuronState, SensoryReceptor,
-    SynapseEdge, SynapseGene, VisionChannel, VisualProperties,
+    action_gene_node_index, sensory_gene_node_index, ActionNeuronState, ActionType, BrainState,
+    GeneNodeId, InterNeuronState, NeuronId, NeuronState, NeuronType, Occupant, OrganismGenome,
+    OrganismId, OrganismState, SensoryNeuronState, SensoryReceptor, SynapseEdge, SynapseGene,
 };
 #[cfg(feature = "profiling")]
 use std::time::Instant;
 
-pub(crate) use crate::topology::{
-    action_index, ACTION_COUNT, ACTION_COUNT_U32, ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT,
-};
+pub(crate) use crate::topology::{action_index, ACTION_COUNT, ACTION_ID_BASE, SENSORY_COUNT};
 pub(crate) use evaluation::{evaluate_brain, BrainEvalContext};
 #[cfg_attr(not(test), allow(unused_imports))]
 pub(crate) use expression::{express_genome, make_action_neuron, make_sensory_neuron};

@@ -9,12 +9,11 @@ const UTILIZATION_THRESHOLD: f32 = 0.03;
 struct IntentBuildContext<'a> {
     world_width: i32,
     occupancy: &'a [Option<Occupant>],
-    spike_map: &'a [bool],
-    spike_visual_map: &'a [VisualProperties],
-    visual_map: &'a [VisualProperties],
     pending_actions: &'a [PendingActionState],
     action_temperature: f32,
     runtime_plasticity_enabled: bool,
+    leaky_neurons_enabled: bool,
+    predation_enabled: bool,
     force_random_actions: bool,
     sim_seed: u64,
     tick: u64,
@@ -34,12 +33,11 @@ impl Simulation {
         let context = IntentBuildContext {
             world_width,
             occupancy: &self.occupancy,
-            spike_map: &self.spike_map,
-            spike_visual_map: &self.spike_visual_map,
-            visual_map: &self.visual_map,
             pending_actions: &self.pending_actions,
             action_temperature: self.config.action_temperature,
             runtime_plasticity_enabled: self.config.runtime_plasticity_enabled,
+            leaky_neurons_enabled: self.config.leaky_neurons_enabled,
+            predation_enabled: self.config.predation_enabled,
             force_random_actions: self.config.force_random_actions,
             sim_seed: self.seed,
             tick: self.turn,
@@ -102,7 +100,7 @@ fn build_intent_for_organism(
     let selected_action_state = select_action_for_organism(organism, context, scratch);
 
     organism.last_action_taken = selected_action_state.selected_action;
-    if selected_action_state.selected_action == ActionType::Idle {
+    if context.predation_enabled && selected_action_state.selected_action == ActionType::Idle {
         organism.health = (organism.health + organism_health_regeneration(organism))
             .min(organism.max_health.max(1.0));
     }
@@ -161,16 +159,13 @@ fn select_action_for_organism(
                 organism.id,
                 context.world_width,
                 context.occupancy,
-                context.spike_map,
-                context.spike_visual_map,
-                context.visual_map,
                 vision_distance,
             );
             ray_scans.map(|scan| scan.food_visible)
         };
 
         return SelectedActionState {
-            selected_action: uniform_random_action(action_sample),
+            selected_action: uniform_random_action(action_sample, context.predation_enabled),
             selected_action_logit: 0.0,
             synapse_ops: 0,
             #[cfg(feature = "instrumentation")]
@@ -183,10 +178,9 @@ fn select_action_for_organism(
         BrainEvalContext {
             world_width: context.world_width,
             occupancy: context.occupancy,
-            spike_map: context.spike_map,
-            spike_visual_map: context.spike_visual_map,
-            visual_map: context.visual_map,
             vision_distance,
+            leaky_neurons_enabled: context.leaky_neurons_enabled,
+            predation_enabled: context.predation_enabled,
             action_temperature: context.action_temperature,
             action_sample,
         },

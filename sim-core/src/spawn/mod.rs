@@ -1,6 +1,7 @@
 use crate::brain::express_genome;
 use crate::genome::{
-    generate_seed_genome, mutate_genome, MAX_MUTATED_VISION_DISTANCE, MIN_MUTATED_VISION_DISTANCE,
+    generate_seed_genome, restrict_predation_genes, MAX_MUTATED_VISION_DISTANCE,
+    MIN_MUTATED_VISION_DISTANCE,
 };
 use crate::grid::{opposite_direction, world_capacity};
 use crate::Simulation;
@@ -20,8 +21,9 @@ pub(crate) use food::CORPSE_ENERGY_RETENTION;
 pub(crate) const NO_REGROWTH_SCHEDULED: u64 = u64::MAX;
 
 pub(crate) struct ReproductionSpawn {
-    pub(crate) parent_genome: OrganismGenome,
-    pub(crate) parent_generation: u64,
+    /// The parent genome, cloned at conception. Reproduction is clonal.
+    pub(crate) offspring_genome: OrganismGenome,
+    pub(crate) offspring_generation: u64,
     pub(crate) parent_species_id: SpeciesId,
     pub(crate) parent_facing: FacingDirection,
     pub(crate) offspring_starting_energy: f32,
@@ -29,14 +31,8 @@ pub(crate) struct ReproductionSpawn {
     pub(crate) r: i32,
 }
 
-pub(crate) struct PeriodicInjectionSpawn {
-    pub(crate) q: i32,
-    pub(crate) r: i32,
-}
-
 pub(crate) enum SpawnRequest {
     Reproduction(Box<ReproductionSpawn>),
-    PeriodicInjection(PeriodicInjectionSpawn),
 }
 
 struct OrganismSpawnParams {
@@ -48,13 +44,4 @@ struct OrganismSpawnParams {
     generation: u64,
     facing: FacingDirection,
     starting_energy_override: Option<f32>,
-}
-
-impl SpawnRequest {
-    fn target_position(&self) -> (i32, i32) {
-        match self {
-            Self::Reproduction(spawn) => (spawn.q, spawn.r),
-            Self::PeriodicInjection(spawn) => (spawn.q, spawn.r),
-        }
-    }
 }
