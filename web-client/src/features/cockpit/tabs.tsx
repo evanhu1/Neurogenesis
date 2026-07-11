@@ -289,13 +289,10 @@ export function GenomeTab({ worldName, revision, active }: TabProps) {
 
 const SERIES_COLUMNS = [
   'population',
-  'descendants',
   'food',
-  'births',
   'deaths',
   'consumptions',
   'predations',
-  'reproductions',
   'action_effectiveness',
   'plant_consumption_rate',
   'prey_consumption_rate',
@@ -417,8 +414,8 @@ export function FindTab({
           </button>
         </div>
         <p className="text-[10px] leading-4 text-ink/30">
-          Fields: id energy health age generation species consumptions plant prey reproductions
-          neurons synapses vision hebb_eta gestating. Operators: &lt; &lt;= &gt; &gt;= == != · join
+          Fields: id energy health age generation species consumptions plant prey
+          neurons synapses vision hebb_eta. Operators: &lt; &lt;= &gt; &gt;= == != · join
           with and/or.
         </p>
       </div>

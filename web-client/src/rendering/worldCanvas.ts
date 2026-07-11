@@ -52,10 +52,6 @@ const ORGANISM_MIN_STROKE_PX = 0.18;
 // Dark strokes keep pale genome colors legible against the light terrain.
 const FOCUSED_ORGANISM_STROKE_COLOR = '#16190f';
 const ORGANISM_STROKE_COLOR = 'rgba(35, 41, 24, 0.55)';
-const GESTATING_GLOW_COLOR = 'rgba(202, 138, 4, 0.9)';
-const GESTATING_GLOW_FILL = 'rgba(250, 204, 21, 0.55)';
-const GESTATING_GLOW_BLUR_SCALE = 0.9;
-const GESTATING_GLOW_MIN_BLUR_PX = 4;
 
 const TERRAIN_NONE = 0;
 const TERRAIN_WALL = 1;
@@ -385,16 +381,6 @@ function drawOrganism(
     ctx.lineTo(backX - perpX, backY - perpY);
     ctx.closePath();
   };
-
-  if (org.is_gestating) {
-    ctx.save();
-    traceBody();
-    ctx.shadowColor = GESTATING_GLOW_COLOR;
-    ctx.shadowBlur = Math.max(GESTATING_GLOW_MIN_BLUR_PX, hexSize * GESTATING_GLOW_BLUR_SCALE);
-    ctx.fillStyle = GESTATING_GLOW_FILL;
-    ctx.fill();
-    ctx.restore();
-  }
 
   traceBody();
   ctx.fillStyle = visualToCss(org.visual);

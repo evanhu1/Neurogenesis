@@ -547,7 +547,7 @@ keys          Up/Down scroll output · PageUp/PageDown page · Home/End top/bott
         let mut config = NeatConfig {
             generations: 8,
             population_size: 20,
-            episode_ticks: 300,
+            episode_horizons: vec![300],
             ..NeatConfig::default()
         };
         let mut seed = 0u64;
@@ -561,7 +561,12 @@ keys          Up/Down scroll output · PageUp/PageDown page · Home/End top/bott
             match args[i].as_str() {
                 "--generations" | "-g" => config.generations = val(i)?.parse()?,
                 "--population" | "-p" => config.population_size = val(i)?.parse()?,
-                "--episode-ticks" | "-t" => config.episode_ticks = val(i)?.parse()?,
+                "--horizons" | "-t" => {
+                    config.episode_horizons = val(i)?
+                        .split(',')
+                        .map(str::parse)
+                        .collect::<std::result::Result<Vec<_>, _>>()?
+                }
                 "--opponents" | "-o" => config.eval_opponents = val(i)?.parse()?,
                 "--seed" | "-s" => seed = val(i)?.parse()?,
                 "--scale" => {
@@ -573,7 +578,7 @@ keys          Up/Down scroll output · PageUp/PageDown page · Home/End top/bott
                 }
                 "--help" | "-h" => {
                     self.push_info(
-                        "neat [-g gens] [-p pop] [-t episode_ticks] [-o opponents] [-s seed] [--scale W,POP]\n  evolves survival champions for this world's config, then reseeds the resident world with the champion colony.",
+                        "neat [-g gens] [-p pop] [-t horizon[,horizon...]] [-o opponents] [-s seed] [--scale W,POP]\n  evolves survival champions for this world's config, then reseeds the resident world with the champion colony.",
                     );
                     return Ok(());
                 }
@@ -590,8 +595,8 @@ keys          Up/Down scroll output · PageUp/PageDown page · Home/End top/bott
         }
 
         self.push_info(&format!(
-            "neat: pop {} · {} generations · {} ticks/ep · {} opponents · seed {} — running (UI blocks)…",
-            config.population_size, config.generations, config.episode_ticks, config.eval_opponents, seed
+            "neat: pop {} · {} generations · horizons {:?} · {} opponents · seed {} — running (UI blocks)…",
+            config.population_size, config.generations, config.episode_horizons, config.eval_opponents, seed
         ));
         if let Some(t) = terminal.as_deref_mut() {
             let _ = t.draw(|f| self.render(f, None));

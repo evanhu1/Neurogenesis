@@ -192,6 +192,13 @@ impl<'a> CommitPhaseContext<'a> {
         if predator_idx == prey_idx || self.dead_organisms[prey_idx] {
             return;
         }
+        if let Some(pool_count) = self.sim.cross_pool_predation_pool_count {
+            let predator_pool = self.sim.organisms[predator_idx].species_id.0 as usize % pool_count;
+            let prey_pool = self.sim.organisms[prey_idx].species_id.0 as usize % pool_count;
+            if predator_pool == prey_pool {
+                return;
+            }
+        }
 
         // Larger attackers land hits on smaller prey reliably; punching up is
         // proportionally unlikely. The roll is a deterministic hash (see

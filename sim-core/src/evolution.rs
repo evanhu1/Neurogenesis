@@ -2,9 +2,9 @@
 //!
 //! This module owns species and innovation history. The simulation
 //! (`crate::Simulation`) is a deterministic fitness evaluator; NEAT is the outer
-//! loop. Every candidate is evaluated as a clonal colony under fixed world seeds
-//! — in-world variation does not exist (reproduction is clonal), so there is
-//! nothing to freeze off.
+//! loop. Candidates are evaluated either as isolated clonal colonies or in
+//! mixed-founder worlds under fixed world seeds. In-world reproduction does not
+//! exist; all genetic variation is owned by the outer loop.
 
 use crate::Simulation;
 use anyhow::{anyhow, bail, Result};
@@ -16,7 +16,8 @@ use sim_config::WorldConfig;
 use sim_types::{
     action_gene_node_id, action_gene_node_index, is_hidden_gene_node_id, sensory_gene_node_id,
     sensory_gene_node_index, split_hidden_gene_node_id, ActionType, FoodKind, GeneNodeId,
-    HiddenNodeGene, InnovationId, NeuronId, OrganismGenome, SensoryReceptor, SynapseGene,
+    HiddenNodeGene, InnovationId, NeuronId, OrganismGenome, OrganismId, SensoryReceptor,
+    SynapseGene,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -34,12 +35,23 @@ const OPPONENT_DOMAIN: u64 = 0x4f50_504f_4e45_4e54;
 pub struct NeatConfig {
     pub population_size: usize,
     pub generations: u32,
-    pub episode_ticks: u64,
+    pub episode_horizons: Vec<u64>,
+    /// Positive per-window weights applied across each episode from early to
+    /// late ticks. `[1]` is uniform survival; `[1,2,4,8]` values later survival
+    /// more while preserving a positive gradient for every alive tick.
+    pub survival_window_weights: Vec<f64>,
     /// Competitive (mixed-population) evaluation: number of opponent genomes
     /// sampled from the current population to share each candidate's evaluation
     /// world (candidate + `eval_opponents` others). `0` restores the isolated
     /// clonal-colony evaluation (each candidate alone against the environment).
     pub eval_opponents: usize,
+    /// Diagnostic oracle: in evaluator worlds, attacks only affect organisms
+    /// from other founder-pool entries. This removes friendly fire to test
+    /// whether identity ambiguity is the binding predation constraint.
+    pub cross_pool_predation_only: bool,
+    /// Durable frozen opponents. One is selected deterministically per case;
+    /// remaining opponent slots are sampled from the contemporary population.
+    pub fixed_anchor_genomes: Vec<OrganismGenome>,
     pub world_seeds: Vec<u64>,
     /// `0` freezes training layouts. Otherwise a fresh deterministic seed
     /// suite is derived every N generations; audit seeds never rotate.
@@ -61,6 +73,7 @@ pub struct NeatConfig {
     /// Select on the mean of the worst-performing fraction of scenario/seed
     /// cases. `1.0` is the ordinary mean; `0.25` is lower-quartile CVaR.
     pub objective_cvar_fraction: f64,
+    pub fitness_objective: FitnessObjective,
     pub selection_strategy: SelectionStrategy,
     pub novelty_k: usize,
     pub novelty_archive_additions_per_generation: usize,
@@ -99,8 +112,11 @@ impl Default for NeatConfig {
         Self {
             population_size: 50,
             generations: 20,
-            episode_ticks: 500,
+            episode_horizons: vec![500],
+            survival_window_weights: vec![1.0],
             eval_opponents: 4,
+            cross_pool_predation_only: false,
+            fixed_anchor_genomes: Vec::new(),
             world_seeds: vec![11, 29, 47],
             training_seed_rotation_period: 5,
             development_world_seeds: vec![61, 79, 97],
@@ -109,6 +125,7 @@ impl Default for NeatConfig {
             development_audit_interval_generations: 1,
             scenarios: ScenarioPreset::ALL.to_vec(),
             objective_cvar_fraction: 0.5,
+            fitness_objective: FitnessObjective::SurvivalFraction,
             selection_strategy: SelectionStrategy::Fitness,
             novelty_k: 15,
             novelty_archive_additions_per_generation: 2,
@@ -151,8 +168,29 @@ impl NeatConfig {
         if self.population_size < 2 {
             bail!("NEAT population_size must be >= 2");
         }
-        if self.generations == 0 || self.episode_ticks == 0 {
-            bail!("NEAT generations and episode_ticks must be >= 1");
+        if self.generations == 0
+            || self.episode_horizons.is_empty()
+            || self.episode_horizons.contains(&0)
+        {
+            bail!("NEAT generations and episode horizons must be nonzero and nonempty");
+        }
+        if self
+            .episode_horizons
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        {
+            bail!("NEAT episode horizons must be strictly increasing and unique");
+        }
+        if self.survival_window_weights.is_empty()
+            || self
+                .survival_window_weights
+                .iter()
+                .any(|weight| !weight.is_finite() || *weight <= 0.0)
+        {
+            bail!("NEAT survival window weights must be finite, positive, and nonempty");
+        }
+        if !self.fixed_anchor_genomes.is_empty() && self.eval_opponents == 0 {
+            bail!("fixed anchors require eval_opponents >= 1");
         }
         if self.world_seeds.is_empty() || self.evaluator_workers == 0 {
             bail!("NEAT needs at least one world seed and evaluator worker");
@@ -164,6 +202,11 @@ impl NeatConfig {
             || self.objective_cvar_fraction == 0.0
         {
             bail!("objective_cvar_fraction must be in (0,1]");
+        }
+        if self.fitness_objective == FitnessObjective::SurvivalTimesRelativeAdvantage
+            && self.eval_opponents == 0
+        {
+            bail!("survival_times_relative_advantage requires eval_opponents >= 1");
         }
         if self.curriculum_promotion_threshold < 0.0 || self.curriculum_promotion_patience == 0 {
             bail!("curriculum threshold must be nonnegative and patience must be >= 1");
@@ -243,6 +286,39 @@ impl NeatConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FitnessObjective {
+    SurvivalFraction,
+    LateWeightedSurvival,
+    SurvivalTimesRelativeAdvantage,
+}
+
+impl FitnessObjective {
+    pub fn parse(value: &str) -> Result<Self> {
+        match value {
+            "survival_fraction" | "survival" => Ok(Self::SurvivalFraction),
+            "late_weighted_survival" | "weighted_survival" => Ok(Self::LateWeightedSurvival),
+            "survival_times_relative_advantage" | "sustainable_competition" => {
+                Ok(Self::SurvivalTimesRelativeAdvantage)
+            }
+            other => bail!(
+                "unknown fitness objective `{other}`; valid: survival_fraction late_weighted_survival survival_times_relative_advantage"
+            ),
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::SurvivalFraction => "lower_tail_mean_survival_fraction",
+            Self::LateWeightedSurvival => "lower_tail_mean_late_weighted_survival",
+            Self::SurvivalTimesRelativeAdvantage => {
+                "lower_tail_mean_survival_times_relative_advantage"
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct Evaluation {
     /// The only selection objective in this baseline.
@@ -250,11 +326,27 @@ pub struct Evaluation {
     /// Ordinary mean across cases, retained beside the robust lower-tail
     /// selection objective as a diagnostic.
     pub mean_case_score: f64,
-    pub mean_maturity_reached_offspring: f64,
-    /// Diagnostics only; these do not contribute to fitness.
-    pub mean_successful_births: f64,
+    /// Ordinary mean of the absolute candidate survival component.
+    pub mean_absolute_survival_fraction: f64,
+    pub mean_late_weighted_survival_fraction: f64,
+    /// Ordinary mean of the bounded relative component. Neutral competition is
+    /// 1.0; candidate advantage approaches 2.0; isolated audits are exactly 1.0.
+    pub mean_relative_survival_advantage: f64,
+    /// Component means over exactly the cases selected into the objective CVaR.
+    pub objective_cvar_absolute_survival_fraction: f64,
+    pub objective_cvar_late_weighted_survival_fraction: f64,
+    pub objective_cvar_relative_survival_advantage: f64,
+    pub objective_cvar_case_count: usize,
+    pub zero_combined_alive_tick_cases: usize,
+    pub opponent_draws: u64,
+    pub duplicate_opponent_draws: u64,
+    /// Mean fraction of candidate founders alive at the episode boundary.
+    /// Distinct from the objective, which integrates survival over all ticks.
+    pub mean_candidate_end_survival_fraction: f64,
+    /// Candidate-lineage diagnostics only; these do not contribute to fitness.
     pub mean_consumptions: f64,
     pub mean_plant_consumptions: f64,
+    pub mean_prey_consumptions: f64,
     /// Fraction of all plant spawn events in the scored window that were
     /// consumed. Reported with standing-plant pressure because regrowth supply
     /// itself depends on successful harvests.
@@ -272,7 +364,7 @@ pub struct Evaluation {
     /// Organism-tick action distribution in ActionType declaration order,
     /// including Idle. This is an observational behavior descriptor only.
     pub mean_action_fractions: [f64; 6],
-    pub mean_final_population: f64,
+    pub mean_world_final_population: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -280,12 +372,25 @@ pub struct CaseEvaluation {
     pub scenario: String,
     pub curriculum_level: u32,
     pub world_seed: u64,
+    pub episode_horizon: u64,
     pub objective_score: f64,
-    pub founders: usize,
-    pub maturity_reached_offspring: u64,
-    pub successful_births: u64,
+    pub absolute_survival_fraction: f64,
+    pub late_weighted_survival_fraction: f64,
+    pub relative_survival_advantage: f64,
+    pub zero_combined_alive_ticks: bool,
+    pub requested_opponents: usize,
+    pub opponent_population_indices: Vec<usize>,
+    pub founders_by_pool: Vec<u64>,
+    pub alive_ticks_by_pool: Vec<u64>,
+    pub weighted_alive_ticks_by_pool: Vec<f64>,
+    pub fixed_anchor_index: Option<usize>,
+    pub founder_pool_size: usize,
+    pub world_founders: usize,
+    pub candidate_founders: u64,
+    pub candidate_end_survivors: u64,
     pub consumptions: u64,
     pub plant_consumptions: u64,
+    pub prey_consumptions: u64,
     pub plant_supply_events: u64,
     /// Plant instances that existed early enough to be consumed during this
     /// scoring window. Final-tick spawns are excluded because food regrowth is
@@ -301,7 +406,7 @@ pub struct CaseEvaluation {
     pub normalized_time_to_first_plant: f64,
     pub spatial_coverage: f64,
     pub action_fractions: [f64; 6],
-    pub final_population: usize,
+    pub world_final_population: usize,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -339,6 +444,12 @@ pub struct FixedSuiteEvaluation {
     /// shape of the fixed difficulty curve by dominating one flattened CVaR.
     pub mean_level_objective_score: f64,
     pub levels: Vec<FixedLevelEvaluation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PanelEvaluation {
+    pub summary: Evaluation,
+    pub cases: Vec<CaseEvaluation>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -397,6 +508,16 @@ pub struct GenerationSummary {
     pub best_fitness: f64,
     pub mean_fitness: f64,
     pub median_fitness: f64,
+    pub best_absolute_survival_fraction: f64,
+    pub best_late_weighted_survival_fraction: f64,
+    pub best_relative_survival_advantage: f64,
+    pub mean_absolute_survival_fraction: f64,
+    pub mean_late_weighted_survival_fraction: f64,
+    pub mean_relative_survival_advantage: f64,
+    pub best_mean_prey_consumptions: f64,
+    /// Predeclared generation champion persisted only at audit checkpoints and
+    /// the final generation for historical cross-play.
+    pub checkpoint_champion_genome: Option<OrganismGenome>,
     pub selection_strategy: SelectionStrategy,
     pub best_novelty: Option<f64>,
     pub mean_novelty: Option<f64>,
@@ -445,6 +566,7 @@ pub struct FrozenOuterLoopContract {
     pub runtime_plasticity_enabled: bool,
     pub leaky_neurons_enabled: bool,
     pub predation_enabled: bool,
+    pub cross_pool_predation_only: bool,
     pub intent_parallel_threads: u32,
 }
 
@@ -462,9 +584,6 @@ pub struct RunResult {
     pub replay_anchor_scenarios: Vec<ScenarioManifest>,
     pub final_training_scenarios: Vec<ScenarioManifest>,
     pub fixed_audit_scenarios: Vec<ScenarioManifest>,
-    /// Extra ticks after the scoring window used only to observe whether every
-    /// scored-window offspring reaches its fixed maturity age.
-    pub maturity_followup_ticks: u64,
     pub generations: Vec<GenerationSummary>,
     pub champion_fitness: f64,
     pub champion_evaluation: Evaluation,
@@ -799,12 +918,12 @@ pub fn run_neat(
         runtime_plasticity_enabled: world.runtime_plasticity_enabled,
         leaky_neurons_enabled: world.leaky_neurons_enabled,
         predation_enabled: world.predation_enabled,
+        cross_pool_predation_only: config.cross_pool_predation_only,
         intent_parallel_threads: world.intent_parallel_threads,
     };
     let world_width = world.world_width;
     let founder_cohort_size = world.num_organisms;
     let food_energy = world.food_energy;
-    let maturity_followup_ticks = u64::from(template.lifecycle.age_of_maturity);
 
     let mut previous_species: Vec<SpeciesRecord> = Vec::new();
     let mut next_species_id = 0u64;
@@ -865,6 +984,9 @@ pub fn run_neat(
             ));
         }
 
+        let checkpoint_due = generation + 1 == config.generations
+            || generation.is_multiple_of(config.development_audit_interval_generations);
+        let checkpoint_champion_genome = checkpoint_due.then(|| best.genome.clone());
         let complexification = observe_complexification(
             generation,
             &population,
@@ -872,8 +994,7 @@ pub fn run_neat(
             &mut innovations,
             &audit_scenarios,
             &config,
-            generation + 1 == config.generations
-                || generation.is_multiple_of(config.development_audit_interval_generations),
+            checkpoint_due,
         )?;
 
         let (next_population, offspring_crossovers, offspring_clones, next_breeding_telemetry) =
@@ -906,6 +1027,7 @@ pub fn run_neat(
             seed_epoch,
             effective_training_seeds,
             incoming_breeding_telemetry,
+            checkpoint_champion_genome,
             config.selection_strategy,
             novelty_archive.len(),
         );
@@ -956,9 +1078,11 @@ pub fn run_neat(
         Some(evaluate_genome_on_fixed_suite(
             &champion_genome,
             &audit_scenarios,
-            config.episode_ticks,
+            &config.episode_horizons,
+            &config.survival_window_weights,
             &config.development_world_seeds,
             config.objective_cvar_fraction,
+            config.cross_pool_predation_only,
         )?)
     };
     let sealed_holdout_evaluation = if config.sealed_holdout_world_seeds.is_empty() {
@@ -967,9 +1091,11 @@ pub fn run_neat(
         Some(evaluate_genome_on_fixed_suite(
             &champion_genome,
             &audit_scenarios,
-            config.episode_ticks,
+            &config.episode_horizons,
+            &config.survival_window_weights,
             &config.sealed_holdout_world_seeds,
             config.objective_cvar_fraction,
+            config.cross_pool_predation_only,
         )?)
     };
     let champion_has_evolved_structure = champion_genome.brain.edges.iter().any(|edge| {
@@ -987,9 +1113,11 @@ pub fn run_neat(
                 Some(evaluate_genome_on_fixed_suite(
                     &evolved_structure_knockout,
                     &audit_scenarios,
-                    config.episode_ticks,
+                    &config.episode_horizons,
+                    &config.survival_window_weights,
                     &config.development_world_seeds,
                     config.objective_cvar_fraction,
+                    config.cross_pool_predation_only,
                 )?)
             } else {
                 Some(full.clone())
@@ -1003,9 +1131,11 @@ pub fn run_neat(
                 Some(evaluate_genome_on_fixed_suite(
                     &ancestral_collapse,
                     &audit_scenarios,
-                    config.episode_ticks,
+                    &config.episode_horizons,
+                    &config.survival_window_weights,
                     &config.development_world_seeds,
                     config.objective_cvar_fraction,
+                    config.cross_pool_predation_only,
                 )?)
             } else {
                 Some(full.clone())
@@ -1031,9 +1161,11 @@ pub fn run_neat(
                 Some(evaluate_genome_on_fixed_suite(
                     &evolved_structure_knockout,
                     &audit_scenarios,
-                    config.episode_ticks,
+                    &config.episode_horizons,
+                    &config.survival_window_weights,
                     &config.sealed_holdout_world_seeds,
                     config.objective_cvar_fraction,
+                    config.cross_pool_predation_only,
                 )?)
             } else {
                 Some(full.clone())
@@ -1056,9 +1188,11 @@ pub fn run_neat(
                 evaluate_genome_on_fixed_suite(
                     &champion_genome,
                     &audit_scenarios,
-                    config.episode_ticks,
+                    &config.episode_horizons,
+                    &config.survival_window_weights,
                     &config.world_seeds,
                     config.objective_cvar_fraction,
+                    config.cross_pool_predation_only,
                 )?,
             )
         };
@@ -1066,19 +1200,17 @@ pub fn run_neat(
         &champion_genome,
         frontier_audit_evaluation,
         &audit_scenarios,
-        config.episode_ticks,
+        &config.episode_horizons,
+        &config.survival_window_weights,
         ablation_seeds,
         config.objective_cvar_fraction,
+        config.cross_pool_predation_only,
         &mut innovations,
     )?;
     Ok(RunResult {
-        result_schema_version: 2,
+        result_schema_version: 8,
         algorithm: "NEAT".to_string(),
-        objective: if config.eval_opponents > 0 {
-            "lower_tail_mean_competitive_survival_fraction".to_string()
-        } else {
-            "lower_tail_mean_survival_fraction".to_string()
-        },
+        objective: config.fitness_objective.name().to_string(),
         seed,
         neat_config: config,
         frozen_outer_loop_contract,
@@ -1088,7 +1220,6 @@ pub fn run_neat(
         replay_anchor_scenarios: level_zero_scenarios,
         final_training_scenarios: training_scenarios,
         fixed_audit_scenarios: audit_scenarios,
-        maturity_followup_ticks,
         generations: summaries,
         champion_fitness,
         champion_evaluation,
@@ -1113,9 +1244,11 @@ fn audit_frontier_champion_structures(
     champion: &OrganismGenome,
     full_evaluation: FixedSuiteEvaluation,
     audit_scenarios: &[ScenarioManifest],
-    episode_ticks: u64,
+    episode_horizons: &[u64],
+    survival_window_weights: &[f64],
     audit_seeds: &[u64],
     objective_cvar_fraction: f64,
+    cross_pool_predation_only: bool,
     innovations: &mut InnovationRegistry,
 ) -> Result<()> {
     let active = active_structure(champion);
@@ -1143,9 +1276,11 @@ fn audit_frontier_champion_structures(
             let evaluation = evaluate_genome_on_fixed_suite(
                 &ablated,
                 audit_scenarios,
-                episode_ticks,
+                episode_horizons,
+                survival_window_weights,
                 audit_seeds,
                 objective_cvar_fraction,
+                cross_pool_predation_only,
             )?;
             Some(full_evaluation.mean_level_objective_score - evaluation.mean_level_objective_score)
         } else {
@@ -1176,9 +1311,11 @@ fn audit_frontier_champion_structures(
             let evaluation = evaluate_genome_on_fixed_suite(
                 &ablated,
                 audit_scenarios,
-                episode_ticks,
+                episode_horizons,
+                survival_window_weights,
                 audit_seeds,
                 objective_cvar_fraction,
+                cross_pool_predation_only,
             )?;
             Some(full_evaluation.mean_level_objective_score - evaluation.mean_level_objective_score)
         } else {
@@ -1321,9 +1458,11 @@ fn observe_complexification(
         Some(evaluate_genome_on_fixed_suite(
             &population[best_index].genome,
             scenarios,
-            config.episode_ticks,
+            &config.episode_horizons,
+            &config.survival_window_weights,
             &config.development_world_seeds,
             config.objective_cvar_fraction,
+            config.cross_pool_predation_only,
         )?)
     };
     let has_evolved_structure = population[best_index]
@@ -1352,16 +1491,20 @@ fn observe_complexification(
                 Some(evaluate_genome_on_fixed_suite(
                     &knockout,
                     scenarios,
-                    config.episode_ticks,
+                    &config.episode_horizons,
+                    &config.survival_window_weights,
                     &config.development_world_seeds,
                     config.objective_cvar_fraction,
+                    config.cross_pool_predation_only,
                 )?),
                 Some(evaluate_genome_on_fixed_suite(
                     &ancestral,
                     scenarios,
-                    config.episode_ticks,
+                    &config.episode_horizons,
+                    &config.survival_window_weights,
                     &config.development_world_seeds,
                     config.objective_cvar_fraction,
+                    config.cross_pool_predation_only,
                 )?),
             )
         };
@@ -1662,13 +1805,17 @@ fn evaluate_population(
                     run_seed,
                     generation,
                     opponent_count: config.eval_opponents,
+                    fixed_anchors: &config.fixed_anchor_genomes,
                 });
                 let result = evaluate_genome(
                     &population[index].genome,
                     scenarios,
-                    config.episode_ticks,
+                    &config.episode_horizons,
+                    &config.survival_window_weights,
                     training_seeds,
                     config.objective_cvar_fraction,
+                    config.fitness_objective,
+                    config.cross_pool_predation_only,
                     ctx.as_ref(),
                 );
                 results.lock().expect("evaluation result lock poisoned")[index] = Some(result);
@@ -1854,22 +2001,29 @@ fn update_novelty_archive(
 
 /// Opponents + RNG context for competitive (mixed-population) evaluation. The
 /// candidate shares each evaluation world with `opponent_count` genomes sampled
-/// from `snapshot` (this generation's population), so fitness becomes a
-/// *relative* reproductive share instead of an absolute count. `None` at a call
-/// site restores the isolated clonal-colony evaluation.
+/// from `snapshot` (this generation's population). Fitness remains the
+/// candidate lineage's own survival-time fraction; opponents affect it through
+/// the shared ecology. `None` restores isolated clonal-colony evaluation.
 struct CompetitiveContext<'a> {
     snapshot: &'a [OrganismGenome],
     candidate_index: usize,
     run_seed: u64,
     generation: u32,
     opponent_count: usize,
+    fixed_anchors: &'a [OrganismGenome],
+}
+
+struct FounderPool {
+    genomes: Vec<OrganismGenome>,
+    opponent_population_indices: Vec<usize>,
+    fixed_anchor_index: Option<usize>,
 }
 
 impl CompetitiveContext<'_> {
     /// Deterministic per-case founder pool: candidate at index 0, then
     /// `opponent_count` opponents sampled (with replacement) from the snapshot,
     /// excluding the candidate. Distinct per (candidate, case).
-    fn build_pool(&self, candidate: &OrganismGenome, case_index: usize) -> Vec<OrganismGenome> {
+    fn build_pool(&self, candidate: &OrganismGenome, case_index: usize) -> FounderPool {
         let mut rng = event_rng(
             self.run_seed,
             self.generation,
@@ -1879,56 +2033,73 @@ impl CompetitiveContext<'_> {
             OPPONENT_DOMAIN,
         );
         let pop = self.snapshot.len();
-        let mut pool = Vec::with_capacity(self.opponent_count + 1);
-        pool.push(candidate.clone());
-        for _ in 0..self.opponent_count {
+        let mut genomes = Vec::with_capacity(self.opponent_count + 1);
+        let mut opponent_population_indices = Vec::with_capacity(self.opponent_count);
+        genomes.push(candidate.clone());
+        let fixed_anchor_index = if self.fixed_anchors.is_empty() {
+            None
+        } else {
+            Some(case_index % self.fixed_anchors.len())
+        };
+        if let Some(anchor_index) = fixed_anchor_index {
+            genomes.push(self.fixed_anchors[anchor_index].clone());
+        }
+        for _ in 0..self
+            .opponent_count
+            .saturating_sub(usize::from(fixed_anchor_index.is_some()))
+        {
             let mut idx = rng.random_range(0..pop);
             if pop > 1 {
                 while idx == self.candidate_index {
                     idx = rng.random_range(0..pop);
                 }
             }
-            pool.push(self.snapshot[idx].clone());
+            genomes.push(self.snapshot[idx].clone());
+            opponent_population_indices.push(idx);
         }
-        pool
+        FounderPool {
+            genomes,
+            opponent_population_indices,
+            fixed_anchor_index,
+        }
     }
 }
 
 fn evaluate_genome(
     genome: &OrganismGenome,
     scenarios: &[ScenarioManifest],
-    episode_ticks: u64,
+    episode_horizons: &[u64],
+    survival_window_weights: &[f64],
     training_seeds: &[u64],
     objective_cvar_fraction: f64,
+    fitness_objective: FitnessObjective,
+    cross_pool_predation_only: bool,
     competitive: Option<&CompetitiveContext>,
 ) -> Result<Evaluation> {
-    evaluate_genome_on_seeds(
-        genome,
-        scenarios,
-        episode_ticks,
-        training_seeds,
-        objective_cvar_fraction,
-        competitive,
-    )
-}
-
-fn evaluate_genome_on_seeds(
-    genome: &OrganismGenome,
-    scenarios: &[ScenarioManifest],
-    episode_ticks: u64,
-    world_seeds: &[u64],
-    objective_cvar_fraction: f64,
-    competitive: Option<&CompetitiveContext>,
-) -> Result<Evaluation> {
-    Ok(evaluate_genome_on_seeds_detailed(
-        genome,
-        scenarios,
-        episode_ticks,
-        world_seeds,
-        objective_cvar_fraction,
-        competitive,
-    )?
-    .summary)
+    let mut cases = Vec::with_capacity(
+        scenarios
+            .len()
+            .saturating_mul(training_seeds.len())
+            .saturating_mul(episode_horizons.len()),
+    );
+    for &episode_ticks in episode_horizons {
+        cases.extend(
+            evaluate_genome_on_seeds_detailed(
+                genome,
+                scenarios,
+                episode_ticks,
+                survival_window_weights,
+                training_seeds,
+                objective_cvar_fraction,
+                fitness_objective,
+                cross_pool_predation_only,
+                competitive,
+                None,
+            )?
+            .cases,
+        );
+    }
+    Ok(summarize_evaluation_cases(&cases, objective_cvar_fraction))
 }
 
 struct EvaluationBundle {
@@ -1940,36 +2111,83 @@ fn evaluate_genome_on_seeds_detailed(
     genome: &OrganismGenome,
     scenarios: &[ScenarioManifest],
     episode_ticks: u64,
+    survival_window_weights: &[f64],
     world_seeds: &[u64],
     objective_cvar_fraction: f64,
+    fitness_objective: FitnessObjective,
+    cross_pool_predation_only: bool,
     competitive: Option<&CompetitiveContext>,
+    fixed_opponents: Option<&[OrganismGenome]>,
 ) -> Result<EvaluationBundle> {
     if scenarios.is_empty() || world_seeds.is_empty() {
         bail!("a genome evaluation needs at least one scenario and world seed");
     }
+    if survival_window_weights.is_empty() {
+        bail!("a genome evaluation needs at least one survival window weight");
+    }
     let mut cases = Vec::with_capacity(scenarios.len() * world_seeds.len());
-    let mut case_scores = Vec::with_capacity(scenarios.len() * world_seeds.len());
     let mut case_index = 0usize;
     for scenario in scenarios {
         for &world_seed in world_seeds {
             // Isolated clonal colony by default; competitive mode shares the
             // world with sampled opponents (candidate is pool entry 0).
-            let pool = match competitive {
-                Some(ctx) if ctx.opponent_count > 0 => ctx.build_pool(genome, case_index),
-                _ => vec![genome.clone()],
+            let mut founder_pool = if let Some(opponents) = fixed_opponents {
+                let mut genomes = Vec::with_capacity(opponents.len() + 1);
+                genomes.push(genome.clone());
+                genomes.extend_from_slice(opponents);
+                FounderPool {
+                    genomes,
+                    opponent_population_indices: (0..opponents.len()).collect(),
+                    fixed_anchor_index: None,
+                }
+            } else {
+                match competitive {
+                    Some(ctx) if ctx.opponent_count > 0 => ctx.build_pool(genome, case_index),
+                    _ => FounderPool {
+                        genomes: vec![genome.clone()],
+                        opponent_population_indices: Vec::new(),
+                        fixed_anchor_index: None,
+                    },
+                }
             };
-            let pool_len = pool.len();
+            // A scenario cannot instantiate more genome sources than founders.
+            // Cap explicitly (rather than silently leaving requested opponents
+            // absent) and serialize the realized pool size in the case record.
+            let requested_pool_len = founder_pool.genomes.len();
+            founder_pool
+                .genomes
+                .truncate((scenario.world.num_organisms as usize).max(1));
+            founder_pool
+                .opponent_population_indices
+                .truncate(founder_pool.genomes.len().saturating_sub(1));
+            let pool_len = founder_pool.genomes.len();
+            if fitness_objective == FitnessObjective::SurvivalTimesRelativeAdvantage
+                && pool_len != requested_pool_len
+            {
+                bail!(
+                    "scenario `{}` can realize only {} of {} requested founder-pool entries",
+                    scenario.name,
+                    pool_len,
+                    requested_pool_len
+                );
+            }
             case_index += 1;
-            let mut sim =
-                Simulation::new_with_champion_pool(scenario.world.clone(), world_seed, pool)
-                    .map_err(|e| {
-                        anyhow!(
-                            "candidate evaluation failed in scenario `{}`: {e}",
-                            scenario.name
-                        )
-                    })?;
-            let founders = sim.organisms().len();
-            if founders == 0 {
+            let mut sim = Simulation::new_with_champion_pool(
+                scenario.world.clone(),
+                world_seed,
+                founder_pool.genomes,
+            )
+            .map_err(|e| {
+                anyhow!(
+                    "candidate evaluation failed in scenario `{}`: {e}",
+                    scenario.name
+                )
+            })?;
+            if cross_pool_predation_only {
+                sim.set_cross_pool_predation_pool_count(Some(pool_len));
+            }
+            let world_founders = sim.organisms().len();
+            if world_founders == 0 {
                 bail!("scenario `{}` spawned no founders", scenario.name);
             }
             // Survival objective: with no in-world reproduction, every organism
@@ -1981,10 +2199,31 @@ fn evaluate_genome_on_seeds_detailed(
             for organism in sim.organisms() {
                 founder_count_by_pool[(organism.species_id.0 as usize) % pool_len] += 1;
             }
+            if founder_count_by_pool.iter().any(|&count| count == 0) {
+                bail!(
+                    "scenario `{}` spawned {} founders for a {}-genome pool; every requested pool entry must be represented",
+                    scenario.name,
+                    world_founders,
+                    pool_len
+                );
+            }
+            if fitness_objective == FitnessObjective::SurvivalTimesRelativeAdvantage
+                && founder_count_by_pool
+                    .windows(2)
+                    .any(|pair| pair[0] != pair[1])
+            {
+                bail!(
+                    "scenario `{}` must represent every competitive genome with equal founder counts, got {:?}",
+                    scenario.name,
+                    founder_count_by_pool
+                );
+            }
             let mut alive_ticks_by_pool = vec![0u64; pool_len];
+            let mut weighted_alive_ticks_by_pool = vec![0.0_f64; pool_len];
+            let mut total_survival_tick_weight = 0.0_f64;
             let world_width = sim.config().world_width as usize;
             let mut visited = vec![false; world_width.saturating_mul(world_width)];
-            record_visited_cells(sim.organisms(), world_width, &mut visited);
+            record_candidate_visited_cells(sim.organisms(), pool_len, world_width, &mut visited);
             let food_tiles = sim.food_tile_count() as u64;
             let initial_plants = sim
                 .foods()
@@ -1993,24 +2232,26 @@ fn evaluate_genome_on_seeds_detailed(
                 .count() as u64;
             let mut plant_supply_events = initial_plants;
             let mut standing_plant_cell_turns = 0u64;
-            let mut action_counts = [0u64; 6];
-            let mut action_observations = 0u64;
-            let mut time_to_first_plant = None;
+            let mut candidate_action_counts = [0u64; 6];
+            let mut candidate_action_observations = 0u64;
+            let mut candidate_time_to_first_plant = None;
+            let mut candidate_consumption_counts = HashMap::<OrganismId, (u64, u64)>::new();
             let mut final_tick_plant_spawns = 0u64;
-            let case_births = 0u64;
             let mut case_consumptions = 0u64;
             let mut case_plant_consumptions = 0u64;
+            let mut world_plant_consumptions = 0u64;
             for _ in 0..episode_ticks {
                 let delta = sim.tick();
-                case_consumptions = case_consumptions
-                    .checked_add(delta.metrics.consumptions_last_turn)
-                    .ok_or_else(|| anyhow!("consumption counter overflow"))?;
-                case_plant_consumptions = case_plant_consumptions
+                let tick_index = delta.turn.saturating_sub(1);
+                let weight_index = ((tick_index as u128 * survival_window_weights.len() as u128)
+                    / episode_ticks as u128)
+                    .min(survival_window_weights.len().saturating_sub(1) as u128)
+                    as usize;
+                let survival_tick_weight = survival_window_weights[weight_index];
+                total_survival_tick_weight += survival_tick_weight;
+                world_plant_consumptions = world_plant_consumptions
                     .checked_add(delta.metrics.plant_consumptions_last_turn)
                     .ok_or_else(|| anyhow!("plant-consumption counter overflow"))?;
-                if delta.metrics.plant_consumptions_last_turn > 0 && time_to_first_plant.is_none() {
-                    time_to_first_plant = Some(delta.turn);
-                }
                 final_tick_plant_spawns = delta
                     .food_spawned
                     .iter()
@@ -2027,18 +2268,59 @@ fn evaluate_genome_on_seeds_detailed(
                             .count() as u64,
                     )
                     .ok_or_else(|| anyhow!("standing-plant counter overflow"))?;
-                record_visited_cells(sim.organisms(), world_width, &mut visited);
+                record_candidate_visited_cells(
+                    sim.organisms(),
+                    pool_len,
+                    world_width,
+                    &mut visited,
+                );
                 for organism in sim.organisms() {
+                    let pool_index = (organism.species_id.0 as usize) % pool_len;
+                    if pool_index != 0 {
+                        continue;
+                    }
                     let action_index = organism.last_action_taken.index();
-                    action_counts[action_index] = action_counts[action_index]
+                    candidate_action_counts[action_index] = candidate_action_counts[action_index]
                         .checked_add(1)
                         .ok_or_else(|| anyhow!("action counter overflow"))?;
-                    action_observations = action_observations
+                    candidate_action_observations = candidate_action_observations
                         .checked_add(1)
                         .ok_or_else(|| anyhow!("action-observation counter overflow"))?;
-                    // Every organism still alive this tick contributes one
-                    // survival-tick to its lineage.
-                    alive_ticks_by_pool[(organism.species_id.0 as usize) % pool_len] += 1;
+                    alive_ticks_by_pool[0] += 1;
+                    weighted_alive_ticks_by_pool[0] += survival_tick_weight;
+                    let previous = candidate_consumption_counts
+                        .insert(
+                            organism.id,
+                            (
+                                organism.consumptions_count,
+                                organism.plant_consumptions_count,
+                            ),
+                        )
+                        .unwrap_or((0, 0));
+                    let consumption_delta = organism.consumptions_count.saturating_sub(previous.0);
+                    let plant_delta = organism.plant_consumptions_count.saturating_sub(previous.1);
+                    case_consumptions = case_consumptions
+                        .checked_add(consumption_delta)
+                        .ok_or_else(|| anyhow!("candidate consumption counter overflow"))?;
+                    case_plant_consumptions = case_plant_consumptions
+                        .checked_add(plant_delta)
+                        .ok_or_else(|| anyhow!("candidate plant-consumption counter overflow"))?;
+                    if plant_delta > 0 && candidate_time_to_first_plant.is_none() {
+                        candidate_time_to_first_plant = Some(delta.turn);
+                    }
+                }
+                for (pool_index, alive_ticks) in alive_ticks_by_pool.iter_mut().enumerate().skip(1)
+                {
+                    let alive_count = sim
+                        .organisms()
+                        .iter()
+                        .filter(|organism| {
+                            (organism.species_id.0 as usize) % pool_len == pool_index
+                        })
+                        .count() as u64;
+                    *alive_ticks += alive_count;
+                    weighted_alive_ticks_by_pool[pool_index] +=
+                        alive_count as f64 * survival_tick_weight;
                 }
             }
             let final_standing_plants = sim
@@ -2046,16 +2328,16 @@ fn evaluate_genome_on_seeds_detailed(
                 .iter()
                 .filter(|food| food.kind == FoodKind::Plant)
                 .count() as u64;
-            if sim.metrics().total_plant_consumptions != case_plant_consumptions {
+            if sim.metrics().total_plant_consumptions != world_plant_consumptions {
                 bail!(
                     "independent plant-consumption totals disagree: evaluator={} sim={}",
-                    case_plant_consumptions,
+                    world_plant_consumptions,
                     sim.metrics().total_plant_consumptions
                 );
             }
             debug_assert_eq!(
                 plant_supply_events,
-                case_plant_consumptions.saturating_add(final_standing_plants),
+                world_plant_consumptions.saturating_add(final_standing_plants),
                 "plant spawn/consumption accounting must conserve plant instances"
             );
             if sim.turn() != episode_ticks {
@@ -2072,15 +2354,42 @@ fn evaluate_genome_on_seeds_detailed(
             // (a brain that lives longer scores higher even if none survive to
             // the end).
             let candidate_founders = founder_count_by_pool[0].max(1);
-            let objective_score =
-                alive_ticks_by_pool[0] as f64 / (candidate_founders as f64 * episode_ticks as f64);
+            let candidate_alive_ticks = alive_ticks_by_pool[0];
+            let absolute_survival_fraction =
+                candidate_alive_ticks as f64 / (candidate_founders as f64 * episode_ticks as f64);
+            let late_weighted_survival_fraction = weighted_alive_ticks_by_pool[0]
+                / (candidate_founders as f64 * total_survival_tick_weight);
+            let (relative_survival_advantage, zero_combined_alive_ticks) = if pool_len == 1 {
+                (1.0, false)
+            } else {
+                let opponent_founders = founder_count_by_pool[1..].iter().sum::<u64>();
+                let opponent_alive_ticks = alive_ticks_by_pool[1..].iter().sum::<u64>();
+                debug_assert!(opponent_founders > 0);
+                let candidate_mean_alive_ticks =
+                    candidate_alive_ticks as f64 / candidate_founders as f64;
+                let opponent_mean_alive_ticks =
+                    opponent_alive_ticks as f64 / opponent_founders as f64;
+                let combined = candidate_mean_alive_ticks + opponent_mean_alive_ticks;
+                if combined == 0.0 {
+                    (0.0, true)
+                } else {
+                    (2.0 * candidate_mean_alive_ticks / combined, false)
+                }
+            };
+            let objective_score = match fitness_objective {
+                FitnessObjective::SurvivalFraction => absolute_survival_fraction,
+                FitnessObjective::LateWeightedSurvival => late_weighted_survival_fraction,
+                FitnessObjective::SurvivalTimesRelativeAdvantage => {
+                    absolute_survival_fraction * relative_survival_advantage
+                }
+            };
             // Candidate founders still alive at the end (survival diagnostic).
-            let case_maturity_reached = sim
+            let candidate_end_survivors = sim
                 .organisms()
                 .iter()
                 .filter(|o| (o.species_id.0 as usize).is_multiple_of(pool_len))
                 .count() as u64;
-            case_scores.push(objective_score);
+            let case_prey_consumptions = case_consumptions.saturating_sub(case_plant_consumptions);
             let actionable_plant_supply = plant_supply_events
                 .checked_sub(final_tick_plant_spawns)
                 .ok_or_else(|| anyhow!("final plant spawns exceed realized supply"))?;
@@ -2088,45 +2397,56 @@ fn evaluate_genome_on_seeds_detailed(
                 final_standing_plants
                     .checked_sub(final_tick_plant_spawns)
                     .ok_or_else(|| anyhow!("final-tick plant spawns are not all standing"))?;
-            if actionable_plant_supply.checked_sub(case_plant_consumptions)
+            if actionable_plant_supply.checked_sub(world_plant_consumptions)
                 != Some(actionable_leftovers)
             {
-                bail!("actionable plant supply does not close at the scoring boundary");
+                bail!("world plant supply does not close at the scoring boundary");
             }
             let plant_capture_fraction = if actionable_plant_supply == 0 {
                 None
             } else {
                 Some(case_plant_consumptions as f64 / actionable_plant_supply as f64)
             };
-            if case_plant_consumptions > actionable_plant_supply {
-                bail!("plant consumptions exceed actionable realized supply");
-            }
             let mean_standing_plant_fraction = if food_tiles == 0 {
                 0.0
             } else {
                 standing_plant_cell_turns as f64 / (food_tiles as f64 * episode_ticks as f64)
             };
-            let normalized_time_to_first_plant =
-                time_to_first_plant.unwrap_or_else(|| episode_ticks.saturating_add(1)) as f64
-                    / episode_ticks as f64;
+            let normalized_time_to_first_plant = candidate_time_to_first_plant
+                .unwrap_or_else(|| episode_ticks.saturating_add(1))
+                as f64
+                / episode_ticks as f64;
             let spatial_coverage = visited.iter().filter(|&&seen| seen).count() as f64
                 / sim.habitable_cell_count().max(1) as f64;
             let mut action_fractions = [0.0; 6];
-            if action_observations > 0 {
-                for (fraction, count) in action_fractions.iter_mut().zip(action_counts) {
-                    *fraction = count as f64 / action_observations as f64;
+            if candidate_action_observations > 0 {
+                for (fraction, count) in action_fractions.iter_mut().zip(candidate_action_counts) {
+                    *fraction = count as f64 / candidate_action_observations as f64;
                 }
             }
             cases.push(CaseEvaluation {
                 scenario: scenario.name.clone(),
                 curriculum_level: scenario.curriculum_level,
                 world_seed,
+                episode_horizon: episode_ticks,
                 objective_score,
-                founders,
-                maturity_reached_offspring: case_maturity_reached,
-                successful_births: case_births,
+                absolute_survival_fraction,
+                late_weighted_survival_fraction,
+                relative_survival_advantage,
+                zero_combined_alive_ticks,
+                requested_opponents: requested_pool_len.saturating_sub(1),
+                opponent_population_indices: founder_pool.opponent_population_indices,
+                founders_by_pool: founder_count_by_pool,
+                alive_ticks_by_pool,
+                weighted_alive_ticks_by_pool,
+                fixed_anchor_index: founder_pool.fixed_anchor_index,
+                founder_pool_size: pool_len,
+                world_founders,
+                candidate_founders,
+                candidate_end_survivors,
                 consumptions: case_consumptions,
                 plant_consumptions: case_plant_consumptions,
+                prey_consumptions: case_prey_consumptions,
                 plant_supply_events,
                 actionable_plant_supply,
                 final_tick_plant_spawns,
@@ -2136,37 +2456,111 @@ fn evaluate_genome_on_seeds_detailed(
                 realized_plant_supply_per_tick: actionable_plant_supply as f64
                     / episode_ticks as f64,
                 mean_standing_plant_fraction,
-                time_to_first_plant,
+                time_to_first_plant: candidate_time_to_first_plant,
                 normalized_time_to_first_plant,
                 spatial_coverage,
                 action_fractions,
-                final_population: sim.organisms().len(),
+                world_final_population: sim.organisms().len(),
             });
         }
     }
+    let summary = summarize_evaluation_cases(&cases, objective_cvar_fraction);
+    Ok(EvaluationBundle { summary, cases })
+}
+
+fn summarize_evaluation_cases(
+    cases: &[CaseEvaluation],
+    objective_cvar_fraction: f64,
+) -> Evaluation {
+    debug_assert!(!cases.is_empty());
     let n = cases.len() as f64;
-    case_scores.sort_by(f64::total_cmp);
-    let cvar_count = ((case_scores.len() as f64 * objective_cvar_fraction).ceil() as usize)
-        .clamp(1, case_scores.len());
-    let mean_case_score = case_scores.iter().sum::<f64>() / case_scores.len() as f64;
-    let mean_objective_score = case_scores[..cvar_count].iter().sum::<f64>() / cvar_count as f64;
+    let mut scored_cases = cases
+        .iter()
+        .enumerate()
+        .map(|(index, case)| (case.objective_score, index))
+        .collect::<Vec<_>>();
+    scored_cases.sort_by(|(left_score, left_index), (right_score, right_index)| {
+        left_score
+            .total_cmp(right_score)
+            .then_with(|| left_index.cmp(right_index))
+    });
+    let cvar_count = ((scored_cases.len() as f64 * objective_cvar_fraction).ceil() as usize)
+        .clamp(1, scored_cases.len());
+    let mean_case_score =
+        scored_cases.iter().map(|(score, _)| score).sum::<f64>() / scored_cases.len() as f64;
+    let mean_objective_score = scored_cases[..cvar_count]
+        .iter()
+        .map(|(score, _)| score)
+        .sum::<f64>()
+        / cvar_count as f64;
+    let objective_cvar_absolute_survival_fraction = scored_cases[..cvar_count]
+        .iter()
+        .map(|(_, index)| cases[*index].absolute_survival_fraction)
+        .sum::<f64>()
+        / cvar_count as f64;
+    let objective_cvar_late_weighted_survival_fraction = scored_cases[..cvar_count]
+        .iter()
+        .map(|(_, index)| cases[*index].late_weighted_survival_fraction)
+        .sum::<f64>()
+        / cvar_count as f64;
+    let objective_cvar_relative_survival_advantage = scored_cases[..cvar_count]
+        .iter()
+        .map(|(_, index)| cases[*index].relative_survival_advantage)
+        .sum::<f64>()
+        / cvar_count as f64;
     let mut mean_action_fractions = [0.0; 6];
-    for case in &cases {
+    for case in cases {
         for (mean, value) in mean_action_fractions.iter_mut().zip(case.action_fractions) {
             *mean += value / n;
         }
     }
-    let summary = Evaluation {
+    Evaluation {
         mean_objective_score,
         mean_case_score,
-        mean_maturity_reached_offspring: cases
+        mean_absolute_survival_fraction: cases
             .iter()
-            .map(|case| case.maturity_reached_offspring as f64)
+            .map(|case| case.absolute_survival_fraction)
             .sum::<f64>()
             / n,
-        mean_successful_births: cases
+        mean_late_weighted_survival_fraction: cases
             .iter()
-            .map(|case| case.successful_births as f64)
+            .map(|case| case.late_weighted_survival_fraction)
+            .sum::<f64>()
+            / n,
+        mean_relative_survival_advantage: cases
+            .iter()
+            .map(|case| case.relative_survival_advantage)
+            .sum::<f64>()
+            / n,
+        objective_cvar_absolute_survival_fraction,
+        objective_cvar_late_weighted_survival_fraction,
+        objective_cvar_relative_survival_advantage,
+        objective_cvar_case_count: cvar_count,
+        zero_combined_alive_tick_cases: cases
+            .iter()
+            .filter(|case| case.zero_combined_alive_ticks)
+            .count(),
+        opponent_draws: cases
+            .iter()
+            .map(|case| case.opponent_population_indices.len() as u64)
+            .sum(),
+        duplicate_opponent_draws: cases
+            .iter()
+            .map(|case| {
+                let unique = case
+                    .opponent_population_indices
+                    .iter()
+                    .copied()
+                    .collect::<BTreeSet<_>>()
+                    .len();
+                case.opponent_population_indices
+                    .len()
+                    .saturating_sub(unique) as u64
+            })
+            .sum(),
+        mean_candidate_end_survival_fraction: cases
+            .iter()
+            .map(|case| case.candidate_end_survivors as f64 / case.candidate_founders.max(1) as f64)
             .sum::<f64>()
             / n,
         mean_consumptions: cases
@@ -2177,6 +2571,11 @@ fn evaluate_genome_on_seeds_detailed(
         mean_plant_consumptions: cases
             .iter()
             .map(|case| case.plant_consumptions as f64)
+            .sum::<f64>()
+            / n,
+        mean_prey_consumptions: cases
+            .iter()
+            .map(|case| case.prey_consumptions as f64)
             .sum::<f64>()
             / n,
         mean_plant_capture_fraction: mean_optional(
@@ -2204,21 +2603,56 @@ fn evaluate_genome_on_seeds_detailed(
             .sum::<f64>()
             / n,
         mean_action_fractions,
-        mean_final_population: cases
+        mean_world_final_population: cases
             .iter()
-            .map(|case| case.final_population as f64)
+            .map(|case| case.world_final_population as f64)
             .sum::<f64>()
             / n,
-    };
-    Ok(EvaluationBundle { summary, cases })
+    }
+}
+
+/// Evaluate one frozen focal genome against an explicit, common opponent panel.
+/// Every scenario/seed case uses the same ordered opponent genomes, making the
+/// relative-survival component comparable across focal champions.
+pub fn evaluate_frozen_panel(
+    focal: &OrganismGenome,
+    opponents: &[OrganismGenome],
+    scenarios: &[ScenarioManifest],
+    episode_ticks: u64,
+    survival_window_weights: &[f64],
+    world_seeds: &[u64],
+    objective_cvar_fraction: f64,
+    fitness_objective: FitnessObjective,
+) -> Result<PanelEvaluation> {
+    if opponents.is_empty() {
+        bail!("frozen-panel evaluation needs at least one opponent");
+    }
+    let bundle = evaluate_genome_on_seeds_detailed(
+        focal,
+        scenarios,
+        episode_ticks,
+        survival_window_weights,
+        world_seeds,
+        objective_cvar_fraction,
+        fitness_objective,
+        false,
+        None,
+        Some(opponents),
+    )?;
+    Ok(PanelEvaluation {
+        summary: bundle.summary,
+        cases: bundle.cases,
+    })
 }
 
 fn evaluate_genome_on_fixed_suite(
     genome: &OrganismGenome,
     scenarios: &[ScenarioManifest],
-    episode_ticks: u64,
+    episode_horizons: &[u64],
+    survival_window_weights: &[f64],
     world_seeds: &[u64],
     objective_cvar_fraction: f64,
+    cross_pool_predation_only: bool,
 ) -> Result<FixedSuiteEvaluation> {
     let mut by_level = BTreeMap::<u32, Vec<ScenarioManifest>>::new();
     for scenario in scenarios {
@@ -2232,18 +2666,33 @@ fn evaluate_genome_on_fixed_suite(
         // Champion audits / holdouts stay isolated (clonal), so they remain an
         // absolute, cross-generation-comparable competence yardstick rather than
         // a relative, opponent-dependent score.
-        let bundle = evaluate_genome_on_seeds_detailed(
-            genome,
-            &level_scenarios,
-            episode_ticks,
-            world_seeds,
-            objective_cvar_fraction,
-            None,
-        )?;
+        let mut cases = Vec::with_capacity(
+            level_scenarios
+                .len()
+                .saturating_mul(world_seeds.len())
+                .saturating_mul(episode_horizons.len()),
+        );
+        for &episode_ticks in episode_horizons {
+            cases.extend(
+                evaluate_genome_on_seeds_detailed(
+                    genome,
+                    &level_scenarios,
+                    episode_ticks,
+                    survival_window_weights,
+                    world_seeds,
+                    objective_cvar_fraction,
+                    FitnessObjective::SurvivalFraction,
+                    cross_pool_predation_only,
+                    None,
+                    None,
+                )?
+                .cases,
+            );
+        }
         levels.push(FixedLevelEvaluation {
             curriculum_level,
-            evaluation: bundle.summary,
-            cases: bundle.cases,
+            evaluation: summarize_evaluation_cases(&cases, objective_cvar_fraction),
+            cases,
         });
     }
     let mean_level_objective_score = levels
@@ -2257,12 +2706,16 @@ fn evaluate_genome_on_fixed_suite(
     })
 }
 
-fn record_visited_cells(
+fn record_candidate_visited_cells(
     organisms: &[sim_types::OrganismState],
+    pool_len: usize,
     world_width: usize,
     visited: &mut [bool],
 ) {
-    for organism in organisms {
+    for organism in organisms
+        .iter()
+        .filter(|organism| (organism.species_id.0 as usize).is_multiple_of(pool_len))
+    {
         let index = organism.r as usize * world_width + organism.q as usize;
         if let Some(cell) = visited.get_mut(index) {
             *cell = true;
@@ -3024,6 +3477,7 @@ fn generation_summary(
     training_seed_epoch: u32,
     effective_training_seeds: Vec<u64>,
     breeding_telemetry: BreedingTelemetry,
+    checkpoint_champion_genome: Option<OrganismGenome>,
     selection_strategy: SelectionStrategy,
     novelty_archive_size: usize,
 ) -> GenerationSummary {
@@ -3062,6 +3516,26 @@ fn generation_summary(
         best_fitness: best.fitness,
         mean_fitness,
         median_fitness,
+        best_absolute_survival_fraction: best.evaluation.mean_absolute_survival_fraction,
+        best_late_weighted_survival_fraction: best.evaluation.mean_late_weighted_survival_fraction,
+        best_relative_survival_advantage: best.evaluation.mean_relative_survival_advantage,
+        mean_absolute_survival_fraction: population
+            .iter()
+            .map(|individual| individual.evaluation.mean_absolute_survival_fraction)
+            .sum::<f64>()
+            / population.len() as f64,
+        mean_late_weighted_survival_fraction: population
+            .iter()
+            .map(|individual| individual.evaluation.mean_late_weighted_survival_fraction)
+            .sum::<f64>()
+            / population.len() as f64,
+        mean_relative_survival_advantage: population
+            .iter()
+            .map(|individual| individual.evaluation.mean_relative_survival_advantage)
+            .sum::<f64>()
+            / population.len() as f64,
+        best_mean_prey_consumptions: best.evaluation.mean_prey_consumptions,
+        checkpoint_champion_genome,
         selection_strategy,
         best_novelty: (selection_strategy == SelectionStrategy::NoveltyLocalCompetition).then(
             || {

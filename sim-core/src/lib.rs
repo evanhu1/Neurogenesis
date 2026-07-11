@@ -43,8 +43,8 @@ mod topology;
 mod turn;
 
 pub use evolution::{
-    run_neat, FixedSuiteEvaluation, GenerationSummary, NeatConfig, RunResult, ScenarioPreset,
-    SelectionStrategy,
+    evaluate_frozen_panel, run_neat, FitnessObjective, FixedSuiteEvaluation, GenerationSummary,
+    NeatConfig, PanelEvaluation, RunResult, ScenarioPreset, SelectionStrategy,
 };
 
 #[cfg(test)]
@@ -73,6 +73,12 @@ pub struct Simulation {
     seed: u64,
     rng: ChaCha8Rng,
     champion_pool: Vec<OrganismGenome>,
+    /// Evaluation-only diagnostic: when set, attacks cannot affect organisms
+    /// sourced from the same champion-pool entry (`species_id % pool_count`).
+    /// This is deliberately not world configuration or organism-observable
+    /// state; it isolates friendly fire as a predation failure mechanism.
+    #[serde(default)]
+    cross_pool_predation_pool_count: Option<usize>,
     next_organism_id: u64,
     next_food_id: u64,
     organisms: Vec<OrganismState>,
@@ -116,6 +122,7 @@ impl Clone for Simulation {
             seed: self.seed,
             rng: self.rng.clone(),
             champion_pool: self.champion_pool.clone(),
+            cross_pool_predation_pool_count: self.cross_pool_predation_pool_count,
             next_organism_id: self.next_organism_id,
             next_food_id: self.next_food_id,
             organisms: self.organisms.clone(),
@@ -160,6 +167,7 @@ impl Simulation {
             seed,
             rng: ChaCha8Rng::seed_from_u64(seed),
             champion_pool: Vec::new(),
+            cross_pool_predation_pool_count: None,
             next_organism_id: 0,
             next_food_id: 0,
             organisms: Vec::new(),
@@ -202,6 +210,10 @@ impl Simulation {
 
     pub fn set_experiment_scaled(&mut self, scaled: bool) {
         self.experiment_scaled = scaled;
+    }
+
+    pub fn set_cross_pool_predation_pool_count(&mut self, pool_count: Option<usize>) {
+        self.cross_pool_predation_pool_count = pool_count.filter(|&count| count > 0);
     }
 
     fn build_terrain_cells(&mut self) {

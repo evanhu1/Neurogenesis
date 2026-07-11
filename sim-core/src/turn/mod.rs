@@ -10,9 +10,9 @@ use crate::brain::{action_index, evaluate_brain, BrainEvalContext, BrainScratch}
 use crate::grid::{hex_neighbor, rotate_left, rotate_right};
 use crate::plasticity::{apply_runtime_weight_updates, compute_pending_coactivations};
 use crate::spawn::CORPSE_ENERGY_RETENTION;
+use crate::Simulation;
 #[cfg(feature = "profiling")]
 use crate::{profiling, profiling::TurnPhase};
-use crate::Simulation;
 use rayon::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 #[cfg(feature = "instrumentation")]

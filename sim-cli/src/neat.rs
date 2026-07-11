@@ -1,7 +1,13 @@
 use crate::{run_output_path, DEFAULT_CONFIG, REPORT_EVERY};
 use anyhow::{anyhow, bail, Result};
+use serde::Deserialize;
 use serde_json::json;
-use sim_core::{run_neat, NeatConfig, RunResult, ScenarioPreset, SelectionStrategy, Simulation};
+use sim_core::evolution::ScenarioManifest;
+use sim_core::{
+    evaluate_frozen_panel, run_neat, FitnessObjective, NeatConfig, RunResult, ScenarioPreset,
+    SelectionStrategy, Simulation,
+};
+use sim_types::OrganismGenome;
 use sim_views::{
     atomic_write, save_sidecar, save_world, sibling_metrics_path, start_recording,
     world_config_with_overrides,
@@ -14,14 +20,14 @@ const PARAMS: &str = "compatibility_threshold excess_coefficient disjoint_coeffi
 target_species compatibility_threshold_adjustment weight_coefficient survival_fraction \
 crossover_probability interspecies_mate_probability \
 curriculum_enabled curriculum_promotion_threshold curriculum_promotion_patience \
-training_seed_rotation_period objective_cvar_fraction \
+training_seed_rotation_period objective_cvar_fraction fitness_objective survival_window_weights \
 selection_strategy novelty_k novelty_archive_additions_per_generation \
 mutate_weight_probability replace_weight_probability weight_perturb_stddev \
 per_connection_weight_mutation_probability mutate_bias_probability bias_perturb_stddev \
 mutate_time_constant_probability time_constant_perturb_stddev add_connection_probability \
 add_node_probability disabled_inheritance_probability stagnation_generations \
 young_species_grace_generations min_young_species_offspring \
-elitism_min_species_size eval_opponents";
+elitism_min_species_size eval_opponents cross_pool_predation_only";
 
 /// Canonical generational NEAT runner. It owns no persistent world: each
 /// candidate is evaluated in deterministic fixed-seed episodes, and the durable
@@ -29,6 +35,9 @@ elitism_min_species_size eval_opponents";
 pub(crate) fn run_neat_cli(args: &[&str], out_dir: &str, out: &mut impl Write) -> Result<()> {
     if args.first() == Some(&"analyze") {
         return run_neat_analysis(&args[1..], out);
+    }
+    if args.first() == Some(&"evaluate-panel") {
+        return run_neat_panel_evaluation(&args[1..], out);
     }
     let mut config_path = DEFAULT_CONFIG.to_string();
     let mut run_seed = 0u64;
@@ -54,8 +63,17 @@ pub(crate) fn run_neat_cli(args: &[&str], out_dir: &str, out: &mut impl Write) -
                 neat.generations = value(args, i, "--generations")?.parse()?;
                 i += 2;
             }
-            "--episode-ticks" => {
-                neat.episode_ticks = value(args, i, "--episode-ticks")?.parse()?;
+            "--episode-horizons" => {
+                neat.episode_horizons =
+                    parse_u64_list(value(args, i, "--episode-horizons")?, "--episode-horizons")?;
+                i += 2;
+            }
+            "--anchor-results" => {
+                neat.fixed_anchor_genomes = value(args, i, "--anchor-results")?
+                    .split(',')
+                    .filter(|path| !path.trim().is_empty())
+                    .map(|path| read_neat_result(path.trim()).map(|result| result.champion_genome))
+                    .collect::<Result<Vec<_>>>()?;
                 i += 2;
             }
             "--world-seeds" => {
@@ -120,13 +138,14 @@ pub(crate) fn run_neat_cli(args: &[&str], out_dir: &str, out: &mut impl Write) -
                 writeln!(
                     out,
                     "neat options: --config P --seed N --population N --generations N \
-                     --episode-ticks T --world-seeds N,N [--audit-seeds N,N|--no-audit] \
+                     --episode-horizons T[,T...] --world-seeds N,N [--audit-seeds N,N|--no-audit] \
                      [--holdout-seeds N,N|--no-holdout] [--audit-levels N,N] [--audit-every N] \
                      [--scenarios baseline,scarcity,sparse_search] \
                      --workers K --scale W,POP \
-                     [--no-scale] [--set world_key=value] [--param neat_key=value]\n\
-                     default scale: 25,30; objective: lower-tail robust offspring maturity;\n\
+                     [--no-scale] [--anchor-results RESULT.json[,RESULT.json...]] [--set world_key=value] [--param neat_key=value]\n\
+                     default scale: 25,30; objective: lower-tail candidate survival-time fraction;\n\
                      analyze: neat analyze RESULT.json [RESULT2.json ...]\n\
+                     frozen panel: neat evaluate-panel --focal RESULT.json --opponents RESULT.json,RESULT.json --horizons 500,1000 --world-seeds 131,149\n\
                      NEAT params: {PARAMS}"
                 )?;
                 return Ok(());
@@ -147,7 +166,9 @@ pub(crate) fn run_neat_cli(args: &[&str], out_dir: &str, out: &mut impl Write) -
             "event": "neat_started",
             "population": neat.population_size,
             "generations": neat.generations,
-            "episode_ticks": neat.episode_ticks,
+            "episode_horizons": neat.episode_horizons,
+            "survival_window_weights": neat.survival_window_weights,
+            "fixed_anchor_count": neat.fixed_anchor_genomes.len(),
             "world_seeds": neat.world_seeds,
             "development_world_seeds": neat.development_world_seeds,
             "sealed_holdout_world_seeds": neat.sealed_holdout_world_seeds,
@@ -156,12 +177,9 @@ pub(crate) fn run_neat_cli(args: &[&str], out_dir: &str, out: &mut impl Write) -
             "workers": neat.evaluator_workers,
             "world_width": world.world_width,
             "founder_cohort_size": world.num_organisms,
-            "objective": if neat.eval_opponents > 0 {
-                "lower_tail_mean_competitive_survival_fraction"
-            } else {
-                "lower_tail_mean_survival_fraction"
-            },
+            "objective": neat.fitness_objective.name(),
             "eval_opponents": neat.eval_opponents,
+            "cross_pool_predation_only": neat.cross_pool_predation_only,
             "scenarios": neat.scenarios,
         })
     );
@@ -198,6 +216,14 @@ pub(crate) fn run_neat_cli(args: &[&str], out_dir: &str, out: &mut impl Write) -
                 "effective_training_seeds": generation.effective_training_seeds,
                 "best_fitness": generation.best_fitness,
                 "mean_fitness": generation.mean_fitness,
+                "best_absolute_survival": generation.best_absolute_survival_fraction,
+                "best_late_weighted_survival": generation.best_late_weighted_survival_fraction,
+                "best_relative_advantage": generation.best_relative_survival_advantage,
+                "mean_absolute_survival": generation.mean_absolute_survival_fraction,
+                "mean_late_weighted_survival": generation.mean_late_weighted_survival_fraction,
+                "mean_relative_advantage": generation.mean_relative_survival_advantage,
+                "best_mean_prey_consumptions": generation.best_mean_prey_consumptions,
+                "checkpoint_genome_persisted": generation.checkpoint_champion_genome.is_some(),
                 "selection_strategy": generation.selection_strategy,
                 "best_novelty": generation.best_novelty,
                 "mean_novelty": generation.mean_novelty,
@@ -266,6 +292,170 @@ pub(crate) fn run_neat_cli(args: &[&str], out_dir: &str, out: &mut impl Write) -
         })
     )
     .map_err(Into::into)
+}
+
+fn run_neat_panel_evaluation(args: &[&str], out: &mut impl Write) -> Result<()> {
+    let mut focal_path = None::<String>;
+    let mut opponent_paths = Vec::<String>::new();
+    let mut horizons = vec![500_u64, 1_000, 2_000, 4_000];
+    let mut world_seeds = None::<Vec<u64>>;
+    let mut levels = None::<Vec<u32>>;
+    let mut objective = FitnessObjective::SurvivalTimesRelativeAdvantage;
+    let mut objective_cvar_fraction = 0.5_f64;
+    let mut survival_window_weights = vec![1.0_f64];
+    let mut i = 0usize;
+    while i < args.len() {
+        match args[i] {
+            "--focal" => {
+                focal_path = Some(value(args, i, "--focal")?.to_string());
+                i += 2;
+            }
+            "--opponents" => {
+                opponent_paths = value(args, i, "--opponents")?
+                    .split(',')
+                    .filter(|path| !path.trim().is_empty())
+                    .map(|path| path.trim().to_string())
+                    .collect();
+                i += 2;
+            }
+            "--horizons" => {
+                horizons = parse_u64_list(value(args, i, "--horizons")?, "--horizons")?;
+                i += 2;
+            }
+            "--world-seeds" => {
+                world_seeds = Some(parse_u64_list(
+                    value(args, i, "--world-seeds")?,
+                    "--world-seeds",
+                )?);
+                i += 2;
+            }
+            "--levels" => {
+                levels = Some(parse_u32_list(value(args, i, "--levels")?, "--levels")?);
+                i += 2;
+            }
+            "--objective" => {
+                objective = FitnessObjective::parse(value(args, i, "--objective")?)?;
+                i += 2;
+            }
+            "--cvar" => {
+                objective_cvar_fraction = value(args, i, "--cvar")?.parse()?;
+                i += 2;
+            }
+            "--window-weights" => {
+                survival_window_weights =
+                    parse_f64_list(value(args, i, "--window-weights")?, "--window-weights")?;
+                i += 2;
+            }
+            "--help" | "-h" => {
+                writeln!(
+                    out,
+                    "neat evaluate-panel --focal RESULT.json --opponents RESULT.json[,RESULT.json...] [--horizons N,N] [--window-weights W,W] [--world-seeds N,N] [--levels N,N] [--objective survival_fraction|late_weighted_survival|survival_times_relative_advantage] [--cvar F]"
+                )?;
+                return Ok(());
+            }
+            other => bail!("unknown neat evaluate-panel arg `{other}`"),
+        }
+    }
+    let focal_path = focal_path.ok_or_else(|| anyhow!("evaluate-panel needs --focal"))?;
+    if opponent_paths.is_empty() {
+        bail!("evaluate-panel needs at least one --opponents result");
+    }
+    if horizons.is_empty() || horizons.contains(&0) {
+        bail!("evaluate-panel horizons must be nonempty and positive");
+    }
+    if !(0.0..=1.0).contains(&objective_cvar_fraction) || objective_cvar_fraction == 0.0 {
+        bail!("evaluate-panel --cvar must be in (0,1]");
+    }
+
+    let focal = read_neat_result(&focal_path)?;
+    let opponents = opponent_paths
+        .iter()
+        .map(|path| read_neat_result(path))
+        .collect::<Result<Vec<_>>>()?;
+    let opponent_genomes = opponents
+        .iter()
+        .map(|result| result.champion_genome.clone())
+        .collect::<Vec<_>>();
+    let world_seeds = world_seeds.unwrap_or_else(|| {
+        if focal.neat_config.sealed_holdout_world_seeds.is_empty() {
+            focal.neat_config.development_world_seeds.clone()
+        } else {
+            focal.neat_config.sealed_holdout_world_seeds.clone()
+        }
+    });
+    if world_seeds.is_empty() {
+        bail!("evaluate-panel needs --world-seeds when the focal result has no audit seeds");
+    }
+    let scenarios = focal
+        .fixed_audit_scenarios
+        .iter()
+        .filter(|scenario| {
+            levels
+                .as_ref()
+                .is_none_or(|levels| levels.contains(&scenario.curriculum_level))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if scenarios.is_empty() {
+        bail!("evaluate-panel selected no scenarios");
+    }
+
+    let mut evaluations = Vec::with_capacity(horizons.len());
+    for horizon in horizons {
+        let evaluation = evaluate_frozen_panel(
+            &focal.champion_genome,
+            &opponent_genomes,
+            &scenarios,
+            horizon,
+            &survival_window_weights,
+            &world_seeds,
+            objective_cvar_fraction,
+            objective,
+        )?;
+        evaluations.push(json!({
+            "horizon": horizon,
+            "summary": evaluation.summary,
+            "cases": evaluation.cases,
+        }));
+    }
+    writeln!(
+        out,
+        "{}",
+        json!({
+            "schema_version": 1,
+            "focal": focal_path,
+            "focal_run_seed": focal.seed,
+            "opponents": opponent_paths,
+            "opponent_run_seeds": opponents.iter().map(|result| result.seed).collect::<Vec<_>>(),
+            "objective": objective,
+            "objective_cvar_fraction": objective_cvar_fraction,
+            "survival_window_weights": survival_window_weights,
+            "world_seeds": world_seeds,
+            "curriculum_levels": levels,
+            "evaluations": evaluations,
+        })
+    )
+    .map_err(Into::into)
+}
+
+#[derive(Deserialize)]
+struct PanelResultSource {
+    seed: u64,
+    champion_genome: OrganismGenome,
+    fixed_audit_scenarios: Vec<ScenarioManifest>,
+    neat_config: PanelSeedConfig,
+}
+
+#[derive(Deserialize)]
+struct PanelSeedConfig {
+    development_world_seeds: Vec<u64>,
+    sealed_holdout_world_seeds: Vec<u64>,
+}
+
+fn read_neat_result(path: &str) -> Result<PanelResultSource> {
+    let reader = File::open(path).map_err(|error| anyhow!("cannot open `{path}`: {error}"))?;
+    serde_json::from_reader(reader)
+        .map_err(|error| anyhow!("cannot parse NEAT result `{path}`: {error}"))
 }
 
 fn run_neat_analysis(args: &[&str], out: &mut impl Write) -> Result<()> {
@@ -418,6 +608,15 @@ fn analyze_result(path: &str, result: &RunResult) -> serde_json::Value {
             "generation": result.champion_generation,
             "curriculum_level": result.champion_curriculum_level,
             "training_fitness": result.champion_fitness,
+            "training_absolute_survival": result.champion_evaluation.mean_absolute_survival_fraction,
+            "training_late_weighted_survival": result.champion_evaluation.mean_late_weighted_survival_fraction,
+            "training_relative_advantage": result.champion_evaluation.mean_relative_survival_advantage,
+            "training_cvar_absolute_survival": result.champion_evaluation.objective_cvar_absolute_survival_fraction,
+            "training_cvar_late_weighted_survival": result.champion_evaluation.objective_cvar_late_weighted_survival_fraction,
+            "training_cvar_relative_advantage": result.champion_evaluation.objective_cvar_relative_survival_advantage,
+            "training_opponent_draws": result.champion_evaluation.opponent_draws,
+            "training_duplicate_opponent_draws": result.champion_evaluation.duplicate_opponent_draws,
+            "training_mean_prey_consumptions": result.champion_evaluation.mean_prey_consumptions,
             "development_score": result.champion_development_evaluation.as_ref().map(|suite| suite.mean_level_objective_score),
             "development_levels": result.champion_development_evaluation.as_ref().map(suite_level_summary),
             "sealed_score": result.sealed_holdout_evaluation.as_ref().map(|suite| suite.mean_level_objective_score),
@@ -430,6 +629,18 @@ fn analyze_result(path: &str, result: &RunResult) -> serde_json::Value {
                 &all_generation,
                 &generations.iter().map(|generation| generation.best_fitness).collect::<Vec<_>>(),
             ),
+            "all_best_absolute_survival_slope": linear_slope(
+                &all_generation,
+                &generations.iter().map(|generation| generation.best_absolute_survival_fraction).collect::<Vec<_>>(),
+            ),
+            "all_best_late_weighted_survival_slope": linear_slope(
+                &all_generation,
+                &generations.iter().map(|generation| generation.best_late_weighted_survival_fraction).collect::<Vec<_>>(),
+            ),
+            "all_best_relative_advantage_slope": linear_slope(
+                &all_generation,
+                &generations.iter().map(|generation| generation.best_relative_survival_advantage).collect::<Vec<_>>(),
+            ),
             "all_best_path_connected_hidden_slope": linear_slope(
                 &all_generation,
                 &generations.iter().map(|generation| generation.best_expressed_hidden_nodes as f64).collect::<Vec<_>>(),
@@ -441,6 +652,18 @@ fn analyze_result(path: &str, result: &RunResult) -> serde_json::Value {
             "late_best_fitness_slope": linear_slope(
                 &late_generation,
                 &late.iter().map(|generation| generation.best_fitness).collect::<Vec<_>>(),
+            ),
+            "late_best_absolute_survival_slope": linear_slope(
+                &late_generation,
+                &late.iter().map(|generation| generation.best_absolute_survival_fraction).collect::<Vec<_>>(),
+            ),
+            "late_best_late_weighted_survival_slope": linear_slope(
+                &late_generation,
+                &late.iter().map(|generation| generation.best_late_weighted_survival_fraction).collect::<Vec<_>>(),
+            ),
+            "late_best_relative_advantage_slope": linear_slope(
+                &late_generation,
+                &late.iter().map(|generation| generation.best_relative_survival_advantage).collect::<Vec<_>>(),
             ),
             "late_best_path_connected_hidden_slope": linear_slope(
                 &late_generation,
@@ -462,6 +685,10 @@ fn analyze_result(path: &str, result: &RunResult) -> serde_json::Value {
             "adaptive_connections_reaching_ten_percent": adaptive_connections,
             "adaptive_nodes_reaching_ten_percent": adaptive_nodes,
         },
+        "historical_checkpoints": {
+            "count": generations.iter().filter(|generation| generation.checkpoint_champion_genome.is_some()).count(),
+            "generations": generations.iter().filter(|generation| generation.checkpoint_champion_genome.is_some()).map(|generation| generation.generation).collect::<Vec<_>>(),
+        },
     })
 }
 
@@ -473,8 +700,12 @@ fn suite_level_summary(suite: &sim_core::FixedSuiteEvaluation) -> Vec<serde_json
             json!({
                 "curriculum_level": level.curriculum_level,
                 "objective": level.evaluation.mean_objective_score,
+                "absolute_survival": level.evaluation.mean_absolute_survival_fraction,
+                "late_weighted_survival": level.evaluation.mean_late_weighted_survival_fraction,
+                "relative_advantage": level.evaluation.mean_relative_survival_advantage,
                 "plant_capture_fraction": level.evaluation.mean_plant_capture_fraction,
                 "plant_consumptions_per_tick": level.evaluation.mean_plant_consumptions_per_tick,
+                "prey_consumptions": level.evaluation.mean_prey_consumptions,
                 "standing_plant_fraction": level.evaluation.mean_standing_plant_fraction,
                 "spatial_coverage": level.evaluation.mean_spatial_coverage,
             })
@@ -560,6 +791,18 @@ fn parse_u32_list(raw: &str, flag: &str) -> Result<Vec<u32>> {
     Ok(values)
 }
 
+fn parse_f64_list(raw: &str, flag: &str) -> Result<Vec<f64>> {
+    let values = raw
+        .split(',')
+        .filter(|part| !part.trim().is_empty())
+        .map(|part| part.trim().parse::<f64>())
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    if values.is_empty() || values.iter().any(|value| !value.is_finite()) {
+        bail!("{flag} needs a nonempty list of finite numbers");
+    }
+    Ok(values)
+}
+
 fn parse_scenarios(raw: &str) -> Result<Vec<ScenarioPreset>> {
     let scenarios: Vec<_> = raw
         .split(',')
@@ -610,6 +853,10 @@ fn apply_neat_param(config: &mut NeatConfig, key: &str, value: &str) -> Result<(
         "curriculum_promotion_patience" => config.curriculum_promotion_patience = value.parse()?,
         "training_seed_rotation_period" => config.training_seed_rotation_period = value.parse()?,
         "objective_cvar_fraction" => config.objective_cvar_fraction = value.parse()?,
+        "fitness_objective" => config.fitness_objective = FitnessObjective::parse(value)?,
+        "survival_window_weights" => {
+            config.survival_window_weights = parse_f64_list(value, "survival_window_weights")?
+        }
         "selection_strategy" => config.selection_strategy = SelectionStrategy::parse(value)?,
         "novelty_k" => config.novelty_k = value.parse()?,
         "novelty_archive_additions_per_generation" => {
@@ -639,6 +886,7 @@ fn apply_neat_param(config: &mut NeatConfig, key: &str, value: &str) -> Result<(
         "min_young_species_offspring" => config.min_young_species_offspring = value.parse()?,
         "elitism_min_species_size" => config.elitism_min_species_size = value.parse()?,
         "eval_opponents" => config.eval_opponents = value.parse()?,
+        "cross_pool_predation_only" => config.cross_pool_predation_only = value.parse()?,
         _ => bail!("unknown NEAT parameter `{key}`; valid: {PARAMS}"),
     }
     Ok(())

@@ -98,10 +98,8 @@ export function InspectorContent({
         },
         { label: 'Energy', value: formatFloat(focusedOrganism.energy, 2) },
         { label: 'Action', value: focusedOrganism.last_action_taken },
-        { label: 'Pregnant', value: focusedOrganism.is_gestating ? 'Yes' : 'No' },
         { label: 'Plants', value: String(focusedOrganism.plant_consumptions_count) },
         { label: 'Prey', value: String(focusedOrganism.prey_consumptions_count) },
-        { label: 'Repr', value: String(focusedOrganism.reproductions_count) },
         {
           label: 'Neurons',
           value: `${brain.sensory.length}s · ${brain.inter.length}i · ${brain.action.length}a`,
