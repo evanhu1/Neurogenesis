@@ -184,7 +184,6 @@ struct ChampionGenomeRecord {
     source_created_at_unix_ms: u128,
     generation: u64,
     age_turns: u64,
-    reproductions_count: u64,
     consumptions_count: u64,
     energy: f32,
 }
@@ -214,7 +213,6 @@ fn compare_champion_records(
     right
         .generation
         .cmp(&left.generation)
-        .then_with(|| right.reproductions_count.cmp(&left.reproductions_count))
         .then_with(|| right.consumptions_count.cmp(&left.consumptions_count))
         .then_with(|| right.energy.total_cmp(&left.energy))
         .then_with(|| right.age_turns.cmp(&left.age_turns))
@@ -236,7 +234,6 @@ fn champion_record_from_organism(
         source_created_at_unix_ms,
         generation: organism.generation,
         age_turns: organism.age_turns,
-        reproductions_count: organism.reproductions_count,
         consumptions_count: organism.consumptions_count,
         energy: organism.energy,
     }
@@ -367,7 +364,6 @@ impl ChampionPoolStore {
             source_created_at_unix_ms: now_unix_ms().unwrap_or(0),
             generation: 0,
             age_turns: 0,
-            reproductions_count: 0,
             consumptions_count: 0,
             energy: 0.0,
         };
@@ -486,7 +482,6 @@ impl From<ChampionGenomeRecord> for ChampionPoolEntry {
             source_created_at_unix_ms: entry.source_created_at_unix_ms,
             generation: entry.generation,
             age_turns: entry.age_turns,
-            reproductions_count: entry.reproductions_count,
             consumptions_count: entry.consumptions_count,
             energy: entry.energy,
         }
@@ -1257,12 +1252,7 @@ mod tests {
         SensoryReceptor, SpeciesId, SynapseGene,
     };
 
-    fn make_record(
-        generation: u64,
-        reproductions: u64,
-        consumptions: u64,
-        energy: f32,
-    ) -> ChampionGenomeRecord {
+    fn make_record(generation: u64, consumptions: u64, energy: f32) -> ChampionGenomeRecord {
         let mut genome = OrganismGenome::test_fixture();
         genome.lifecycle.max_organism_age = u32::MAX;
         genome.topology.vision_distance = generation as u32 + 2;
@@ -1280,7 +1270,6 @@ mod tests {
             source_created_at_unix_ms: generation as u128,
             generation,
             age_turns: generation * 2,
-            reproductions_count: reproductions,
             consumptions_count: consumptions,
             energy,
         }
@@ -1288,8 +1277,8 @@ mod tests {
 
     #[test]
     fn merge_champion_entries_prefers_higher_ranked_unique_genomes() {
-        let weak = make_record(3, 1, 1, 10.0);
-        let strong = make_record(8, 5, 9, 80.0);
+        let weak = make_record(3, 1, 10.0);
+        let strong = make_record(8, 9, 80.0);
         let duplicate_strong = strong.clone();
 
         let merged = merge_champion_entries(
@@ -1304,7 +1293,7 @@ mod tests {
 
     #[test]
     fn select_champion_candidates_deduplicates_identical_genomes() {
-        let strong = make_record(10, 4, 2, 40.0);
+        let strong = make_record(10, 2, 40.0);
         let weaker_duplicate = ChampionGenomeRecord {
             energy: 5.0,
             generation: 2,
@@ -1334,11 +1323,9 @@ mod tests {
                 strong.energy.max(1.0),
                 strong.energy.max(1.0),
                 0.0,
-                false,
                 strong.consumptions_count,
                 0,
                 0,
-                strong.reproductions_count,
                 ActionType::Idle,
                 empty_brain.clone(),
                 strong.genome.clone(),
@@ -1355,11 +1342,9 @@ mod tests {
                 weaker_duplicate.energy.max(1.0),
                 weaker_duplicate.energy.max(1.0),
                 0.0,
-                false,
                 weaker_duplicate.consumptions_count,
                 0,
                 0,
-                weaker_duplicate.reproductions_count,
                 ActionType::Idle,
                 empty_brain,
                 weaker_duplicate.genome,
@@ -1379,7 +1364,7 @@ mod tests {
         let forward_action = ActionType::Forward;
         let attack_action = ActionType::Attack;
 
-        let mut record = make_record(4, 2, 3, 25.0);
+        let mut record = make_record(4, 3, 25.0);
         record.genome.brain.hidden_nodes = vec![
             HiddenNodeGene {
                 id: seed_hidden_gene_node_id(0),

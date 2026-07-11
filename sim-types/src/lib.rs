@@ -188,7 +188,6 @@ pub enum ActionType {
     Forward,
     Eat,
     Attack,
-    Reproduce,
 }
 impl ActionType {
     pub const ALL: &'static [ActionType] = &[
@@ -197,7 +196,6 @@ impl ActionType {
         ActionType::Forward,
         ActionType::Eat,
         ActionType::Attack,
-        ActionType::Reproduce,
     ];
 
     pub fn active(predation_enabled: bool) -> impl Iterator<Item = ActionType> {
@@ -212,7 +210,7 @@ impl ActionType {
     }
 
     /// Stable per-action index used by dataset encodings and histograms:
-    /// declaration order including `Idle` (`0..=6`).
+    /// declaration order including `Idle` (`0..=5`).
     pub const fn index(self) -> usize {
         self as usize
     }
@@ -223,7 +221,7 @@ impl ActionType {
     pub const fn can_fail(self) -> bool {
         matches!(
             self,
-            ActionType::Forward | ActionType::Eat | ActionType::Attack | ActionType::Reproduce
+            ActionType::Forward | ActionType::Eat | ActionType::Attack
         )
     }
 
@@ -334,27 +332,6 @@ pub enum TerrainType {
 pub enum EntityId {
     Organism(OrganismId),
     Food(FoodId),
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum ReproductionFailureCause {
-    InsufficientEnergy,
-    Immature,
-    BirthTargetBlockedByWall,
-    BlockedBirth,
-    ParentDied,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
-pub struct ReproductionEvent {
-    pub parent_id: OrganismId,
-    pub parent_species_id: SpeciesId,
-    pub parent_age_turns: u64,
-    pub parent_generation: u64,
-    pub investment_energy: f32,
-    pub parent_energy_after_event: f32,
-    pub child_id: Option<OrganismId>,
-    pub failure_cause: Option<ReproductionFailureCause>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -700,14 +677,11 @@ pub struct OrganismState {
     #[serde(default)]
     pub damage_taken_last_turn: f32,
     #[serde(default)]
-    pub is_gestating: bool,
-    #[serde(default)]
     pub consumptions_count: u64,
     #[serde(default)]
     pub plant_consumptions_count: u64,
     #[serde(default)]
     pub prey_consumptions_count: u64,
-    pub reproductions_count: u64,
     #[serde(default)]
     pub last_action_taken: ActionType,
     #[serde(default)]
@@ -733,11 +707,9 @@ impl OrganismState {
         health: f32,
         max_health: f32,
         damage_taken_last_turn: f32,
-        is_gestating: bool,
         consumptions_count: u64,
         plant_consumptions_count: u64,
         prey_consumptions_count: u64,
-        reproductions_count: u64,
         last_action_taken: ActionType,
         brain: BrainState,
         genome: OrganismGenome,
@@ -755,11 +727,9 @@ impl OrganismState {
             max_health,
             energy_at_last_sensing: energy,
             damage_taken_last_turn,
-            is_gestating,
             consumptions_count,
             plant_consumptions_count,
             prey_consumptions_count,
-            reproductions_count,
             last_action_taken,
             base_metabolic_cost: 0.0,
             #[cfg(feature = "instrumentation")]
@@ -798,7 +768,6 @@ pub struct MetricsSnapshot {
     pub total_consumptions: u64,
     /// Cumulative plant-food consumptions since the world was reset.
     pub total_plant_consumptions: u64,
-    pub reproductions_last_turn: u64,
     pub starvations_last_turn: u64,
     pub age_deaths_last_turn: u64,
 }
@@ -857,7 +826,6 @@ pub struct TickDelta {
     pub facing_updates: Vec<OrganismFacing>,
     pub removed_positions: Vec<RemovedEntityPosition>,
     pub spawned: Vec<OrganismState>,
-    pub reproduction_events: Vec<ReproductionEvent>,
     pub food_spawned: Vec<FoodState>,
     pub metrics: MetricsSnapshot,
 }

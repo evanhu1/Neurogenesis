@@ -1,5 +1,4 @@
 use super::*;
-use sim_types::ReproductionFailureCause;
 
 struct CommitPhaseContext<'a> {
     sim: &'a mut Simulation,
@@ -300,28 +299,6 @@ impl<'a> CommitPhaseContext<'a> {
     }
 
     fn finalize(&mut self, gestation_started_this_tick: &mut Vec<bool>) {
-        // Gestating parents killed during commit by predation
-        // must still report a failed reproduction before their pending action
-        // is compacted away, mirroring the starvation/old-age path in
-        // lifecycle_phase.
-        for (idx, dead) in self.dead_organisms.iter().enumerate() {
-            if !dead || self.sim.pending_actions[idx].kind != PendingActionKind::Reproduce {
-                continue;
-            }
-            let organism = &self.sim.organisms[idx];
-            let pending_reproduction = self.sim.pending_reproductions[idx]
-                .as_ref()
-                .expect("Reproduce pending action must carry reproduction metadata");
-            self.result
-                .reproduction_events
-                .push(pending_reproduction.event(
-                    organism,
-                    self.sim.pending_actions[idx].reproduction_energy(),
-                    None,
-                    Some(ReproductionFailureCause::ParentDied),
-                ));
-        }
-
         self.sim
             .compact_organism_state(&self.dead_organisms, Some(gestation_started_this_tick));
 

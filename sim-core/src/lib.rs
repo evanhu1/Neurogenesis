@@ -32,8 +32,6 @@ pub mod evolution;
 pub(crate) mod genome;
 mod grid;
 mod metabolism;
-#[path = "brain/pending_action.rs"]
-mod pending_action;
 #[path = "brain/plasticity.rs"]
 mod plasticity;
 #[cfg(feature = "profiling")]
@@ -43,10 +41,6 @@ mod spawn;
 #[path = "brain/topology.rs"]
 mod topology;
 mod turn;
-
-pub(crate) use pending_action::{
-    PendingActionKind, PendingActionState, PendingReproductionState,
-};
 
 pub use evolution::{
     run_neat, FixedSuiteEvaluation, GenerationSummary, NeatConfig, RunResult, ScenarioPreset,
@@ -82,8 +76,6 @@ pub struct Simulation {
     next_organism_id: u64,
     next_food_id: u64,
     organisms: Vec<OrganismState>,
-    pending_actions: Vec<PendingActionState>,
-    pending_reproductions: Vec<Option<PendingReproductionState>>,
     foods: Vec<FoodState>,
     occupancy: Vec<Option<Occupant>>,
     terrain_map: Vec<bool>,
@@ -127,8 +119,6 @@ impl Clone for Simulation {
             next_organism_id: self.next_organism_id,
             next_food_id: self.next_food_id,
             organisms: self.organisms.clone(),
-            pending_actions: self.pending_actions.clone(),
-            pending_reproductions: self.pending_reproductions.clone(),
             foods: self.foods.clone(),
             occupancy: self.occupancy.clone(),
             terrain_map: self.terrain_map.clone(),
@@ -173,8 +163,6 @@ impl Simulation {
             next_organism_id: 0,
             next_food_id: 0,
             organisms: Vec::new(),
-            pending_actions: Vec::new(),
-            pending_reproductions: Vec::new(),
             foods: Vec::new(),
             occupancy: vec![None; capacity],
             terrain_cells: Vec::new(),
@@ -298,8 +286,6 @@ impl Simulation {
         self.next_organism_id = 0;
         self.next_food_id = 0;
         self.organisms.clear();
-        self.pending_actions.clear();
-        self.pending_reproductions.clear();
         self.foods.clear();
         self.occupancy.fill(None);
         // terrain_map/food_tiles/food_regrowth_due_turn/food_regrowth_schedule are
@@ -462,35 +448,6 @@ impl Simulation {
             return Err(SimError::InvalidState(
                 "organisms must be sorted by ascending id".to_owned(),
             ));
-        }
-
-        if self.pending_actions.len() != self.organisms.len() {
-            return Err(SimError::InvalidState(format!(
-                "pending_actions length {} does not match organism count {}",
-                self.pending_actions.len(),
-                self.organisms.len()
-            )));
-        }
-        if self.pending_reproductions.len() != self.organisms.len() {
-            return Err(SimError::InvalidState(format!(
-                "pending_reproductions length {} does not match organism count {}",
-                self.pending_reproductions.len(),
-                self.organisms.len()
-            )));
-        }
-        for ((organism, pending_action), pending_reproduction) in self
-            .organisms
-            .iter()
-            .zip(&self.pending_actions)
-            .zip(&self.pending_reproductions)
-        {
-            let action_is_reproduction = pending_action.kind == PendingActionKind::Reproduce;
-            if action_is_reproduction != pending_reproduction.is_some() {
-                return Err(SimError::InvalidState(format!(
-                    "organism {:?} pending reproduction metadata does not match its pending action",
-                    organism.id
-                )));
-            }
         }
 
         if !self

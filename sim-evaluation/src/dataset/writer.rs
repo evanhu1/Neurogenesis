@@ -63,7 +63,7 @@ impl PartitionedParquetWriter {
         organism_id: u64,
         species_id: u64,
         generation: u64,
-        num_offspring: u32,
+        total_consumptions: u64,
         genome: &OrganismGenome,
     ) -> Result<()> {
         let file_name = format!("t{:06}.bin", tick);
@@ -85,7 +85,7 @@ impl PartitionedParquetWriter {
             organism_id,
             species_id,
             generation,
-            num_offspring,
+            total_consumptions,
             file_path: rel_path,
         });
         Ok(())
@@ -216,16 +216,16 @@ mod tests {
         let batch_one = vec![
             TickSummaryRow {
                 tick: 1,
-                descendant_population: 120,
+                population: 120,
             },
             TickSummaryRow {
                 tick: 2,
-                descendant_population: 122,
+                population: 122,
             },
         ];
         let batch_two = vec![TickSummaryRow {
             tick: 3,
-            descendant_population: 123,
+            population: 123,
         }];
 
         for row in &batch_one {
@@ -250,11 +250,10 @@ mod tests {
 
         writer.emit_tick(TickSummaryRow {
             tick: 1,
-            descendant_population: 4,
+            population: 4,
         });
         writer.emit_organism_lifetime(OrganismLifetimeRow {
             id: 42,
-            origin: 2,
             death_tick: Some(100),
             total_actions: 100,
             contingent_actions: 60,

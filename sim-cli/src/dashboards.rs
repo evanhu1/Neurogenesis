@@ -65,14 +65,12 @@ impl App {
         let sim = ctx.sim;
         let turn = sim.turn();
         let pop = sim.organisms().len() as u64;
-        let descendants = sim.organisms().iter().filter(|o| o.generation > 0).count() as u64;
         let (plants, corpses, food_energy) = food_summary(sim);
 
         if fmt.is_json() {
             let mut v = json!({
                 "turn": turn,
                 "population": pop,
-                "descendants": descendants,
                 "food": { "plants": plants, "corpses": corpses, "total_energy": food_energy },
             });
             if let Some((p, _, partial)) = pillars {
@@ -92,7 +90,7 @@ impl App {
         if let Some((p, _, partial)) = pillars {
             writeln!(
                 out,
-                "t={turn:<8} pop={pop:<6} desc={descendants:<6} food={food:<6} \
+                "t={turn:<8} pop={pop:<6} food={food:<6} \
                  plant={} prey={} eff={} mi={} slope={}{}",
                 opt(p.mean_plant_consumption_rate, 4),
                 opt(p.mean_prey_consumption_rate, 4),
@@ -105,7 +103,7 @@ impl App {
         } else {
             writeln!(
                 out,
-                "t={turn:<8} pop={pop:<6} desc={descendants:<6} food={food:<6} energy={food_energy:.0}"
+                "t={turn:<8} pop={pop:<6} food={food:<6} energy={food_energy:.0}"
             )
             .map_err(Into::into)
         }

@@ -9,7 +9,6 @@ const UTILIZATION_THRESHOLD: f32 = 0.03;
 struct IntentBuildContext<'a> {
     world_width: i32,
     occupancy: &'a [Option<Occupant>],
-    pending_actions: &'a [PendingActionState],
     action_temperature: f32,
     runtime_plasticity_enabled: bool,
     leaky_neurons_enabled: bool,
@@ -33,7 +32,6 @@ impl Simulation {
         let context = IntentBuildContext {
             world_width,
             occupancy: &self.occupancy,
-            pending_actions: &self.pending_actions,
             action_temperature: self.config.action_temperature,
             runtime_plasticity_enabled: self.config.runtime_plasticity_enabled,
             leaky_neurons_enabled: self.config.leaky_neurons_enabled,
@@ -92,11 +90,6 @@ fn build_intent_for_organism(
     context: IntentBuildContext<'_>,
     scratch: &mut BrainScratch,
 ) -> BuiltIntent {
-    let pending_action = context.pending_actions[idx];
-    if pending_action.turns_remaining > 0 {
-        return locked_intent(idx, organism);
-    }
-
     let selected_action_state = select_action_for_organism(organism, context, scratch);
 
     organism.last_action_taken = selected_action_state.selected_action;
@@ -117,28 +110,6 @@ fn build_intent_for_organism(
         intent,
         #[cfg(feature = "instrumentation")]
         action_record: Some(instrument_action_record(organism, selected_action_state)),
-    }
-}
-
-fn locked_intent(idx: usize, organism: &OrganismState) -> BuiltIntent {
-    BuiltIntent {
-        intent: OrganismIntent {
-            idx,
-            id: organism.id,
-            from: (organism.q, organism.r),
-            facing_after_actions: organism.facing,
-            wants_move: false,
-            wants_eat: false,
-            wants_attack: false,
-            wants_reproduce: false,
-            move_target: None,
-            interaction_target: None,
-            move_confidence: 0.0,
-            took_action: false,
-            synapse_ops: 0,
-        },
-        #[cfg(feature = "instrumentation")]
-        action_record: None,
     }
 }
 
@@ -226,7 +197,6 @@ fn intent_from_selected_action(
         wants_move: false,
         wants_eat: false,
         wants_attack: false,
-        wants_reproduce: false,
         move_target: None,
         interaction_target: None,
         move_confidence: 0.0,
@@ -251,7 +221,6 @@ fn intent_from_selected_action(
             intent.wants_attack = true;
             intent.interaction_target = Some(forward_cell());
         }
-        ActionType::Reproduce => intent.wants_reproduce = true,
     }
 
     intent

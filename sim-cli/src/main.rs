@@ -322,7 +322,12 @@ impl App {
 
     /// Run one command against the already-loaded world. `new` is handled by the
     /// orchestrator (it constructs rather than reads), so it is not here.
-    pub(crate) fn run_oneshot(&mut self, cmd: &str, args: &[&str], out: &mut impl Write) -> Result<()> {
+    pub(crate) fn run_oneshot(
+        &mut self,
+        cmd: &str,
+        args: &[&str],
+        out: &mut impl Write,
+    ) -> Result<()> {
         if is_read_only(cmd) {
             return self.run_read(cmd, args, out);
         }
@@ -337,7 +342,12 @@ impl App {
     }
 
     /// Dispatch a pure-read command to `sim-views` against a borrowed context.
-    pub(crate) fn run_read(&mut self, cmd: &str, args: &[&str], out: &mut impl Write) -> Result<()> {
+    pub(crate) fn run_read(
+        &mut self,
+        cmd: &str,
+        args: &[&str],
+        out: &mut impl Write,
+    ) -> Result<()> {
         let ctx = self.read_ctx()?;
         match cmd {
             "turn" => sim_views::turn(&ctx, args, out),

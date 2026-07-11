@@ -13,8 +13,6 @@ impl Simulation {
         mut gestation_started_this_tick: Option<&mut Vec<bool>>,
     ) {
         debug_assert_eq!(removed.len(), self.organisms.len());
-        debug_assert_eq!(self.pending_actions.len(), self.organisms.len());
-        debug_assert_eq!(self.pending_reproductions.len(), self.organisms.len());
         if let Some(skip) = gestation_started_this_tick.as_ref() {
             debug_assert_eq!(skip.len(), self.organisms.len());
         }
@@ -28,8 +26,6 @@ impl Simulation {
             if !*removed_flag {
                 if write != read {
                     self.organisms.swap(write, read);
-                    self.pending_actions.swap(write, read);
-                    self.pending_reproductions.swap(write, read);
                     if let Some(ref mut skip) = gestation_started_this_tick {
                         skip.swap(write, read);
                     }
@@ -38,8 +34,6 @@ impl Simulation {
             }
         }
         self.organisms.truncate(write);
-        self.pending_actions.truncate(write);
-        self.pending_reproductions.truncate(write);
         if let Some(skip) = gestation_started_this_tick {
             skip.truncate(write);
         }

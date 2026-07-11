@@ -56,15 +56,12 @@ pub struct Recorder {
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct EcoSample {
     pub population: u32,
-    pub descendants: u32,
     pub food: u32,
-    pub births: u32,
     pub deaths: u32,
     pub starvations: u32,
     pub age_deaths: u32,
     pub predations: u32,
     pub consumptions: u32,
-    pub reproductions: u32,
 }
 
 /// A borrowed, read-only view of a loaded world plus its optional metric
@@ -378,10 +375,9 @@ pub fn tick_recording(
         let turn = sim.turn();
         let deaths = ingest_tick(&mut rec.ledger, turn, &delta, sim.action_records());
         rec.lifetimes.extend(deaths);
-        let descendants = rec.ledger.descendant_population();
         rec.tick_summary.push(TickSummaryRow {
             tick: turn,
-            descendant_population: descendants,
+            population: rec.ledger.population(),
         });
         let org_deaths = delta
             .removed_positions
@@ -390,15 +386,12 @@ pub fn tick_recording(
             .count() as u32;
         rec.samples.push(EcoSample {
             population: delta.metrics.organisms,
-            descendants,
             food: sim.foods().len() as u32,
-            births: delta.spawned.len() as u32,
             deaths: org_deaths,
             starvations: delta.metrics.starvations_last_turn as u32,
             age_deaths: delta.metrics.age_deaths_last_turn as u32,
             predations: delta.metrics.predations_last_turn as u32,
             consumptions: delta.metrics.consumptions_last_turn as u32,
-            reproductions: delta.metrics.reproductions_last_turn as u32,
         });
     }
     delta
@@ -547,7 +540,6 @@ pub fn state(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
                 "consumptions": m.consumptions_last_turn,
                 "plant_consumptions": m.plant_consumptions_last_turn,
                 "predations": m.predations_last_turn,
-                "reproductions": m.reproductions_last_turn,
                 "starvations": m.starvations_last_turn,
                 "age_deaths": m.age_deaths_last_turn,
             },
@@ -575,7 +567,7 @@ pub fn state(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
     )?;
     writeln!(
         out,
-        "population = {pop}  (descendants gen>0 = {descendants}, founders/injections = {})",
+        "population = {pop}  (descendants gen>0 = {descendants}, founders gen0 = {})",
         pop - descendants
     )?;
     writeln!(out, "  energy:     {}", fmt_stats(energy))?;
@@ -596,11 +588,10 @@ pub fn state(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
     )?;
     writeln!(
         out,
-        "last-turn: consumptions={} (plant={}) predations={} reproductions={} starvations={} age_deaths={}",
+        "last-turn: consumptions={} (plant={}) predations={} starvations={} age_deaths={}",
         m.consumptions_last_turn,
         m.plant_consumptions_last_turn,
         m.predations_last_turn,
-        m.reproductions_last_turn,
         m.starvations_last_turn,
         m.age_deaths_last_turn,
     )?;
@@ -688,14 +679,12 @@ pub fn inspect(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()>
             "age": o.age_turns,
             "generation": o.generation,
             "species": o.species_id.0,
-            "gestating": o.is_gestating,
             "last_action": o.last_action_taken,
             "consumptions": {
                 "total": o.consumptions_count,
                 "plant": o.plant_consumptions_count,
                 "prey": o.prey_consumptions_count,
             },
-            "reproductions": o.reproductions_count,
             "genome": {
                 "hidden_nodes": o.genome.hidden_node_count(),
                 "synapses": o.brain.synapse_count,
@@ -717,17 +706,16 @@ pub fn inspect(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()>
     writeln!(out, "organism {id}:")?;
     writeln!(
         out,
-        "  pos=({}, {}) facing={:?} energy={:.2} health={:.2}/{:.2} age={} gen={} species={} gestating={}",
-        o.q, o.r, o.facing, o.energy, o.health, o.max_health, o.age_turns, o.generation, o.species_id.0, o.is_gestating
+        "  pos=({}, {}) facing={:?} energy={:.2} health={:.2}/{:.2} age={} gen={} species={}",
+        o.q, o.r, o.facing, o.energy, o.health, o.max_health, o.age_turns, o.generation, o.species_id.0
     )?;
     writeln!(
         out,
-        "  last_action={:?} consumptions={} (plant={}, prey={}) reproductions={}",
+        "  last_action={:?} consumptions={} (plant={}, prey={})",
         o.last_action_taken,
         o.consumptions_count,
         o.plant_consumptions_count,
         o.prey_consumptions_count,
-        o.reproductions_count
     )?;
     let g = &o.genome;
     writeln!(
@@ -765,10 +753,10 @@ pub fn top(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
     let field = *rest.first().ok_or_else(|| anyhow!("top needs a field"))?;
     if !matches!(
         field,
-        "energy" | "health" | "age" | "generation" | "consumptions" | "reproductions"
+        "energy" | "health" | "age" | "generation" | "consumptions"
     ) {
         anyhow::bail!(
-            "unknown field `{field}` (energy|health|age|generation|consumptions|reproductions)"
+            "unknown field `{field}` (energy|health|age|generation|consumptions)"
         );
     }
     let n: usize = rest.get(1).map(|s| s.parse()).transpose()?.unwrap_or(10);
@@ -784,7 +772,6 @@ pub fn top(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
             "age" => o.age_turns as f64,
             "generation" => o.generation as f64,
             "consumptions" => o.consumptions_count as f64,
-            "reproductions" => o.reproductions_count as f64,
             _ => f64::NAN,
         }
     };
@@ -807,7 +794,6 @@ pub fn top(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
                     "age": o.age_turns,
                     "generation": o.generation,
                     "consumptions": o.consumptions_count,
-                    "reproductions": o.reproductions_count,
                     "last_action": o.last_action_taken,
                 })
             })
@@ -824,14 +810,13 @@ pub fn top(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
         let o = &orgs[i];
         writeln!(
             out,
-            "  id={:<6} {field}={:<12.3} energy={:.1} age={} gen={} consum={} repro={} last={:?}",
+            "  id={:<6} {field}={:<12.3} energy={:.1} age={} gen={} consum={} last={:?}",
             o.id.0,
             key(o),
             o.energy,
             o.age_turns,
             o.generation,
             o.consumptions_count,
-            o.reproductions_count,
             o.last_action_taken
         )?;
     }

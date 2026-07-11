@@ -7,8 +7,8 @@
 use serde::{Deserialize, Serialize};
 use sim_types::{
     organism_visual, FacingDirection, FoodState, MetricsSnapshot, OrganismFacing, OrganismGenome,
-    OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, ReproductionEvent, SpeciesId,
-    TerrainCell, TickDelta, VisualProperties, WorldSnapshot,
+    OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId, TerrainCell,
+    TickDelta, VisualProperties, WorldSnapshot,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -32,11 +32,9 @@ pub struct WorldOrganismState {
     pub health: f32,
     pub max_health: f32,
     pub damage_taken_last_turn: f32,
-    pub is_gestating: bool,
     pub consumptions_count: u64,
     pub plant_consumptions_count: u64,
     pub prey_consumptions_count: u64,
-    pub reproductions_count: u64,
     pub visual: VisualProperties,
 }
 
@@ -54,11 +52,9 @@ impl From<&OrganismState> for WorldOrganismState {
             health: organism.health,
             max_health: organism.max_health,
             damage_taken_last_turn: organism.damage_taken_last_turn,
-            is_gestating: organism.is_gestating,
             consumptions_count: organism.consumptions_count,
             plant_consumptions_count: organism.plant_consumptions_count,
             prey_consumptions_count: organism.prey_consumptions_count,
-            reproductions_count: organism.reproductions_count,
             visual: organism_visual(),
         }
     }
@@ -104,7 +100,6 @@ pub struct TickDeltaView {
     pub facing_updates: Vec<OrganismFacing>,
     pub removed_positions: Vec<RemovedEntityPosition>,
     pub spawned: Vec<WorldOrganismState>,
-    pub reproduction_events: Vec<ReproductionEvent>,
     pub food_spawned: Vec<FoodState>,
     pub metrics: MetricsSnapshot,
 }
@@ -117,7 +112,6 @@ impl From<TickDelta> for TickDeltaView {
             facing_updates: delta.facing_updates,
             removed_positions: delta.removed_positions,
             spawned: delta.spawned.iter().map(WorldOrganismState::from).collect(),
-            reproduction_events: delta.reproduction_events,
             food_spawned: delta.food_spawned,
             metrics: delta.metrics,
         }
@@ -151,7 +145,6 @@ pub struct ChampionPoolEntry {
     pub source_created_at_unix_ms: u128,
     pub generation: u64,
     pub age_turns: u64,
-    pub reproductions_count: u64,
     pub consumptions_count: u64,
     pub energy: f32,
 }

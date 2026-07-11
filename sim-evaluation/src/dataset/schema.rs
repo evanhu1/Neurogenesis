@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Index row pointing at a serialized genome blob. One per flush interval
-/// where at least one organism has reproduced.
+/// where at least one organism has consumed food.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GenomeSnapshotIndexRow {
     pub snapshot_id: u64,
@@ -17,7 +17,7 @@ pub struct GenomeSnapshotIndexRow {
     pub organism_id: u64,
     pub species_id: u64,
     pub generation: u64,
-    pub num_offspring: u32,
+    pub total_consumptions: u64,
     /// Path relative to the seed's dataset directory, e.g. `genomes/t001000.bin`.
     pub file_path: String,
 }

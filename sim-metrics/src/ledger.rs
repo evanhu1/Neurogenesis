@@ -4,18 +4,18 @@
 //! analysis layer ([`crate::intervals`], [`crate::pillars`]) which reads pooled
 //! lifetime rows.
 //!
-//! The sidecar also tracks `num_offspring` per organism so genome snapshots
-//! can pick the top reproducer at each flush boundary.
+//! The sidecar also tracks lifetime consumptions per organism so genome
+//! snapshots can pick the top forager at each flush boundary.
 
-use crate::schema::{OrganismLifetimeRow, OrganismOrigin, ACTION_COUNT, JOINT_LEN};
+use crate::schema::{OrganismLifetimeRow, ACTION_COUNT, JOINT_LEN};
 use serde::{Deserialize, Serialize};
-use sim_types::{ActionRecord, ActionType, OrganismId, ReproductionEvent};
+use sim_types::{ActionRecord, OrganismId};
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 
-/// Minimum number of non-Reproduce contingent actions an organism must take
-/// before we trust a within-life learning slope; below this the regression is
-/// too noisy to mean anything.
+/// Minimum number of contingent actions an organism must take before we trust a
+/// within-life learning slope; below this the regression is too noisy to mean
+/// anything.
 const MIN_LEARNING_SAMPLES: u64 = 30;
 
 /// Identity hasher for integer-keyed HashMaps. OrganismId values are unique
@@ -77,8 +77,6 @@ impl LearningAccumulator {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OrganismEntry {
     pub id: u64,
-    origin: OrganismOrigin,
-    pub num_offspring: u32,
     total_actions: u64,
     contingent_actions: u64,
     failed_actions: u64,
@@ -91,11 +89,9 @@ pub struct OrganismEntry {
 }
 
 impl OrganismEntry {
-    fn new(id: u64, origin: OrganismOrigin) -> Self {
+    fn new(id: u64) -> Self {
         Self {
             id,
-            origin,
-            num_offspring: 0,
             total_actions: 0,
             contingent_actions: 0,
             failed_actions: 0,
@@ -106,10 +102,16 @@ impl OrganismEntry {
         }
     }
 
+    /// Total lifetime consumptions (foraging + predation) — the survival-arena
+    /// analog of reproductive success, used to pick a representative genome.
+    pub fn total_consumptions(&self) -> u64 {
+        self.plant_consumptions
+            .saturating_add(self.prey_consumptions)
+    }
+
     fn into_lifetime_row(self, death_tick: Option<u64>) -> OrganismLifetimeRow {
         OrganismLifetimeRow {
             id: self.id,
-            origin: self.origin.code(),
             death_tick,
             total_actions: self.total_actions,
             contingent_actions: self.contingent_actions,
@@ -125,55 +127,28 @@ impl OrganismEntry {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Ledger {
     sidecar: IdHashMap<OrganismId, OrganismEntry>,
-    /// Child id → parent id, captured when a successful `ReproductionEvent`
-    /// is observed and consumed on the corresponding `birth()` call. Founders
-    /// and periodic injections never appear here, so their `parent_id` stays
-    /// `None` — that's the signal used to distinguish descendants from seeded
-    /// organisms.
-    pending_parents: IdHashMap<OrganismId, OrganismId>,
-    descendant_population: u32,
+    population: u32,
 }
 
 impl Ledger {
     pub fn new() -> Self {
         Self {
             sidecar: IdHashMap::default(),
-            pending_parents: IdHashMap::default(),
-            descendant_population: 0,
+            population: 0,
         }
     }
 
-    pub fn birth(&mut self, id: OrganismId, birth_tick: u64) {
-        let parent_id = self.pending_parents.remove(&id).map(|p| p.0);
-        let origin = if parent_id.is_some() {
-            OrganismOrigin::Descendant
-        } else if birth_tick == 0 {
-            OrganismOrigin::InitialFounder
-        } else {
-            OrganismOrigin::PeriodicInjection
-        };
-        if origin == OrganismOrigin::Descendant {
-            self.descendant_population = self.descendant_population.saturating_add(1);
-        }
-        self.sidecar.insert(id, OrganismEntry::new(id.0, origin));
+    pub fn birth(&mut self, id: OrganismId) {
+        self.population = self.population.saturating_add(1);
+        self.sidecar.insert(id, OrganismEntry::new(id.0));
     }
 
     /// Register an organism that is *already alive* when recording begins
-    /// mid-run (so its real birth — and any reproduction event that would have
-    /// classified it — was never observed). Origin is inferred from the live
-    /// `generation`: only `generation > 0` marks a descendant, which is the
-    /// sole class that feeds pillars. Lifetime counters therefore start partway
-    /// through the organism's life; callers should label such windows partial.
-    pub fn register_existing(&mut self, id: OrganismId, generation: u64) {
-        let origin = if generation > 0 {
-            OrganismOrigin::Descendant
-        } else {
-            OrganismOrigin::InitialFounder
-        };
-        if origin == OrganismOrigin::Descendant {
-            self.descendant_population = self.descendant_population.saturating_add(1);
-        }
-        self.sidecar.insert(id, OrganismEntry::new(id.0, origin));
+    /// mid-run. Lifetime counters therefore start partway through the
+    /// organism's life; callers should label such windows partial.
+    pub fn register_existing(&mut self, id: OrganismId) {
+        self.population = self.population.saturating_add(1);
+        self.sidecar.insert(id, OrganismEntry::new(id.0));
     }
 
     /// Ingest one tick's worth of one organism's action record.
@@ -197,40 +172,16 @@ impl Ledger {
             if record.action_failed {
                 entry.failed_actions = entry.failed_actions.saturating_add(1);
             }
-            // In-life learning is measured on maturation-neutral competence:
-            // Forward/Eat/Attack success vs age. Reproduce is excluded because
-            // its availability is gated on maturity, which would confound the
-            // slope with the onset of reproduction rather than learning.
-            if record.selected_action != ActionType::Reproduce {
-                let success = if record.action_failed { 0.0 } else { 1.0 };
-                entry.learning.observe(record.age_turns as f64, success);
-            }
-        }
-    }
-
-    pub fn record_reproduction(&mut self, event: &ReproductionEvent) {
-        // Only successful events advance lineage state; failures (blocked
-        // birth, parent died) carry no parent→child edge.
-        if event.failure_cause.is_some() {
-            return;
-        }
-        if let Some(entry) = self.sidecar.get_mut(&event.parent_id) {
-            entry.num_offspring = entry.num_offspring.saturating_add(1);
-        }
-        if let Some(child_id) = event.child_id {
-            self.pending_parents.insert(child_id, event.parent_id);
+            // In-life learning is measured on contingent-action competence
+            // (Forward/Eat/Attack success vs age).
+            let success = if record.action_failed { 0.0 } else { 1.0 };
+            entry.learning.observe(record.age_turns as f64, success);
         }
     }
 
     pub fn death(&mut self, id: OrganismId, tick: u64) -> Option<OrganismLifetimeRow> {
         let entry = self.sidecar.remove(&id)?;
-        if entry.origin == OrganismOrigin::Descendant {
-            debug_assert!(
-                self.descendant_population > 0,
-                "descendant_population underflow: death of {id:?} with zero running count"
-            );
-            self.descendant_population = self.descendant_population.saturating_sub(1);
-        }
+        self.population = self.population.saturating_sub(1);
         Some(entry.into_lifetime_row(Some(tick)))
     }
 
@@ -238,31 +189,33 @@ impl Ledger {
     /// tick completes so every organism contributes a lifetime row.
     pub fn drain_survivors(&mut self) -> Vec<OrganismLifetimeRow> {
         let survivors = std::mem::take(&mut self.sidecar);
-        self.descendant_population = 0;
+        self.population = 0;
         survivors
             .into_values()
             .map(|entry| entry.into_lifetime_row(None))
             .collect()
     }
 
-    pub fn descendant_population(&self) -> u32 {
-        self.descendant_population
+    pub fn population(&self) -> u32 {
+        self.population
     }
 
-    /// Select the living organism with the most offspring. Ties are broken by
-    /// lowest id to keep snapshot selection deterministic. Returns `None` when
-    /// no living organism has reproduced yet.
-    pub fn top_reproducer(&self) -> Option<&OrganismEntry> {
+    /// Select the living organism with the most lifetime consumptions — the
+    /// survival-arena analog of the top reproducer, used to pick a
+    /// representative genome. Ties are broken by lowest id to keep snapshot
+    /// selection deterministic. Returns `None` when no living organism has
+    /// consumed anything yet.
+    pub fn top_forager(&self) -> Option<&OrganismEntry> {
         let mut best: Option<&OrganismEntry> = None;
         for entry in self.sidecar.values() {
-            if entry.num_offspring == 0 {
+            if entry.total_consumptions() == 0 {
                 continue;
             }
             match best {
                 None => best = Some(entry),
                 Some(current)
-                    if entry.num_offspring > current.num_offspring
-                        || (entry.num_offspring == current.num_offspring
+                    if entry.total_consumptions() > current.total_consumptions()
+                        || (entry.total_consumptions() == current.total_consumptions()
                             && entry.id < current.id) =>
                 {
                     best = Some(entry)
@@ -292,7 +245,7 @@ fn sensory_bin(record: &ActionRecord) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sim_types::{OrganismId, SensoryReceptor};
+    use sim_types::{ActionType, OrganismId, SensoryReceptor};
 
     fn record(action: ActionType, failed: bool, age: u64) -> ActionRecord {
         ActionRecord {
@@ -311,7 +264,7 @@ mod tests {
     #[test]
     fn lifetime_row_counts_contingent_failures_and_consumptions() {
         let mut ledger = Ledger::new();
-        ledger.birth(OrganismId(1), 0);
+        ledger.birth(OrganismId(1));
         ledger.record_action(&record(ActionType::TurnLeft, true, 0));
         ledger.record_action(&record(ActionType::Eat, true, 0));
         let mut ate = record(ActionType::Eat, false, 1);
@@ -329,33 +282,9 @@ mod tests {
     #[test]
     fn learning_slope_none_below_sample_gate() {
         let mut ledger = Ledger::new();
-        ledger.birth(OrganismId(1), 0);
+        ledger.birth(OrganismId(1));
         ledger.record_action(&record(ActionType::Forward, false, 0));
         let row = ledger.death(OrganismId(1), 10).unwrap();
         assert!(row.learning_slope.is_none());
-    }
-
-    #[test]
-    fn top_reproducer_picks_max_offspring_breaking_ties_low_id() {
-        let mut ledger = Ledger::new();
-        ledger.birth(OrganismId(1), 0);
-        ledger.birth(OrganismId(2), 0);
-        ledger.birth(OrganismId(3), 0);
-        ledger
-            .sidecar
-            .get_mut(&OrganismId(1))
-            .unwrap()
-            .num_offspring = 3;
-        ledger
-            .sidecar
-            .get_mut(&OrganismId(2))
-            .unwrap()
-            .num_offspring = 5;
-        ledger
-            .sidecar
-            .get_mut(&OrganismId(3))
-            .unwrap()
-            .num_offspring = 5;
-        assert_eq!(ledger.top_reproducer().unwrap().id, 2);
     }
 }

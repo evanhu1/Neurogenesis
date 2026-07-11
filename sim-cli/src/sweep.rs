@@ -285,7 +285,7 @@ fn run_cell_seed(
         lifetimes.extend(ingest_tick(&mut ledger, turn, &delta, sim.action_records()));
         tick_summary.push(TickSummaryRow {
             tick: turn,
-            descendant_population: ledger.descendant_population(),
+            population: ledger.population(),
         });
     }
     // Include organisms still alive at `to` (the eval drains survivors before

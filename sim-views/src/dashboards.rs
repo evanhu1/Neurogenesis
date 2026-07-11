@@ -52,7 +52,6 @@ pub fn eco(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
     let sim = ctx.sim;
     let turn = sim.turn();
     let pop = sim.organisms().len() as u64;
-    let descendants = sim.organisms().iter().filter(|o| o.generation > 0).count() as u64;
     let (plants, corpses, food_energy) = crate::food_summary(sim);
     let food_tiles = sim.food_tile_count();
     let habitable_cells = sim.habitable_cell_count();
@@ -70,7 +69,6 @@ pub fn eco(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
         let mut v = json!({
             "turn": turn,
             "population": pop,
-            "descendants": descendants,
             "food": { "plants": plants, "corpses": corpses, "total_energy": food_energy },
             "food_tiles": {
                 "selected": food_tiles,
@@ -83,7 +81,6 @@ pub fn eco(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
             let s = &rec.samples;
             let pops: Vec<f64> = s.iter().map(|x| x.population as f64).collect();
             let foods: Vec<f64> = s.iter().map(|x| x.food as f64).collect();
-            let births = s.iter().map(|x| x.births as u64).sum::<u64>();
             let deaths = s.iter().map(|x| x.deaths as u64).sum::<u64>();
             let starv = s.iter().map(|x| x.starvations as u64).sum::<u64>();
             let aged = s.iter().map(|x| x.age_deaths as u64).sum::<u64>();
@@ -98,7 +95,6 @@ pub fn eco(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
                 "ticks": s.len(),
                 "population_series": downsample(&pops),
                 "food_series": downsample(&foods),
-                "births_per_tick": births as f64 / n,
                 "deaths_per_tick": deaths as f64 / n,
                 "deaths_by_cause": {
                     "total": deaths,
@@ -121,14 +117,13 @@ pub fn eco(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
 
     writeln!(
         out,
-        "eco @ turn {turn}: population={pop} descendants={descendants} \
+        "eco @ turn {turn}: population={pop} \
          food: plants={plants} corpses={corpses} energy={food_energy:.0}"
     )?;
     if let Some(rec) = recorder.filter(|_| have_traj) {
         let s = &rec.samples;
         let pops: Vec<f64> = s.iter().map(|x| x.population as f64).collect();
         let foods: Vec<f64> = s.iter().map(|x| x.food as f64).collect();
-        let births = s.iter().map(|x| x.births as u64).sum::<u64>();
         let deaths = s.iter().map(|x| x.deaths as u64).sum::<u64>();
         let starv = s.iter().map(|x| x.starvations as u64).sum::<u64>();
         let aged = s.iter().map(|x| x.age_deaths as u64).sum::<u64>();
@@ -150,8 +145,7 @@ pub fn eco(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
         writeln!(out, "  food       {} (now {flast:.0})", spark(&foods))?;
         writeln!(
             out,
-            "  rates/tick: births={:.4} deaths={:.4} consumptions={:.4} predations={:.4}",
-            births as f64 / n,
+            "  rates/tick: deaths={:.4} consumptions={:.4} predations={:.4}",
             deaths as f64 / n,
             mean(&cons),
             mean(&preds),
@@ -348,6 +342,10 @@ pub fn genome(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> 
         None
     };
 
+    // Plasticity genes only drive behavior when within-life learning is on;
+    // flag when the world has it disabled so the values aren't misread.
+    let plasticity_enabled = ctx.sim.config().runtime_plasticity_enabled;
+
     if fmt.is_json() {
         let mut gene_obj = serde_json::Map::new();
         for (name, group, f) in genes {
@@ -359,6 +357,7 @@ pub fn genome(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> 
         }
         let mut v = json!({
             "population": orgs.len(),
+            "runtime_plasticity_enabled": plasticity_enabled,
             "genes": gene_obj,
         });
         if let Some(n) = drift_note {
@@ -371,7 +370,12 @@ pub fn genome(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> 
     let mut last_group = "";
     for (name, group, f) in genes {
         if *group != last_group {
-            writeln!(out, "  [{group}]")?;
+            let tag = if *group == "plasticity" && !plasticity_enabled {
+                "  (disabled — runtime_plasticity_enabled=false)"
+            } else {
+                ""
+            };
+            writeln!(out, "  [{group}]{tag}")?;
             last_group = group;
         }
         match Stats::of(&collect(*f)) {
@@ -436,13 +440,10 @@ pub fn timeseries(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<
     let sample_col = |name: &str| -> Option<Vec<f64>> {
         let f: fn(&EcoSample) -> f64 = match name {
             "population" => |x| x.population as f64,
-            "descendants" => |x| x.descendants as f64,
             "food" => |x| x.food as f64,
-            "births" => |x| x.births as f64,
             "deaths" => |x| x.deaths as f64,
             "consumptions" => |x| x.consumptions as f64,
             "predations" => |x| x.predations as f64,
-            "reproductions" => |x| x.reproductions as f64,
             _ => return None,
         };
         Some(s.iter().map(f).collect())
@@ -462,7 +463,7 @@ pub fn timeseries(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<
             "prey_consumption_rate" => |m| m.prey_consumption_rate.unwrap_or(f64::NAN),
             "mi_sa" => |m| m.mi_sa.unwrap_or(f64::NAN),
             "learning_slope" => |m| m.learning_slope.unwrap_or(f64::NAN),
-            "interval_descendants" => |m| m.pop as f64,
+            "interval_population" => |m| m.pop as f64,
             _ => return None,
         };
         Some(intervals.iter().map(f).collect())
@@ -474,10 +475,10 @@ pub fn timeseries(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<
         let series = sample_col(name).or_else(|| interval_col(name));
         let mut series = series.ok_or_else(|| {
             anyhow!(
-                "unknown column `{name}`; valid: population descendants food births \
-                 deaths consumptions predations reproductions action_effectiveness \
+                "unknown column `{name}`; valid: population food \
+                 deaths consumptions predations action_effectiveness \
                  plant_consumption_rate prey_consumption_rate mi_sa learning_slope \
-                 interval_descendants"
+                 interval_population"
             )
         })?;
         if let Some(k) = last {

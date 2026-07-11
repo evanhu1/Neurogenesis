@@ -25,8 +25,7 @@ export type ActionType =
   | 'TurnRight'
   | 'Forward'
   | 'Eat'
-  | 'Attack'
-  | 'Reproduce';
+  | 'Attack';
 
 export type FoodKind = 'Plant' | 'Corpse';
 export type TerrainType = 'Mountain';
@@ -204,11 +203,9 @@ type OrganismStateOf<Id> = {
   max_health: number;
   energy_at_last_sensing: number;
   damage_taken_last_turn: number;
-  is_gestating: boolean;
   consumptions_count: number;
   plant_consumptions_count: number;
   prey_consumptions_count: number;
-  reproductions_count: number;
   last_action_taken: ActionType;
   base_metabolic_cost: number;
   brain: BrainStateOf<Id>;
@@ -230,11 +227,9 @@ type WorldOrganismStateOf<Id> = {
   health: number;
   max_health: number;
   damage_taken_last_turn: number;
-  is_gestating: boolean;
   consumptions_count: number;
   plant_consumptions_count: number;
   prey_consumptions_count: number;
-  reproductions_count: number;
   visual: VisualProperties;
 };
 
@@ -263,7 +258,6 @@ export type ApiMetricsSnapshot = {
   predations_last_turn: number;
   total_consumptions: number;
   total_plant_consumptions: number;
-  reproductions_last_turn: number;
   starvations_last_turn: number;
   age_deaths_last_turn: number;
 };
@@ -320,7 +314,6 @@ export type ChampionPoolEntry = {
   source_created_at_unix_ms: number;
   generation: number;
   age_turns: number;
-  reproductions_count: number;
   consumptions_count: number;
   energy: number;
 };
@@ -341,24 +334,6 @@ type EntityIdOf<Id> =
 
 export type ApiEntityId = EntityIdOf<ApiScalarId>;
 export type EntityId = EntityIdOf<number>;
-
-export type ReproductionFailureCause =
-  | 'InsufficientEnergy'
-  | 'Immature'
-  | 'BirthTargetBlockedByWall'
-  | 'BlockedBirth'
-  | 'ParentDied';
-
-export type ApiReproductionEvent = {
-  parent_id: ApiScalarId;
-  parent_species_id: ApiScalarId;
-  parent_age_turns: number;
-  parent_generation: number;
-  investment_energy: number;
-  parent_energy_after_event: number;
-  child_id: ApiScalarId | null;
-  failure_cause: ReproductionFailureCause | null;
-};
 
 type RemovedEntityPositionOf<Id> = {
   entity_id: EntityIdOf<Id>;
@@ -383,13 +358,11 @@ export type ApiTickDelta = {
   facing_updates: ApiOrganismFacing[];
   removed_positions: ApiRemovedEntityPosition[];
   spawned: ApiWorldOrganismState[];
-  reproduction_events: ApiReproductionEvent[];
   food_spawned: ApiFoodState[];
   metrics: ApiMetricsSnapshot;
 };
 
-// UI tick delta: reproduction_events are never read by the client, so
-// normalization drops them; metrics stay raw until applyTickDelta derives
+// UI tick delta: metrics stay raw until applyTickDelta derives
 // species counts from the updated organism list.
 export type TickDelta = {
   turn: number;

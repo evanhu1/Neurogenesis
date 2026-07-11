@@ -1,5 +1,4 @@
 use super::*;
-use crate::spawn::{ReproductionSpawn, SpawnRequest};
 use sim_types::TickDelta;
 
 pub(super) trait IntoEnergy {
@@ -149,11 +148,9 @@ pub(super) fn make_single_action_organism(
         max_health: initial_energy,
         energy_at_last_sensing: initial_energy,
         damage_taken_last_turn: 0.0,
-        is_gestating: false,
         consumptions_count: 0,
         plant_consumptions_count: 0,
         prey_consumptions_count: 0,
-        reproductions_count: 0,
         last_action_taken: ActionType::Idle,
         base_metabolic_cost: 0.0,
         #[cfg(feature = "instrumentation")]
@@ -190,11 +187,9 @@ pub(super) fn make_organism(
         max_health: initial_energy,
         energy_at_last_sensing: initial_energy,
         damage_taken_last_turn: 0.0,
-        is_gestating: false,
         consumptions_count: 0,
         plant_consumptions_count: 0,
         prey_consumptions_count: 0,
-        reproductions_count: 0,
         last_action_taken: ActionType::Idle,
         base_metabolic_cost: 0.0,
         #[cfg(feature = "instrumentation")]
@@ -204,57 +199,6 @@ pub(super) fn make_organism(
     })
 }
 
-pub(super) fn reproduction_request_from_parent(
-    sim: &Simulation,
-    parent_id: OrganismId,
-) -> SpawnRequest {
-    let parent = sim
-        .organisms
-        .iter()
-        .find(|organism| organism.id == parent_id)
-        .expect("parent should exist for reproduction request");
-    let (q, r) = crate::grid::hex_neighbor(
-        (parent.q, parent.r),
-        crate::grid::opposite_direction(parent.facing),
-        sim.config.world_width as i32,
-    );
-    SpawnRequest::Reproduction(Box::new(ReproductionSpawn {
-        offspring_genome: parent.genome.clone(),
-        offspring_generation: parent.generation.saturating_add(1),
-        parent_species_id: parent.species_id,
-        parent_facing: parent.facing,
-        offspring_starting_energy: sim_types::offspring_transfer_energy(
-            parent.genome.lifecycle.gestation_ticks,
-        ),
-        q,
-        r,
-    }))
-}
-
-pub(super) fn reproduction_request_at(
-    sim: &Simulation,
-    parent_id: OrganismId,
-    q: i32,
-    r: i32,
-) -> SpawnRequest {
-    let parent = sim
-        .organisms
-        .iter()
-        .find(|organism| organism.id == parent_id)
-        .expect("parent should exist for reproduction request");
-    SpawnRequest::Reproduction(Box::new(ReproductionSpawn {
-        offspring_genome: parent.genome.clone(),
-        offspring_generation: parent.generation.saturating_add(1),
-        parent_species_id: parent.species_id,
-        parent_facing: parent.facing,
-        offspring_starting_energy: sim_types::offspring_transfer_energy(
-            parent.genome.lifecycle.gestation_ticks,
-        ),
-        q,
-        r,
-    }))
-}
-
 pub(super) fn configure_sim(sim: &mut Simulation, mut organisms: Vec<OrganismState>) {
     let coeff = sim.config.body_mass_metabolic_cost_coeff;
     for organism in &mut organisms {
@@ -262,8 +206,6 @@ pub(super) fn configure_sim(sim: &mut Simulation, mut organisms: Vec<OrganismSta
     }
     organisms.sort_by_key(|organism| organism.id);
     sim.organisms = organisms;
-    sim.pending_actions = vec![PendingActionState::default(); sim.organisms.len()];
-    sim.pending_reproductions = (0..sim.organisms.len()).map(|_| None).collect();
     sim.foods.clear();
     sim.next_food_id = 0;
     sim.next_organism_id = sim

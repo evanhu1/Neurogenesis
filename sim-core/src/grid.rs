@@ -1,4 +1,4 @@
-use crate::{PendingActionState, Simulation};
+use crate::Simulation;
 use sim_types::FacingDirection;
 use sim_types::{Occupant, OrganismState};
 
@@ -83,17 +83,6 @@ fn wrap_neighbor(coord: i32, width: i32) -> i32 {
     }
 }
 
-pub(crate) fn opposite_direction(direction: FacingDirection) -> FacingDirection {
-    match direction {
-        FacingDirection::East => FacingDirection::West,
-        FacingDirection::NorthEast => FacingDirection::SouthWest,
-        FacingDirection::NorthWest => FacingDirection::SouthEast,
-        FacingDirection::West => FacingDirection::East,
-        FacingDirection::SouthWest => FacingDirection::NorthEast,
-        FacingDirection::SouthEast => FacingDirection::NorthWest,
-    }
-}
-
 impl Simulation {
     pub(crate) fn debug_assert_consistent_state(&self) {
         if cfg!(debug_assertions) {
@@ -169,8 +158,6 @@ impl Simulation {
 
         self.occupancy[cell_idx] = Some(Occupant::Organism(organism.id));
         self.organisms.push(organism);
-        self.pending_actions.push(PendingActionState::default());
-        self.pending_reproductions.push(None);
         true
     }
 

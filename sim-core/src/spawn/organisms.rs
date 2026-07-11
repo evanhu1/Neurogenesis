@@ -2,62 +2,26 @@ use super::*;
 use crate::metabolism::refresh_organism_base_metabolic_cost;
 
 impl Simulation {
-    /// Resolves queued spawn requests, returning outcomes aligned 1:1 with the
-    /// drained queue order: `Some(organism)` for each request that spawned and
-    /// `None` for each request whose target cell was occupied. Callers that
-    /// attribute children to parents positionally rely on this alignment.
-    pub(crate) fn resolve_spawn_requests(
-        &mut self,
-        queue: &mut Vec<SpawnRequest>,
-    ) -> Vec<Option<OrganismState>> {
-        let mut spawned = Vec::with_capacity(queue.len());
-        for request in queue.drain(..) {
-            let organism = match request {
-                SpawnRequest::Reproduction(reproduction) => {
-                    // Clonal birth: the child inherits the parent genome exactly.
-                    // All genetic variation is owned by the NEAT outer loop.
-                    self.build_organism(
-                        reproduction.offspring_genome,
-                        OrganismSpawnParams {
-                            species_id: Some(reproduction.parent_species_id),
-                            q: reproduction.q,
-                            r: reproduction.r,
-                            generation: reproduction.offspring_generation,
-                            facing: opposite_direction(reproduction.parent_facing),
-                            starting_energy_override: Some(reproduction.offspring_starting_energy),
-                        },
-                    )
-                }
-            };
-
-            // Move the organism into the grid; only successful adds pay for a
-            // clone (taken from the inserted element) for the returned vec.
-            let added = self.add_organism(organism);
-            spawned.push(added.then(|| {
-                self.organisms
-                    .last()
-                    .expect("add_organism pushed the organism on success")
-                    .clone()
-            }));
-        }
-
-        spawned
-    }
-
     pub(crate) fn spawn_initial_population(&mut self) {
         let mut open_positions = self.empty_positions();
         open_positions.shuffle(&mut self.rng);
         let initial_population = (self.config.num_organisms as usize).min(open_positions.len());
 
-        for _ in 0..initial_population {
+        for founder_slot in 0..initial_population {
             let (q, r) = open_positions
                 .pop()
                 .expect("initial population requires at least one unique cell per organism");
-            // Founders draw from the champion pool when one is provided (NEAT
-            // seeds a clonal colony from a single candidate; the server seeds a
-            // diverse population from its pool), otherwise from a fresh seed
-            // genome. In-world variation no longer exists — genetic diversity is
-            // owned by the NEAT outer loop.
+            // Founders draw from the champion pool when one is provided,
+            // otherwise from a fresh seed genome. In-world variation no longer
+            // exists — genetic diversity is owned by the NEAT outer loop.
+            //
+            // Pool assignment is round-robin (founder `k` uses pool entry
+            // `k % len`) rather than random. This gives every pool genome an
+            // even founder share AND makes lineage attributable without a new
+            // field: a founder takes its own id as species_id and descendants
+            // inherit it, so any organism's source pool entry is
+            // `species_id % pool_len` — used by competitive NEAT evaluation. A
+            // single-entry pool (the clonal colony) is unchanged.
             let genome = if self.champion_pool.is_empty() {
                 generate_seed_genome(
                     &self.config.seed_genome_config,
@@ -65,8 +29,7 @@ impl Simulation {
                     &mut self.rng,
                 )
             } else {
-                let idx = self.rng.random_range(0..self.champion_pool.len());
-                self.champion_pool[idx].clone()
+                self.champion_pool[founder_slot % self.champion_pool.len()].clone()
             };
             let facing = self.random_facing();
             let organism = self.build_organism(
@@ -113,11 +76,9 @@ impl Simulation {
             max_health,
             energy_at_last_sensing: starting_energy,
             damage_taken_last_turn: 0.0,
-            is_gestating: false,
             consumptions_count: 0,
             plant_consumptions_count: 0,
             prey_consumptions_count: 0,
-            reproductions_count: 0,
             last_action_taken: ActionType::Idle,
             base_metabolic_cost: 0.0,
             #[cfg(feature = "instrumentation")]
@@ -155,4 +116,3 @@ impl Simulation {
         positions
     }
 }
-

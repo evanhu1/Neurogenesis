@@ -8,32 +8,26 @@ use crate::schema::OrganismLifetimeRow;
 use sim_types::{ActionRecord, EntityId, OrganismState, TickDelta};
 
 /// Register the initial founder population with the ledger before the tick
-/// loop. Founders are born at tick 0, which marks them `InitialFounder`. Use
-/// this when recording starts from turn 0 (exact eval parity).
+/// loop. Use this when recording starts from turn 0 (exact eval parity).
 pub fn register_founders(ledger: &mut Ledger, organisms: &[OrganismState]) {
     for organism in organisms {
-        ledger.birth(organism.id, 0);
+        ledger.birth(organism.id);
     }
 }
 
-/// Register an already-alive population when recording starts mid-run, inferring
-/// each organism's origin from its `generation` (see [`Ledger::register_existing`]).
+/// Register an already-alive population when recording starts mid-run.
 /// Resulting lifetime windows are partial and should be labelled as such.
 pub fn register_existing(ledger: &mut Ledger, organisms: &[OrganismState]) {
     for organism in organisms {
-        ledger.register_existing(organism.id, organism.generation);
+        ledger.register_existing(organism.id);
     }
 }
 
 /// Feed one tick's emissions into the ledger and return the lifetime rows for
 /// organisms that died this tick, in `delta.removed_positions` order, for the
-/// caller to persist or collect.
-///
-/// The call order — actions, then reproductions, then births, then deaths —
-/// is load-bearing: reproductions register child→parent edges that the
-/// following births consume to classify descendants. `action_records` is the
-/// per-organism slice from `Simulation::action_records()` (index-aligned to
-/// `organisms()`); `delta` is the value returned by `Simulation::tick()`.
+/// caller to persist or collect. `action_records` is the per-organism slice
+/// from `Simulation::action_records()` (index-aligned to `organisms()`);
+/// `delta` is the value returned by `Simulation::tick()`.
 pub fn ingest_tick(
     ledger: &mut Ledger,
     tick: u64,
@@ -43,11 +37,8 @@ pub fn ingest_tick(
     for record in action_records.iter().flatten() {
         ledger.record_action(record);
     }
-    for event in &delta.reproduction_events {
-        ledger.record_reproduction(event);
-    }
     for spawned in &delta.spawned {
-        ledger.birth(spawned.id, tick);
+        ledger.birth(spawned.id);
     }
     let mut deaths = Vec::new();
     for removed in &delta.removed_positions {

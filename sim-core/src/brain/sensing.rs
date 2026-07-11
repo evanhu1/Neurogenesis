@@ -204,8 +204,6 @@ mod tests {
             max_health,
             max_health,
             0.0,
-            false,
-            0,
             0,
             0,
             0,

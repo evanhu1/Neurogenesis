@@ -131,6 +131,10 @@ pub fn brain(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
     }
 
     let sim = ctx.sim;
+    // Within-life learning is a world-level toggle; when off, the plasticity
+    // genes and eligibility traces are inert and synapse weights stay at their
+    // birth values. Surfaced in the plasticity/synapse views below.
+    let plasticity_enabled = sim.config().runtime_plasticity_enabled;
     let idx = sim
         .organisms()
         .iter()
@@ -140,8 +144,8 @@ pub fn brain(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
     let o = &sim.organisms()[idx];
 
     match view {
-        BrainView::Summary => brain_summary(o, rec.as_ref(), fmt, out),
-        BrainView::Synapses => brain_synapses(o, fmt, out),
+        BrainView::Summary => brain_summary(o, rec.as_ref(), plasticity_enabled, fmt, out),
+        BrainView::Synapses => brain_synapses(o, plasticity_enabled, fmt, out),
         BrainView::Activations => brain_activations(o, fmt, out),
         BrainView::Dot => brain_dot(o, fmt, out),
     }
@@ -298,13 +302,12 @@ const DEFAULT_FIND_FIELDS: &[&str] = &[
     "age",
     "generation",
     "consumptions",
-    "reproductions",
 ];
 
 /// All field names accepted by `find` predicates and `--fields` columns. Shown
 /// in error messages so the command is self-documenting.
 const FIND_FIELDS: &str = "id energy health max_health age generation species \
-    consumptions plant prey reproductions neurons synapses vision hebb_eta gestating";
+    consumptions plant prey neurons synapses vision hebb_eta";
 
 /// Whether `name` is a known numeric field. The same table validates both
 /// predicate fields and `--fields` columns; `org_field` maps each to a value.
@@ -320,12 +323,10 @@ fn is_field(name: &str) -> bool {
             | "consumptions"
             | "plant"
             | "prey"
-            | "reproductions"
             | "neurons"
             | "synapses"
             | "vision"
             | "hebb_eta"
-            | "gestating"
     )
 }
 
@@ -343,26 +344,18 @@ fn org_field(o: &OrganismState, name: &str) -> f64 {
         "consumptions" => o.consumptions_count as f64,
         "plant" => o.plant_consumptions_count as f64,
         "prey" => o.prey_consumptions_count as f64,
-        "reproductions" => o.reproductions_count as f64,
         "neurons" => o.genome.hidden_node_count() as f64,
         "synapses" => o.brain.synapse_count as f64,
         "vision" => o.genome.topology.vision_distance as f64,
         "hebb_eta" => o.genome.plasticity.hebb_eta_gain as f64,
-        "gestating" => {
-            if o.is_gestating {
-                1.0
-            } else {
-                0.0
-            }
-        }
         _ => f64::NAN,
     }
 }
 
 fn field_text(o: &OrganismState, name: &str) -> String {
     match name {
-        "id" | "age" | "generation" | "species" | "consumptions" | "plant" | "prey"
-        | "reproductions" | "neurons" | "synapses" | "vision" | "gestating" => {
+        "id" | "age" | "generation" | "species" | "consumptions" | "plant" | "prey" | "neurons"
+        | "synapses" | "vision" => {
             format!("{}", org_field(o, name) as i64)
         }
         "hebb_eta" => format!("{:.4}", org_field(o, name)),
@@ -372,9 +365,8 @@ fn field_text(o: &OrganismState, name: &str) -> String {
 
 fn field_json(o: &OrganismState, name: &str) -> Value {
     match name {
-        "id" | "age" | "generation" | "species" | "consumptions" | "plant" | "prey"
-        | "reproductions" | "neurons" | "synapses" | "vision" => json!(org_field(o, name) as u64),
-        "gestating" => json!(o.is_gestating),
+        "id" | "age" | "generation" | "species" | "consumptions" | "plant" | "prey" | "neurons"
+        | "synapses" | "vision" => json!(org_field(o, name) as u64),
         _ => json!(org_field(o, name)),
     }
 }
@@ -629,6 +621,7 @@ fn all_edges(o: &OrganismState) -> Vec<&SynapseEdge> {
 fn brain_summary(
     o: &OrganismState,
     rec: Option<&sim_types::ActionRecord>,
+    plasticity_enabled: bool,
     fmt: Format,
     out: &mut impl Write,
 ) -> Result<()> {
@@ -666,6 +659,7 @@ fn brain_summary(
             "top_synapses": top_json,
             "alpha": if b.inter.is_empty() { Value::Null } else { json!({ "min": alpha_min, "max": alpha_max }) },
             "plasticity": {
+                "runtime_plasticity_enabled": plasticity_enabled,
                 "hebb_eta_gain": g.hebb_eta_gain,
                 "juvenile_eta_scale": g.juvenile_eta_scale,
                 "eligibility_retention": g.eligibility_retention,
@@ -708,9 +702,14 @@ fn brain_summary(
     } else {
         writeln!(out, "  alpha range: [{alpha_min:.3}, {alpha_max:.3}]")?;
     }
+    let plasticity_tag = if plasticity_enabled {
+        ""
+    } else {
+        "  [runtime_plasticity_enabled disabled — weights static, no within-life learning]"
+    };
     writeln!(
         out,
-        "  plasticity: hebb_eta={:.4} juv_scale={:.3} elig_ret={:.3} max_dw={:.4} prune={:.4} -> effective_eta={:.5}",
+        "  plasticity: hebb_eta={:.4} juv_scale={:.3} elig_ret={:.3} max_dw={:.4} prune={:.4} -> effective_eta={:.5}{plasticity_tag}",
         g.hebb_eta_gain,
         g.juvenile_eta_scale,
         g.eligibility_retention,
@@ -725,7 +724,12 @@ fn brain_summary(
     Ok(())
 }
 
-fn brain_synapses(o: &OrganismState, fmt: Format, out: &mut impl Write) -> Result<()> {
+fn brain_synapses(
+    o: &OrganismState,
+    plasticity_enabled: bool,
+    fmt: Format,
+    out: &mut impl Write,
+) -> Result<()> {
     let mut edges = all_edges(o);
     edges.sort_by(|a, b| {
         a.pre_neuron_id
@@ -747,7 +751,11 @@ fn brain_synapses(o: &OrganismState, fmt: Format, out: &mut impl Write) -> Resul
                 })
             })
             .collect();
-        let v = json!({ "id": o.id.0, "synapses": rows });
+        let v = json!({
+            "id": o.id.0,
+            "runtime_plasticity_enabled": plasticity_enabled,
+            "synapses": rows,
+        });
         return writeln!(out, "{v}").map_err(Into::into);
     }
 
@@ -757,6 +765,12 @@ fn brain_synapses(o: &OrganismState, fmt: Format, out: &mut impl Write) -> Resul
         o.id.0,
         edges.len()
     )?;
+    if !plasticity_enabled {
+        writeln!(
+            out,
+            "  [runtime_plasticity_enabled disabled — weights are static within lifetime; elig/pending are inert]"
+        )?;
+    }
     for e in &edges {
         writeln!(
             out,

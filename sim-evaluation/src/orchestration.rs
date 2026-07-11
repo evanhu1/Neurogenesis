@@ -210,14 +210,14 @@ fn run_single_seed_evaluation(
 
         writer.emit_tick(TickSummaryRow {
             tick,
-            descendant_population: ledger.descendant_population(),
+            population: ledger.population(),
         });
 
         let flush_tick = tick % options.report_every == 0 || tick == options.ticks;
         if flush_tick {
-            // Genome snapshot of the top reproducer only at flush boundaries —
+            // Genome snapshot of the top forager only at flush boundaries —
             // iterating every organism is expensive.
-            if let Some(top) = ledger.top_reproducer() {
+            if let Some(top) = ledger.top_forager() {
                 if let Ok(idx) = sim
                     .organisms()
                     .binary_search_by_key(&sim_types::OrganismId(top.id), |o| o.id)
@@ -228,7 +228,7 @@ fn run_single_seed_evaluation(
                         organism.id.0,
                         organism.species_id.0,
                         organism.generation,
-                        top.num_offspring,
+                        top.total_consumptions(),
                         &organism.genome,
                     )?;
                 }

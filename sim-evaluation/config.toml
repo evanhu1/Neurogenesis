@@ -36,7 +36,7 @@ mate_compatibility_threshold = 1.0
 # Flags for running experiments.
 [flags]
 meta_mutation_enabled = true
-runtime_plasticity_enabled = true
+runtime_plasticity_enabled = false
 leaky_neurons_enabled = false
 predation_enabled = false
 force_random_actions = false

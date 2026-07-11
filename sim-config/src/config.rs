@@ -76,7 +76,7 @@ pub fn world_config_defaults() -> WorldConfigDefaults {
             terrain_threshold: 0.86,
         },
         flags: FlagsDefaults {
-            runtime_plasticity_enabled: true,
+            runtime_plasticity_enabled: false,
             leaky_neurons_enabled: false,
             predation_enabled: false,
             force_random_actions: false,

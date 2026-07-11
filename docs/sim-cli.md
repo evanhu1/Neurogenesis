@@ -118,7 +118,9 @@ cargo build -p sim-cli --release        # --release strongly recommended
 - **Nothing is written unless you `save`.** A bare `save` writes back to the
   opened `--in` file (`--new` worlds require an explicit `save <path>`); the
   metric sidecar follows automatically.
-- Keys: `Up`/`Down` history · `PageUp`/`PageDown` scroll · `Ctrl-C` quit.
+- Keys: `Up`/`Down` scroll the output (wrapped), `PageUp`/`PageDown` by a page,
+  `Home`/`End` top/bottom · `Ctrl-P`/`Ctrl-N` command history · `Ctrl-C` quit.
+  Long output lines wrap; new output snaps the view back to the bottom.
 - Scripting/verification: `tui … --exec "cmd; cmd; …"` runs a `;`-separated
   sequence headlessly (no terminal) and prints the resulting output — handy for
   smoke tests or reproducible sessions.

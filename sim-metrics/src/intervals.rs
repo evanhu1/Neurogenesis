@@ -11,20 +11,19 @@
 //! in-memory ledger output).
 
 use crate::schema::{
-    OrganismLifetimeRow, TickSummaryRow, ACTION_COUNT, DESCENDANT_CODE, JOINT_LEN,
-    SENSORY_BIN_COUNT,
+    OrganismLifetimeRow, TickSummaryRow, ACTION_COUNT, JOINT_LEN, SENSORY_BIN_COUNT,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
 
 /// One row per reporting interval — the primary timeseries format consumed by
-/// reports, comparisons, and the CSV export. Derived by pooling descendant
+/// reports, comparisons, and the CSV export. Derived by pooling organism
 /// lifetime rows per death-tick interval. Every rate uses total actions taken
 /// as the denominator.
 #[derive(Debug, Clone, Serialize)]
 pub struct IntervalMetrics {
     pub tick: u64,
-    /// Descendant population (viability context, not a competence score).
+    /// Living population (viability context, not a competence score).
     pub pop: u32,
     /// Successful contingent actions / total actions. Idling and spinning
     /// self-penalise because they inflate the denominator without succeeding.
@@ -66,11 +65,11 @@ pub fn derive_interval_metrics(
         .map(IntervalAccumulator::new)
         .collect();
 
-    // `pop` context: the descendant population reported nearest each interval
+    // `pop` context: the living population reported nearest each interval
     // end (the per-tick line).
     let mut pop_by_tick: BTreeMap<u64, u32> = BTreeMap::new();
     for row in tick_summary {
-        pop_by_tick.insert(row.tick, row.descendant_population);
+        pop_by_tick.insert(row.tick, row.population);
     }
     for acc in accs.iter_mut() {
         acc.pop = pop_by_tick
@@ -81,9 +80,6 @@ pub fn derive_interval_metrics(
     }
 
     for row in organism_lifetimes {
-        if row.origin != DESCENDANT_CODE {
-            continue;
-        }
         let Some(death_tick) = row.death_tick else {
             continue;
         };

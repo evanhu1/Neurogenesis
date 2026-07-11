@@ -14,11 +14,13 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::{DefaultTerminal, Frame};
+use sim_core::{run_neat, NeatConfig, Simulation};
 use sim_views::output::Format;
 use sim_views::{
     food_summary, load_sidecar, load_world, resolve_metrics_path, save_sidecar, save_world,
     sibling_metrics_path,
 };
+use std::cell::Cell;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -48,6 +50,10 @@ enum Submit {
     Handled,
     /// Advance the world this many ticks (chunked + cancellable in the UI).
     Advance(u64),
+    /// Run a NEAT search (the given args), then replace the resident world with
+    /// a colony seeded from the champion. Driven from the event loop so it can
+    /// paint per-generation progress.
+    Neat(Vec<String>),
     /// Exit the session.
     Quit,
 }
@@ -61,8 +67,11 @@ struct Session {
     history: Vec<String>,
     /// Index into `history` while recalling; `None` = editing a fresh line.
     history_pos: Option<usize>,
-    /// Lines scrolled up from the bottom of the scrollback (0 = pinned bottom).
-    scroll: usize,
+    /// Wrapped output rows scrolled up from the bottom (0 = pinned to bottom).
+    scroll: u16,
+    /// Max scrollable offset from the last render (wrapped rows − viewport
+    /// height), so key handlers can clamp `scroll` without knowing the area.
+    max_scroll: Cell<u16>,
     dirty: bool,
     status: StatusLine,
     /// Set after a `quit` with unsaved changes; a second confirms.
@@ -72,9 +81,9 @@ struct Session {
 #[derive(Default, Clone)]
 struct StatusLine {
     turn: u64,
+    world_width: u32,
     population: usize,
     plants: u64,
-    mean_energy: f64,
 }
 
 impl Session {
@@ -160,6 +169,7 @@ impl Session {
             history: Vec::new(),
             history_pos: None,
             scroll: 0,
+            max_scroll: Cell::new(0),
             dirty: false,
             status: StatusLine::default(),
             quit_armed: false,
@@ -207,17 +217,11 @@ impl Session {
             return;
         };
         let (plants, _corpses, _food_energy) = food_summary(sim);
-        let orgs = sim.organisms();
-        let mean_energy = if orgs.is_empty() {
-            0.0
-        } else {
-            orgs.iter().map(|o| o.energy as f64).sum::<f64>() / orgs.len() as f64
-        };
         self.status = StatusLine {
             turn: sim.turn(),
-            population: orgs.len(),
+            world_width: sim.config().world_width,
+            population: sim.organisms().len(),
             plants,
-            mean_energy,
         };
     }
 
@@ -230,7 +234,10 @@ impl Session {
         let line = raw.trim();
         // Echo the prompt line (unless it is the auto-run of an empty line).
         self.push_line(Line::from(vec![
-            Span::styled("> ", Style::default().fg(COL_PROMPT).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "> ",
+                Style::default().fg(COL_PROMPT).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(line.to_string(), Style::default().fg(COL_PROMPT)),
         ]));
         if line.is_empty() {
@@ -253,7 +260,9 @@ impl Session {
             "quit" | "exit" | "q" => {
                 if self.dirty && !self.quit_armed {
                     self.quit_armed = true;
-                    self.push_info("unsaved changes — `save` to persist, or `quit` again to discard.");
+                    self.push_info(
+                        "unsaved changes — `save` to persist, or `quit` again to discard.",
+                    );
                     Submit::Handled
                 } else {
                     Submit::Quit
@@ -274,7 +283,9 @@ impl Session {
                 Submit::Handled
             }
             "query" => {
-                self.push_error("`query` is a batch mode for the one-shot CLI; just type commands here.");
+                self.push_error(
+                    "`query` is a batch mode for the one-shot CLI; just type commands here.",
+                );
                 Submit::Handled
             }
             "step" | "run-to" => match self.advance_target(cmd, &args) {
@@ -288,6 +299,7 @@ impl Session {
                     Submit::Handled
                 }
             },
+            "neat" => Submit::Neat(args.iter().map(|a| a.to_string()).collect()),
             _ => {
                 self.run_reused(cmd, &args);
                 Submit::Handled
@@ -338,7 +350,10 @@ impl Session {
     }
 
     fn handle_save(&mut self, arg_path: Option<&str>) {
-        let path = match arg_path.map(str::to_string).or_else(|| self.save_path.clone()) {
+        let path = match arg_path
+            .map(str::to_string)
+            .or_else(|| self.save_path.clone())
+        {
             Some(p) => p,
             None => {
                 self.push_error("save: no path — this world was `--new`; use `save <path>`.");
@@ -377,7 +392,8 @@ commands (same vocabulary as the one-shot CLI):
   advance     step [N]   run-to T        (Esc cancels a long run)
   other       watch T [--every E]        bench [N]
   session     save [path]  clear  help  quit  (quit! discards unsaved changes)
-keys          Up/Down history · PageUp/PageDown scroll · Ctrl-C quit";
+keys          Up/Down scroll output · PageUp/PageDown page · Home/End top/bottom
+              Ctrl-P/Ctrl-N command history · Ctrl-C quit";
         self.push_info(help);
     }
 
@@ -396,6 +412,7 @@ keys          Up/Down history · PageUp/PageDown scroll · Ctrl-C quit";
                     self.refresh_status();
                     self.push_info(&format!("advanced → {}", self.status.turn));
                 }
+                Submit::Neat(args) => self.run_neat_command(None, &args)?,
                 Submit::Quit => break,
                 Submit::Handled => {}
             }
@@ -432,8 +449,16 @@ keys          Up/Down history · PageUp/PageDown scroll · Ctrl-C quit";
             if key.kind != KeyEventKind::Press {
                 continue;
             }
-            if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-                return Ok(());
+            // Ctrl combos: quit, and readline-style command history (Up/Down are
+            // reserved for scrolling the output).
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                match key.code {
+                    KeyCode::Char('c') => return Ok(()),
+                    KeyCode::Char('p') => self.recall_history(-1),
+                    KeyCode::Char('n') => self.recall_history(1),
+                    _ => {}
+                }
+                continue;
             }
             match key.code {
                 KeyCode::Enter => {
@@ -442,6 +467,7 @@ keys          Up/Down history · PageUp/PageDown scroll · Ctrl-C quit";
                     match self.submit(&line) {
                         Submit::Quit => return Ok(()),
                         Submit::Advance(n) => self.run_advance(terminal, n)?,
+                        Submit::Neat(args) => self.run_neat_command(Some(terminal), &args)?,
                         Submit::Handled => {}
                     }
                 }
@@ -449,10 +475,14 @@ keys          Up/Down history · PageUp/PageDown scroll · Ctrl-C quit";
                 KeyCode::Backspace => {
                     self.input.pop();
                 }
-                KeyCode::Up => self.recall_history(-1),
-                KeyCode::Down => self.recall_history(1),
-                KeyCode::PageUp => self.scroll = self.scroll.saturating_add(10),
+                // Arrows / PageUp/PageDown scroll the output pane (rows up from
+                // the bottom), clamped to the last render's scrollable range.
+                KeyCode::Up => self.scroll_by(1),
+                KeyCode::Down => self.scroll = self.scroll.saturating_sub(1),
+                KeyCode::PageUp => self.scroll_by(10),
                 KeyCode::PageDown => self.scroll = self.scroll.saturating_sub(10),
+                KeyCode::Home => self.scroll = self.max_scroll.get(),
+                KeyCode::End => self.scroll = 0,
                 KeyCode::Esc => self.input.clear(),
                 _ => {}
             }
@@ -496,6 +526,126 @@ keys          Up/Down history · PageUp/PageDown scroll · Ctrl-C quit";
         Ok(())
     }
 
+    /// Run a NEAT search over the resident world's config, painting each
+    /// generation's fitness into the scrollback, then reseed the resident world
+    /// with a colony grown from the champion so it can be run/inspected in place.
+    /// Blocks the UI for the run's duration (sized small by default).
+    fn run_neat_command(
+        &mut self,
+        mut terminal: Option<&mut DefaultTerminal>,
+        args: &[String],
+    ) -> Result<()> {
+        let Some(sim) = self.app.sim.as_ref() else {
+            self.push_error("neat: no world loaded");
+            return Ok(());
+        };
+        // Evolve for the resident world's config (its food/scarcity/predation
+        // settings carry through). `--scale` overrides size for the eval worlds.
+        let mut world = sim.config().clone();
+        // Interactive defaults: small so a run finishes quickly. Override with
+        // flags. eval_opponents keeps H1's competitive survival objective on.
+        let mut config = NeatConfig {
+            generations: 8,
+            population_size: 20,
+            episode_ticks: 300,
+            ..NeatConfig::default()
+        };
+        let mut seed = 0u64;
+        let mut i = 0;
+        while i < args.len() {
+            let val = |i: usize| -> Result<&str> {
+                args.get(i + 1)
+                    .map(String::as_str)
+                    .ok_or_else(|| anyhow!("{} needs a value", args[i]))
+            };
+            match args[i].as_str() {
+                "--generations" | "-g" => config.generations = val(i)?.parse()?,
+                "--population" | "-p" => config.population_size = val(i)?.parse()?,
+                "--episode-ticks" | "-t" => config.episode_ticks = val(i)?.parse()?,
+                "--opponents" | "-o" => config.eval_opponents = val(i)?.parse()?,
+                "--seed" | "-s" => seed = val(i)?.parse()?,
+                "--scale" => {
+                    let (w, p) = val(i)?
+                        .split_once(',')
+                        .ok_or_else(|| anyhow!("--scale needs W,POP"))?;
+                    world.world_width = w.parse()?;
+                    world.num_organisms = p.parse()?;
+                }
+                "--help" | "-h" => {
+                    self.push_info(
+                        "neat [-g gens] [-p pop] [-t episode_ticks] [-o opponents] [-s seed] [--scale W,POP]\n  evolves survival champions for this world's config, then reseeds the resident world with the champion colony.",
+                    );
+                    return Ok(());
+                }
+                other => {
+                    self.push_error(&format!("neat: unknown arg `{other}` (try `neat --help`)"));
+                    return Ok(());
+                }
+            }
+            i += 2;
+        }
+        if let Err(e) = config.validate() {
+            self.push_error(&format!("neat: invalid config: {e}"));
+            return Ok(());
+        }
+
+        self.push_info(&format!(
+            "neat: pop {} · {} generations · {} ticks/ep · {} opponents · seed {} — running (UI blocks)…",
+            config.population_size, config.generations, config.episode_ticks, config.eval_opponents, seed
+        ));
+        if let Some(t) = terminal.as_deref_mut() {
+            let _ = t.draw(|f| self.render(f, None));
+        }
+
+        let seed_world = world.clone();
+        let started = Instant::now();
+        let outcome = run_neat(config, world, seed, |gen| {
+            self.push_line(Line::from(Span::styled(
+                format!(
+                    "  gen {:>3}: best {:.3} · mean {:.3} · species {}",
+                    gen.generation,
+                    gen.best_fitness,
+                    gen.mean_fitness,
+                    gen.species.len()
+                ),
+                Style::default().fg(COL_INFO),
+            )));
+            if let Some(t) = terminal.as_deref_mut() {
+                let _ = t.draw(|f| self.render(f, None));
+            }
+        });
+
+        let result = match outcome {
+            Ok(result) => result,
+            Err(e) => {
+                self.push_error(&format!("neat failed: {e}"));
+                return Ok(());
+            }
+        };
+        let secs = started.elapsed().as_secs_f64();
+
+        match Simulation::new_with_champion_pool(seed_world, seed, vec![result.champion_genome]) {
+            Ok(champion_sim) => {
+                self.app.sim = Some(champion_sim);
+                self.app.start_recording()?;
+                self.dirty = true;
+                self.refresh_status();
+                self.push_info(&format!(
+                    "neat done ({secs:.1}s): champion survival {:.3} (gen {}). Resident world reseeded with the champion colony — run-to / inspect / brain it.",
+                    result.champion_fitness, result.champion_generation
+                ));
+            }
+            Err(e) => self.push_error(&format!("neat: seeding champion world failed: {e}")),
+        }
+        Ok(())
+    }
+
+    /// Scroll the output up by `rows`, clamped to the last render's max offset
+    /// so scrolling past the top doesn't accumulate dead presses.
+    fn scroll_by(&mut self, rows: u16) {
+        self.scroll = self.scroll.saturating_add(rows).min(self.max_scroll.get());
+    }
+
     fn recall_history(&mut self, dir: i32) {
         if self.history.is_empty() {
             return;
@@ -535,8 +685,11 @@ keys          Up/Down history · PageUp/PageDown scroll · Ctrl-C quit";
             None => String::new(),
         };
         let text = format!(
-            " t={} · pop {} · plants {} · energy {:.0}{dirty}{running}",
-            self.status.turn, self.status.population, self.status.plants, self.status.mean_energy
+            " {w}×{w} · t={} · pop {} · plants {}{dirty}{running}",
+            self.status.turn,
+            self.status.population,
+            self.status.plants,
+            w = self.status.world_width,
         );
         let bar = Paragraph::new(text).style(
             Style::default()
@@ -549,14 +702,25 @@ keys          Up/Down history · PageUp/PageDown scroll · Ctrl-C quit";
 
     fn render_output(&self, frame: &mut Frame, area: Rect) {
         let block = Block::bordered().title(" output ");
+        let inner_w = area.width.saturating_sub(2) as usize;
         let inner_h = area.height.saturating_sub(2) as usize;
-        let total = self.scrollback.len();
-        let max_top = total.saturating_sub(inner_h);
-        let top = max_top.saturating_sub(self.scroll);
+        // Pre-wrap every logical line to the pane width so long output never
+        // overflows the right edge. Wrapping ourselves (rather than letting
+        // Paragraph wrap) keeps the row math exact, so the newest line is always
+        // visible and scroll counts real screen rows.
+        let rows: Vec<Line> = self
+            .scrollback
+            .iter()
+            .flat_map(|line| wrap_line(line, inner_w))
+            .collect();
+        let total = rows.len();
+        let max_offset = total.saturating_sub(inner_h);
+        self.max_scroll
+            .set(max_offset.min(u16::MAX as usize) as u16);
+        let top = max_offset.saturating_sub(self.scroll as usize);
         let end = (top + inner_h).min(total);
-        let visible: Vec<Line> = self.scrollback[top..end].to_vec();
-        let para = Paragraph::new(Text::from(visible)).block(block);
-        frame.render_widget(para, area);
+        let visible = rows[top..end].to_vec();
+        frame.render_widget(Paragraph::new(Text::from(visible)).block(block), area);
     }
 
     fn render_input(&self, frame: &mut Frame, area: Rect) {
@@ -572,4 +736,34 @@ keys          Up/Down history · PageUp/PageDown scroll · Ctrl-C quit";
 /// Flatten a styled line back to its plain text (headless output).
 fn line_to_plain(line: &Line) -> String {
     line.spans.iter().map(|s| s.content.as_ref()).collect()
+}
+
+/// Hard-wrap one styled line into `width`-column rows, preserving span styles.
+/// Character-based (not word-aware), which is fine for the structured sim output
+/// and keeps row counts exact. An empty line yields one empty row.
+fn wrap_line(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
+    let width = width.max(1);
+    let mut rows: Vec<Line<'static>> = Vec::new();
+    let mut cur: Vec<Span<'static>> = Vec::new();
+    let mut cur_w = 0usize;
+    for span in &line.spans {
+        let style = span.style;
+        let mut buf = String::new();
+        for ch in span.content.chars() {
+            if cur_w == width {
+                if !buf.is_empty() {
+                    cur.push(Span::styled(std::mem::take(&mut buf), style));
+                }
+                rows.push(Line::from(std::mem::take(&mut cur)));
+                cur_w = 0;
+            }
+            buf.push(ch);
+            cur_w += 1;
+        }
+        if !buf.is_empty() {
+            cur.push(Span::styled(buf, style));
+        }
+    }
+    rows.push(Line::from(cur));
+    rows
 }

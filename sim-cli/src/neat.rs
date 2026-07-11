@@ -21,7 +21,7 @@ per_connection_weight_mutation_probability mutate_bias_probability bias_perturb_
 mutate_time_constant_probability time_constant_perturb_stddev add_connection_probability \
 add_node_probability disabled_inheritance_probability stagnation_generations \
 young_species_grace_generations min_young_species_offspring \
-elitism_min_species_size";
+elitism_min_species_size eval_opponents";
 
 /// Canonical generational NEAT runner. It owns no persistent world: each
 /// candidate is evaluated in deterministic fixed-seed episodes, and the durable
@@ -156,7 +156,12 @@ pub(crate) fn run_neat_cli(args: &[&str], out_dir: &str, out: &mut impl Write) -
             "workers": neat.evaluator_workers,
             "world_width": world.world_width,
             "founder_cohort_size": world.num_organisms,
-            "objective": "lower_tail_mean_log_maturity_reached_offspring_per_founder",
+            "objective": if neat.eval_opponents > 0 {
+                "lower_tail_mean_competitive_survival_fraction"
+            } else {
+                "lower_tail_mean_survival_fraction"
+            },
+            "eval_opponents": neat.eval_opponents,
             "scenarios": neat.scenarios,
         })
     );
@@ -633,6 +638,7 @@ fn apply_neat_param(config: &mut NeatConfig, key: &str, value: &str) -> Result<(
         }
         "min_young_species_offspring" => config.min_young_species_offspring = value.parse()?,
         "elitism_min_species_size" => config.elitism_min_species_size = value.parse()?,
+        "eval_opponents" => config.eval_opponents = value.parse()?,
         _ => bail!("unknown NEAT parameter `{key}`; valid: {PARAMS}"),
     }
     Ok(())
