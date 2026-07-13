@@ -226,17 +226,31 @@ cargo build -p sim-cli --release        # --release strongly recommended
   restores pose and clears task entities before every tick, enforces an empty
   delay, and then requires committed left/right turns in the remembered order
   under an identical two-food choice scene. Search and sealed admission use
-  disjoint world seeds and evidence IDs. The task program and both panels are
-  fingerprinted before search. Archived-solver prefiltering uses only search;
-  the first proposal selected by search plus all-history replay receives one
-  sealed audit, whose verdict ends the stage. The durable JSON includes every
-  context trace, core and task-intervention energy rows, eight explicit
-  complement pairs sharing the same world/action stream within each pair,
-  exact preceding-controller knockout, full brain reset, cue-symbol
-  relabeling, complement-cue donor-brain swap (including the donor's complete
-  cue/delay trace and brain-state fingerprint), random/replay/semantic/nuisance
-  controls, mechanism-level slice lesions, all-history crossplay, and paired
-  fixed-ecology results.
+  disjoint world seeds and evidence IDs, but are not claimed to have disjoint
+  semantic histories: admission is a sealed world/RNG/pose replication panel,
+  and at rank 4 both panels exhaust the same 16 histories. The JSON records
+  search/admission unique-history and overlap counts. The evaluator-contract
+  version, task program, exact task/ecology `WorldConfig`s, ecology horizon,
+  and both panels are fingerprinted before search. Archived-solver prefiltering
+  uses only search; the first proposal selected by search plus all-history
+  replay receives one sealed audit, whose verdict ends the stage. Outer seeds
+  must be unique.
+
+  The durable JSON includes exact initial, proposed, admitted, and knockout
+  genomes; every context trace; every sensory receptor activation; all action
+  logits, the action temperature, and the exact deterministic action-sample
+  value; a gate requiring every normal response to be the unique raw-logit
+  argmax with at least `0.1` margin over every other action and explicit idle;
+  core and task-intervention energy rows; eight explicit complement
+  pairs sharing the same world/action stream within each pair; exact
+  preceding-controller knockout; full brain reset; complement-cue donor-brain
+  swap (including the donor's complete cue/delay trace and brain-state
+  fingerprint); random/replay/semantic/nuisance controls; mechanism-level
+  slice lesions; all-history crossplay; and paired fixed-ecology results. The
+  ecology gate is per seed: survival ticks, plant captures, and final organism
+  energy must each be noninferior, with energy compared using a
+  `32 * f32::EPSILON * max(|before|, |after|, 1)` tolerance. The preceding
+  controller must capture at least one plant across the four ecology seeds.
 
   The command is deliberately fail-closed about scope: the curriculum and
   response rule are predeclared, the current vertical slice scores committed
@@ -244,8 +258,10 @@ cargo build -p sim-cli --release        # --release strongly recommended
   canonical Mealy-machine quotienting. The `2^n` histories and `n`-bit exact
   memory lower bound describe the formal delayed-copy grammar; each run audits
   only 16 unique histories, so its empirical distinguishability certificate is
-  capped at four bits. Even repeated rank gains are capacity evidence, not a
-  demonstration of open-ended behavioral novelty.
+  capped at four bits. Complementing cue symbols and matched response semantics
+  is a redundant equivariance replication, not independent evidence. Even
+  repeated rank gains are capacity evidence, not a demonstration of open-ended
+  behavioral novelty.
 
 ## Workflows
 

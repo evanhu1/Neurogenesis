@@ -524,7 +524,11 @@ fn action_rng_seed(sim_seed: u64, tick: u64, organism_id: OrganismId) -> u64 {
     mix_u64(mixed)
 }
 
-fn deterministic_action_sample(sim_seed: u64, tick: u64, organism_id: OrganismId) -> f32 {
+pub(crate) fn deterministic_action_sample(
+    sim_seed: u64,
+    tick: u64,
+    organism_id: OrganismId,
+) -> f32 {
     let sample = (action_rng_seed(sim_seed, tick, organism_id) >> 40) as u32;
     sample as f32 / ((1_u32 << 24) - 1) as f32
 }

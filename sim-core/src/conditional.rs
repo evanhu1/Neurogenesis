@@ -12,19 +12,21 @@
 //! stage/search budgets bound a run), while controller growth remains subject
 //! to the physical `u32` id space and machine memory.
 
+use crate::brain::EXPLICIT_IDLE_LOGIT_BIAS;
 use crate::grid::{hex_neighbor, rotate_by_steps};
 use crate::progressive::{
     enforce_retention, exact_fingerprint, verify_extension_effect, AllHistoryRetention,
     ExtensionEffectEvidence, ProtectedResidual, RetentionRequirementHeader, TaskCheckpoint,
     TaskReplay,
 };
+use crate::turn::deterministic_action_sample;
 use crate::{SimError, Simulation};
 use serde::{Deserialize, Serialize};
 use sim_types::{
     action_gene_node_id, connection_innovation_id, food_visual, seed_hidden_gene_node_id,
     sensory_gene_node_id, ActionType, BrainState, EnergyLedgerRow, FacingDirection, FoodId,
     FoodKind, FoodState, GeneNodeId, HiddenNodeGene, InnovationId, Occupant, OrganismGenome,
-    SynapseGene, WorldConfig,
+    SensoryReceptor, SynapseGene, WorldConfig,
 };
 use std::collections::BTreeSet;
 use thiserror::Error;
@@ -35,6 +37,9 @@ const MAX_CONTROL_PASSES: u32 = 2;
 const MIN_CAUSAL_DROP: u32 = 8;
 const TASK_WORLD_WIDTH: u32 = 15;
 const DEFAULT_ESCROW_ENERGY: f32 = 64.0;
+const MIN_PRECEDING_ECOLOGY_PLANT_CAPTURES: u64 = 1;
+const MIN_NORMAL_RESPONSE_LOGIT_MARGIN: f32 = 0.1;
+const EVALUATOR_CONTRACT_VERSION: &str = "conditional-program-evaluator-v3";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ConditionalProgramConfig {
@@ -68,19 +73,34 @@ impl Default for ConditionalProgramConfig {
 pub struct ConditionalProgramExperiment {
     pub schema: String,
     pub config: ConditionalProgramConfig,
+    pub effective_evaluator_configs: EffectiveEvaluatorConfigs,
     pub contract: ExperimentContract,
     pub scope_limitations: Vec<String>,
     pub outer_runs: Vec<OuterRun>,
     pub summary: ExperimentSummary,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EffectiveEvaluatorConfigs {
+    pub task_world: WorldConfig,
+    pub task_world_fingerprint: String,
+    pub random_action_task_world: WorldConfig,
+    pub random_action_task_world_fingerprint: String,
+    pub ecology_world: WorldConfig,
+    pub ecology_world_fingerprint: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExperimentContract {
+    pub evaluator_contract_version: String,
     pub organism_observations: Vec<String>,
     pub forbidden_observations: Vec<String>,
     pub pose_reset: String,
     pub energy: String,
     pub search_and_admission: String,
+    pub ecology_gate: String,
+    pub cue_symbol_equivariance_replication: String,
+    pub action_margin_gate: String,
     pub rank_limit: String,
 }
 
@@ -98,6 +118,7 @@ pub struct ExperimentSummary {
 pub struct OuterRun {
     pub outer_seed: u64,
     pub initial_controller_fingerprint: String,
+    pub initial_controller_genome: OrganismGenome,
     pub stages: Vec<StageEvidence>,
     pub accepted_tasks: Vec<AcceptedTaskRecord>,
     pub accepted_solvers: Vec<AcceptedSolverRecord>,
@@ -109,6 +130,11 @@ pub struct OuterRun {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StageEvidence {
     pub archive_index: u64,
+    pub evaluator_contract_version: String,
+    pub task_world_config_fingerprint: String,
+    pub random_action_task_world_config_fingerprint: String,
+    pub ecology_world_config_fingerprint: String,
+    pub ecology_horizon: u32,
     pub task: ConditionalTaskProgram,
     pub task_program_fingerprint: String,
     pub search_contexts_fingerprint: String,
@@ -135,8 +161,14 @@ pub struct SemanticRankCertificate {
     pub formal_task_language_history_count: String,
     /// Lower bound for an exact solver over the complete task grammar.
     pub formal_exact_solver_memory_lower_bound_bits: u32,
-    /// Histories actually represented by the finite evidence panel.
-    pub evaluated_unique_histories: u32,
+    pub search_evaluated_unique_histories: u32,
+    pub admission_evaluated_unique_histories: u32,
+    pub semantic_history_overlap_count: u32,
+    pub search_only_semantic_history_count: u32,
+    pub admission_only_semantic_history_count: u32,
+    pub each_panel_exhausts_formal_language: bool,
+    pub admission_claimed_as_unseen_semantic_history_holdout: bool,
+    pub admission_panel_role: String,
     /// Fail-closed empirical lower bound supported by the finite panel only.
     pub empirical_distinguishable_history_lower_bound_bits: u32,
     pub formal_rank_exceeds_empirical_panel: bool,
@@ -180,7 +212,7 @@ pub struct ConditionalContext {
 #[serde(rename_all = "snake_case")]
 pub enum TrialMode {
     Normal,
-    CueSymbolRelabeled,
+    MatchedCueSymbolEquivarianceReplication,
     NuisancePerturbed,
     SemanticPermutation,
     FixedCueReplay,
@@ -195,6 +227,7 @@ pub enum TrialMode {
 pub struct SearchAttempt {
     pub proposal_index: u32,
     pub controller_fingerprint: String,
+    pub controller_genome: OrganismGenome,
     pub module: DelayLineModule,
     pub new_task_search_passes: u32,
     pub historical_search_passes: Vec<SolverPanelScore>,
@@ -232,10 +265,12 @@ pub struct CausalSlice {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AdmissionEvidence {
     pub candidate_controller_fingerprint: String,
+    pub candidate_controller_genome: OrganismGenome,
     pub knockout_controller_fingerprint: String,
+    pub knockout_controller_genome: OrganismGenome,
     pub knockout_is_exact_preceding_controller: bool,
     pub normal: PanelEvidence,
-    pub cue_symbol_relabeled: PanelEvidence,
+    pub matched_cue_symbol_equivariance_replication: PanelEvidence,
     pub nuisance_perturbed: PanelEvidence,
     pub semantic_permutation: PanelEvidence,
     pub fixed_cue_replay: PanelEvidence,
@@ -245,6 +280,7 @@ pub struct AdmissionEvidence {
     pub donor_brain_swap_follow_host: PanelEvidence,
     pub random_actions: PanelEvidence,
     pub exact_knockout: PanelEvidence,
+    pub action_margin_audit: ActionMarginAudit,
     pub nuisance_outcome_differences: u32,
     pub fully_correct_complement_pairs: u32,
     pub archived_solver_admission: Vec<SolverPanelScore>,
@@ -315,9 +351,47 @@ pub struct ConditionalTickTrace {
     pub r_after_tick: i32,
     pub facing_after_tick: FacingDirection,
     pub organism_energy_bits: u32,
+    pub sensory: Vec<SensoryActivation>,
     pub food_ray_activation_bits: Vec<u32>,
     pub hidden: Vec<HiddenActivation>,
+    pub action_logits: Vec<ActionLogitTrace>,
+    pub action_temperature: f32,
+    pub action_temperature_bits: u32,
+    pub deterministic_action_sample_tick: u64,
+    pub deterministic_action_sample: f32,
+    pub deterministic_action_sample_bits: u32,
+    pub force_random_actions: bool,
     pub core_energy_ledger: EnergyLedgerRow,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SensoryActivation {
+    pub runtime_id: u32,
+    pub receptor: SensoryReceptor,
+    pub activation: f32,
+    pub activation_bits: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ActionLogitTrace {
+    pub runtime_id: u32,
+    pub action_type: ActionType,
+    pub logit: f32,
+    pub logit_bits: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ActionMarginAudit {
+    pub expected_normal_response_ticks: u32,
+    pub observed_normal_response_ticks: u32,
+    pub every_tick_has_complete_action_logits: bool,
+    pub every_selected_action_is_unique_argmax: bool,
+    pub minimum_required_raw_logit_margin: f32,
+    pub minimum_observed_raw_logit_margin: Option<f32>,
+    pub maximum_observed_raw_logit_margin: Option<f32>,
+    pub minimum_deterministic_action_sample: Option<f32>,
+    pub maximum_deterministic_action_sample: Option<f32>,
+    pub accepted: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -389,14 +463,28 @@ pub struct RetentionAudit {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EcologyNoninferiority {
     pub horizon: u32,
-    pub preceding_controller: Vec<EcologyTrial>,
-    pub candidate_controller: Vec<EcologyTrial>,
+    pub pairs: Vec<EcologyPairAudit>,
+    pub minimum_preceding_plant_captures: u64,
+    pub preceding_competence_floor_met: bool,
+    pub every_seed_pair_noninferior: bool,
     pub preceding_survivor_ticks: u64,
     pub candidate_survivor_ticks: u64,
     pub preceding_plant_consumptions: u64,
     pub candidate_plant_consumptions: u64,
+    pub aggregate_survivor_ticks_noninferior: bool,
+    pub aggregate_plant_consumption_noninferior: bool,
+    pub accepted: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EcologyPairAudit {
+    pub seed: u64,
+    pub preceding: EcologyTrial,
+    pub candidate: EcologyTrial,
     pub survivor_ticks_noninferior: bool,
-    pub plant_consumption_noninferior: bool,
+    pub plant_consumptions_noninferior: bool,
+    pub final_organism_energy_tolerance: f64,
+    pub final_organism_energy_noninferior: bool,
     pub accepted: bool,
 }
 
@@ -416,7 +504,7 @@ pub struct AdmissionGate {
     pub candidate_at_least_14_of_16: bool,
     pub every_archived_solver_at_most_2_of_16: bool,
     pub all_history_retained: bool,
-    pub cue_symbol_relabeling_at_least_14_of_16: bool,
+    pub matched_cue_symbol_equivariance_replication_at_least_14_of_16: bool,
     pub random_at_most_2_of_16: bool,
     pub replay_at_most_2_of_16: bool,
     pub cue_erasure_at_most_2_of_16: bool,
@@ -428,6 +516,7 @@ pub struct AdmissionGate {
     pub nuisance_changes_at_most_2: bool,
     pub at_least_six_of_eight_complement_pairs: bool,
     pub every_claimed_causal_slice_necessary: bool,
+    pub normal_response_actions_have_decisive_unique_argmax: bool,
     pub fixed_ecology_noninferior: bool,
     pub energy_accounting_closed: bool,
     pub qualified: bool,
@@ -437,6 +526,7 @@ pub struct AdmissionGate {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AcceptedTaskRecord {
     pub task: ConditionalTaskProgram,
+    pub evaluator_contract_version: String,
     pub task_program_fingerprint: String,
     pub search_contexts_fingerprint: String,
     pub admission_contexts_fingerprint: String,
@@ -446,10 +536,11 @@ pub struct AcceptedTaskRecord {
     pub checkpoint: TaskCheckpoint,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AcceptedSolverRecord {
     pub solver_label: String,
     pub controller_fingerprint: String,
+    pub controller_genome: OrganismGenome,
     pub accepted_at_archive_index: Option<u64>,
 }
 
@@ -479,6 +570,11 @@ struct ArchivedSolverRuntime {
 
 #[derive(Serialize)]
 struct FrozenTaskIdentity<'a> {
+    evaluator_contract_version: &'a str,
+    task_world_config_fingerprint: &'a str,
+    random_action_task_world_config_fingerprint: &'a str,
+    ecology_world_config_fingerprint: &'a str,
+    ecology_horizon: u32,
     task_program_fingerprint: &'a str,
     search_contexts_fingerprint: &'a str,
     admission_contexts_fingerprint: &'a str,
@@ -494,9 +590,14 @@ pub fn run_conditional_program_experiment(
     config: ConditionalProgramConfig,
 ) -> Result<ConditionalProgramExperiment, ConditionalProgramError> {
     validate_experiment_config(&config)?;
+    let effective_evaluator_configs = effective_evaluator_configs()?;
     let mut outer_runs = Vec::with_capacity(config.outer_seeds.len());
     for &outer_seed in &config.outer_seeds {
-        outer_runs.push(run_outer_seed(&config, outer_seed)?);
+        outer_runs.push(run_outer_seed(
+            &config,
+            outer_seed,
+            &effective_evaluator_configs,
+        )?);
     }
 
     let qualifying_discoveries = outer_runs
@@ -521,9 +622,11 @@ pub fn run_conditional_program_experiment(
 
     let outer_seed_count = config.outer_seeds.len();
     Ok(ConditionalProgramExperiment {
-        schema: "conditional-program-pilot-v2".to_owned(),
+        schema: "conditional-program-pilot-v3".to_owned(),
         config,
+        effective_evaluator_configs,
         contract: ExperimentContract {
+            evaluator_contract_version: EVALUATOR_CONTRACT_VERSION.to_owned(),
             organism_observations: vec![
                 "three ordinary relative food rays".to_owned(),
                 "ordinary contact-ahead".to_owned(),
@@ -538,7 +641,10 @@ pub fn run_conditional_program_experiment(
             ],
             pose_reset: "before every cue, delay, and response tick: restore q/r/facing, health, damage, last action, task-related consumption counters, and energy_at_last_sensing; preserve the complete BrainState except in explicit reset/swap arms".to_owned(),
             energy: "one fixed latent escrow per episode; task interventions and every canonical Simulation tick fail closed independently".to_owned(),
-            search_and_admission: "the task program and both context panels are fingerprinted into one frozen-task identity before deterministic solver proposals; search and sealed admission use disjoint world seeds and evidence ids; archived-solver prefiltering uses search only; the first proposal selected entirely by search plus all-history replay is audited exactly once, and the stage stops regardless of the sealed verdict".to_owned(),
+            search_and_admission: "the evaluator contract version, task program, and both context panels are fingerprinted into one frozen-task identity before deterministic solver proposals; search and sealed admission use disjoint world seeds and evidence ids but may contain the same semantic histories; admission is a sealed world/RNG/pose replication panel, not an unseen-semantic-history holdout (rank 4 enumerates all 16 histories in both panels); archived-solver prefiltering uses search only; the first proposal selected entirely by search plus all-history replay is audited exactly once, and the stage stops regardless of the sealed verdict".to_owned(),
+            ecology_gate: format!("four fixed paired ecology seeds; candidate survivor ticks, plant captures, and final organism energy must each be noninferior on every seed pair; energy uses a 32*f32::EPSILON*max(abs(preceding),abs(candidate),1) tolerance; the preceding controller must capture at least {MIN_PRECEDING_ECOLOGY_PLANT_CAPTURES} plant across the four-seed panel"),
+            cue_symbol_equivariance_replication: "complementing both visible cue symbols and their matched response semantics is a redundant matched-equivariance replication of the normal panel, retained as a consistency check and never counted as independent evidence".to_owned(),
+            action_margin_gate: format!("on every normal response tick, the selected action must be the unique raw-logit argmax over the full action vector and exceed the next-highest action logit (or explicit idle bias) by at least {MIN_NORMAL_RESPONSE_LOGIT_MARGIN}; this prevents deterministic seed/turn samples from rescuing marginal decisions"),
             rank_limit: "no encoded experimental maximum; stage/search budgets limit a CLI run, while u32 node ids and machine memory are physical ceilings".to_owned(),
         },
         scope_limitations: vec![
@@ -546,6 +652,7 @@ pub fn run_conditional_program_experiment(
             "the pilot requires both the selected turn action and its post-commit facing change, but does not score dedicated task-food consumption events".to_owned(),
             "task runtime and escrow evidence are owned by the sim-core evaluator trace rather than serialized into Simulation and the canonical tick ledger".to_owned(),
             "no exact strong/stutter Mealy-machine quotient or alpha-canonical task hash is implemented in this vertical slice".to_owned(),
+            "the cue-symbol relabel arm is a redundant matched-equivariance replication, not an independent capability observation".to_owned(),
             "a finite stage-budgeted run cannot establish an unbounded discovery tail".to_owned(),
         ],
         outer_runs,
@@ -568,6 +675,11 @@ fn validate_experiment_config(
     if config.outer_seeds.is_empty() {
         return Err(ConditionalProgramError::InvalidConfig(
             "outer_seeds must not be empty".to_owned(),
+        ));
+    }
+    if config.outer_seeds.iter().collect::<BTreeSet<_>>().len() != config.outer_seeds.len() {
+        return Err(ConditionalProgramError::InvalidConfig(
+            "outer_seeds must not contain duplicates".to_owned(),
         ));
     }
     if config.stage_budget == 0 || config.search_budget == 0 {
@@ -611,6 +723,7 @@ fn validate_experiment_config(
 fn run_outer_seed(
     config: &ConditionalProgramConfig,
     outer_seed: u64,
+    effective_configs: &EffectiveEvaluatorConfigs,
 ) -> Result<OuterRun, ConditionalProgramError> {
     let base = OrganismGenome::test_fixture();
     let base_fingerprint = fingerprint(&base)?;
@@ -618,7 +731,7 @@ fn run_outer_seed(
     let mut archived_tasks: Vec<ArchivedTaskRuntime> = Vec::new();
     let mut archived_solvers = vec![ArchivedSolverRuntime {
         label: "solver_0_initial".to_owned(),
-        genome: base,
+        genome: base.clone(),
         fingerprint: base_fingerprint.clone(),
         accepted_at: None,
     }];
@@ -653,6 +766,12 @@ fn run_outer_seed(
         let search_contexts_fingerprint = fingerprint(&search_contexts)?;
         let admission_contexts_fingerprint = fingerprint(&admission_contexts)?;
         let task_fingerprint = fingerprint(&FrozenTaskIdentity {
+            evaluator_contract_version: EVALUATOR_CONTRACT_VERSION,
+            task_world_config_fingerprint: &effective_configs.task_world_fingerprint,
+            random_action_task_world_config_fingerprint: &effective_configs
+                .random_action_task_world_fingerprint,
+            ecology_world_config_fingerprint: &effective_configs.ecology_world_fingerprint,
+            ecology_horizon: config.ecology_horizon,
             task_program_fingerprint: &task_program_fingerprint,
             search_contexts_fingerprint: &search_contexts_fingerprint,
             admission_contexts_fingerprint: &admission_contexts_fingerprint,
@@ -690,6 +809,7 @@ fn run_outer_seed(
                 &search_contexts,
                 TrialMode::Normal,
                 config.escrow_energy,
+                effective_configs,
             )?;
             old_scores.push(score_panel(
                 solver,
@@ -721,6 +841,7 @@ fn run_outer_seed(
                     &search_contexts,
                     TrialMode::Normal,
                     config.escrow_energy,
+                    effective_configs,
                 )?;
                 let mut historical_search_passes = Vec::new();
                 let mut history_ok = true;
@@ -732,6 +853,7 @@ fn run_outer_seed(
                             &archived.record.contexts,
                             TrialMode::Normal,
                             f32::from_bits(archived.record.task.fixed_episode_escrow_bits),
+                            effective_configs,
                         )?;
                         history_ok &= panel.passes >= MIN_ADMISSION_PASSES;
                         historical_search_passes.push(SolverPanelScore {
@@ -749,6 +871,7 @@ fn run_outer_seed(
                 let mut attempt = SearchAttempt {
                     proposal_index,
                     controller_fingerprint: candidate_fingerprint,
+                    controller_genome: candidate.clone(),
                     module: module.clone(),
                     new_task_search_passes: search_panel.passes,
                     historical_search_passes,
@@ -785,6 +908,7 @@ fn run_outer_seed(
                     &admission_contexts,
                     &archived_tasks,
                     &archived_solvers,
+                    effective_configs,
                 )?;
                 let qualified = admission.gate.qualified;
                 if !qualified {
@@ -843,14 +967,29 @@ fn run_outer_seed(
             }
         }
 
-        let evaluated_unique_histories = admission_contexts
+        let search_histories = search_contexts
             .iter()
-            .map(|context| &context.cue_bits)
-            .collect::<BTreeSet<_>>()
-            .len() as u32;
-        let empirical_history_bits = evaluated_unique_histories.ilog2();
+            .map(|context| context.cue_bits.clone())
+            .collect::<BTreeSet<_>>();
+        let admission_histories = admission_contexts
+            .iter()
+            .map(|context| context.cue_bits.clone())
+            .collect::<BTreeSet<_>>();
+        let semantic_history_overlap_count =
+            search_histories.intersection(&admission_histories).count() as u32;
+        let search_unique_histories = search_histories.len() as u32;
+        let admission_unique_histories = admission_histories.len() as u32;
+        let empirical_history_bits = admission_unique_histories.ilog2();
+        let formal_history_count = 1_u128.checked_shl(task.rank).unwrap_or(u128::MAX);
         let stage = StageEvidence {
             archive_index,
+            evaluator_contract_version: EVALUATOR_CONTRACT_VERSION.to_owned(),
+            task_world_config_fingerprint: effective_configs.task_world_fingerprint.clone(),
+            random_action_task_world_config_fingerprint: effective_configs
+                .random_action_task_world_fingerprint
+                .clone(),
+            ecology_world_config_fingerprint: effective_configs.ecology_world_fingerprint.clone(),
+            ecology_horizon: config.ecology_horizon,
             task: task.clone(),
             task_program_fingerprint: task_program_fingerprint.clone(),
             search_contexts_fingerprint: search_contexts_fingerprint.clone(),
@@ -859,7 +998,18 @@ fn run_outer_seed(
             semantic_rank: SemanticRankCertificate {
                 formal_task_language_history_count: format!("2^{}", task.rank),
                 formal_exact_solver_memory_lower_bound_bits: task.rank,
-                evaluated_unique_histories,
+                search_evaluated_unique_histories: search_unique_histories,
+                admission_evaluated_unique_histories: admission_unique_histories,
+                semantic_history_overlap_count,
+                search_only_semantic_history_count: search_unique_histories
+                    - semantic_history_overlap_count,
+                admission_only_semantic_history_count: admission_unique_histories
+                    - semantic_history_overlap_count,
+                each_panel_exhausts_formal_language: formal_history_count
+                    == u128::from(search_unique_histories)
+                    && formal_history_count == u128::from(admission_unique_histories),
+                admission_claimed_as_unseen_semantic_history_holdout: false,
+                admission_panel_role: "sealed world/RNG/pose replication panel; not claimed as an unseen-semantic-history holdout".to_owned(),
                 empirical_distinguishable_history_lower_bound_bits: empirical_history_bits,
                 formal_rank_exceeds_empirical_panel: task.rank > empirical_history_bits,
                 required_response_vector_length: task.rank,
@@ -891,6 +1041,7 @@ fn run_outer_seed(
             archived_tasks.push(ArchivedTaskRuntime {
                 record: AcceptedTaskRecord {
                     task: task.clone(),
+                    evaluator_contract_version: EVALUATOR_CONTRACT_VERSION.to_owned(),
                     task_program_fingerprint: task_program_fingerprint.clone(),
                     search_contexts_fingerprint: search_contexts_fingerprint.clone(),
                     admission_contexts_fingerprint: admission_contexts_fingerprint.clone(),
@@ -918,11 +1069,16 @@ fn run_outer_seed(
         }
     }
 
-    let final_crossplay =
-        build_crossplay(&archived_solvers, &archived_tasks, config.escrow_energy)?;
+    let final_crossplay = build_crossplay(
+        &archived_solvers,
+        &archived_tasks,
+        config.escrow_energy,
+        effective_configs,
+    )?;
     Ok(OuterRun {
         outer_seed,
         initial_controller_fingerprint: base_fingerprint,
+        initial_controller_genome: base,
         stages,
         accepted_tasks: archived_tasks
             .iter()
@@ -933,6 +1089,7 @@ fn run_outer_seed(
             .map(|solver| AcceptedSolverRecord {
                 solver_label: solver.label.clone(),
                 controller_fingerprint: solver.fingerprint.clone(),
+                controller_genome: solver.genome.clone(),
                 accepted_at_archive_index: solver.accepted_at,
             })
             .collect(),
@@ -955,6 +1112,7 @@ fn audit_candidate(
     contexts: &[ConditionalContext],
     archived_tasks: &[ArchivedTaskRuntime],
     archived_solvers: &[ArchivedSolverRuntime],
+    effective_configs: &EffectiveEvaluatorConfigs,
 ) -> Result<AdmissionEvidence, ConditionalProgramError> {
     let normal = evaluate_panel(
         task,
@@ -962,13 +1120,15 @@ fn audit_candidate(
         contexts,
         TrialMode::Normal,
         config.escrow_energy,
+        effective_configs,
     )?;
-    let cue_symbol_relabeled = evaluate_panel(
+    let matched_cue_symbol_equivariance_replication = evaluate_panel(
         task,
         candidate,
         contexts,
-        TrialMode::CueSymbolRelabeled,
+        TrialMode::MatchedCueSymbolEquivarianceReplication,
         config.escrow_energy,
+        effective_configs,
     )?;
     let nuisance_perturbed = evaluate_panel(
         task,
@@ -976,6 +1136,7 @@ fn audit_candidate(
         contexts,
         TrialMode::NuisancePerturbed,
         config.escrow_energy,
+        effective_configs,
     )?;
     let semantic_permutation = evaluate_panel(
         task,
@@ -983,6 +1144,7 @@ fn audit_candidate(
         contexts,
         TrialMode::SemanticPermutation,
         config.escrow_energy,
+        effective_configs,
     )?;
     let fixed_cue_replay = evaluate_panel(
         task,
@@ -990,6 +1152,7 @@ fn audit_candidate(
         contexts,
         TrialMode::FixedCueReplay,
         config.escrow_energy,
+        effective_configs,
     )?;
     let cue_erased = evaluate_panel(
         task,
@@ -997,6 +1160,7 @@ fn audit_candidate(
         contexts,
         TrialMode::CueErased,
         config.escrow_energy,
+        effective_configs,
     )?;
     let full_brain_reset = evaluate_panel(
         task,
@@ -1004,6 +1168,7 @@ fn audit_candidate(
         contexts,
         TrialMode::FullBrainReset,
         config.escrow_energy,
+        effective_configs,
     )?;
     let donor_brain_swap_follow_donor = evaluate_panel(
         task,
@@ -1011,6 +1176,7 @@ fn audit_candidate(
         contexts,
         TrialMode::DonorBrainSwapFollowDonor,
         config.escrow_energy,
+        effective_configs,
     )?;
     let donor_brain_swap_follow_host = evaluate_panel(
         task,
@@ -1018,6 +1184,7 @@ fn audit_candidate(
         contexts,
         TrialMode::DonorBrainSwapFollowHost,
         config.escrow_energy,
+        effective_configs,
     )?;
     let random_actions = evaluate_panel(
         task,
@@ -1025,6 +1192,7 @@ fn audit_candidate(
         contexts,
         TrialMode::RandomActions,
         config.escrow_energy,
+        effective_configs,
     )?;
     let knockout = protector.knockout_extension();
     let exact_knockout = evaluate_panel(
@@ -1033,6 +1201,7 @@ fn audit_candidate(
         contexts,
         TrialMode::Normal,
         config.escrow_energy,
+        effective_configs,
     )?;
     let candidate_fingerprint = fingerprint(candidate)?;
     let knockout_fingerprint = fingerprint(&knockout)?;
@@ -1045,6 +1214,7 @@ fn audit_candidate(
         .filter(|(left, right)| left.passed != right.passed)
         .count() as u32;
     let fully_correct_complement_pairs = count_fully_correct_complement_pairs(&normal)?;
+    let action_margin_audit = audit_normal_response_action_margins(task, &normal);
 
     let checkpoints = archived_tasks
         .iter()
@@ -1059,6 +1229,7 @@ fn audit_candidate(
             &archived.record.contexts,
             TrialMode::Normal,
             f32::from_bits(archived.record.task.fixed_episode_escrow_bits),
+            effective_configs,
         )?;
         ancestor_replays.push(replay_from_panel(
             &archived.record.task,
@@ -1072,6 +1243,7 @@ fn audit_candidate(
             &archived.record.contexts,
             TrialMode::Normal,
             f32::from_bits(archived.record.task.fixed_episode_escrow_bits),
+            effective_configs,
         )?;
         candidate_replays.push(replay_from_panel(
             &archived.record.task,
@@ -1144,6 +1316,7 @@ fn audit_candidate(
             contexts,
             TrialMode::Normal,
             config.escrow_energy,
+            effective_configs,
         )?;
         let pass_drop = normal.passes.saturating_sub(panel.passes);
         causal_necessities.push(CausalNecessity {
@@ -1155,8 +1328,13 @@ fn audit_candidate(
         });
     }
 
-    let ecology_noninferiority =
-        ecology_noninferiority(config.ecology_horizon, outer_seed, preceding, candidate)?;
+    let ecology_noninferiority = ecology_noninferiority(
+        config.ecology_horizon,
+        outer_seed,
+        preceding,
+        candidate,
+        &effective_configs.ecology_world,
+    )?;
 
     // This is the first and only archived-solver evaluation on the sealed
     // admission panel. Its result cannot influence proposal selection.
@@ -1169,6 +1347,7 @@ fn audit_candidate(
                 contexts,
                 TrialMode::Normal,
                 config.escrow_energy,
+                effective_configs,
             )
             .map(|panel| (solver.clone(), panel))
         })
@@ -1201,7 +1380,10 @@ fn audit_candidate(
     };
     for (label, panel) in [
         ("candidate_normal", &normal),
-        ("candidate_cue_symbol_relabeling", &cue_symbol_relabeled),
+        (
+            "candidate_matched_cue_symbol_equivariance_replication",
+            &matched_cue_symbol_equivariance_replication,
+        ),
         ("candidate_nuisance", &nuisance_perturbed),
         ("candidate_semantic", &semantic_permutation),
         ("candidate_replay", &fixed_cue_replay),
@@ -1228,7 +1410,7 @@ fn audit_candidate(
     }
     let knockout_runtime = ArchivedSolverRuntime {
         label: "exact_preceding_controller_knockout".to_owned(),
-        genome: knockout,
+        genome: knockout.clone(),
         fingerprint: knockout_fingerprint.clone(),
         accepted_at: None,
     };
@@ -1245,7 +1427,7 @@ fn audit_candidate(
         causal_necessities.iter().all(|slice| slice.necessary);
     let energy_accounting_closed = [
         &normal,
-        &cue_symbol_relabeled,
+        &matched_cue_symbol_equivariance_replication,
         &nuisance_perturbed,
         &semantic_permutation,
         &fixed_cue_replay,
@@ -1264,8 +1446,8 @@ fn audit_candidate(
         candidate_at_least_14_of_16: normal.passes >= MIN_ADMISSION_PASSES,
         every_archived_solver_at_most_2_of_16: archived_solver_max_passes <= MAX_CONTROL_PASSES,
         all_history_retained: retention.accepted,
-        cue_symbol_relabeling_at_least_14_of_16: cue_symbol_relabeled.passes
-            >= MIN_ADMISSION_PASSES,
+        matched_cue_symbol_equivariance_replication_at_least_14_of_16:
+            matched_cue_symbol_equivariance_replication.passes >= MIN_ADMISSION_PASSES,
         random_at_most_2_of_16: random_actions.passes <= MAX_CONTROL_PASSES,
         replay_at_most_2_of_16: fixed_cue_replay.passes <= MAX_CONTROL_PASSES,
         cue_erasure_at_most_2_of_16: cue_erased.passes <= MAX_CONTROL_PASSES,
@@ -1279,6 +1461,7 @@ fn audit_candidate(
         nuisance_changes_at_most_2: nuisance_outcome_differences <= 2,
         at_least_six_of_eight_complement_pairs: fully_correct_complement_pairs >= 6,
         every_claimed_causal_slice_necessary,
+        normal_response_actions_have_decisive_unique_argmax: action_margin_audit.accepted,
         fixed_ecology_noninferior: ecology_noninferiority.accepted,
         energy_accounting_closed,
         qualified: false,
@@ -1293,10 +1476,12 @@ fn audit_candidate(
 
     Ok(AdmissionEvidence {
         candidate_controller_fingerprint: candidate_fingerprint,
+        candidate_controller_genome: candidate.clone(),
         knockout_controller_fingerprint: knockout_fingerprint,
+        knockout_controller_genome: knockout,
         knockout_is_exact_preceding_controller: protector.knockout_extension() == *preceding,
         normal,
-        cue_symbol_relabeled,
+        matched_cue_symbol_equivariance_replication,
         nuisance_perturbed,
         semantic_permutation,
         fixed_cue_replay,
@@ -1306,6 +1491,7 @@ fn audit_candidate(
         donor_brain_swap_follow_host,
         random_actions,
         exact_knockout,
+        action_margin_audit,
         nuisance_outcome_differences,
         fully_correct_complement_pairs,
         archived_solver_admission,
@@ -1331,8 +1517,8 @@ fn collect_gate_failures(gate: &mut AdmissionGate) {
         ),
         (gate.all_history_retained, "all-history retention failed"),
         (
-            gate.cue_symbol_relabeling_at_least_14_of_16,
-            "cue-symbol relabeling panel below 14/16",
+            gate.matched_cue_symbol_equivariance_replication_at_least_14_of_16,
+            "redundant matched cue-symbol equivariance replication below 14/16",
         ),
         (gate.random_at_most_2_of_16, "random control exceeds 2/16"),
         (
@@ -1376,8 +1562,12 @@ fn collect_gate_failures(gate: &mut AdmissionGate) {
             "one or more claimed causal slices fail the >=8/16 necessity drop",
         ),
         (
+            gate.normal_response_actions_have_decisive_unique_argmax,
+            "normal response actions are not all unique raw-logit argmaxes with >=0.1 margin",
+        ),
+        (
             gate.fixed_ecology_noninferior,
-            "fixed-ecology survival/plant-consumption noninferiority failed",
+            "fixed-ecology per-seed survival/plant/final-energy noninferiority or non-vacuous preceding competence floor failed",
         ),
         (
             gate.energy_accounting_closed,
@@ -1765,6 +1955,7 @@ fn evaluate_panel(
     contexts: &[ConditionalContext],
     mode: TrialMode,
     escrow_energy: f32,
+    effective_configs: &EffectiveEvaluatorConfigs,
 ) -> Result<PanelEvidence, ConditionalProgramError> {
     let mut trials = Vec::with_capacity(contexts.len());
     for context in contexts {
@@ -1774,6 +1965,7 @@ fn evaluate_panel(
             context,
             mode.clone(),
             escrow_energy,
+            effective_configs,
         )?);
     }
     let passes = trials.iter().filter(|trial| trial.passed).count() as u32;
@@ -1790,16 +1982,18 @@ fn evaluate_trial(
     context: &ConditionalContext,
     mode: TrialMode,
     escrow_energy: f32,
+    effective_configs: &EffectiveEvaluatorConfigs,
 ) -> Result<TrialEvidence, ConditionalProgramError> {
-    let mut world = task_world(matches!(mode, TrialMode::RandomActions));
+    let world = if matches!(mode, TrialMode::RandomActions) {
+        &effective_configs.random_action_task_world
+    } else {
+        &effective_configs.task_world
+    };
     let mut sim = Simulation::new_with_champion_pool(
         world.clone(),
         context.world_seed,
         vec![genome.clone()],
     )?;
-    // Keep the copied config alive only as an explicit assertion that the
-    // actual Simulation uses the frozen evaluator flags.
-    world.force_random_actions = matches!(mode, TrialMode::RandomActions);
     debug_assert_eq!(
         sim.config().force_random_actions,
         world.force_random_actions
@@ -1825,17 +2019,27 @@ fn evaluate_trial(
     .then(|| actual_bits.iter().map(|bit| !bit).collect::<Vec<_>>());
     let donor_state = donor_bits
         .as_ref()
-        .map(|bits| advance_donor_to_response_brain(task, genome, &effective_context, bits))
+        .map(|bits| {
+            advance_donor_to_response_brain(
+                task,
+                genome,
+                &effective_context,
+                bits,
+                &effective_configs.task_world,
+            )
+        })
         .transpose()?;
     let replay_bits = vec![false; actual_bits.len()];
     let presented_bits = match mode {
-        TrialMode::CueSymbolRelabeled => actual_bits.iter().map(|bit| !bit).collect(),
+        TrialMode::MatchedCueSymbolEquivarianceReplication => {
+            actual_bits.iter().map(|bit| !bit).collect()
+        }
         TrialMode::FixedCueReplay => replay_bits,
         TrialMode::CueErased => actual_bits.clone(),
         _ => actual_bits.clone(),
     };
     let expected_bits = match mode {
-        TrialMode::CueSymbolRelabeled | TrialMode::SemanticPermutation => {
+        TrialMode::MatchedCueSymbolEquivarianceReplication | TrialMode::SemanticPermutation => {
             actual_bits.iter().map(|bit| !bit).collect()
         }
         TrialMode::DonorBrainSwapFollowDonor => {
@@ -1987,9 +2191,10 @@ fn advance_donor_to_response_brain(
     genome: &OrganismGenome,
     context: &ConditionalContext,
     donor_bits: &[bool],
+    task_world_config: &WorldConfig,
 ) -> Result<PreparedDonorState, ConditionalProgramError> {
     let mut sim = Simulation::new_with_champion_pool(
-        task_world(false),
+        task_world_config.clone(),
         context.world_seed,
         vec![genome.clone()],
     )?;
@@ -2125,6 +2330,33 @@ fn task_world(force_random_actions: bool) -> WorldConfig {
     world.predation_enabled = false;
     world.force_random_actions = force_random_actions;
     world
+}
+
+fn effective_evaluator_configs() -> Result<EffectiveEvaluatorConfigs, ConditionalProgramError> {
+    let task_world_config = task_world(false);
+    let random_action_task_world = task_world(true);
+    let ecology_world = ecology_world()?;
+    Ok(EffectiveEvaluatorConfigs {
+        task_world_fingerprint: fingerprint(&task_world_config)?,
+        random_action_task_world_fingerprint: fingerprint(&random_action_task_world)?,
+        ecology_world_fingerprint: fingerprint(&ecology_world)?,
+        task_world: task_world_config,
+        random_action_task_world,
+        ecology_world,
+    })
+}
+
+fn ecology_world() -> Result<WorldConfig, ConditionalProgramError> {
+    let mut world = sim_config::load_default_world_config()
+        .map_err(|error| ConditionalProgramError::Integrity(error.to_string()))?;
+    world.world_width = 25;
+    world.num_organisms = 1;
+    world.intent_parallel_threads = 1;
+    world.runtime_plasticity_enabled = false;
+    world.leaky_neurons_enabled = false;
+    world.predation_enabled = false;
+    world.force_random_actions = false;
+    Ok(world)
 }
 
 fn nuisance_context(context: &ConditionalContext) -> ConditionalContext {
@@ -2287,6 +2519,9 @@ fn capture_tick(
     let organism = sim.organisms().first().ok_or_else(|| {
         ConditionalProgramError::Integrity("conditional task organism died".to_owned())
     })?;
+    let deterministic_action_sample_tick = sim.turn().saturating_sub(1);
+    let action_sample =
+        deterministic_action_sample(sim.seed, deterministic_action_sample_tick, organism.id);
     Ok(ConditionalTickTrace {
         phase: phase.to_owned(),
         phase_index,
@@ -2299,6 +2534,17 @@ fn capture_tick(
         r_after_tick: organism.r,
         facing_after_tick: organism.facing,
         organism_energy_bits: organism.energy.to_bits(),
+        sensory: organism
+            .brain
+            .sensory
+            .iter()
+            .map(|sensor| SensoryActivation {
+                runtime_id: sensor.neuron.neuron_id.0,
+                receptor: sensor.receptor,
+                activation: sensor.neuron.activation,
+                activation_bits: sensor.neuron.activation.to_bits(),
+            })
+            .collect(),
         food_ray_activation_bits: organism
             .brain
             .sensory
@@ -2316,6 +2562,23 @@ fn capture_tick(
                 activation_bits: node.neuron.activation.to_bits(),
             })
             .collect(),
+        action_logits: organism
+            .brain
+            .action
+            .iter()
+            .map(|action| ActionLogitTrace {
+                runtime_id: action.neuron_id.0,
+                action_type: action.action_type,
+                logit: action.logit,
+                logit_bits: action.logit.to_bits(),
+            })
+            .collect(),
+        action_temperature: sim.config().action_temperature,
+        action_temperature_bits: sim.config().action_temperature.to_bits(),
+        deterministic_action_sample_tick,
+        deterministic_action_sample: action_sample,
+        deterministic_action_sample_bits: action_sample.to_bits(),
+        force_random_actions: sim.config().force_random_actions,
         core_energy_ledger: sim.metrics().energy_ledger_last_turn,
     })
 }
@@ -2446,6 +2709,7 @@ fn build_crossplay(
     solvers: &[ArchivedSolverRuntime],
     tasks: &[ArchivedTaskRuntime],
     default_escrow: f32,
+    effective_configs: &EffectiveEvaluatorConfigs,
 ) -> Result<Vec<MatrixCell>, ConditionalProgramError> {
     let mut matrix = Vec::new();
     for task in tasks {
@@ -2461,6 +2725,7 @@ fn build_crossplay(
                 } else {
                     default_escrow
                 },
+                effective_configs,
             )?;
             append_matrix(
                 &mut matrix,
@@ -2540,6 +2805,94 @@ fn count_fully_correct_complement_pairs(
     Ok(count)
 }
 
+fn audit_normal_response_action_margins(
+    task: &ConditionalTaskProgram,
+    normal: &PanelEvidence,
+) -> ActionMarginAudit {
+    let expected_normal_response_ticks = normal.trials.len() as u32 * task.rank;
+    let mut observed_normal_response_ticks = 0_u32;
+    let mut every_tick_has_complete_action_logits = true;
+    let mut every_selected_action_is_unique_argmax = true;
+    let mut minimum_observed_raw_logit_margin: Option<f32> = None;
+    let mut maximum_observed_raw_logit_margin: Option<f32> = None;
+    let mut minimum_deterministic_action_sample: Option<f32> = None;
+    let mut maximum_deterministic_action_sample: Option<f32> = None;
+
+    for tick in normal
+        .trials
+        .iter()
+        .flat_map(|trial| &trial.trace.ticks)
+        .filter(|tick| tick.phase == "identical_choice")
+    {
+        observed_normal_response_ticks += 1;
+        let complete = tick.action_logits.len() == ActionType::ALL.len()
+            && tick
+                .action_logits
+                .iter()
+                .all(|logit| logit.logit.is_finite())
+            && ActionType::ALL.iter().all(|action| {
+                tick.action_logits
+                    .iter()
+                    .filter(|logit| logit.action_type == *action)
+                    .count()
+                    == 1
+            });
+        every_tick_has_complete_action_logits &= complete;
+
+        let Some(selected) = tick
+            .action_logits
+            .iter()
+            .find(|logit| logit.action_type == tick.selected_action)
+        else {
+            every_selected_action_is_unique_argmax = false;
+            continue;
+        };
+        let mut next_highest = EXPLICIT_IDLE_LOGIT_BIAS;
+        for competitor in tick
+            .action_logits
+            .iter()
+            .filter(|logit| logit.action_type != tick.selected_action)
+        {
+            next_highest = next_highest.max(competitor.logit);
+        }
+        let margin = selected.logit - next_highest;
+        if !margin.is_finite() {
+            every_selected_action_is_unique_argmax = false;
+        } else {
+            every_selected_action_is_unique_argmax &= margin > 0.0;
+            minimum_observed_raw_logit_margin = Some(
+                minimum_observed_raw_logit_margin.map_or(margin, |current| current.min(margin)),
+            );
+            maximum_observed_raw_logit_margin = Some(
+                maximum_observed_raw_logit_margin.map_or(margin, |current| current.max(margin)),
+            );
+        }
+        let sample = tick.deterministic_action_sample;
+        minimum_deterministic_action_sample =
+            Some(minimum_deterministic_action_sample.map_or(sample, |current| current.min(sample)));
+        maximum_deterministic_action_sample =
+            Some(maximum_deterministic_action_sample.map_or(sample, |current| current.max(sample)));
+    }
+
+    let accepted = observed_normal_response_ticks == expected_normal_response_ticks
+        && every_tick_has_complete_action_logits
+        && every_selected_action_is_unique_argmax
+        && minimum_observed_raw_logit_margin
+            .is_some_and(|margin| margin >= MIN_NORMAL_RESPONSE_LOGIT_MARGIN);
+    ActionMarginAudit {
+        expected_normal_response_ticks,
+        observed_normal_response_ticks,
+        every_tick_has_complete_action_logits,
+        every_selected_action_is_unique_argmax,
+        minimum_required_raw_logit_margin: MIN_NORMAL_RESPONSE_LOGIT_MARGIN,
+        minimum_observed_raw_logit_margin,
+        maximum_observed_raw_logit_margin,
+        minimum_deterministic_action_sample,
+        maximum_deterministic_action_sample,
+        accepted,
+    }
+}
+
 fn response_actions(trace: &BehaviorTrace) -> Vec<ActionType> {
     trace
         .ticks
@@ -2594,48 +2947,83 @@ fn ecology_noninferiority(
     outer_seed: u64,
     preceding: &OrganismGenome,
     candidate: &OrganismGenome,
+    ecology_world_config: &WorldConfig,
 ) -> Result<EcologyNoninferiority, ConditionalProgramError> {
     let seeds = (0..4)
         .map(|index| mix64(outer_seed ^ 0x4543_4f4c_4f47_5900 ^ index))
         .collect::<Vec<_>>();
     let preceding_controller = seeds
         .iter()
-        .map(|&seed| run_ecology_trial(preceding, seed, horizon))
+        .map(|&seed| run_ecology_trial(preceding, seed, horizon, ecology_world_config))
         .collect::<Result<Vec<_>, _>>()?;
     let candidate_controller = seeds
         .iter()
-        .map(|&seed| run_ecology_trial(candidate, seed, horizon))
+        .map(|&seed| run_ecology_trial(candidate, seed, horizon, ecology_world_config))
         .collect::<Result<Vec<_>, _>>()?;
-    let preceding_survivor_ticks = preceding_controller
+    let pairs = preceding_controller
+        .into_iter()
+        .zip(candidate_controller)
+        .map(|(preceding, candidate)| {
+            if preceding.seed != candidate.seed {
+                return Err(ConditionalProgramError::Integrity(
+                    "paired ecology trials have mismatched seeds".to_owned(),
+                ));
+            }
+            let survivor_ticks_noninferior = candidate.survivor_ticks >= preceding.survivor_ticks;
+            let plant_consumptions_noninferior =
+                candidate.plant_consumptions >= preceding.plant_consumptions;
+            let energy_scale = preceding
+                .final_organism_energy
+                .abs()
+                .max(candidate.final_organism_energy.abs())
+                .max(1.0);
+            let final_organism_energy_tolerance = 32.0 * f64::from(f32::EPSILON) * energy_scale;
+            let final_organism_energy_noninferior = candidate.final_organism_energy
+                + final_organism_energy_tolerance
+                >= preceding.final_organism_energy;
+            Ok(EcologyPairAudit {
+                seed: preceding.seed,
+                preceding,
+                candidate,
+                survivor_ticks_noninferior,
+                plant_consumptions_noninferior,
+                final_organism_energy_tolerance,
+                final_organism_energy_noninferior,
+                accepted: survivor_ticks_noninferior
+                    && plant_consumptions_noninferior
+                    && final_organism_energy_noninferior,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let preceding_survivor_ticks = pairs.iter().map(|pair| pair.preceding.survivor_ticks).sum();
+    let candidate_survivor_ticks = pairs.iter().map(|pair| pair.candidate.survivor_ticks).sum();
+    let preceding_plant_consumptions = pairs
         .iter()
-        .map(|trial| trial.survivor_ticks)
+        .map(|pair| pair.preceding.plant_consumptions)
         .sum();
-    let candidate_survivor_ticks = candidate_controller
+    let candidate_plant_consumptions = pairs
         .iter()
-        .map(|trial| trial.survivor_ticks)
+        .map(|pair| pair.candidate.plant_consumptions)
         .sum();
-    let preceding_plant_consumptions = preceding_controller
-        .iter()
-        .map(|trial| trial.plant_consumptions)
-        .sum();
-    let candidate_plant_consumptions = candidate_controller
-        .iter()
-        .map(|trial| trial.plant_consumptions)
-        .sum();
-    let survivor_ticks_noninferior = candidate_survivor_ticks >= preceding_survivor_ticks;
-    let plant_consumption_noninferior =
+    let aggregate_survivor_ticks_noninferior = candidate_survivor_ticks >= preceding_survivor_ticks;
+    let aggregate_plant_consumption_noninferior =
         candidate_plant_consumptions >= preceding_plant_consumptions;
+    let preceding_competence_floor_met =
+        preceding_plant_consumptions >= MIN_PRECEDING_ECOLOGY_PLANT_CAPTURES;
+    let every_seed_pair_noninferior = pairs.iter().all(|pair| pair.accepted);
     Ok(EcologyNoninferiority {
         horizon,
-        preceding_controller,
-        candidate_controller,
+        pairs,
+        minimum_preceding_plant_captures: MIN_PRECEDING_ECOLOGY_PLANT_CAPTURES,
+        preceding_competence_floor_met,
+        every_seed_pair_noninferior,
         preceding_survivor_ticks,
         candidate_survivor_ticks,
         preceding_plant_consumptions,
         candidate_plant_consumptions,
-        survivor_ticks_noninferior,
-        plant_consumption_noninferior,
-        accepted: survivor_ticks_noninferior && plant_consumption_noninferior,
+        aggregate_survivor_ticks_noninferior,
+        aggregate_plant_consumption_noninferior,
+        accepted: preceding_competence_floor_met && every_seed_pair_noninferior,
     })
 }
 
@@ -2643,17 +3031,13 @@ fn run_ecology_trial(
     genome: &OrganismGenome,
     seed: u64,
     horizon: u32,
+    ecology_world_config: &WorldConfig,
 ) -> Result<EcologyTrial, ConditionalProgramError> {
-    let mut world = sim_config::load_default_world_config()
-        .map_err(|error| ConditionalProgramError::Integrity(error.to_string()))?;
-    world.world_width = 25;
-    world.num_organisms = 1;
-    world.intent_parallel_threads = 1;
-    world.runtime_plasticity_enabled = false;
-    world.leaky_neurons_enabled = false;
-    world.predation_enabled = false;
-    world.force_random_actions = false;
-    let mut sim = Simulation::new_with_champion_pool(world, seed, vec![genome.clone()])?;
+    let mut sim = Simulation::new_with_champion_pool(
+        ecology_world_config.clone(),
+        seed,
+        vec![genome.clone()],
+    )?;
     let mut survivor_ticks = 0_u64;
     let mut max_residual = 0.0_f64;
     let mut max_tolerance = 0.0_f64;
@@ -2685,9 +3069,9 @@ fn run_ecology_trial(
 
 fn ecology_energy_closed(evidence: &EcologyNoninferiority) -> bool {
     evidence
-        .preceding_controller
+        .pairs
         .iter()
-        .chain(&evidence.candidate_controller)
+        .flat_map(|pair| [&pair.preceding, &pair.candidate])
         .all(|trial| trial.maximum_core_energy_residual <= trial.maximum_core_energy_tolerance)
 }
 

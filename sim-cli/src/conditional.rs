@@ -54,7 +54,7 @@ pub(crate) fn run_conditional_program_cli(
             "--help" | "-h" => {
                 writeln!(
                     out,
-                    "conditional-program options:\n  --outer-seeds N,N  independent outer seeds (default 7,42,123)\n  --stages N          runtime stage budget; not a task-grammar depth cap\n  --search-budget N   deterministic proposals per frozen task\n  --starting-rank N   first cue/response sequence length (minimum 4)\n  --delay N           mandatory empty pose-reset ticks (minimum 1)\n  --escrow E          fixed all-or-nothing episode reward (minimum 1)\n  --ecology-horizon N paired fixed-ecology noninferiority horizon\n  --out-dir D         durable result directory (global flag)"
+                    "conditional-program options:\n  --outer-seeds N,N  unique independent outer seeds (default 7,42,123)\n  --stages N          runtime stage budget; not a task-grammar depth cap\n  --search-budget N   deterministic proposals per frozen task\n  --starting-rank N   first cue/response sequence length (minimum 4)\n  --delay N           mandatory empty pose-reset ticks (minimum 1)\n  --escrow E          fixed all-or-nothing episode reward (minimum 1)\n  --ecology-horizon N per-seed paired fixed-ecology noninferiority horizon\n  --out-dir D         durable result directory (global flag)"
                 )?;
                 return Ok(());
             }
