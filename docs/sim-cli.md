@@ -150,6 +150,18 @@ cargo build -p sim-cli --release        # --release strongly recommended
   `sweep --grid food_energy=10,12,14 --seeds 7,42,123,2026 --to 500000
   --baseline food_energy=12`.
 
+- `powerplay [--config P] [--seed N] [--depth 1..4] [--population N]
+  [--generations N] [--module-width N] [--ticks-per-stage N]
+  [--world-width N] [--food-energy F] [--search-seeds N,...]
+  [--episode-seeds N,...] [--out-dir D]` — run the bounded sequential-resource
+  Causal Ecology PowerPlay pilot. Search and admission each require 16 unique,
+  disjoint contexts; accepted residuals must retain every archived prefix while
+  every earlier checkpoint and the exact residual knockout fail the new task.
+  The result JSON preserves the task x solver matrix, per-episode action traces,
+  fixed-escrow closure, and maximum engine-ledger residuals. This command is a
+  falsification scaffold, **not open-endedness evidence**: its visible-target
+  grammar is finite, depth is capped at four, and payoff does not gate survival.
+
 - `neat [--config P] [--seed N] [--population N] [--generations N]
   [--episode-horizons T[,T...]] [--world-seeds N,N]
   [--audit-seeds N,N|--no-audit]
