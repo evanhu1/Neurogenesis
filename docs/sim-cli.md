@@ -162,6 +162,26 @@ cargo build -p sim-cli --release        # --release strongly recommended
   falsification scaffold, **not open-endedness evidence**: its visible-target
   grammar is finite, depth is capped at four, and payoff does not gate survival.
 
+- `public-preamble-probe [--config P] [--run-seeds N,...] [--population N]
+  [--generations N] [--module-width N] [--ticks-per-stage N]
+  [--world-width N] [--food-energy F] [--search-seeds N,...]
+  [--episode-seeds N,...] [--out-dir D]` — reconstruct each source run through
+  the actual PowerPlay task/controller construction, then evaluate its exact
+  accepted depth-1 and depth-2 solvers on 16 new contexts. Every matched arm
+  receives the same 36-tick, two-stage-width semantic bit string and full task
+  horizon: the meaningful arm renders `0/1` as left/right zero-energy FoodRay
+  cues, the blank arm renders no cues, and the permutation arm swaps the cue
+  mapping. Body and pose reset between cue ticks while complete brain state is
+  preserved; task deadlines begin after the preamble and ordinary fixed task
+  escrow/accounting is unchanged. The strict per-pair gate is meaningful
+  `>=14/16`, blank `<=2/16`, and permuted `<=2/16`. Results retain exact source
+  configs, program/genome identities, per-context actions, sensory activations,
+  and energy rows. This is explicitly evaluator-owned and non-evidentiary: it
+  can falsify importing the interface premise but cannot demonstrate selection,
+  novelty, capacity growth, or open-endedness. When public semantics fail, the
+  result records branch transfer as
+  `not_attempted_because_public_semantics_failed`.
+
 - `neat [--config P] [--seed N] [--population N] [--generations N]
   [--episode-horizons T[,T...]] [--world-seeds N,N]
   [--audit-seeds N,N|--no-audit]

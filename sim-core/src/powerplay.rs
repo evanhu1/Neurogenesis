@@ -11,6 +11,10 @@
 //! system: generated payoff-bearing tasks, protected additive solver capacity,
 //! predecessor-retention gates, and an exact causal module knockout.
 
+mod public_preamble;
+
+pub use public_preamble::*;
+
 use crate::{
     genome::generate_seed_genome, grid::hex_neighbor, grid::rotate_by_steps,
     progressive::ProtectedResidual, Simulation,
@@ -1048,6 +1052,23 @@ fn run_episode(
     let mut sim = Simulation::new_with_champion_pool(world.clone(), seed, vec![genome.clone()])
         .map_err(|error| anyhow!("powerplay episode world construction failed: {error}"))?;
     prepare_episode_state(&mut sim)?;
+    execute_program_on_sim(&mut sim, program, config, seed, capture_steps, false, 0)
+}
+
+/// Execute the actual PowerPlay resource program on an already prepared world.
+///
+/// The public-preamble falsification probe uses this exact path after advancing
+/// a matched evaluator-owned cue prefix. Normal PowerPlay calls enter at turn
+/// zero and retain their original early-stop behavior.
+fn execute_program_on_sim(
+    sim: &mut Simulation,
+    program: &EcologyProgram,
+    config: &PowerPlayConfig,
+    seed: u64,
+    capture_steps: bool,
+    fixed_horizon: bool,
+    task_turn_origin: u64,
+) -> Result<EpisodeEvidence> {
     let initial_organism_energy = sim.organisms[0].energy;
     let horizon = config
         .ticks_per_stage
@@ -1069,15 +1090,18 @@ fn run_episode(
     let mut max_engine_energy_ledger_residual = 0.0_f64;
     let mut max_engine_energy_ledger_tolerance = 0.0_f64;
     let mut steps = Vec::new();
-    spawn_stage_resource(&mut sim, resolved_stages[active_stage], stage_energy)?;
+    spawn_stage_resource(sim, resolved_stages[active_stage], stage_energy)?;
     task_energy_injected += stage_energy;
 
     for _ in 0..horizon {
-        move_active_resource(&mut sim, resolved_stages[active_stage])?;
+        if active_stage < program.stages.len() {
+            move_active_resource(sim, resolved_stages[active_stage])?;
+        }
         let active_stage_before_tick = active_stage;
         let food_before_tick = sim.foods().first().map(|food| (food.q, food.r));
         let before = sim.metrics().total_plant_consumptions;
         let delta = sim.tick();
+        let task_tick = delta.turn.saturating_sub(task_turn_origin);
         let ledger = delta.metrics.energy_ledger_last_turn;
         for residual in [
             ledger.organism_residual,
@@ -1092,10 +1116,10 @@ fn run_episode(
             max_engine_energy_ledger_tolerance.max(ledger.residual_tolerance);
         let consumed = sim.metrics().total_plant_consumptions > before;
         if consumed {
-            completion_ticks.push(delta.turn);
+            completion_ticks.push(task_tick);
             active_stage += 1;
             if active_stage < program.stages.len() {
-                spawn_stage_resource(&mut sim, resolved_stages[active_stage], stage_energy)?;
+                spawn_stage_resource(sim, resolved_stages[active_stage], stage_energy)?;
                 task_energy_injected += stage_energy;
             }
         }
@@ -1103,7 +1127,7 @@ fn run_episode(
             let organism = sim.organisms().first();
             let food_after_tick = sim.foods().first().map(|food| (food.q, food.r));
             steps.push(BehaviorStep {
-                tick: delta.turn,
+                tick: task_tick,
                 active_stage_before_tick,
                 active_stage_after_tick: active_stage,
                 action: organism.map_or(ActionType::Idle, |value| value.last_action_taken),
@@ -1118,7 +1142,7 @@ fn run_episode(
                 stage_completed: consumed,
             });
         }
-        if active_stage == program.stages.len() {
+        if active_stage == program.stages.len() && !fixed_horizon {
             break;
         }
     }

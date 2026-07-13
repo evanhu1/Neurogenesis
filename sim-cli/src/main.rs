@@ -98,6 +98,7 @@ fn print_help(out: &mut impl Write) -> Result<()> {
          \x20 neat analyze RESULT.json [RESULT2.json ...]    derive trend, saturation, lesion, and innovation diagnostics\n\
          \x20 conditional-program [--outer-seeds N,N] [--stages N] [--search-budget N] [--starting-rank N] [--delay N]  delayed conditional task-program pilot → result json\n\
          \x20 powerplay [--seed N] [--depth 1..4] [--population N] [--generations N]  bounded causal-ecology pilot → result json\n\
+         \x20 public-preamble-probe [--run-seeds N,N] [--population N] [--generations N]  matched-arm PowerPlay interface falsifier → result json\n\
          \n\
          READS (stdout only)\n\
          \x20 turn | state | pillars | eco | lineage | genome [--gene G] | food --in w.bin\n\
@@ -173,6 +174,10 @@ fn run() -> Result<()> {
     if cmd == "powerplay" {
         let mut out = io::stdout().lock();
         return powerplay::run_powerplay_cli(&cmd_args, &out_dir, &mut out);
+    }
+    if cmd == "public-preamble-probe" {
+        let mut out = io::stdout().lock();
+        return powerplay::run_public_preamble_probe_cli(&cmd_args, &out_dir, &mut out);
     }
     // Human-facing interactive mode: a resident world driven from a split-pane
     // TUI, as opposed to the agent-facing one-shot commands below. `--in` is a

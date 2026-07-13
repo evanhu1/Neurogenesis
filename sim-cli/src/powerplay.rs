@@ -2,7 +2,9 @@ use crate::{run_output_path, DEFAULT_CONFIG};
 use anyhow::{anyhow, bail, Result};
 use serde_json::json;
 use sim_config::load_world_config_from_path;
-use sim_core::powerplay::{run_powerplay, PowerPlayConfig};
+use sim_core::powerplay::{
+    run_powerplay, run_public_preamble_probe, PowerPlayConfig, PublicPreambleProbeConfig,
+};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
@@ -111,6 +113,126 @@ pub(crate) fn run_powerplay_cli(args: &[&str], out_dir: &str, out: &mut impl Wri
             "requested_depth": result.config.max_depth,
             "stopped_reason": result.stopped_reason,
             "claim_scope": result.claim_scope,
+        })
+    )?;
+    Ok(())
+}
+
+pub(crate) fn run_public_preamble_probe_cli(
+    args: &[&str],
+    out_dir: &str,
+    out: &mut impl Write,
+) -> Result<()> {
+    let mut config_path = DEFAULT_CONFIG.to_string();
+    let mut config = PublicPreambleProbeConfig::default();
+    let mut i = 0usize;
+    while i < args.len() {
+        match args[i] {
+            "--config" => {
+                config_path = value(args, i, "--config")?.to_string();
+                i += 2;
+            }
+            "--run-seeds" => {
+                config.source_run_seeds = parse_seed_suite(value(args, i, "--run-seeds")?)?;
+                i += 2;
+            }
+            "--population" => {
+                config.source_powerplay.population_size =
+                    value(args, i, "--population")?.parse()?;
+                i += 2;
+            }
+            "--generations" => {
+                config.source_powerplay.generations_per_depth =
+                    value(args, i, "--generations")?.parse()?;
+                i += 2;
+            }
+            "--module-width" => {
+                config.source_powerplay.module_width = value(args, i, "--module-width")?.parse()?;
+                i += 2;
+            }
+            "--ticks-per-stage" => {
+                config.source_powerplay.ticks_per_stage =
+                    value(args, i, "--ticks-per-stage")?.parse()?;
+                i += 2;
+            }
+            "--world-width" => {
+                config.source_powerplay.world_width = value(args, i, "--world-width")?.parse()?;
+                i += 2;
+            }
+            "--food-energy" => {
+                config.source_powerplay.food_energy = value(args, i, "--food-energy")?.parse()?;
+                i += 2;
+            }
+            "--episode-seeds" => {
+                config.source_powerplay.episode_seeds =
+                    parse_seed_suite(value(args, i, "--episode-seeds")?)?;
+                i += 2;
+            }
+            "--search-seeds" => {
+                config.source_powerplay.search_seeds =
+                    parse_seed_suite(value(args, i, "--search-seeds")?)?;
+                i += 2;
+            }
+            "--help" | "-h" => {
+                writeln!(
+                    out,
+                    "public-preamble-probe options: --config P --run-seeds N,... \
+                     --population N --generations N --module-width N \
+                     --ticks-per-stage N --world-width N --food-energy F \
+                     --search-seeds N,... --episode-seeds N,...\n\
+                     Reconstructs exact accepted depth-1/depth-2 PowerPlay \
+                     solvers, then compares a fixed task-program FoodRay \
+                     preamble with blank and cue-permuted controls on 16 \
+                     disjoint contexts. This is evaluator-owned falsification, \
+                     never open-endedness evidence."
+                )?;
+                return Ok(());
+            }
+            other => bail!(
+                "unknown public-preamble-probe arg `{other}` (use `public-preamble-probe --help`)"
+            ),
+        }
+    }
+
+    let world = load_world_config_from_path(Path::new(&config_path))?;
+    eprintln!(
+        "{}",
+        json!({
+            "event": "public_preamble_probe_started",
+            "claim_scope": "evaluator-owned imported-premise falsification; not open-endedness evidence",
+            "source_run_seeds": config.source_run_seeds,
+            "source_depth": config.source_powerplay.max_depth,
+            "population_size": config.source_powerplay.population_size,
+            "generations_per_depth": config.source_powerplay.generations_per_depth,
+            "strict_gate": {
+                "meaningful_minimum": 14,
+                "blank_maximum": 2,
+                "permuted_maximum": 2,
+            },
+        })
+    );
+    let result = run_public_preamble_probe(world, config)?;
+    let path = run_output_path(out_dir, "public-preamble-probe")?;
+    let file = File::create(&path)
+        .map_err(|error| anyhow!("cannot create `{}`: {error}", path.display()))?;
+    let mut writer = BufWriter::new(file);
+    serde_json::to_writer_pretty(&mut writer, &result)?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+    writeln!(
+        out,
+        "{}",
+        json!({
+            "result": path,
+            "verdict": result.verdict,
+            "verdict_reason": result.verdict_reason,
+            "branch_transfer_status": result.branch_transfer_status,
+            "requested_pair_count": result.requested_pair_count,
+            "evaluated_pair_count": result.evaluated_pair_count,
+            "passed_pair_count": result.passed_pair_count,
+            "evaluator_owned": result.evaluator_owned,
+            "evidentiary": result.evidentiary,
+            "open_endedness_demonstrated": result.open_endedness_demonstrated,
         })
     )?;
     Ok(())
