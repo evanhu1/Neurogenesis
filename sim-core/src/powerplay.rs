@@ -1106,6 +1106,9 @@ fn execute_program_on_sim(
         for residual in [
             ledger.organism_residual,
             ledger.food_residual,
+            ledger.artifact_residual,
+            ledger.food_split_transfer_residual,
+            ledger.artifact_release_transfer_residual,
             ledger.total_residual,
             ledger.transfer_residual,
         ] {

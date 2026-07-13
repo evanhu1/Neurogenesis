@@ -31,6 +31,14 @@ pub struct FlagsDefaults {
     pub leaky_neurons_enabled: bool,
     pub predation_enabled: bool,
     pub force_random_actions: bool,
+    pub protocol_cache_enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq)]
+pub struct ArtifactDefaults {
+    pub cache_energy_fraction: f32,
+    pub cache_release_efficiency: f32,
+    pub protocol_interaction_energy_cost: f32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
@@ -39,6 +47,7 @@ pub struct WorldConfigDefaults {
     pub food_regrowth: FoodRegrowthDefaults,
     pub terrain: TerrainDefaults,
     pub flags: FlagsDefaults,
+    pub artifact: ArtifactDefaults,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
@@ -80,6 +89,12 @@ pub fn world_config_defaults() -> WorldConfigDefaults {
             leaky_neurons_enabled: false,
             predation_enabled: false,
             force_random_actions: false,
+            protocol_cache_enabled: false,
+        },
+        artifact: ArtifactDefaults {
+            cache_energy_fraction: 0.35,
+            cache_release_efficiency: 1.0,
+            protocol_interaction_energy_cost: 0.0,
         },
     }
 }
@@ -159,6 +174,14 @@ pub struct WorldConfig {
     pub predation_enabled: bool,
     #[serde(default = "default_force_random_actions")]
     pub force_random_actions: bool,
+    #[serde(default = "default_protocol_cache_enabled")]
+    pub protocol_cache_enabled: bool,
+    #[serde(default = "default_cache_energy_fraction")]
+    pub cache_energy_fraction: f32,
+    #[serde(default = "default_cache_release_efficiency")]
+    pub cache_release_efficiency: f32,
+    #[serde(default = "default_protocol_interaction_energy_cost")]
+    pub protocol_interaction_energy_cost: f32,
     pub seed_genome_config: SeedGenomeConfig,
 }
 
@@ -184,6 +207,10 @@ impl WorldConfig {
             leaky_neurons_enabled: false,
             predation_enabled: false,
             force_random_actions: false,
+            protocol_cache_enabled: false,
+            cache_energy_fraction: 0.35,
+            cache_release_efficiency: 1.0,
+            protocol_interaction_energy_cost: 0.0,
             seed_genome_config: SeedGenomeConfig {
                 num_neurons: 20,
                 num_synapses: 80,
@@ -220,6 +247,10 @@ impl WorldConfig {
             leaky_neurons_enabled: false,
             predation_enabled: false,
             force_random_actions: false,
+            protocol_cache_enabled: false,
+            cache_energy_fraction: 0.35,
+            cache_release_efficiency: 1.0,
+            protocol_interaction_energy_cost: 0.0,
             seed_genome_config: SeedGenomeConfig {
                 num_neurons: 1,
                 num_synapses: 0,
@@ -246,6 +277,7 @@ struct WorldConfigToml {
     food: WorldFoodToml,
     terrain: WorldTerrainToml,
     flags: WorldFlagsToml,
+    artifact: WorldArtifactToml,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -306,6 +338,19 @@ struct WorldFlagsToml {
     predation_enabled: bool,
     #[serde(default = "default_force_random_actions")]
     force_random_actions: bool,
+    #[serde(default = "default_protocol_cache_enabled")]
+    protocol_cache_enabled: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorldArtifactToml {
+    #[serde(default = "default_cache_energy_fraction")]
+    cache_energy_fraction: f32,
+    #[serde(default = "default_cache_release_efficiency")]
+    cache_release_efficiency: f32,
+    #[serde(default = "default_protocol_interaction_energy_cost")]
+    protocol_interaction_energy_cost: f32,
 }
 
 impl WorldConfigToml {
@@ -328,6 +373,10 @@ impl WorldConfigToml {
             leaky_neurons_enabled: self.flags.leaky_neurons_enabled,
             predation_enabled: self.flags.predation_enabled,
             force_random_actions: self.flags.force_random_actions,
+            protocol_cache_enabled: self.flags.protocol_cache_enabled,
+            cache_energy_fraction: self.artifact.cache_energy_fraction,
+            cache_release_efficiency: self.artifact.cache_release_efficiency,
+            protocol_interaction_energy_cost: self.artifact.protocol_interaction_energy_cost,
             seed_genome_config,
         }
     }
@@ -419,6 +468,21 @@ pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
     }
     if !(0.0..=1.0).contains(&config.terrain_threshold) {
         return Err("terrain_threshold must be in [0.0, 1.0]".to_owned());
+    }
+    if !(0.0..=1.0).contains(&config.cache_energy_fraction)
+        || !config.cache_energy_fraction.is_finite()
+    {
+        return Err("cache_energy_fraction must be finite and in [0.0, 1.0]".to_owned());
+    }
+    if !(0.0..=1.0).contains(&config.cache_release_efficiency)
+        || !config.cache_release_efficiency.is_finite()
+    {
+        return Err("cache_release_efficiency must be finite and in [0.0, 1.0]".to_owned());
+    }
+    if !config.protocol_interaction_energy_cost.is_finite()
+        || config.protocol_interaction_energy_cost < 0.0
+    {
+        return Err("protocol_interaction_energy_cost must be finite and >= 0".to_owned());
     }
     if !config.seed_genome_config.juvenile_eta_scale.is_finite()
         || config.seed_genome_config.juvenile_eta_scale < 0.0
@@ -514,4 +578,22 @@ fn default_predation_enabled() -> bool {
 
 fn default_force_random_actions() -> bool {
     world_config_defaults().flags.force_random_actions
+}
+
+fn default_protocol_cache_enabled() -> bool {
+    world_config_defaults().flags.protocol_cache_enabled
+}
+
+fn default_cache_energy_fraction() -> f32 {
+    world_config_defaults().artifact.cache_energy_fraction
+}
+
+fn default_cache_release_efficiency() -> f32 {
+    world_config_defaults().artifact.cache_release_efficiency
+}
+
+fn default_protocol_interaction_energy_cost() -> f32 {
+    world_config_defaults()
+        .artifact
+        .protocol_interaction_energy_cost
 }

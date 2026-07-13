@@ -91,6 +91,10 @@ export type WorldConfig = {
   leaky_neurons_enabled: boolean;
   predation_enabled: boolean;
   force_random_actions: boolean;
+  protocol_cache_enabled: boolean;
+  cache_energy_fraction: number;
+  cache_release_efficiency: number;
+  protocol_interaction_energy_cost: number;
   seed_genome_config: SeedGenomeConfig;
 };
 
@@ -254,11 +258,18 @@ export type EnergyLedgerRow = {
   organism_energy_after: number;
   food_energy_before: number;
   food_energy_after: number;
+  artifact_energy_before: number;
+  artifact_energy_after: number;
   plant_spawn_energy: number;
   passive_metabolism_energy: number;
   action_cost_energy: number;
   food_consumption_debit: number;
   food_consumption_credit: number;
+  food_to_artifact_credit: number;
+  artifact_release_debit: number;
+  artifact_release_credit: number;
+  artifact_release_loss: number;
+  protocol_interaction_cost_energy: number;
   predation_prey_energy_removed: number;
   predation_energy_credit: number;
   predation_retention_loss: number;
@@ -269,7 +280,10 @@ export type EnergyLedgerRow = {
   removal_adjustment: number;
   organism_residual: number;
   food_residual: number;
+  artifact_residual: number;
   total_residual: number;
+  food_split_transfer_residual: number;
+  artifact_release_transfer_residual: number;
   transfer_residual: number;
   residual_tolerance: number;
 };

@@ -865,6 +865,9 @@ fn maximum_ledger_residual(row: EnergyLedgerRow) -> f64 {
     row.organism_residual
         .abs()
         .max(row.food_residual.abs())
+        .max(row.artifact_residual.abs())
+        .max(row.food_split_transfer_residual.abs())
+        .max(row.artifact_release_transfer_residual.abs())
         .max(row.total_residual.abs())
         .max(row.transfer_residual.abs())
 }

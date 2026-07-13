@@ -2,6 +2,7 @@ use super::*;
 
 impl Simulation {
     pub(super) fn clear_turn_transient_state(&mut self) {
+        self.clear_artifact_events_last_turn();
         for organism in self.organisms.iter_mut() {
             organism.damage_taken_last_turn = 0.0;
         }

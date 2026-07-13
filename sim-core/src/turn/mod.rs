@@ -9,6 +9,7 @@ use crate::brain::scan_rays;
 use crate::brain::{action_index, evaluate_brain, BrainEvalContext, BrainScratch};
 use crate::grid::{hex_neighbor, rotate_left, rotate_right};
 use crate::plasticity::{apply_runtime_weight_updates, compute_pending_coactivations};
+use crate::ppec::ArtifactEnergyFlow;
 use crate::Simulation;
 #[cfg(feature = "profiling")]
 use crate::{profiling, profiling::TurnPhase};
@@ -127,6 +128,7 @@ struct CommitResult {
     action_cost_energy: f64,
     food_consumption_debit: f64,
     food_consumption_credit: f64,
+    food_to_artifact_credit: f64,
     predation_prey_energy_removed: f64,
     predation_energy_credit: f64,
     predation_retention_loss: f64,
@@ -140,6 +142,24 @@ struct LifecycleEnergyFlow {
     passive_metabolism_energy: f64,
     unrecycled_energy_removed: f64,
     removal_adjustment: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PhysicalEnergyTotals {
+    organism: f64,
+    food: f64,
+    artifact: f64,
+}
+
+struct EnergyLedgerInputs<'a> {
+    turn: u64,
+    before: PhysicalEnergyTotals,
+    organisms: &'a [OrganismState],
+    foods: &'a [FoodState],
+    artifacts: &'a [sim_types::ArtifactCacheState],
+    commit: &'a CommitResult,
+    lifecycle: &'a LifecycleEnergyFlow,
+    artifact_flow: &'a ArtifactEnergyFlow,
 }
 
 macro_rules! profile_turn_phase {
@@ -183,6 +203,16 @@ impl Simulation {
             "food energy before tick",
             self.foods.iter().map(|food| food.energy),
         );
+        let artifact_energy_before = checked_energy_total(
+            "artifact energy before tick",
+            self.artifact_caches()
+                .iter()
+                .map(|artifact| artifact.energy),
+        );
+        // IDs below this frontier existed when the tick began. A request that
+        // predicts an ID minted by this tick's food commit cannot use it until
+        // the next tick.
+        let eligible_artifact_id_frontier = self.next_artifact_id;
 
         #[cfg(feature = "profiling")]
         let tick_started = Instant::now();
@@ -220,6 +250,12 @@ impl Simulation {
         commit.food_spawned.extend(lifecycle_food_spawned);
         self.turn_scratch.gestation_started = gestation_started;
 
+        // Public artifact responses resolve only after ordinary movement/food
+        // commit. Eligibility is limited to the start-of-tick ID frontier;
+        // within that set, stable request ordering defines conflict semantics.
+        let artifact_flow =
+            self.resolve_pending_artifact_interactions(eligible_artifact_id_frontier);
+
         // Commit was the last reader of the intents and move resolutions;
         // return the buffers to TurnScratch for reuse next tick.
         self.turn_scratch.intents = intents;
@@ -241,15 +277,20 @@ impl Simulation {
             self.debug_assert_consistent_state();
         });
 
-        let energy_ledger = build_energy_ledger_row(
-            self.turn.saturating_add(1),
-            organism_energy_before,
-            food_energy_before,
-            &self.organisms,
-            &self.foods,
-            &commit,
-            &lifecycle_energy,
-        );
+        let energy_ledger = build_energy_ledger_row(EnergyLedgerInputs {
+            turn: self.turn.saturating_add(1),
+            before: PhysicalEnergyTotals {
+                organism: organism_energy_before,
+                food: food_energy_before,
+                artifact: artifact_energy_before,
+            },
+            organisms: &self.organisms,
+            foods: &self.foods,
+            artifacts: self.artifact_caches(),
+            commit: &commit,
+            lifecycle: &lifecycle_energy,
+            artifact_flow: &artifact_flow,
+        });
 
         let removed_positions = profile_turn_phase!(TurnPhase::MetricsAndDelta, {
             self.turn = self.turn.saturating_add(1);
@@ -351,15 +392,20 @@ fn checked_energy_total(label: &str, values: impl Iterator<Item = f32>) -> f64 {
     total
 }
 
-fn build_energy_ledger_row(
-    turn: u64,
-    organism_energy_before: f64,
-    food_energy_before: f64,
-    organisms: &[OrganismState],
-    foods: &[FoodState],
-    commit: &CommitResult,
-    lifecycle: &LifecycleEnergyFlow,
-) -> EnergyLedgerRow {
+fn build_energy_ledger_row(inputs: EnergyLedgerInputs<'_>) -> EnergyLedgerRow {
+    let EnergyLedgerInputs {
+        turn,
+        before,
+        organisms,
+        foods,
+        artifacts,
+        commit,
+        lifecycle,
+        artifact_flow,
+    } = inputs;
+    let organism_energy_before = before.organism;
+    let food_energy_before = before.food;
+    let artifact_energy_before = before.artifact;
     let organism_energy_after = checked_energy_total(
         "organism energy after tick",
         organisms.iter().map(|organism| organism.energy),
@@ -367,6 +413,10 @@ fn build_energy_ledger_row(
     let food_energy_after = checked_energy_total(
         "food energy after tick",
         foods.iter().map(|food| food.energy),
+    );
+    let artifact_energy_after = checked_energy_total(
+        "artifact energy after tick",
+        artifacts.iter().map(|artifact| artifact.energy),
     );
     let plant_spawn_energy = checked_energy_total(
         "plant spawn energy",
@@ -386,32 +436,53 @@ fn build_energy_ledger_row(
     );
     let removal_adjustment = lifecycle.removal_adjustment + commit.removal_adjustment;
 
-    let organism_expected =
-        organism_energy_before - lifecycle.passive_metabolism_energy - commit.action_cost_energy
-            + commit.food_consumption_credit
-            + commit.predation_energy_credit
-            - lifecycle.unrecycled_energy_removed
-            - commit.predation_prey_energy_removed
-            - commit.corpse_source_energy_removed;
+    let organism_expected = organism_energy_before
+        - lifecycle.passive_metabolism_energy
+        - commit.action_cost_energy
+        - artifact_flow.protocol_interaction_cost_energy
+        + commit.food_consumption_credit
+        + artifact_flow.artifact_release_credit
+        + commit.predation_energy_credit
+        - lifecycle.unrecycled_energy_removed
+        - commit.predation_prey_energy_removed
+        - commit.corpse_source_energy_removed;
     let food_expected = food_energy_before - commit.food_consumption_debit
         + plant_spawn_energy
         + corpse_spawn_energy;
+    let artifact_expected = artifact_energy_before + commit.food_to_artifact_credit
+        - artifact_flow.artifact_release_debit;
     let organism_residual = organism_energy_after - organism_expected;
     let food_residual = food_energy_after - food_expected;
-    let transfer_residual = commit.food_consumption_credit - commit.food_consumption_debit;
-    let total_expected = organism_energy_before + food_energy_before + plant_spawn_energy
-        - lifecycle.passive_metabolism_energy
-        - commit.action_cost_energy
-        - commit.predation_retention_loss
-        - commit.corpse_retention_loss
-        + removal_adjustment;
-    let total_residual = organism_energy_after + food_energy_after - total_expected;
-    let flow_scale = (organism_energy_before + food_energy_before).abs()
+    let artifact_residual = artifact_energy_after - artifact_expected;
+    let food_split_transfer_residual = commit.food_consumption_credit
+        + commit.food_to_artifact_credit
+        - commit.food_consumption_debit;
+    let artifact_release_transfer_residual = artifact_flow.artifact_release_credit
+        + artifact_flow.artifact_release_loss
+        - artifact_flow.artifact_release_debit;
+    let transfer_residual = food_split_transfer_residual + artifact_release_transfer_residual;
+    let total_expected =
+        organism_energy_before + food_energy_before + artifact_energy_before + plant_spawn_energy
+            - lifecycle.passive_metabolism_energy
+            - commit.action_cost_energy
+            - artifact_flow.protocol_interaction_cost_energy
+            - commit.predation_retention_loss
+            - commit.corpse_retention_loss
+            - artifact_flow.artifact_release_loss
+            + removal_adjustment;
+    let total_residual =
+        organism_energy_after + food_energy_after + artifact_energy_after - total_expected;
+    let flow_scale = (organism_energy_before + food_energy_before + artifact_energy_before).abs()
         + plant_spawn_energy.abs()
         + lifecycle.passive_metabolism_energy.abs()
         + commit.action_cost_energy.abs()
         + commit.food_consumption_debit.abs()
         + commit.food_consumption_credit.abs()
+        + commit.food_to_artifact_credit.abs()
+        + artifact_flow.artifact_release_debit.abs()
+        + artifact_flow.artifact_release_credit.abs()
+        + artifact_flow.artifact_release_loss.abs()
+        + artifact_flow.protocol_interaction_cost_energy.abs()
         + commit.predation_prey_energy_removed.abs()
         + commit.predation_energy_credit.abs()
         + commit.predation_retention_loss.abs()
@@ -429,11 +500,18 @@ fn build_energy_ledger_row(
         organism_energy_after,
         food_energy_before,
         food_energy_after,
+        artifact_energy_before,
+        artifact_energy_after,
         plant_spawn_energy,
         passive_metabolism_energy: lifecycle.passive_metabolism_energy,
         action_cost_energy: commit.action_cost_energy,
         food_consumption_debit: commit.food_consumption_debit,
         food_consumption_credit: commit.food_consumption_credit,
+        food_to_artifact_credit: commit.food_to_artifact_credit,
+        artifact_release_debit: artifact_flow.artifact_release_debit,
+        artifact_release_credit: artifact_flow.artifact_release_credit,
+        artifact_release_loss: artifact_flow.artifact_release_loss,
+        protocol_interaction_cost_energy: artifact_flow.protocol_interaction_cost_energy,
         predation_prey_energy_removed: commit.predation_prey_energy_removed,
         predation_energy_credit: commit.predation_energy_credit,
         predation_retention_loss: commit.predation_retention_loss,
@@ -444,7 +522,10 @@ fn build_energy_ledger_row(
         removal_adjustment,
         organism_residual,
         food_residual,
+        artifact_residual,
         total_residual,
+        food_split_transfer_residual,
+        artifact_release_transfer_residual,
         transfer_residual,
         residual_tolerance,
     };
@@ -458,11 +539,18 @@ fn assert_energy_ledger_closes(row: &EnergyLedgerRow) {
         row.organism_energy_after,
         row.food_energy_before,
         row.food_energy_after,
+        row.artifact_energy_before,
+        row.artifact_energy_after,
         row.plant_spawn_energy,
         row.passive_metabolism_energy,
         row.action_cost_energy,
         row.food_consumption_debit,
         row.food_consumption_credit,
+        row.food_to_artifact_credit,
+        row.artifact_release_debit,
+        row.artifact_release_credit,
+        row.artifact_release_loss,
+        row.protocol_interaction_cost_energy,
         row.predation_prey_energy_removed,
         row.predation_energy_credit,
         row.predation_retention_loss,
@@ -473,7 +561,10 @@ fn assert_energy_ledger_closes(row: &EnergyLedgerRow) {
         row.removal_adjustment,
         row.organism_residual,
         row.food_residual,
+        row.artifact_residual,
         row.total_residual,
+        row.food_split_transfer_residual,
+        row.artifact_release_transfer_residual,
         row.transfer_residual,
         row.residual_tolerance,
     ];
@@ -484,14 +575,24 @@ fn assert_energy_ledger_closes(row: &EnergyLedgerRow) {
     );
     assert!(
         row.predation_retention_loss >= -row.residual_tolerance
-            && row.corpse_retention_loss >= -row.residual_tolerance,
+            && row.corpse_retention_loss >= -row.residual_tolerance
+            && row.artifact_release_loss >= -row.residual_tolerance,
         "energy ledger: negative retention loss at turn {}: {row:?}",
         row.turn
     );
     for (label, residual) in [
         ("organism compartment", row.organism_residual),
         ("food compartment", row.food_residual),
-        ("food transfer", row.transfer_residual),
+        ("artifact compartment", row.artifact_residual),
+        (
+            "plant-to-organism/artifact transfer",
+            row.food_split_transfer_residual,
+        ),
+        (
+            "artifact release transfer",
+            row.artifact_release_transfer_residual,
+        ),
+        ("combined physical transfers", row.transfer_residual),
         ("total compartments", row.total_residual),
     ] {
         assert!(

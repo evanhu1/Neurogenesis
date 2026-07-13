@@ -40,6 +40,20 @@ cargo build -p sim-cli --release        # --release strongly recommended
   readouts therefore remain zero-depth and are not evolutionary evidence.
 - **Current lifetime boundary:** survival is energy-only. The serialized
   `max_organism_age` value is legacy telemetry and is not an enforced age cap.
+- **Optional public-cache boundary:** `[flags].protocol_cache_enabled` splits a
+  configured fraction of consumed plant energy into serialized, nonblocking
+  public cache artifacts. Correct two-bit responses to each cache's complete
+  public program and challenge release its stored energy through a stable
+  queued interaction path. Valid same-cache contention uses canonical organism
+  ID order; future evolutionary panels must rotate founder/ID assignments
+  symmetrically because Stage 0 does not establish ID-order robustness. An
+  adjacent attempt is eligible only when `organism_energy >= interaction_cost`;
+  exact equality pays the actor to zero, while an insufficient actor neither
+  pays nor claims the cache's slot. Caches
+  can stack on one cell, never block organisms
+  or food, and currently have no expiry, decay, capacity limit, or garbage
+  collection. The baseline keeps this mechanism disabled; Stage 0 is therefore
+  not yet a viable unbounded-run ecology.
 
 ## Global flags
 
@@ -221,6 +235,36 @@ cargo build -p sim-cli --release        # --release strongly recommended
   external artifact SHA must be accompanied by the git commit and executable
   hash because those are deliberately recorded as unavailable rather than
   fabricated.
+
+- `ppec-mechanism [--config P] [--run-seeds N,...] [--contexts N]
+  [--persistence-ticks N] [--cache-fraction F] [--interaction-cost F]
+  [--out-dir D]` — run the evaluator-owned Stage-0 persistent public
+  proof-carrying energy-cache probe. Each exact two-producer scene funds caches
+  through ordinary plant consumption, waits with no interaction, verifies exact
+  save/load/replay with one eligible request still pending, checks canonical
+  valid-vs-valid same-cache contention for both a correct and a wrong lower-ID
+  claimant (including event snapshots and per-path energy accounting), and then
+  runs matched own-protocol, foreign-protocol,
+  no-payoff, code-permutation, challenge-permutation, artifact-knockout,
+  constant-0/1/2/3, and deterministic random-response arms. Durable JSON
+  contains every public
+  program, challenge, response, committed event, per-path energy residual, and
+  final world fingerprint. This establishes only that persistent escrow,
+  public semantics, generic use, and causal controls engage. Responses are
+  evaluator-supplied; the protocol has a `u16` arity bound and no demonstrated
+  canonicalization or dead-op resistance. It does not show evolved use,
+  adaptive novelty, capability growth, unbounded structure, or open-endedness.
+  The one-shot two-bit proof also gives a blind response `1/4` success. With
+  the default probe's 7-energy cache and 0.25 cost, random guessing has positive
+  expected payoff, so this is not a protective/adversarial ecology. Stage 1
+  must introduce a multi-round proof or a cost/reward contract with negative
+  random-policy net payoff and hard-gate the random arm's payoff, not merely its
+  lower acceptance count.
+  Each cache also clones the complete opcode vector and evaluation allocates and
+  replays work linear in program bytes. With stacking and no collection this
+  can create unbounded memory/work for the wrong reason; long-tail use requires
+  canonical protocol interning/reference counting, a bounded artifact lifecycle,
+  and energy-priced execution.
 
 - `neat [--config P] [--seed N] [--population N] [--generations N]
   [--episode-horizons T[,T...]] [--world-seeds N,N]

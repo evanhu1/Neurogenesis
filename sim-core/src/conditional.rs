@@ -2938,6 +2938,9 @@ fn tick_energy_closed(tick: &ConditionalTickTrace) -> bool {
     let row = tick.core_energy_ledger;
     row.organism_residual.abs() <= row.residual_tolerance
         && row.food_residual.abs() <= row.residual_tolerance
+        && row.artifact_residual.abs() <= row.residual_tolerance
+        && row.food_split_transfer_residual.abs() <= row.residual_tolerance
+        && row.artifact_release_transfer_residual.abs() <= row.residual_tolerance
         && row.transfer_residual.abs() <= row.residual_tolerance
         && row.total_residual.abs() <= row.residual_tolerance
 }
@@ -3048,6 +3051,9 @@ fn run_ecology_trial(
         max_residual = max_residual
             .max(row.organism_residual.abs())
             .max(row.food_residual.abs())
+            .max(row.artifact_residual.abs())
+            .max(row.food_split_transfer_residual.abs())
+            .max(row.artifact_release_transfer_residual.abs())
             .max(row.transfer_residual.abs())
             .max(row.total_residual.abs());
         max_tolerance = max_tolerance.max(row.residual_tolerance);

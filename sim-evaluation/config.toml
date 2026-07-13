@@ -27,3 +27,9 @@ runtime_plasticity_enabled = false # Whether runtime Hebbian plasticity updates 
 leaky_neurons_enabled = false # Whether hidden neurons retain leaky recurrent state instead of using instantaneous NEAT activations.
 predation_enabled = false # Enables organism vision, the Health sensor, Attack actions, and predation damage.
 force_random_actions = false # Debug toggle that ignores policy logits and forces random actions.
+protocol_cache_enabled = false # Enables the persistent nonblocking public energy-cache overlay.
+
+[artifact]
+cache_energy_fraction = 0.35 # Fraction of consumed plant energy transferred into a public cache when enabled.
+cache_release_efficiency = 1.0 # Fraction of accepted cache energy credited to the opener; the remainder is explicit loss.
+protocol_interaction_energy_cost = 0.0 # Energy charged for each queued public protocol response.

@@ -184,7 +184,13 @@ impl<'a> CommitPhaseContext<'a> {
             food.id,
             self.sim.turn.saturating_add(1)
         );
-        let gained_energy = food.energy.max(0.0);
+        let cache_allocation = if food.kind == FoodKind::Plant {
+            self.sim
+                .create_cache_from_plant_transfer(predator_idx, food.q, food.r, food.energy)
+        } else {
+            0.0
+        };
+        let gained_energy = food.energy.max(0.0) - cache_allocation;
         let predator = &mut self.sim.organisms[predator_idx];
         let energy_before_consumption = predator.energy;
         predator.energy += gained_energy;
@@ -197,6 +203,7 @@ impl<'a> CommitPhaseContext<'a> {
         self.result.food_consumption_debit += f64::from(food.energy);
         self.result.food_consumption_credit +=
             f64::from(predator.energy) - f64::from(energy_before_consumption);
+        self.result.food_to_artifact_credit += f64::from(cache_allocation);
         predator.consumptions_count = predator.consumptions_count.saturating_add(1);
         match food.kind {
             FoodKind::Plant => {

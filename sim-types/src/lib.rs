@@ -15,6 +15,7 @@ id_newtype!(OrganismId, u64);
 id_newtype!(SpeciesId, u64);
 id_newtype!(NeuronId, u32);
 id_newtype!(FoodId, u64);
+id_newtype!(ArtifactId, u64);
 
 /// Stable identity of a node in the heritable graph.
 ///
@@ -780,6 +781,86 @@ pub struct FoodState {
     pub visual: VisualProperties,
 }
 
+/// Public Stage-0 byte program carried by a persistent cache. The opcode vector
+/// is variable length and every byte participates in the two-bit response
+/// function; consumers receive the complete program and challenge.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PublicProtocolProgram {
+    pub input_arity: u16,
+    pub opcodes: Vec<u8>,
+}
+
+/// Nonblocking persistent artifact overlay. It deliberately does not implement
+/// [`Occupant`], so organisms, plants, and caches can share a cell.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ArtifactCacheState {
+    pub id: ArtifactId,
+    pub q: i32,
+    pub r: i32,
+    pub energy: f32,
+    pub creator_id: OrganismId,
+    pub owner_protocol_fingerprint: String,
+    pub public_program: PublicProtocolProgram,
+    pub challenge_bits: Vec<u8>,
+    pub attempt_ordinal: u64,
+    pub created_turn: u64,
+}
+
+/// A response queued through the generic public artifact interaction channel.
+/// The ordinal is allocated by the world and makes same-tick resolution stable.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ArtifactInteractionRequest {
+    pub request_ordinal: u64,
+    pub organism_id: OrganismId,
+    pub artifact_id: ArtifactId,
+    pub response_bits: u8,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactInteractionOutcome {
+    Released,
+    AcceptedNoPayoff,
+    WrongResponse,
+    /// The requested ID was minted after the current tick began and is not
+    /// eligible until a later tick.
+    CreatedThisTick,
+    /// A lower stable-order request already claimed this artifact's single
+    /// interaction slot for the tick.
+    ContendedThisTick,
+    /// The adjacent actor could not pay the configured interaction cost. This
+    /// is nonclaiming, so a later valid actor can still use the cache.
+    InsufficientEnergy,
+    NotAdjacent,
+    MissingArtifact,
+    MissingOrganism,
+}
+
+/// Ordered causal fact emitted by the committed artifact interaction path.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ArtifactInteractionEvent {
+    pub turn: u64,
+    pub request_ordinal: u64,
+    pub organism_id: OrganismId,
+    pub artifact_id: ArtifactId,
+    pub owner_protocol_fingerprint: Option<String>,
+    pub challenge_bits: Vec<u8>,
+    pub response_bits: u8,
+    pub expected_response_bits: Option<u8>,
+    pub own_protocol: Option<bool>,
+    pub outcome: ArtifactInteractionOutcome,
+    /// Cache energy seen by the evaluated attempt. For a contended request,
+    /// this is the start-of-slot snapshot used by the canonical winner.
+    pub cache_energy_before: f32,
+    /// Physical cache energy when this event was emitted; zero after an earlier
+    /// same-tick winner released and removed the cache.
+    pub cache_energy_after: f32,
+    pub organism_energy_before: f32,
+    pub organism_energy_after: f32,
+    pub released_energy: f32,
+    pub release_loss: f32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct MetricsSnapshot {
     pub turns: u64,
@@ -801,8 +882,9 @@ pub struct MetricsSnapshot {
     pub energy_ledger_last_turn: EnergyLedgerRow,
 }
 
-/// Per-tick energy accounting over the two physical compartments: signed
-/// organism energy and food energy. All values are simulation energy units.
+/// Per-tick energy accounting over the three physical compartments: signed
+/// organism energy, food energy, and persistent artifact energy. All values
+/// are simulation energy units.
 ///
 /// Consumption is an internal transfer and therefore has separate debit and
 /// credit columns. Predation/corpse conversion is intentionally lossy and the
@@ -816,11 +898,23 @@ pub struct EnergyLedgerRow {
     pub organism_energy_after: f64,
     pub food_energy_before: f64,
     pub food_energy_after: f64,
+    pub artifact_energy_before: f64,
+    pub artifact_energy_after: f64,
     pub plant_spawn_energy: f64,
     pub passive_metabolism_energy: f64,
     pub action_cost_energy: f64,
     pub food_consumption_debit: f64,
     pub food_consumption_credit: f64,
+    /// Portion of consumed plant energy transferred into persistent caches.
+    pub food_to_artifact_credit: f64,
+    /// Energy removed from caches by accepted public interactions.
+    pub artifact_release_debit: f64,
+    /// Retained cache energy credited to opening organisms.
+    pub artifact_release_credit: f64,
+    /// Deliberately dissipated cache energy when release efficiency is below 1.
+    pub artifact_release_loss: f64,
+    /// Explicit cost of queued public protocol responses.
+    pub protocol_interaction_cost_energy: f64,
     /// Signed prey energy removed from the organism compartment by predation.
     pub predation_prey_energy_removed: f64,
     pub predation_energy_credit: f64,
@@ -835,9 +929,18 @@ pub struct EnergyLedgerRow {
     pub removal_adjustment: f64,
     pub organism_residual: f64,
     pub food_residual: f64,
-    /// Total-compartment residual, deliberately excluding the food-transfer
-    /// mismatch so a non-closing transfer cannot hide as an allowed source.
+    pub artifact_residual: f64,
+    /// Total-compartment residual, deliberately excluding internal transfer
+    /// mismatches so a non-closing transfer cannot hide as an allowed source.
     pub total_residual: f64,
+    /// Plant consumption split only. Kept separate so a funding-path error
+    /// cannot cancel an equal and opposite artifact-release error.
+    pub food_split_transfer_residual: f64,
+    /// Artifact release only. Kept separate from plant funding for fail-closed
+    /// per-path conservation.
+    pub artifact_release_transfer_residual: f64,
+    /// Sum of the two independent transfer residuals, retained as a compact
+    /// diagnostic but never used as their only hard gate.
     pub transfer_residual: f64,
     pub residual_tolerance: f64,
 }

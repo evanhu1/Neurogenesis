@@ -3,8 +3,9 @@ use rand_chacha::ChaCha8Rng;
 #[cfg(feature = "instrumentation")]
 use sim_types::ActionRecord;
 use sim_types::{
-    FoodState, MetricsSnapshot, Occupant, OrganismGenome, OrganismId, OrganismState, TerrainCell,
-    TerrainType, VisualProperties, WorldConfig, WorldSnapshot,
+    ArtifactCacheState, ArtifactInteractionEvent, ArtifactInteractionRequest, FoodState,
+    MetricsSnapshot, Occupant, OrganismGenome, OrganismId, OrganismState, TerrainCell, TerrainType,
+    VisualProperties, WorldConfig, WorldSnapshot,
 };
 use std::collections::BTreeMap;
 use thiserror::Error;
@@ -36,6 +37,7 @@ mod metabolism;
 #[path = "brain/plasticity.rs"]
 mod plasticity;
 pub mod powerplay;
+pub mod ppec;
 #[cfg(feature = "profiling")]
 #[path = "../profiling/profiling.rs"]
 pub mod profiling;
@@ -104,8 +106,21 @@ pub struct Simulation {
     pub(crate) attack_events_last_turn: Vec<turn::AttackEvent>,
     next_organism_id: u64,
     next_food_id: u64,
+    #[serde(default)]
+    next_artifact_id: u64,
+    #[serde(default)]
+    next_artifact_interaction_ordinal: u64,
     organisms: Vec<OrganismState>,
     foods: Vec<FoodState>,
+    /// Persistent nonblocking public cache overlay, sorted by artifact ID.
+    #[serde(default)]
+    artifact_caches: Vec<ArtifactCacheState>,
+    /// Generic public responses queued for deterministic next-tick commit.
+    #[serde(default)]
+    pending_artifact_interactions: Vec<ArtifactInteractionRequest>,
+    /// Ordered committed facts from the most recent tick.
+    #[serde(default)]
+    artifact_events_last_turn: Vec<ArtifactInteractionEvent>,
     occupancy: Vec<Option<Occupant>>,
     terrain_map: Vec<bool>,
     food_tiles: Vec<bool>,
@@ -152,8 +167,13 @@ impl Clone for Simulation {
             attack_events_last_turn: Vec::new(),
             next_organism_id: self.next_organism_id,
             next_food_id: self.next_food_id,
+            next_artifact_id: self.next_artifact_id,
+            next_artifact_interaction_ordinal: self.next_artifact_interaction_ordinal,
             organisms: self.organisms.clone(),
             foods: self.foods.clone(),
+            artifact_caches: self.artifact_caches.clone(),
+            pending_artifact_interactions: self.pending_artifact_interactions.clone(),
+            artifact_events_last_turn: self.artifact_events_last_turn.clone(),
             occupancy: self.occupancy.clone(),
             terrain_map: self.terrain_map.clone(),
             food_tiles: self.food_tiles.clone(),
@@ -201,8 +221,13 @@ impl Simulation {
             attack_events_last_turn: Vec::new(),
             next_organism_id: 0,
             next_food_id: 0,
+            next_artifact_id: 0,
+            next_artifact_interaction_ordinal: 0,
             organisms: Vec::new(),
             foods: Vec::new(),
+            artifact_caches: Vec::new(),
+            pending_artifact_interactions: Vec::new(),
+            artifact_events_last_turn: Vec::new(),
             occupancy: vec![None; capacity],
             terrain_cells: Vec::new(),
             terrain_map: Vec::new(),
@@ -362,8 +387,13 @@ impl Simulation {
         self.champion_pool = champion_pool;
         self.next_organism_id = 0;
         self.next_food_id = 0;
+        self.next_artifact_id = 0;
+        self.next_artifact_interaction_ordinal = 0;
         self.organisms.clear();
         self.foods.clear();
+        self.artifact_caches.clear();
+        self.pending_artifact_interactions.clear();
+        self.artifact_events_last_turn.clear();
         self.occupancy.fill(None);
         // terrain_map/food_tiles/food_regrowth_due_turn/food_regrowth_schedule are
         // wholesale reassigned by initialize_terrain/build_terrain_cells/
@@ -537,6 +567,16 @@ impl Simulation {
             ));
         }
 
+        if !self
+            .artifact_caches
+            .windows(2)
+            .all(|window| window[0].id < window[1].id)
+        {
+            return Err(SimError::InvalidState(
+                "artifact caches must be sorted by ascending id".to_owned(),
+            ));
+        }
+
         let width = self.config.world_width as i32;
         let mut expected_occupancy = vec![None; expected_capacity];
         for (idx, blocked) in self.terrain_map.iter().copied().enumerate() {
@@ -598,6 +638,43 @@ impl Simulation {
             expected_occupancy[idx] = Some(Occupant::Food(food.id));
         }
 
+        for artifact in &self.artifact_caches {
+            if artifact.q < 0 || artifact.r < 0 || artifact.q >= width || artifact.r >= width {
+                return Err(SimError::InvalidState(format!(
+                    "artifact {:?} uses non-canonical coordinates ({}, {})",
+                    artifact.id, artifact.q, artifact.r
+                )));
+            }
+            let idx = artifact.r as usize * width as usize + artifact.q as usize;
+            if self.terrain_map[idx] {
+                return Err(SimError::InvalidState(format!(
+                    "artifact {:?} cannot occupy wall cell ({}, {})",
+                    artifact.id, artifact.q, artifact.r
+                )));
+            }
+            if !artifact.energy.is_finite() || artifact.energy <= 0.0 {
+                return Err(SimError::InvalidState(format!(
+                    "artifact {:?} energy must be finite and positive",
+                    artifact.id
+                )));
+            }
+            ppec::evaluate_public_protocol(&artifact.public_program, &artifact.challenge_bits)
+                .map_err(|error| {
+                    SimError::InvalidState(format!(
+                        "artifact {:?} protocol is invalid: {error}",
+                        artifact.id
+                    ))
+                })?;
+            if ppec::public_protocol_fingerprint(&artifact.public_program)
+                != artifact.owner_protocol_fingerprint
+            {
+                return Err(SimError::InvalidState(format!(
+                    "artifact {:?} public protocol fingerprint mismatch",
+                    artifact.id
+                )));
+            }
+        }
+
         if self.occupancy != expected_occupancy {
             return Err(SimError::InvalidState(
                 "occupancy vector does not match organism/food positions".to_owned(),
@@ -618,6 +695,36 @@ impl Simulation {
                 "next_food_id {} must be greater than max food id {}",
                 self.next_food_id, max_food_id
             )));
+        }
+
+        let max_artifact_id = self
+            .artifact_caches
+            .iter()
+            .map(|artifact| artifact.id.0)
+            .max()
+            .unwrap_or(0);
+        if !self.artifact_caches.is_empty() && self.next_artifact_id <= max_artifact_id {
+            return Err(SimError::InvalidState(format!(
+                "next_artifact_id {} must be greater than max artifact id {}",
+                self.next_artifact_id, max_artifact_id
+            )));
+        }
+        let mut pending_ordinals = std::collections::BTreeSet::new();
+        for request in &self.pending_artifact_interactions {
+            if request.response_bits > 0b11
+                || request.request_ordinal >= self.next_artifact_interaction_ordinal
+            {
+                return Err(SimError::InvalidState(format!(
+                    "invalid pending artifact request ordinal {}",
+                    request.request_ordinal
+                )));
+            }
+            if !pending_ordinals.insert(request.request_ordinal) {
+                return Err(SimError::InvalidState(format!(
+                    "duplicate pending artifact request ordinal {}",
+                    request.request_ordinal
+                )));
+            }
         }
 
         if self.metrics.organisms != self.organisms.len() as u32 {

@@ -14,6 +14,7 @@ mod conditional;
 mod dashboards;
 mod neat;
 mod powerplay;
+mod ppec;
 mod sweep;
 mod tui;
 
@@ -100,6 +101,7 @@ fn print_help(out: &mut impl Write) -> Result<()> {
          \x20 powerplay [--seed N] [--depth 1..4] [--population N] [--generations N]  bounded causal-ecology pilot → result json\n\
          \x20 public-preamble-probe [--run-seeds N,N] [--population N] [--generations N]  zero-shot PowerPlay interface compatibility probe → result json\n\
          \x20 public-decoder-probe [--source-seed N] [--decoder-population N] [--decoder-generations N]  protected public decoder + descendant-checkpoint reuse falsifier → result json\n\
+         \x20 ppec-mechanism [--run-seeds N,N] [--contexts N] [--persistence-ticks N]  persistent public-cache mechanism probe → result json\n\
          \n\
          READS (stdout only)\n\
          \x20 turn | state | pillars | eco | lineage | genome [--gene G] | food --in w.bin\n\
@@ -183,6 +185,10 @@ fn run() -> Result<()> {
     if cmd == "public-decoder-probe" {
         let mut out = io::stdout().lock();
         return powerplay::run_public_decoder_probe_cli(&cmd_args, &out_dir, &mut out);
+    }
+    if cmd == "ppec-mechanism" {
+        let mut out = io::stdout().lock();
+        return ppec::run_ppec_mechanism_cli(&cmd_args, &out_dir, &mut out);
     }
     // Human-facing interactive mode: a resident world driven from a split-pane
     // TUI, as opposed to the agent-facing one-shot commands below. `--in` is a
