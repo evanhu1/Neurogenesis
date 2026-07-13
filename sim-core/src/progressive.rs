@@ -336,8 +336,9 @@ pub fn enforce_retention(
 }
 
 /// Paired causal evidence for the just-added residual. The knockout controller
-/// must fingerprint to the previous sealed checkpoint, and at least one exact
-/// per-seed behavior trace must change when the residual is enabled.
+/// must fingerprint to the previous sealed checkpoint, the trial contexts must
+/// be unique, and the enabled controller must clear an explicit capability gap
+/// in addition to changing its exact per-seed behavior traces.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtensionEffectEvidence {
     pub task_id: u64,
@@ -357,6 +358,13 @@ pub fn verify_extension_effect(
     sealed_controller_fingerprint: &str,
     evidence: &ExtensionEffectEvidence,
 ) -> Result<(), ExtensionEffectError> {
+    if !is_fingerprint(sealed_controller_fingerprint)
+        || !is_fingerprint(&evidence.task_fingerprint)
+        || !is_fingerprint(&evidence.enabled_controller_fingerprint)
+        || !is_fingerprint(&evidence.knockout_controller_fingerprint)
+    {
+        return Err(ExtensionEffectError::MalformedFingerprint);
+    }
     if evidence.knockout_controller_fingerprint != sealed_controller_fingerprint {
         return Err(ExtensionEffectError::WrongKnockoutController);
     }
@@ -365,6 +373,7 @@ pub fn verify_extension_effect(
     }
     let trials = evidence.trial_seeds.len();
     if trials == 0
+        || !trial_seeds_are_unique(&evidence.trial_seeds)
         || evidence.enabled_behavior_fingerprints.len() != trials
         || evidence.knockout_behavior_fingerprints.len() != trials
         || evidence.enabled_passes as usize > trials
@@ -476,6 +485,7 @@ fn validate_checkpoint(checkpoint: &TaskCheckpoint) -> Result<(), RetentionError
     let task_id = checkpoint.requirement.task_id;
     let trials = checkpoint.trial_seeds.len();
     if trials == 0
+        || !trial_seeds_are_unique(&checkpoint.trial_seeds)
         || checkpoint.accepted_behavior_fingerprints.len() != trials
         || checkpoint.accepted_passes as usize > trials
         || checkpoint.requirement.minimum_passes as usize > trials
@@ -495,6 +505,7 @@ fn validate_checkpoint(checkpoint: &TaskCheckpoint) -> Result<(), RetentionError
 
 fn validate_replay_shape(replay: &TaskReplay) -> Result<(), RetentionError> {
     if replay.trial_seeds.is_empty()
+        || !trial_seeds_are_unique(&replay.trial_seeds)
         || replay.behavior_fingerprints.len() != replay.trial_seeds.len()
         || replay.passes as usize > replay.trial_seeds.len()
     {
@@ -521,6 +532,10 @@ fn is_fingerprint(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn trial_seeds_are_unique(seeds: &[u64]) -> bool {
+    seeds.iter().copied().collect::<BTreeSet<_>>().len() == seeds.len()
 }
 
 fn unique_nodes(genome: &OrganismGenome) -> Result<BTreeSet<GeneNodeId>, ProtectedResidualError> {

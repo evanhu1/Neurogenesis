@@ -27,6 +27,7 @@ use sim_types::{
     InnovationId, Occupant, OrganismGenome, SynapseGene,
 };
 use std::cmp::Ordering;
+use std::collections::BTreeSet;
 
 const RESULT_SCHEMA_VERSION: u32 = 1;
 const TASK_DOMAIN: u64 = 0x504f_5745_5250_4c59;
@@ -84,11 +85,28 @@ impl PowerPlayConfig {
         if self.module_width == 0 || self.module_width > 16 {
             bail!("module-width must be in 1..=16");
         }
-        if self.search_seeds.is_empty()
+        if self.search_seeds.len() != 16
             || self.episode_seeds.len() != 16
             || self.ticks_per_stage == 0
         {
-            bail!("the adversarial pilot gate requires exactly 16 episode seeds");
+            bail!("the adversarial pilot gate requires exactly 16 search and admission seeds");
+        }
+        if self
+            .search_seeds
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>()
+            .len()
+            != 16
+            || self
+                .episode_seeds
+                .iter()
+                .copied()
+                .collect::<BTreeSet<_>>()
+                .len()
+                != 16
+        {
+            bail!("search and admission seed suites must each contain 16 unique seeds");
         }
         if self
             .search_seeds
