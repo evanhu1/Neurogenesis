@@ -30,7 +30,7 @@ therefore "sustained discovery through the tested horizon under a stated
 resource envelope," with a geometric sequence of later horizons and adversarial
 controls, not a proof of unboundedness.
 
-The smallest materially new substrate mechanism that targets the semantic gap
+One materially new substrate mechanism that directly targets the semantic gap
 is **persistent, energy-funded, recursively composable niche construction**:
 organisms must be able to build public artifacts that persist into later
 evolutionary episodes, expose generic observable ports, and become inputs to
@@ -38,7 +38,11 @@ further construction. That creates endogenous ecological inheritance and makes
 new organism-artifact and lineage-lineage relations possible. It still cannot
 defeat physical finiteness, but unlike another archive, controller, task, or
 world-size ladder, it can expand the operational affordance space whose tail is
-being measured.
+being measured. This audit does not prove that construction is the unique or
+smallest possible mechanism: an unbounded temporal strategy over fixed
+primitives, a morphology with new public interactions, or a synthesis of
+protected learning and endogenous ecology could also satisfy an operational
+tail contract and must be tested rather than excluded by assertion.
 
 ## 1. Three claims that must not be conflated
 
@@ -312,13 +316,14 @@ possible controller states." Controller and task complexity are useful only
 when they produce a new causal organization of behavior, resources, or
 interactions. Otherwise they are universal-interpreter/size ladders.
 
-## 6. Smallest materially new substrate mechanism
+## 6. One materially new substrate mechanism
 
-The fixed resource/action/receptor affordance set is provably finite in the
-compiled implementation, and its *primitive physical vocabulary* remains fixed
-even in the ordinary unbounded-memory idealization. The smallest change that
-directly addresses this is one generic, recursively reusable construction
-channel rather than a long enum of hand-authored new objects.
+The fixed resource/action/receptor affordance set is finite in the compiled
+implementation, and its *primitive physical vocabulary* remains fixed even in
+the ordinary unbounded-memory idealization. A generic, recursively reusable
+construction channel is a concrete change that directly addresses this rather
+than adding a long enum of hand-authored new objects. It is a falsifiable
+candidate, not a minimality theorem.
 
 ### Persistent public constructor ecology
 
@@ -417,23 +422,25 @@ finite observation into a theorem about all future time.
 
 ## 8. Consequence for the standing task
 
-Under the prompt's literal conjunction—an **unbounded** run, indefinitely
-nonrepeating behavior, and discoveries not implicit at early times—the current
-fixed compiled substrate has a proof-level obstruction. No rearrangement of
-NEAT selection, novelty scoring, plasticity coefficients, or a finite task
-archive can satisfy it. Those mechanisms can still establish an important
-operational sustained-tail result, but claiming literal completion would exceed
-the evidence.
+Under a fixed finite RAM/disk/output envelope, the prompt's literal
+conjunction—an **unbounded** run, indefinitely nonrepeating behavior, and
+discoveries not implicit at early times—has a proof-level obstruction. That is
+the resource model of any one actual executable invocation, but it is an extra
+assumption relative to an abstract unbounded algorithm. It cannot be used to
+declare the algorithmic search exhausted. No finite experiment can prove an
+all-time tail; it can establish only an operational sustained-tail result.
 
 The exact open gap is therefore not "more tuning" or merely "more compute." It
 is:
 
 1. define open-endedness operationally as reproducible sustained-tail discovery
    under increasing finite horizons, rather than literal infinity; and
-2. introduce an endogenous affordance-expansion mechanism—minimally, persistent
-   energy-funded recursive public construction—then demonstrate that later
-   capability depends on the resulting new causal ecological relations rather
-   than on drift, IDs, a universal interpreter, or a size ladder.
+2. implement and test endogenous problem/affordance generation coupled to
+   protected solver learning and historical retention. Persistent energy-funded
+   recursive public construction is one concrete candidate, not a proven unique
+   minimum. Any survivor must demonstrate that later capability depends on new
+   causal ecological relations rather than on drift, IDs, a universal
+   interpreter, or a size ladder.
 
 Until both are done and survive the standing adversarial audits, the complete
 open-endedness claim is not established.
