@@ -413,18 +413,14 @@ pub fn run_powerplay(
             candidate_retention_gate = candidate_archive_evaluations
                 .iter()
                 .all(|entry| entry.evaluation.full_success_count >= 14);
+            let sealed_candidate_eval =
+                evaluate_program(&base_world, &candidate.genome, &program, &config, true)?;
             let ablated = knockout_module(&candidate.genome, &module);
             let ablated_eval = evaluate_program(&base_world, &ablated, &program, &config, true)?;
             causal_knockout_gate = knockout_restores_predecessor_exactly
-                && ablated_eval.full_success_rate <= config.predecessor_fail_max_fraction
-                && candidate.evaluation.full_success_rate >= config.pass_fraction;
-            candidate_evaluation = Some(evaluate_program(
-                &base_world,
-                &candidate.genome,
-                &program,
-                &config,
-                true,
-            )?);
+                && ablated_eval.full_success_count <= 2
+                && sealed_candidate_eval.full_success_count >= 14;
+            candidate_evaluation = Some(sealed_candidate_eval);
             knockout_evaluation = Some(ablated_eval);
             let accepted = predecessor_failed_new_task_gate
                 && all_historical_solvers_failed_new_task_gate
