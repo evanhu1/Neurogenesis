@@ -183,8 +183,9 @@ pub(crate) fn run_public_preamble_probe_cli(
                      Reconstructs exact accepted depth-1/depth-2 PowerPlay \
                      solvers, then compares a fixed task-program FoodRay \
                      preamble with blank and cue-permuted controls on 16 \
-                     disjoint contexts. This is evaluator-owned falsification, \
-                     never open-endedness evidence."
+                     disjoint contexts. This checks only zero-shot compatibility \
+                     of legacy checkpoints; it is never evidence about trained \
+                     decoder capacity, transfer, or open-endedness."
                 )?;
                 return Ok(());
             }
@@ -199,7 +200,7 @@ pub(crate) fn run_public_preamble_probe_cli(
         "{}",
         json!({
             "event": "public_preamble_probe_started",
-            "claim_scope": "evaluator-owned imported-premise falsification; not open-endedness evidence",
+            "claim_scope": "evaluator-owned zero-shot legacy-checkpoint compatibility; not trained-capacity, transfer, or open-endedness evidence",
             "source_run_seeds": config.source_run_seeds,
             "source_depth": config.source_powerplay.max_depth,
             "population_size": config.source_powerplay.population_size,

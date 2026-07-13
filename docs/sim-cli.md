@@ -177,10 +177,10 @@ cargo build -p sim-cli --release        # --release strongly recommended
   `>=14/16`, blank `<=2/16`, and permuted `<=2/16`. Results retain exact source
   configs, program/genome identities, per-context actions, sensory activations,
   and energy rows. This is explicitly evaluator-owned and non-evidentiary: it
-  can falsify importing the interface premise but cannot demonstrate selection,
-  novelty, capacity growth, or open-endedness. When public semantics fail, the
-  result records branch transfer as
-  `not_attempted_because_public_semantics_failed`.
+  can reject only zero-shot import of these exact checkpoints, which were never
+  selected on the preamble. It cannot reject a trainable public decoder or
+  demonstrate selection, transfer, novelty, capacity growth, or open-endedness.
+  Branch transfer is not implemented by this probe.
 
 - `neat [--config P] [--seed N] [--population N] [--generations N]
   [--episode-horizons T[,T...]] [--world-seeds N,N]

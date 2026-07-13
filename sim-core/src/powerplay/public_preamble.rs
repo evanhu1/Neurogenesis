@@ -1,11 +1,13 @@
-//! Executable falsification probe for the imported public-preamble premise.
+//! Executable zero-shot compatibility probe for a public preamble.
 //!
 //! PowerPlay solvers are selected on ordinary task episodes. This evaluator-
 //! owned probe asks a narrower question before that premise is imported into a
-//! future algorithm: does an accepted solver make task-specific use of a
-//! public, physical FoodRay preamble? It compares a meaningful program encoding
-//! against all-blank and left/right-permuted controls on disjoint contexts.
-//! The probe is diagnostic only and is never evidence of open-endedness.
+//! future algorithm: does an accepted solver already make task-specific use of
+//! a public, physical FoodRay preamble that it never saw during selection? It
+//! compares a meaningful program encoding against all-blank and left/right-
+//! permuted controls on disjoint contexts. Failure rejects only zero-shot import
+//! of these checkpoints. The probe is diagnostic and is never evidence about a
+//! trainable public decoder, branch transfer, or open-endedness.
 
 use super::{
     configure_task_world, execute_program_on_sim, mix64, prepare_episode_state,
@@ -26,7 +28,7 @@ use sim_types::{
 };
 use std::collections::BTreeSet;
 
-const PUBLIC_PREAMBLE_RESULT_SCHEMA_VERSION: u32 = 1;
+const PUBLIC_PREAMBLE_RESULT_SCHEMA_VERSION: u32 = 2;
 const PROBE_CONTEXT_COUNT: usize = 16;
 const MAX_ENCODED_STAGES: usize = 2;
 const PREAMBLE_CONTEXT_DOMAIN: u64 = 0x5052_4541_4d42_4c45;
@@ -243,7 +245,7 @@ pub struct PublicPreambleProbeResult {
 }
 
 /// Construct actual PowerPlay checkpoints, then run the evaluator-owned public
-/// preamble falsification on independent contexts.
+/// preamble zero-shot compatibility check on independent contexts.
 pub fn run_public_preamble_probe(
     base_world: WorldConfig,
     config: PublicPreambleProbeConfig,
@@ -341,7 +343,7 @@ pub fn run_public_preamble_probe(
     let (verdict, verdict_reason) = if any_failed {
         (
             ImportedPreamblePremiseVerdict::Falsified,
-            "at least one exact accepted solver/task pair failed the >=14/16 meaningful and <=2/16 blank/permuted matched-arm gate".to_string(),
+            "at least one exact accepted legacy solver/task pair failed the zero-shot >=14/16 meaningful and <=2/16 blank/permuted matched-arm gate".to_string(),
         )
     } else if evaluated_pair_count == requested_pair_count
         && passed_pair_count == requested_pair_count
@@ -358,21 +360,13 @@ pub fn run_public_preamble_probe(
         )
     };
 
-    let branch_transfer_status = match verdict {
-        ImportedPreamblePremiseVerdict::Falsified => {
-            "not_attempted_because_public_semantics_failed"
-        }
-        ImportedPreamblePremiseVerdict::SurvivedStrictGate
-        | ImportedPreamblePremiseVerdict::NotEvaluable => {
-            "not_attempted_by_this_imported-premise_probe"
-        }
-    }
-    .to_string();
+    let branch_transfer_status =
+        "not_implemented_by_this_zero_shot_compatibility_probe".to_string();
 
     Ok(PublicPreambleProbeResult {
         result_schema_version: PUBLIC_PREAMBLE_RESULT_SCHEMA_VERSION,
-        algorithm: "powerplay_public_preamble_import_falsification_v1".to_string(),
-        claim_scope: "evaluator-owned falsification of a public-preamble capacity premise; not selection, admission, novelty, capability, or open-endedness evidence".to_string(),
+        algorithm: "powerplay_public_preamble_zero_shot_compatibility_v2".to_string(),
+        claim_scope: "evaluator-owned zero-shot compatibility of exact legacy checkpoints with one unfamiliar public preamble; not evidence about trainable decoder capacity, branch transfer, selection, novelty, or open-endedness".to_string(),
         evaluator_owned: true,
         evidentiary: false,
         open_endedness_demonstrated: false,
@@ -650,7 +644,8 @@ fn run_arm(
                 .is_some_and(|tick| *tick <= deadline)
         })
         .collect::<Vec<_>>();
-    let full_task_success = task_prefix_successes.last().copied().unwrap_or(false);
+    let full_task_success =
+        !task_prefix_successes.is_empty() && task_prefix_successes.iter().all(|success| *success);
     let total_ticks = sim.turn();
     let expected_total_ticks = FIXED_PREAMBLE_TICKS as u64 + task_ticks;
     if total_ticks != expected_total_ticks || task_episode.steps.len() as u64 != task_ticks {
