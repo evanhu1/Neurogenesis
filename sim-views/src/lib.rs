@@ -27,7 +27,8 @@ use sim_config::{load_world_config_from_path, world_config_from_toml_parts, Worl
 use sim_core::Simulation;
 use sim_metrics::{
     compute_pillar_scores, derive_interval_metrics, ingest_tick, register_existing,
-    register_founders, IntervalMetrics, Ledger, OrganismLifetimeRow, PillarScores, TickSummaryRow,
+    register_founders, BehaviorIntervalRow, IntervalMetrics, Ledger, OrganismLifetimeRow,
+    PillarScores, TickSummaryRow,
 };
 use sim_types::{EntityId, OrganismGenome};
 use std::fs::File;
@@ -35,17 +36,22 @@ use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 /// In-memory metric recorder. Holds the shared per-organism ledger plus raw
-/// tick, lifetime, and reproduction fact streams. Survivors are intentionally
-/// absent from `lifetimes` — the interval layer skips `death_tick == None`
-/// rows, exactly as the eval does.
+/// tick, action-time interval, and lifetime fact streams. Behavioral metrics
+/// use `behavior_intervals`; lifetime rows remain cohort/lifecycle facts.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Recorder {
     pub ledger: Ledger,
     pub tick_summary: Vec<TickSummaryRow>,
+    pub behavior_intervals: Vec<BehaviorIntervalRow>,
     pub lifetimes: Vec<OrganismLifetimeRow>,
     /// Richer per-recorded-tick ecology samples for `eco`/`timeseries`
     /// trajectories (the metric `tick_summary` only carries descendant pop).
     pub samples: Vec<EcoSample>,
+    /// Boundary cadence used to close action-time behavior rows.
+    pub report_every: u64,
+    /// Last world turn whose action records were ingested. This can differ
+    /// from the loaded world's turn when it was advanced under `--no-metrics`.
+    pub recorded_through_turn: u64,
     /// Turn at which recording began. `> 0` means already-alive organisms were
     /// back-registered with partial lifetime counters (windows are approximate).
     pub started_turn: u64,
@@ -77,33 +83,38 @@ pub struct ReadCtx<'a> {
 }
 
 impl ReadCtx<'_> {
+    fn recorded_behavior_rows(&self) -> Option<Vec<BehaviorIntervalRow>> {
+        let rec = self.recorder?;
+        let mut rows = rec.behavior_intervals.clone();
+        let open = rec
+            .ledger
+            .behavior_interval_snapshot(rec.recorded_through_turn);
+        if open.start_tick < open.end_tick {
+            rows.push(open);
+        }
+        Some(rows)
+    }
+
     /// Compute live pillars over the recorded span using the exact `sim-metrics`
     /// pipeline. Returns the scores, the interval count, and whether the window
     /// is partial (recording started after turn 0). `None` when not recording.
     pub fn live_pillars(&self) -> Option<(PillarScores, usize, bool)> {
         let rec = self.recorder?;
-        let total_ticks = self.sim.turn();
-        let intervals = derive_interval_metrics(
-            &rec.tick_summary,
-            &rec.lifetimes,
-            self.report_every,
-            total_ticks,
-        );
+        let rows = self.recorded_behavior_rows()?;
+        let intervals = derive_interval_metrics(&rows);
         let scores = compute_pillar_scores(&intervals);
-        Some((scores, intervals.len(), rec.started_turn > 0))
+        Some((
+            scores,
+            intervals.len(),
+            rec.started_turn > 0 || rec.recorded_through_turn != self.sim.turn(),
+        ))
     }
 
     /// The full per-interval metric series behind the pillar scores — the
     /// granular data `pillars` reports alongside the windowed means.
     pub fn live_intervals(&self) -> Option<Vec<IntervalMetrics>> {
-        let rec = self.recorder?;
-        let total_ticks = self.sim.turn();
-        Some(derive_interval_metrics(
-            &rec.tick_summary,
-            &rec.lifetimes,
-            self.report_every,
-            total_ticks,
-        ))
+        let rows = self.recorded_behavior_rows()?;
+        Some(derive_interval_metrics(&rows))
     }
 }
 
@@ -165,11 +176,24 @@ pub fn save_world(sim: &Simulation, path: &str) -> Result<()> {
 /// 2-tuple by [`save_sidecar`].
 pub fn load_sidecar(path: &str) -> Result<(u64, Recorder)> {
     let file = File::open(path).map_err(|e| anyhow!("cannot open metrics `{path}`: {e}"))?;
-    ciborium::from_reader(BufReader::new(file))
-        .map_err(|e| anyhow!("loading metrics `{path}`: {e}"))
+    let (report_every, recorder): (u64, Recorder) = ciborium::from_reader(BufReader::new(file))
+        .map_err(|e| anyhow!("loading metrics `{path}`: {e}"))?;
+    if report_every != recorder.report_every {
+        anyhow::bail!(
+            "metrics `{path}` has inconsistent report cadence: envelope={report_every}, recorder={}",
+            recorder.report_every
+        );
+    }
+    Ok((report_every, recorder))
 }
 
 pub fn save_sidecar(report_every: u64, recorder: &Recorder, path: &str) -> Result<()> {
+    if report_every != recorder.report_every {
+        anyhow::bail!(
+            "refusing to save metrics `{path}` with inconsistent report cadence: envelope={report_every}, recorder={}",
+            recorder.report_every
+        );
+    }
     atomic_write(path, |w| {
         // Serialize a borrowed `(report_every, recorder)` tuple — no clone of the
         // (large) recorder, and no hand-mirrored struct to keep in sync.
@@ -336,9 +360,11 @@ pub fn build_world(params: &NewWorldParams) -> Result<BuiltWorld> {
 /// Begin recording on a world: build a fresh ledger and back-register the live
 /// population (founders exactly at turn 0, otherwise a partial window). Used when
 /// `new` mints a sidecar and when a mutating command finds no existing sidecar.
-pub fn start_recording(sim: &Simulation) -> Recorder {
+pub fn start_recording(sim: &Simulation, report_every: u64) -> Recorder {
+    assert!(report_every > 0, "report_every must be greater than zero");
     let mut ledger = Ledger::new();
     let started_turn = sim.turn();
+    ledger.begin_behavior_recording(started_turn);
     if started_turn == 0 {
         register_founders(&mut ledger, sim.organisms());
     } else {
@@ -347,8 +373,11 @@ pub fn start_recording(sim: &Simulation) -> Recorder {
     Recorder {
         ledger,
         tick_summary: Vec::new(),
+        behavior_intervals: Vec::new(),
         lifetimes: Vec::new(),
         samples: Vec::new(),
+        report_every,
+        recorded_through_turn: started_turn,
         started_turn,
     }
 }
@@ -374,11 +403,16 @@ pub fn tick_recording(
     if let Some(rec) = recorder {
         let turn = sim.turn();
         let deaths = ingest_tick(&mut rec.ledger, turn, &delta, sim.action_records());
+        rec.recorded_through_turn = turn;
         rec.lifetimes.extend(deaths);
         rec.tick_summary.push(TickSummaryRow {
             tick: turn,
             population: rec.ledger.population(),
         });
+        if turn.is_multiple_of(rec.report_every) {
+            rec.behavior_intervals
+                .push(rec.ledger.take_behavior_interval(turn));
+        }
         let org_deaths = delta
             .removed_positions
             .iter()
@@ -707,7 +741,15 @@ pub fn inspect(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()>
     writeln!(
         out,
         "  pos=({}, {}) facing={:?} energy={:.2} health={:.2}/{:.2} age={} gen={} species={}",
-        o.q, o.r, o.facing, o.energy, o.health, o.max_health, o.age_turns, o.generation, o.species_id.0
+        o.q,
+        o.r,
+        o.facing,
+        o.energy,
+        o.health,
+        o.max_health,
+        o.age_turns,
+        o.generation,
+        o.species_id.0
     )?;
     writeln!(
         out,
@@ -755,9 +797,7 @@ pub fn top(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
         field,
         "energy" | "health" | "age" | "generation" | "consumptions"
     ) {
-        anyhow::bail!(
-            "unknown field `{field}` (energy|health|age|generation|consumptions)"
-        );
+        anyhow::bail!("unknown field `{field}` (energy|health|age|generation|consumptions)");
     }
     let n: usize = rest.get(1).map(|s| s.parse()).transpose()?.unwrap_or(10);
     if let Some(arg) = rest.get(2) {

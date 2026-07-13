@@ -279,7 +279,7 @@ pub(crate) fn run_neat_cli(args: &[&str], out_dir: &str, out: &mut impl Write) -
     )
     .map_err(|error| anyhow!("building champion world: {error}"))?;
     save_world(&champion_world, &world_path_string)?;
-    let recorder = start_recording(&champion_world);
+    let recorder = start_recording(&champion_world, REPORT_EVERY);
     let sidecar_path = sibling_metrics_path(&world_path_string);
     save_sidecar(REPORT_EVERY, &recorder, &sidecar_path)?;
 

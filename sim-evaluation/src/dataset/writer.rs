@@ -3,7 +3,7 @@
 //! immediately readable by DuckDB/polars/pandas via a glob of the table dir.
 
 use super::schema::GenomeSnapshotIndexRow;
-use super::{OrganismLifetimeRow, TickSummaryRow};
+use super::{BehaviorIntervalRow, OrganismLifetimeRow, TickSummaryRow};
 use anyhow::{Context, Result};
 use arrow::array::RecordBatch;
 use arrow::datatypes::FieldRef;
@@ -22,11 +22,17 @@ pub struct PartitionedParquetWriter {
     partition_index: u32,
     next_snapshot_id: u64,
     tick_summary: TableBuffer<TickSummaryRow>,
+    behavior_intervals: TableBuffer<BehaviorIntervalRow>,
     organism_lifetimes: TableBuffer<OrganismLifetimeRow>,
     genome_snapshots: TableBuffer<GenomeSnapshotIndexRow>,
 }
 
-const TABLES: &[&str] = &["tick_summary", "organism_lifetimes", "genome_snapshots"];
+const TABLES: &[&str] = &[
+    "tick_summary",
+    "behavior_intervals",
+    "organism_lifetimes",
+    "genome_snapshots",
+];
 
 const GENOMES_DIR: &str = "genomes";
 
@@ -43,6 +49,7 @@ impl PartitionedParquetWriter {
             partition_index: 0,
             next_snapshot_id: 0,
             tick_summary: TableBuffer::new("tick_summary"),
+            behavior_intervals: TableBuffer::new("behavior_intervals"),
             organism_lifetimes: TableBuffer::new("organism_lifetimes"),
             genome_snapshots: TableBuffer::new("genome_snapshots"),
         })
@@ -50,6 +57,9 @@ impl PartitionedParquetWriter {
 
     pub fn emit_tick(&mut self, row: TickSummaryRow) {
         self.tick_summary.push(row);
+    }
+    pub fn emit_behavior_interval(&mut self, row: BehaviorIntervalRow) {
+        self.behavior_intervals.push(row);
     }
     pub fn emit_organism_lifetime(&mut self, row: OrganismLifetimeRow) {
         self.organism_lifetimes.push(row);
@@ -97,6 +107,7 @@ impl PartitionedParquetWriter {
     pub fn flush(&mut self) -> Result<()> {
         let part = self.partition_index;
         self.tick_summary.flush(&self.root, part)?;
+        self.behavior_intervals.flush(&self.root, part)?;
         self.organism_lifetimes.flush(&self.root, part)?;
         self.genome_snapshots.flush(&self.root, part)?;
         self.partition_index += 1;

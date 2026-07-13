@@ -92,7 +92,7 @@ fn print_help(out: &mut impl Write) -> Result<()> {
          \x20 watch T [--every E] --in w.bin [--out w.bin] advance to T, emitting a metrics row every E ticks\n\
          \x20 bench [N] --in w.bin                         time N ticks (world discarded)\n\
          \x20 sweep --grid k=v,v... --seeds N,N --to T [--out-dir D]  parallel grid×seed runs → result file\n\
-         \x20 neat [--population N] [--generations N] [--episode-ticks T] [--world-seeds N,N] [--audit-seeds N,N] [--holdout-seeds N,N] [--audit-levels N,N] [--audit-every N] [--scale W,POP] [--param k=v]  canonical generational NEAT → result json + champion world.bin\n\
+         \x20 neat [--population N] [--generations N] [--episode-horizons T[,T...]] [--world-seeds N,N] [--audit-seeds N,N] [--holdout-seeds N,N] [--audit-levels N,N] [--audit-every N] [--scale W,POP] [--param k=v]  canonical generational NEAT → result json + champion world.bin\n\
          \x20 neat analyze RESULT.json [RESULT2.json ...]    derive trend, saturation, lesion, and innovation diagnostics\n\
          \n\
          READS (stdout only)\n\
@@ -203,26 +203,36 @@ fn run() -> Result<()> {
             if Path::new(mp).exists() {
                 let (report_every, recorder) = load_sidecar(mp)?;
                 app.report_every = report_every;
-                // Warn (on stderr, so stdout JSON stays clean) if the sidecar's
-                // recorded span doesn't reach the world's turn — e.g. the world
-                // was advanced under `--no-metrics`. Pillars/eco are then
-                // computed only over what was recorded, which is easy to misread.
                 let world_turn = app.sim.as_ref().map(|s| s.turn()).unwrap_or(0);
-                let sidecar_last = recorder
-                    .tick_summary
-                    .last()
-                    .map(|r| r.tick)
-                    .unwrap_or(recorder.started_turn);
-                if sidecar_last < world_turn {
-                    eprintln!(
-                        "{}",
-                        json!({ "warning": format!(
-                            "metric sidecar is stale: covers ticks <= {sidecar_last} but world is at turn {world_turn}; \
-                             history-based reads use the recorded span only"
-                        ) })
+                let sidecar_last = recorder.recorded_through_turn;
+                if sidecar_last > world_turn {
+                    bail!(
+                        "metric sidecar is ahead of its world: covers ticks <= {sidecar_last} but world is at turn {world_turn}"
                     );
                 }
-                app.recorder = Some(recorder);
+                if sidecar_last < world_turn {
+                    if mutating {
+                        eprintln!(
+                            "{}",
+                            json!({ "warning": format!(
+                                "metric sidecar is stale: covers ticks <= {sidecar_last} but world is at turn {world_turn}; \
+                                 restarting recording at the current turn before mutation"
+                            ) })
+                        );
+                        app.start_recording()?;
+                    } else {
+                        eprintln!(
+                            "{}",
+                            json!({ "warning": format!(
+                                "metric sidecar is stale: covers ticks <= {sidecar_last} but world is at turn {world_turn}; \
+                                 history-based reads use the recorded span only"
+                            ) })
+                        );
+                        app.recorder = Some(recorder);
+                    }
+                } else {
+                    app.recorder = Some(recorder);
+                }
             } else if mutating {
                 app.start_recording()?;
             }
@@ -306,7 +316,7 @@ impl App {
             .sim
             .as_ref()
             .ok_or_else(|| anyhow!("no world loaded to record"))?;
-        self.recorder = Some(start_recording(sim));
+        self.recorder = Some(start_recording(sim, self.report_every));
         Ok(())
     }
 

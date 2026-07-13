@@ -3,8 +3,8 @@
 //! `sim-metrics` and is re-exported through `dataset::mod`; this file keeps only
 //! the rows that are purely a function of on-disk persistence.
 //!
-//! These structs ARE the schema — Arrow field definitions are derived from
-//! their `serde` shape via `serde_arrow`.
+//! These structs ARE the dataset-specific part of the schema — Arrow field
+//! definitions are derived from their `serde` shape via `serde_arrow`.
 
 use serde::{Deserialize, Serialize};
 

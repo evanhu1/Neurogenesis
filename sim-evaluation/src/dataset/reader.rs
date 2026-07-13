@@ -2,7 +2,7 @@
 //! Keeps the whole dataset in memory because per-seed datasets are small
 //! (tens of MBs); swap for streaming iterators if runs grow large.
 
-use super::{OrganismLifetimeRow, TickSummaryRow};
+use super::{BehaviorIntervalRow, OrganismLifetimeRow, TickSummaryRow};
 use anyhow::{Context, Result};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use serde::Deserialize;
@@ -11,7 +11,10 @@ use std::fs::{self, File};
 use std::path::Path;
 
 pub struct DatasetReader {
+    #[allow(dead_code)]
     pub tick_summary: Vec<TickSummaryRow>,
+    pub behavior_intervals: Vec<BehaviorIntervalRow>,
+    #[allow(dead_code)]
     pub organism_lifetimes: Vec<OrganismLifetimeRow>,
 }
 
@@ -19,6 +22,7 @@ impl DatasetReader {
     pub fn load(root: &Path) -> Result<Self> {
         Ok(Self {
             tick_summary: load_table(root, "tick_summary")?,
+            behavior_intervals: load_table(root, "behavior_intervals")?,
             organism_lifetimes: load_table(root, "organism_lifetimes")?,
         })
     }

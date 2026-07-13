@@ -145,7 +145,11 @@ impl Session {
                 if Path::new(&mp).exists() {
                     let (report_every, recorder) = load_sidecar(&mp)?;
                     app.report_every = report_every;
-                    app.recorder = Some(recorder);
+                    if recorder.recorded_through_turn == app.sim.as_ref().unwrap().turn() {
+                        app.recorder = Some(recorder);
+                    } else {
+                        app.start_recording()?;
+                    }
                 } else {
                     app.start_recording()?;
                 }

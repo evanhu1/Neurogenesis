@@ -7,10 +7,10 @@
 //! The sidecar also tracks lifetime consumptions per organism so genome
 //! snapshots can pick the top forager at each flush boundary.
 
-use crate::schema::{OrganismLifetimeRow, ACTION_COUNT, JOINT_LEN};
-use serde::{Deserialize, Serialize};
+use crate::schema::{BehaviorIntervalRow, OrganismLifetimeRow, ACTION_COUNT, JOINT_LEN};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sim_types::{ActionRecord, OrganismId};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::hash::{BuildHasherDefault, Hasher};
 
 /// Minimum number of contingent actions an organism must take before we trust a
@@ -49,6 +49,84 @@ struct LearningAccumulator {
     sum_age_succ: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BehaviorAccumulator {
+    total_actions: u64,
+    contingent_actions: u64,
+    failed_actions: u64,
+    plant_consumptions: u64,
+    prey_consumptions: u64,
+    joint_sensory_action: Vec<u64>,
+    learning_by_organism: BTreeMap<OrganismId, LearningAccumulator>,
+}
+
+impl Default for BehaviorAccumulator {
+    fn default() -> Self {
+        Self {
+            total_actions: 0,
+            contingent_actions: 0,
+            failed_actions: 0,
+            plant_consumptions: 0,
+            prey_consumptions: 0,
+            joint_sensory_action: vec![0; JOINT_LEN],
+            learning_by_organism: BTreeMap::new(),
+        }
+    }
+}
+
+impl BehaviorAccumulator {
+    fn observe(&mut self, record: &ActionRecord, plant_delta: u64, prey_delta: u64) {
+        self.total_actions = self.total_actions.saturating_add(1);
+        let joint_idx = sensory_bin(record) * ACTION_COUNT + record.selected_action.index();
+        self.joint_sensory_action[joint_idx] =
+            self.joint_sensory_action[joint_idx].saturating_add(1);
+        self.plant_consumptions = self.plant_consumptions.saturating_add(plant_delta);
+        self.prey_consumptions = self.prey_consumptions.saturating_add(prey_delta);
+
+        if record.selected_action.can_fail() {
+            self.contingent_actions = self.contingent_actions.saturating_add(1);
+            if record.action_failed {
+                self.failed_actions = self.failed_actions.saturating_add(1);
+            }
+            self.learning_by_organism
+                .entry(record.organism_id)
+                .or_default()
+                .observe(
+                    record.age_turns as f64,
+                    if record.action_failed { 0.0 } else { 1.0 },
+                );
+        }
+    }
+
+    fn into_row(self, start_tick: u64, end_tick: u64, population: u32) -> BehaviorIntervalRow {
+        let (learning_samples, learning_within_numerator, learning_within_denominator) = self
+            .learning_by_organism
+            .values()
+            .fold((0_u64, 0.0_f64, 0.0_f64), |acc, learning| {
+                let (samples, numerator, denominator) = learning.within_centered_terms();
+                (
+                    acc.0.saturating_add(samples),
+                    acc.1 + numerator,
+                    acc.2 + denominator,
+                )
+            });
+        BehaviorIntervalRow {
+            start_tick,
+            end_tick,
+            population,
+            total_actions: self.total_actions,
+            contingent_actions: self.contingent_actions,
+            failed_actions: self.failed_actions,
+            plant_consumptions: self.plant_consumptions,
+            prey_consumptions: self.prey_consumptions,
+            joint_sensory_action: self.joint_sensory_action,
+            learning_samples,
+            learning_within_numerator,
+            learning_within_denominator,
+        }
+    }
+}
+
 impl LearningAccumulator {
     fn observe(&mut self, age: f64, success: f64) {
         self.n += 1;
@@ -72,6 +150,16 @@ impl LearningAccumulator {
         let numer = n * self.sum_age_succ - self.sum_age * self.sum_succ;
         Some((numer / denom) as f32)
     }
+
+    fn within_centered_terms(&self) -> (u64, f64, f64) {
+        if self.n == 0 {
+            return (0, 0.0, 0.0);
+        }
+        let n = self.n as f64;
+        let numerator = self.sum_age_succ - self.sum_age * self.sum_succ / n;
+        let denominator = self.sum_age_sq - self.sum_age * self.sum_age / n;
+        (self.n, numerator, denominator.max(0.0))
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -82,6 +170,10 @@ pub struct OrganismEntry {
     failed_actions: u64,
     plant_consumptions: u64,
     prey_consumptions: u64,
+    /// Last cumulative engine counters observed; kept separate from the
+    /// recorder-local totals above so mid-run recording starts at zero.
+    last_seen_plant_consumptions: u64,
+    last_seen_prey_consumptions: u64,
     /// Row-major `[SENSORY_BIN_COUNT][ACTION_COUNT]` flattened across the whole
     /// lifetime.
     joint_sensory_action: Vec<u64>,
@@ -97,6 +189,8 @@ impl OrganismEntry {
             failed_actions: 0,
             plant_consumptions: 0,
             prey_consumptions: 0,
+            last_seen_plant_consumptions: 0,
+            last_seen_prey_consumptions: 0,
             joint_sensory_action: vec![0; JOINT_LEN],
             learning: LearningAccumulator::default(),
         }
@@ -124,10 +218,64 @@ impl OrganismEntry {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct Ledger {
     sidecar: IdHashMap<OrganismId, OrganismEntry>,
     population: u32,
+    behavior_interval_start_tick: u64,
+    behavior: BehaviorAccumulator,
+}
+
+#[derive(Serialize)]
+struct LedgerWireRef<'a> {
+    sidecar: Vec<(&'a OrganismId, &'a OrganismEntry)>,
+    population: u32,
+    behavior_interval_start_tick: u64,
+    behavior: &'a BehaviorAccumulator,
+}
+
+#[derive(Deserialize)]
+struct LedgerWireOwned {
+    sidecar: Vec<(OrganismId, OrganismEntry)>,
+    population: u32,
+    behavior_interval_start_tick: u64,
+    behavior: BehaviorAccumulator,
+}
+
+impl Serialize for Ledger {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut sidecar: Vec<_> = self.sidecar.iter().collect();
+        sidecar.sort_unstable_by_key(|(id, _)| id.0);
+        LedgerWireRef {
+            sidecar,
+            population: self.population,
+            behavior_interval_start_tick: self.behavior_interval_start_tick,
+            behavior: &self.behavior,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Ledger {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = LedgerWireOwned::deserialize(deserializer)?;
+        let mut sidecar = IdHashMap::default();
+        for (id, entry) in wire.sidecar {
+            sidecar.insert(id, entry);
+        }
+        Ok(Self {
+            sidecar,
+            population: wire.population,
+            behavior_interval_start_tick: wire.behavior_interval_start_tick,
+            behavior: wire.behavior,
+        })
+    }
 }
 
 impl Ledger {
@@ -135,7 +283,16 @@ impl Ledger {
         Self {
             sidecar: IdHashMap::default(),
             population: 0,
+            behavior_interval_start_tick: 0,
+            behavior: BehaviorAccumulator::default(),
         }
+    }
+
+    /// Set the exclusive start boundary when recording begins partway through
+    /// a world. Fresh runs already start at zero.
+    pub fn begin_behavior_recording(&mut self, start_tick: u64) {
+        self.behavior_interval_start_tick = start_tick;
+        self.behavior = BehaviorAccumulator::default();
     }
 
     pub fn birth(&mut self, id: OrganismId) {
@@ -146,26 +303,39 @@ impl Ledger {
     /// Register an organism that is *already alive* when recording begins
     /// mid-run. Lifetime counters therefore start partway through the
     /// organism's life; callers should label such windows partial.
-    pub fn register_existing(&mut self, id: OrganismId) {
+    pub fn register_existing(&mut self, organism: &sim_types::OrganismState) {
         self.population = self.population.saturating_add(1);
-        self.sidecar.insert(id, OrganismEntry::new(id.0));
+        let mut entry = OrganismEntry::new(organism.id.0);
+        // Establish cumulative-counter baselines so the first recorded action
+        // cannot attribute pre-recording consumptions to the new interval.
+        entry.last_seen_plant_consumptions = organism.plant_consumptions_count;
+        entry.last_seen_prey_consumptions = organism.prey_consumptions_count;
+        self.sidecar.insert(organism.id, entry);
     }
 
     /// Ingest one tick's worth of one organism's action record.
     pub fn record_action(&mut self, record: &ActionRecord) {
-        let action_idx = record.selected_action.index();
-        let sensory_bin = sensory_bin(record);
         // Absent sidecar entry means we never saw this organism's birth — skip.
         let Some(entry) = self.sidecar.get_mut(&record.organism_id) else {
             return;
         };
 
+        let plant_delta = record
+            .plant_consumptions_count
+            .saturating_sub(entry.last_seen_plant_consumptions);
+        let prey_delta = record
+            .prey_consumptions_count
+            .saturating_sub(entry.last_seen_prey_consumptions);
+        self.behavior.observe(record, plant_delta, prey_delta);
+
         entry.total_actions = entry.total_actions.saturating_add(1);
-        let joint_idx = sensory_bin * ACTION_COUNT + action_idx;
+        let joint_idx = sensory_bin(record) * ACTION_COUNT + record.selected_action.index();
         entry.joint_sensory_action[joint_idx] =
             entry.joint_sensory_action[joint_idx].saturating_add(1);
-        entry.plant_consumptions = record.plant_consumptions_count;
-        entry.prey_consumptions = record.prey_consumptions_count;
+        entry.plant_consumptions = entry.plant_consumptions.saturating_add(plant_delta);
+        entry.prey_consumptions = entry.prey_consumptions.saturating_add(prey_delta);
+        entry.last_seen_plant_consumptions = record.plant_consumptions_count;
+        entry.last_seen_prey_consumptions = record.prey_consumptions_count;
 
         if record.selected_action.can_fail() {
             entry.contingent_actions = entry.contingent_actions.saturating_add(1);
@@ -190,14 +360,33 @@ impl Ledger {
     pub fn drain_survivors(&mut self) -> Vec<OrganismLifetimeRow> {
         let survivors = std::mem::take(&mut self.sidecar);
         self.population = 0;
-        survivors
+        let mut rows: Vec<_> = survivors
             .into_values()
             .map(|entry| entry.into_lifetime_row(None))
-            .collect()
+            .collect();
+        rows.sort_unstable_by_key(|row| row.id);
+        rows
     }
 
     pub fn population(&self) -> u32 {
         self.population
+    }
+
+    /// Close the current action-time interval and begin a fresh one at
+    /// `end_tick`. The row contains only facts observed since the preceding
+    /// boundary, including actions by organisms that remain alive.
+    pub fn take_behavior_interval(&mut self, end_tick: u64) -> BehaviorIntervalRow {
+        let start_tick = self.behavior_interval_start_tick;
+        self.behavior_interval_start_tick = end_tick;
+        std::mem::take(&mut self.behavior).into_row(start_tick, end_tick, self.population)
+    }
+
+    /// Snapshot the open interval without draining it, for live read commands
+    /// issued between reporting boundaries.
+    pub fn behavior_interval_snapshot(&self, end_tick: u64) -> BehaviorIntervalRow {
+        self.behavior
+            .clone()
+            .into_row(self.behavior_interval_start_tick, end_tick, self.population)
     }
 
     /// Select the living organism with the most lifetime consumptions — the

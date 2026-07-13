@@ -2,8 +2,9 @@
 //! dataset schema — `sim-evaluation` derives its Arrow/Parquet columns from
 //! their `serde` shape, and `sim-cli` accumulates the same rows in memory.
 //!
-//! The dataset is deliberately compact: per-tick population and per-organism
-//! lifetime rows carry every fact the analysis consumes.
+//! The dataset is deliberately compact: per-tick population, per-reporting-
+//! interval behavior, and per-organism lifetime rows carry every fact the
+//! analysis consumes.
 
 use serde::{Deserialize, Serialize};
 use sim_types::{ActionType, SensoryReceptor};
@@ -29,9 +30,35 @@ pub struct TickSummaryRow {
     pub population: u32,
 }
 
+/// Action-time facts accumulated over one reporting interval `(start_tick,
+/// end_tick]`. Unlike lifetime cohorts, these rows include actions taken by
+/// organisms that are still alive at the interval boundary, so they are the
+/// source of truth for behavioral tail metrics.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BehaviorIntervalRow {
+    pub start_tick: u64,
+    pub end_tick: u64,
+    /// Living organisms at `end_tick`.
+    pub population: u32,
+    pub total_actions: u64,
+    pub contingent_actions: u64,
+    pub failed_actions: u64,
+    pub plant_consumptions: u64,
+    pub prey_consumptions: u64,
+    /// Row-major flattened `[SENSORY_BIN_COUNT][ACTION_COUNT]` for actions
+    /// taken during this interval only.
+    pub joint_sensory_action: Vec<u64>,
+    /// Organism-fixed-effect OLS sufficient statistics for contingent-action
+    /// success vs age. Centering within each organism prevents mixed-age cohort
+    /// composition from masquerading as lifetime improvement.
+    pub learning_samples: u64,
+    pub learning_within_numerator: f64,
+    pub learning_within_denominator: f64,
+}
+
 /// One row per organism, emitted at death (or at end-of-run for survivors).
-/// Every behavioural metric is derived by bucketing these rows by `death_tick`
-/// into reporting intervals and pooling over the whole population.
+/// These rows support lifecycle/cohort analyses; behavioral interval metrics
+/// are derived from [`BehaviorIntervalRow`] so live survivors are not omitted.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OrganismLifetimeRow {
     pub id: u64,

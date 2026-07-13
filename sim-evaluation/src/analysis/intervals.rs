@@ -7,13 +7,8 @@ use crate::types::IntervalMetrics;
 
 pub fn derive_interval_metrics(
     dataset: &DatasetReader,
-    report_every: u64,
-    total_ticks: u64,
+    _report_every: u64,
+    _total_ticks: u64,
 ) -> Vec<IntervalMetrics> {
-    sim_metrics::derive_interval_metrics(
-        &dataset.tick_summary,
-        &dataset.organism_lifetimes,
-        report_every,
-        total_ticks,
-    )
+    sim_metrics::derive_interval_metrics(&dataset.behavior_intervals)
 }

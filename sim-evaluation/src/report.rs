@@ -125,8 +125,19 @@ pub fn write_html_report(
     html.push_str("<div class=\"panel\"><h2>Windowed Metrics</h2>");
     let _ = write!(
         html,
-        "<p class=\"score-sub\">window: ticks {}-{} | raw windowed means of each behavioural signal — no aggregate or normalised score.</p>",
-        pillars.window_start_tick, pillars.window_end_tick
+        "<p class=\"score-sub\">window: ticks {}-{} | raw windowed means — no aggregate or normalised score. Seed coverage: action {}/{}, MI {}/{}, plant {}/{}, prey {}/{}, learning {}/{}.</p>",
+        pillars.window_start_tick,
+        pillars.window_end_tick,
+        pillars.coverage.action_effectiveness,
+        pillars.coverage.runs_total,
+        pillars.coverage.mi_sa,
+        pillars.coverage.runs_total,
+        pillars.coverage.plant_consumption_rate,
+        pillars.coverage.runs_total,
+        pillars.coverage.prey_consumption_rate,
+        pillars.coverage.runs_total,
+        pillars.coverage.learning_slope,
+        pillars.coverage.runs_total,
     );
     html.push_str("<div class=\"pillar-list\">");
     pillar_card(
@@ -216,7 +227,7 @@ pub fn write_html_report(
         ),
         (
             "action_effectiveness",
-            "Successful contingent actions / total actions taken, pooled over the interval's deceased descendants. Idling and spinning lower it (they inflate the denominator without succeeding).".to_owned(),
+            "Successful contingent actions / total actions taken during the interval, including actions by organisms still alive at its boundary. Idling and spinning lower it (they inflate the denominator without succeeding).".to_owned(),
         ),
         (
             "plant_consumption_rate",
@@ -228,11 +239,11 @@ pub fn write_html_report(
         ),
         (
             "mi_sa",
-            "Miller-Madow-corrected mutual information between coarse food-visibility context and selected action, pooled from deceased-descendant lifetime histograms. Measures whether sensing conditions behaviour.".to_owned(),
+            "Miller-Madow-corrected mutual information between coarse food-visibility context and selected action during the interval. Measures whether sensing conditions behaviour.".to_owned(),
         ),
         (
             "learning_slope",
-            "Mean within-life OLS slope of action success vs age over non-Reproduce contingent actions. Positive ⇒ organisms got better at acting over their own lives (in-life learning). Should be ≈0 under the random-action control.".to_owned(),
+            "Action-time OLS slope of contingent-action success vs organism age within the interval. It is observational and requires plasticity reset/freeze controls before being interpreted as learning.".to_owned(),
         ),
     ];
     for (header, tooltip) in timeseries_headers {

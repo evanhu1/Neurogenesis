@@ -1,6 +1,7 @@
-//! Central experiment dataset: raw per-tick population, per-organism lifetime,
-//! and per-reproduction facts emitted during a sim run, written as partitioned
-//! Parquet files plus a JSON manifest, then read back by the analysis layer.
+//! Central experiment dataset: raw per-tick population, per-interval action-time
+//! behavior, and per-organism lifetime facts emitted during a sim run, written
+//! as partitioned Parquet files plus a JSON manifest, then read back by the
+//! analysis layer.
 //!
 //! The dataset is the single source of truth. The sim loop only produces raw
 //! data; every derived metric or report reads from here.
@@ -18,4 +19,4 @@ pub use writer::PartitionedParquetWriter;
 // crate persists under the historical `crate::dataset::…` path. The histogram
 // constants/enum are consumed inside `sim-metrics` itself, so they are imported
 // directly from there where still needed (e.g. dataset tests).
-pub use sim_metrics::{OrganismLifetimeRow, TickSummaryRow};
+pub use sim_metrics::{BehaviorIntervalRow, OrganismLifetimeRow, TickSummaryRow};

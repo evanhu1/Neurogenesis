@@ -6,7 +6,6 @@ use crate::output::{opt, sparkline, Stats};
 use crate::{take_format, EcoSample, ReadCtx};
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
-use sim_metrics::derive_interval_metrics;
 use sim_types::OrganismState;
 use std::io::Write;
 
@@ -426,15 +425,12 @@ pub fn timeseries(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<
             .collect();
     }
 
-    let report_every = ctx.report_every;
     let rec = ctx
         .recorder
         .ok_or_else(|| anyhow!("timeseries requires recording; `record on` then advance"))?;
     if rec.samples.is_empty() {
         return Err(anyhow!("no recorded samples yet; advance the sim first"));
     }
-    let current_turn = ctx.sim.turn();
-
     // Sample-keyed columns (per recorded tick).
     let s = &rec.samples;
     let sample_col = |name: &str| -> Option<Vec<f64>> {
@@ -450,12 +446,7 @@ pub fn timeseries(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<
     };
 
     // Interval-keyed columns (per reporting interval, from the metrics layer).
-    let intervals = derive_interval_metrics(
-        &rec.tick_summary,
-        &rec.lifetimes,
-        report_every,
-        current_turn,
-    );
+    let intervals = ctx.live_intervals().unwrap_or_default();
     let interval_col = |name: &str| -> Option<Vec<f64>> {
         let f: fn(&sim_metrics::IntervalMetrics) -> f64 = match name {
             "action_effectiveness" => |m| m.action_effectiveness.unwrap_or(f64::NAN),

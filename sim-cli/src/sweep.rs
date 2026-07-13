@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use sim_core::Simulation;
 use sim_metrics::{
     compute_pillar_scores, derive_interval_metrics, ingest_tick, register_founders, Ledger,
-    PillarScores, TickSummaryRow,
+    PillarScores,
 };
 use std::io::Write;
 use std::path::Path;
@@ -277,22 +277,16 @@ fn run_cell_seed(
 
     let mut ledger = Ledger::new();
     register_founders(&mut ledger, sim.organisms());
-    let mut tick_summary: Vec<TickSummaryRow> = Vec::new();
-    let mut lifetimes = Vec::new();
+    let mut behavior_intervals = Vec::new();
     for _ in 0..to {
         let delta = sim.tick();
         let turn = sim.turn();
-        lifetimes.extend(ingest_tick(&mut ledger, turn, &delta, sim.action_records()));
-        tick_summary.push(TickSummaryRow {
-            tick: turn,
-            population: ledger.population(),
-        });
+        let _ = ingest_tick(&mut ledger, turn, &delta, sim.action_records());
+        if turn.is_multiple_of(report_every) || turn == to {
+            behavior_intervals.push(ledger.take_behavior_interval(turn));
+        }
     }
-    // Include organisms still alive at `to` (the eval drains survivors before
-    // scoring), so sweep pillar values match an eval run of the same config/seed,
-    // not just rank consistently.
-    lifetimes.extend(ledger.drain_survivors());
-    let intervals = derive_interval_metrics(&tick_summary, &lifetimes, report_every, to);
+    let intervals = derive_interval_metrics(&behavior_intervals);
     Ok(compute_pillar_scores(&intervals))
 }
 

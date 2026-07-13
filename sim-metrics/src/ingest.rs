@@ -19,7 +19,7 @@ pub fn register_founders(ledger: &mut Ledger, organisms: &[OrganismState]) {
 /// Resulting lifetime windows are partial and should be labelled as such.
 pub fn register_existing(ledger: &mut Ledger, organisms: &[OrganismState]) {
     for organism in organisms {
-        ledger.register_existing(organism.id);
+        ledger.register_existing(organism);
     }
 }
 

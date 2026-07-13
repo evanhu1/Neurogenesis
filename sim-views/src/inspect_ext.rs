@@ -296,13 +296,7 @@ pub fn decide(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> 
 // `find` predicate grammar + field mapping
 // ---------------------------------------------------------------------------
 
-const DEFAULT_FIND_FIELDS: &[&str] = &[
-    "id",
-    "energy",
-    "age",
-    "generation",
-    "consumptions",
-];
+const DEFAULT_FIND_FIELDS: &[&str] = &["id", "energy", "age", "generation", "consumptions"];
 
 /// All field names accepted by `find` predicates and `--fields` columns. Shown
 /// in error messages so the command is self-documenting.

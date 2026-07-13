@@ -15,7 +15,7 @@
 //!   [`OrganismLifetimeRow`]s at death.
 //! - [`ingest`] — drives the ledger from live simulation tick data; shared by
 //!   the eval orchestration and the CLI recorder.
-//! - [`intervals`] — pools lifetime rows into per-interval timeseries.
+//! - [`intervals`] — derives timeseries from compact action-time interval rows.
 //! - [`pillars`] — scores a timeseries window into competence axes.
 //! - [`stats`] — small numeric helpers shared across the above.
 
@@ -29,6 +29,9 @@ pub mod stats;
 pub use ingest::{ingest_tick, register_existing, register_founders};
 pub use intervals::{derive_interval_metrics, IntervalMetrics};
 pub use ledger::{Ledger, OrganismEntry};
-pub use pillars::{compute_pillar_scores, PillarScores};
-pub use schema::{OrganismLifetimeRow, TickSummaryRow, ACTION_COUNT, JOINT_LEN, SENSORY_BIN_COUNT};
+pub use pillars::{compute_pillar_scores, PillarCoverage, PillarScores};
+pub use schema::{
+    BehaviorIntervalRow, OrganismLifetimeRow, TickSummaryRow, ACTION_COUNT, JOINT_LEN,
+    SENSORY_BIN_COUNT,
+};
 pub use stats::{mean_f64, mean_option, mean_round_u32};

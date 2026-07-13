@@ -791,9 +791,14 @@ fn build_new_world(
         config.num_organisms = pop;
     }
     let report_every = req.report_every.unwrap_or(DEFAULT_REPORT_EVERY);
+    if report_every == 0 {
+        return Err(AppError::BadRequest(
+            "report_every must be greater than zero".to_owned(),
+        ));
+    }
     let champions = pool.snapshot_genomes()?;
     let sim = Simulation::new_with_champion_pool(config, req.seed.unwrap_or(0), champions)?;
-    let recorder = sim_views::start_recording(&sim);
+    let recorder = sim_views::start_recording(&sim, report_every);
     save_bundle(root, &name, &sim, Some(&recorder), report_every)?;
     let snapshot = sim.snapshot().into();
     Ok(WorldResponse { name, snapshot })
@@ -844,6 +849,13 @@ async fn step_world(
     let root = state.world_root.clone();
     let response = tokio::task::spawn_blocking(move || -> Result<WorldResponse, AppError> {
         let mut loaded = load_bundle(&root, &name)?;
+        if loaded
+            .recorder
+            .as_ref()
+            .is_some_and(|rec| rec.recorded_through_turn != loaded.sim.turn())
+        {
+            loaded.recorder = Some(sim_views::start_recording(&loaded.sim, loaded.report_every));
+        }
         sim_views::advance(
             &mut loaded.sim,
             loaded.recorder.as_mut(),
@@ -874,6 +886,13 @@ async fn run_to_world(
     let root = state.world_root.clone();
     let response = tokio::task::spawn_blocking(move || -> Result<WorldResponse, AppError> {
         let mut loaded = load_bundle(&root, &name)?;
+        if loaded
+            .recorder
+            .as_ref()
+            .is_some_and(|rec| rec.recorded_through_turn != loaded.sim.turn())
+        {
+            loaded.recorder = Some(sim_views::start_recording(&loaded.sim, loaded.report_every));
+        }
         let current = loaded.sim.turn();
         if req.turn > current {
             sim_views::advance(
@@ -1184,6 +1203,12 @@ async fn stream_loop(socket: WebSocket, root: Arc<PathBuf>, name: String, tps: u
     let mut sim = loaded.sim;
     let mut recorder = loaded.recorder;
     let report_every = loaded.report_every;
+    if recorder
+        .as_ref()
+        .is_some_and(|rec| rec.recorded_through_turn != sim.turn())
+    {
+        recorder = Some(sim_views::start_recording(&sim, report_every));
+    }
 
     let (mut sender, mut receiver) = socket.split();
     let initial = StreamFrame::StateSnapshot(sim.snapshot().into());

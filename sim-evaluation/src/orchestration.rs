@@ -1,7 +1,7 @@
 //! Drives the simulation and funnels everything it emits into the on-disk
-//! dataset: per-tick population, per-reproduction, and per-organism lifetime
-//! facts. Pillars, comparisons and reports are produced afterwards by the
-//! analysis layer reading the same dataset.
+//! dataset: per-tick population, per-interval action-time behavior, and
+//! per-organism lifetime facts. Pillars, comparisons and reports are produced
+//! afterwards by the analysis layer reading the same dataset.
 
 use crate::analysis::{
     analyze, average_pillar_scores, average_timeseries, write_aggregate_artifacts,
@@ -215,6 +215,7 @@ fn run_single_seed_evaluation(
 
         let flush_tick = tick % options.report_every == 0 || tick == options.ticks;
         if flush_tick {
+            writer.emit_behavior_interval(ledger.take_behavior_interval(tick));
             // Genome snapshot of the top forager only at flush boundaries —
             // iterating every organism is expensive.
             if let Some(top) = ledger.top_forager() {

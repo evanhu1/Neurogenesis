@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 // Metric readouts are owned by `sim-metrics`; re-exported under the historical
 // `crate::types::…` path so the summary/report/comparison code is unchanged.
-pub(crate) use sim_metrics::{IntervalMetrics, PillarScores};
+pub(crate) use sim_metrics::{IntervalMetrics, PillarCoverage, PillarScores};
 
 #[derive(Debug, Clone)]
 pub(crate) struct HarnessRunOptions {

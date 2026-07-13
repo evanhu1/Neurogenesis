@@ -21,12 +21,13 @@ pub(crate) fn write_timeseries_csv(out_dir: &Path, rows: &[IntervalMetrics]) -> 
     let mut csv = BufWriter::new(File::create(csv_path)?);
     writeln!(
         csv,
-        "tick,pop,action_effectiveness,plant_consumption_rate,prey_consumption_rate,mi_sa,learning_slope"
+        "start_tick,tick,pop,action_effectiveness,plant_consumption_rate,prey_consumption_rate,mi_sa,learning_slope"
     )?;
     for metrics in rows {
         writeln!(
             csv,
-            "{tick},{pop},{action_effectiveness},{plant_consumption_rate},{prey_consumption_rate},{mi_sa},{learning_slope}",
+            "{start_tick},{tick},{pop},{action_effectiveness},{plant_consumption_rate},{prey_consumption_rate},{mi_sa},{learning_slope}",
+            start_tick = metrics.start_tick,
             tick = metrics.tick,
             pop = metrics.pop,
             action_effectiveness = csv_opt(metrics.action_effectiveness),
@@ -107,6 +108,19 @@ pub(crate) fn print_evaluation_summary(out_dir: &Path, summary: &EvaluationSumma
     println!("seeds: {}", format_seed_list(&summary.seeds));
     println!("worker_threads: {}", summary.worker_threads);
     let pillars = &summary.pillars;
+    println!(
+        "metric_coverage: action={}/{} mi={}/{} plant={}/{} prey={}/{} learning={}/{}",
+        pillars.coverage.action_effectiveness,
+        pillars.coverage.runs_total,
+        pillars.coverage.mi_sa,
+        pillars.coverage.runs_total,
+        pillars.coverage.plant_consumption_rate,
+        pillars.coverage.runs_total,
+        pillars.coverage.prey_consumption_rate,
+        pillars.coverage.runs_total,
+        pillars.coverage.learning_slope,
+        pillars.coverage.runs_total,
+    );
     println!(
         "plant_consumption_rate: {}",
         fmt_option(pillars.mean_plant_consumption_rate, 4),
