@@ -203,7 +203,7 @@ pub struct ProceduralEcologyCaseEvidence {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProceduralEcologyStage0Gates {
-    pub canonical_disabled_hook_byte_identical: bool,
+    pub empty_disabled_hook_noop_replay_exact: bool,
     pub duplicate_replay_exact: bool,
     pub fixed_release_schedule_count_and_energy: bool,
     pub initial_escrow_matches_full_schedule: bool,
@@ -232,6 +232,7 @@ pub struct ProceduralEcologyStage0Result {
     pub evaluator_owned: bool,
     pub open_endedness_demonstrated: bool,
     pub stage_1_authorized: bool,
+    pub initial_escrow_origin: String,
     pub conservation_scope: String,
     pub stage_1_blockers: Vec<String>,
     pub policy_observations: Vec<String>,
@@ -342,19 +343,22 @@ pub fn run_procedural_ecology_stage0(
     let gates = build_gates(&config, &release_schedule, &baseline, &cases)?;
     let initial_escrow_energy = release_schedule.len() as f64 * f64::from(config.plant_energy);
     let mut result = ProceduralEcologyStage0Result {
-        schema_version: 1,
+        schema_version: 2,
         claim_scope: "evaluator-owned Stage-0 procedural-ecology mechanics; not an evolutionary or open-endedness result".to_owned(),
         evaluator_owned: true,
         open_endedness_demonstrated: false,
         stage_1_authorized: false,
+        initial_escrow_origin: "independent evaluator endowment for each counterfactual world".to_owned(),
         conservation_scope: "within-episode closure after an evaluator-preloaded fixed ecology escrow; escrow initialization is outside the recorded transfer ledger".to_owned(),
         stage_1_blockers: vec![
-            format!("The {initial_escrow_energy}-energy per-case initial escrow is evaluator-preloaded and has no source-compartment debit row; only subsequent within-episode transfers close."),
+            format!("Each counterfactual world independently receives a {initial_escrow_energy}-energy evaluator endowment with no source-compartment debit row. Only subsequent within-episode transfers close, and energy must not be aggregated across arms."),
             "The diagnostic trace includes applied/raw policy-input labels and is not a behavior descriptor. Stage 0 now publishes a separate physical fingerprint, but no organism behavior descriptor has been validated.".to_owned(),
             "A scheduled boundary can reclaim and release in the same wrapper call; the combined row closes the net transfers but does not serialize intermediate food/ecology physical checkpoints.".to_owned(),
             "A carrier landing on an occupied cell aborts the case instead of applying a deterministic defer/fallback rule suitable for evolved organisms.".to_owned(),
             "The disabled-hook comparison invokes an intentionally empty function and is therefore an internal no-op regression check, not independent proof of canonical equivalence.".to_owned(),
             "Consumption input is inferred through private Simulation::foods membership rather than a public TickDelta removal fact.".to_owned(),
+            "The fixture disables canonical food tiles and emits ordinary Plant values. Coexistence needs explicit provenance so consuming an escrow-funded release cannot schedule hidden canonical regrowth or merge procedural and canonical energy flows.".to_owned(),
+            "The fixed eater makes traces identical across run seeds, so the seed suite establishes deterministic replay coverage rather than ecological or behavioral robustness.".to_owned(),
         ],
         policy_observations: vec![
             "The local program observes only its translated carrier/home cell state and whether the previously released public FoodId remains in Simulation::foods.".to_owned(),
@@ -974,7 +978,7 @@ fn build_gates(
     baseline: &[ProceduralEcologyBaselineEvidence],
     cases: &[ProceduralEcologyCaseEvidence],
 ) -> Result<ProceduralEcologyStage0Gates> {
-    let canonical_disabled_hook_byte_identical = baseline.iter().all(|entry| entry.exact);
+    let empty_disabled_hook_noop_replay_exact = baseline.iter().all(|entry| entry.exact);
     let duplicate_replay_exact = cases.iter().all(|case| case.duplicate_replay_exact);
     let expected_release_energy = f64::from(config.plant_energy);
     let fixed_release_schedule_count_and_energy = cases.iter().all(|case| {
@@ -1003,40 +1007,43 @@ fn build_gates(
             })
     });
     let boundary_transfer_rows_match_release_events = cases.iter().all(|case| {
-        let event_release = case
-            .release_events
-            .iter()
-            .map(|event| event.release_energy)
-            .sum::<f64>();
         let event_reclaim = case
             .release_events
             .iter()
             .map(|event| event.reclaimed_energy)
             .sum::<f64>();
-        let row_release_debit = case
-            .energy_ledger
-            .iter()
-            .map(|row| row.ecology_release_debit)
-            .sum::<f64>();
-        let row_release_credit = case
-            .energy_ledger
-            .iter()
-            .map(|row| row.food_release_credit)
-            .sum::<f64>();
-        let row_reclaim_debit = case
-            .energy_ledger
-            .iter()
-            .map(|row| row.food_reclaim_debit)
-            .sum::<f64>();
-        let row_reclaim_credit = case
-            .energy_ledger
-            .iter()
-            .map(|row| row.ecology_reclaim_credit)
-            .sum::<f64>();
-        event_release.to_bits() == row_release_debit.to_bits()
-            && event_release.to_bits() == row_release_credit.to_bits()
-            && event_reclaim.to_bits() == row_reclaim_debit.to_bits()
-            && event_reclaim.to_bits() == row_reclaim_credit.to_bits()
+        let every_event_has_one_exact_row = case.release_events.iter().all(|event| {
+            let Some(expected_turn) = event.before_turn.checked_add(1) else {
+                return false;
+            };
+            let mut matching_rows = case
+                .energy_ledger
+                .iter()
+                .filter(|row| row.turn == expected_turn);
+            let Some(row) = matching_rows.next() else {
+                return false;
+            };
+            matching_rows.next().is_none()
+                && row.ecology_release_debit.to_bits() == event.release_energy.to_bits()
+                && row.food_release_credit.to_bits() == event.release_energy.to_bits()
+                && row.food_reclaim_debit.to_bits() == event.reclaimed_energy.to_bits()
+                && row.ecology_reclaim_credit.to_bits() == event.reclaimed_energy.to_bits()
+        });
+        let every_nonboundary_row_is_zero = case.energy_ledger.iter().all(|row| {
+            let is_boundary = case.release_events.iter().any(|event| {
+                event
+                    .before_turn
+                    .checked_add(1)
+                    .is_some_and(|turn| turn == row.turn)
+            });
+            is_boundary
+                || (row.food_reclaim_debit == 0.0
+                    && row.ecology_reclaim_credit == 0.0
+                    && row.ecology_release_debit == 0.0
+                    && row.food_release_credit == 0.0)
+        });
+        every_event_has_one_exact_row
+            && every_nonboundary_row_is_zero
             && event_reclaim.to_bits() == case.total_reclaimed_energy.to_bits()
     });
     let no_unaccounted_engine_plant_spawn = cases.iter().all(|case| {
@@ -1178,7 +1185,7 @@ fn build_gates(
                 && engine_ledger_closes(row.engine)
         });
     let mut gates = ProceduralEcologyStage0Gates {
-        canonical_disabled_hook_byte_identical,
+        empty_disabled_hook_noop_replay_exact,
         duplicate_replay_exact,
         fixed_release_schedule_count_and_energy,
         initial_escrow_matches_full_schedule,
@@ -1199,7 +1206,7 @@ fn build_gates(
         all_total_ledgers_close,
         all_passed: false,
     };
-    gates.all_passed = gates.canonical_disabled_hook_byte_identical
+    gates.all_passed = gates.empty_disabled_hook_noop_replay_exact
         && gates.duplicate_replay_exact
         && gates.fixed_release_schedule_count_and_energy
         && gates.initial_escrow_matches_full_schedule

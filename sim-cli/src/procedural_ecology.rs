@@ -68,7 +68,7 @@ pub(crate) fn run_procedural_ecology_stage0_cli(
             "release_interval_ticks": config.release_interval_ticks,
             "plant_energy": config.plant_energy,
             "policies": ["stationary", "moving_front", "consumption_responsive"],
-            "controls": ["behavior_input_clamp", "translation", "duplicate_replay", "canonical_disabled_hook"],
+            "controls": ["behavior_input_clamp", "translation", "duplicate_replay", "empty_disabled_hook_noop"],
         })
     );
     let result = run_procedural_ecology_stage0(world, config)?;

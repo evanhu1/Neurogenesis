@@ -103,7 +103,7 @@ fn print_help(out: &mut impl Write) -> Result<()> {
          \x20 public-preamble-probe [--run-seeds N,N] [--population N] [--generations N]  zero-shot PowerPlay interface compatibility probe → result json\n\
          \x20 public-decoder-probe [--source-seed N] [--decoder-population N] [--decoder-generations N]  protected public decoder + descendant-checkpoint reuse falsifier → result json\n\
          \x20 ppec-mechanism [--run-seeds N,N] [--contexts N] [--persistence-ticks N]  persistent public-cache mechanism probe → result json\n\
-         \x20 procedural-ecology-stage0 [--run-seeds N,N] [--horizon N] [--release-interval N] [--plant-energy F]  conserved procedural-ecology mechanics probe → result json\n\
+         \x20 procedural-ecology-stage0 [--run-seeds N,N] [--horizon N] [--release-interval N] [--plant-energy F]  fixed-endowment procedural-ecology mechanics probe → result json\n\
          \n\
          READS (stdout only)\n\
          \x20 turn | state | pillars | eco | lineage | genome [--gene G] | food --in w.bin\n\
