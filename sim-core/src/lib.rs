@@ -38,6 +38,7 @@ mod metabolism;
 mod plasticity;
 pub mod powerplay;
 pub mod ppec;
+pub mod procedural_ecology;
 #[cfg(feature = "profiling")]
 #[path = "../profiling/profiling.rs"]
 pub mod profiling;
