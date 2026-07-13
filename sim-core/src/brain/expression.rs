@@ -116,23 +116,21 @@ fn wire_birth_synapses_from_genome(
     }
 
     // Innovation order is unrelated to dense runtime IDs. Restore the runtime
-    // per-source post-ID ordering required by partition-based routing.
+    // inter-target/action-target partition required by routing. Post IDs remain
+    // ordered inside each group, but hidden IDs above the stable action-ID
+    // island are intentionally numerically greater than action IDs.
     for neuron in sensory.iter_mut() {
-        neuron
-            .synapses
-            .sort_unstable_by_key(|edge| edge.post_neuron_id);
+        crate::topology::sort_runtime_synapses(&mut neuron.synapses);
     }
     for neuron in inter.iter_mut() {
-        neuron
-            .synapses
-            .sort_unstable_by_key(|edge| edge.post_neuron_id);
+        crate::topology::sort_runtime_synapses(&mut neuron.synapses);
     }
     if cfg!(debug_assertions) {
         for sensory_neuron in sensory.iter() {
-            crate::topology::debug_assert_sorted_by_post_neuron_id(&sensory_neuron.synapses);
+            crate::topology::debug_assert_runtime_synapse_order(&sensory_neuron.synapses);
         }
         for inter_neuron in inter.iter() {
-            crate::topology::debug_assert_sorted_by_post_neuron_id(&inter_neuron.synapses);
+            crate::topology::debug_assert_runtime_synapse_order(&inter_neuron.synapses);
         }
     }
 }

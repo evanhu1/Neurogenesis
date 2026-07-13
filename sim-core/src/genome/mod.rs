@@ -2,9 +2,10 @@ use crate::topology::{
     constrain_weight, ACTION_COUNT, ACTION_ID_BASE, INTER_ID_BASE, SENSORY_COUNT,
 };
 
-/// Inter-neuron IDs occupy `INTER_ID_BASE..ACTION_ID_BASE`; growing past this
-/// bound would collide inter IDs with the action ID space.
-pub(crate) const MAX_INTER_NEURONS: u32 = ACTION_ID_BASE - INTER_ID_BASE;
+/// Every runtime ID from `INTER_ID_BASE` onward is available to a hidden node
+/// except the small stable action-ID island. `inter_neuron_id` skips that
+/// island, so action IDs no longer impose the old 1,000-hidden-node ceiling.
+pub(crate) const MAX_INTER_NEURONS: u32 = u32::MAX - INTER_ID_BASE + 1 - ACTION_COUNT as u32;
 use rand::Rng;
 use rand_distr::{Distribution, StandardNormal};
 use sim_types::{

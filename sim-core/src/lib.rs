@@ -37,6 +37,7 @@ mod plasticity;
 #[cfg(feature = "profiling")]
 #[path = "../profiling/profiling.rs"]
 pub mod profiling;
+pub mod progressive;
 mod spawn;
 #[path = "brain/topology.rs"]
 mod topology;

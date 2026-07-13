@@ -6,10 +6,7 @@ use crate::output::{Format, Stats};
 use crate::{take_format, ReadCtx};
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
-use sim_types::{
-    ActionType, NeuronId, OrganismState, SensoryReceptor, SynapseEdge, ACTION_NEURON_ID_BASE,
-    INTER_NEURON_ID_BASE,
-};
+use sim_types::{ActionType, NeuronId, OrganismState, SensoryReceptor, SynapseEdge};
 use std::io::Write;
 
 /// Mirrors `sim-core/src/brain/mod.rs`: the implicit Idle option's logit and the
@@ -547,14 +544,11 @@ const TOP_SYNAPSES: usize = 12;
 /// Human-readable label for any neuron id: sensory receptors by name, action
 /// neurons by action type, inter neurons by `i<index>`.
 fn neuron_label(id: NeuronId) -> String {
-    if id.0 >= ACTION_NEURON_ID_BASE {
-        if let Some(a) = ActionType::from_neuron_id(id) {
-            return format!("act:{a:?}");
-        }
-        return format!("act#{}", id.0);
+    if let Some(a) = ActionType::from_neuron_id(id) {
+        return format!("act:{a:?}");
     }
-    if id.0 >= INTER_NEURON_ID_BASE {
-        return format!("i{}", id.0 - INTER_NEURON_ID_BASE);
+    if let Some(index) = sim_types::inter_neuron_index(id, u32::MAX) {
+        return format!("i{index}");
     }
     if let Some(r) = SensoryReceptor::from_neuron_id(id) {
         return format!("s:{}", receptor_label(&r));

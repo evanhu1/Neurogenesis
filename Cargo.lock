@@ -3056,6 +3056,7 @@ dependencies = [
  "rand_chacha",
  "rand_distr",
  "rayon",
+ "ring",
  "serde",
  "serde_json",
  "sim-config",

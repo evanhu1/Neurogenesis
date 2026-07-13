@@ -61,9 +61,9 @@ pub(crate) fn evaluate_brain(
         if sensory.neuron.activation == 0.0 {
             continue;
         }
-        // Outgoing edges are sorted by post ID, so inter-targeting edges form
-        // a prefix and action-targeting edges a suffix; the split index is
-        // cached by `refresh_action_synapse_starts_and_count`.
+        // Outgoing edges are explicitly partitioned by target role, so inter
+        // targets form a prefix and action targets a suffix even when a hidden
+        // runtime ID lies numerically above the stable action-ID island.
         let (inter_edges, action_edges) = sensory.synapses.split_at(sensory.action_synapse_start);
         result.synapse_ops += accumulate_inter_inputs(
             inter_edges,

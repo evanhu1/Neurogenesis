@@ -18,6 +18,7 @@ serde_json.workspace = true
 ciborium.workspace = true
 thiserror.workspace = true
 rand_distr.workspace = true
+ring = "0.17.14"
 sim-config = { path = "../sim-config" }
 sim-types = { path = "../sim-types" }
 rayon = "1.10"

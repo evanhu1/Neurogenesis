@@ -22,8 +22,8 @@ pub(crate) fn action_neuron_id(index: usize) -> NeuronId {
 }
 
 pub(crate) fn inter_index(id: NeuronId, num_neurons: usize) -> Option<usize> {
-    let idx = id.0.checked_sub(INTER_ID_BASE)? as usize;
-    (idx < num_neurons).then_some(idx)
+    let num_neurons = u32::try_from(num_neurons).ok()?;
+    sim_types::inter_neuron_index(id, num_neurons).map(|index| index as usize)
 }
 
 pub(crate) fn action_array_index(id: NeuronId) -> Option<usize> {
@@ -47,29 +47,38 @@ pub(crate) fn constrain_weight(weight: f32) -> f32 {
 pub(crate) fn refresh_action_synapse_starts_and_count(brain: &mut BrainState) {
     let mut total_synapses = 0usize;
     for sensory_neuron in brain.sensory.iter_mut() {
-        debug_assert_sorted_by_post_neuron_id(&sensory_neuron.synapses);
+        debug_assert_runtime_synapse_order(&sensory_neuron.synapses);
         sensory_neuron.action_synapse_start = sensory_neuron
             .synapses
-            .partition_point(|edge| edge.post_neuron_id.0 < ACTION_ID_BASE);
+            .partition_point(|edge| action_array_index(edge.post_neuron_id).is_none());
         total_synapses += sensory_neuron.synapses.len();
     }
 
     for inter_neuron in brain.inter.iter_mut() {
-        debug_assert_sorted_by_post_neuron_id(&inter_neuron.synapses);
+        debug_assert_runtime_synapse_order(&inter_neuron.synapses);
         inter_neuron.action_synapse_start = inter_neuron
             .synapses
-            .partition_point(|edge| edge.post_neuron_id.0 < ACTION_ID_BASE);
+            .partition_point(|edge| action_array_index(edge.post_neuron_id).is_none());
         total_synapses += inter_neuron.synapses.len();
     }
 
     brain.synapse_count = total_synapses as u32;
 }
 
-pub(crate) fn debug_assert_sorted_by_post_neuron_id(edges: &[SynapseEdge]) {
+pub(crate) fn debug_assert_runtime_synapse_order(edges: &[SynapseEdge]) {
     debug_assert!(
-        edges
-            .windows(2)
-            .all(|pair| pair[0].post_neuron_id <= pair[1].post_neuron_id),
-        "outgoing synapses must stay sorted by post_neuron_id"
+        edges.windows(2).all(|pair| {
+            runtime_post_sort_key(pair[0].post_neuron_id)
+                <= runtime_post_sort_key(pair[1].post_neuron_id)
+        }),
+        "outgoing synapses must keep inter targets before action targets"
     );
+}
+
+pub(crate) fn sort_runtime_synapses(edges: &mut [SynapseEdge]) {
+    edges.sort_unstable_by_key(|edge| runtime_post_sort_key(edge.post_neuron_id));
+}
+
+fn runtime_post_sort_key(id: NeuronId) -> (bool, u32) {
+    (action_array_index(id).is_some(), id.0)
 }

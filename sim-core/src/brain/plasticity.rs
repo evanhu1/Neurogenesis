@@ -364,9 +364,9 @@ fn compute_pending_edge_coactivations(
     action_activations: &[f32],
     action_means: &[f32],
 ) {
-    // Edges stay sorted by post ID (asserted where the cache is refreshed in
-    // `refresh_action_synapse_starts_and_count`), so the cached split index
-    // separates the inter-targeting prefix from the action-targeting suffix.
+    // Edges stay partitioned by target role (asserted where the cache is
+    // refreshed in `refresh_action_synapse_starts_and_count`), so the cached
+    // split separates the inter-targeting prefix from the action-targeting suffix.
     let (inter_edges, action_edges) = edges.split_at_mut(action_synapse_start);
 
     // Covariance rule on inter-targeting edges:

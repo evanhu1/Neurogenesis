@@ -414,11 +414,35 @@ mod tests {
 }
 
 pub fn inter_neuron_id(index: u32) -> NeuronId {
-    NeuronId(INTER_NEURON_ID_BASE + index)
+    let dense_id = INTER_NEURON_ID_BASE
+        .checked_add(index)
+        .expect("inter-neuron index exceeds the u32 runtime ID space");
+    if dense_id < ACTION_NEURON_ID_BASE {
+        return NeuronId(dense_id);
+    }
+
+    // Action IDs are a small, stable wire-visible island inside the runtime
+    // ID space. Skip that island instead of treating it as a hard ceiling on
+    // hidden-node growth. Existing IDs below the old 1,000-node boundary stay
+    // unchanged; later hidden nodes resume immediately after the action IDs.
+    NeuronId(
+        dense_id
+            .checked_add(ActionType::ALL.len() as u32)
+            .expect("inter-neuron index exceeds the u32 runtime ID space"),
+    )
 }
 
 pub fn inter_neuron_index(id: NeuronId, num_neurons: u32) -> Option<u32> {
-    let idx = id.0.checked_sub(INTER_NEURON_ID_BASE)?;
+    let action_end = ACTION_NEURON_ID_BASE.checked_add(ActionType::ALL.len() as u32)?;
+    if (ACTION_NEURON_ID_BASE..action_end).contains(&id.0) {
+        return None;
+    }
+    let dense_id = if id.0 >= action_end {
+        id.0.checked_sub(ActionType::ALL.len() as u32)?
+    } else {
+        id.0
+    };
+    let idx = dense_id.checked_sub(INTER_NEURON_ID_BASE)?;
     (idx < num_neurons).then_some(idx)
 }
 
@@ -595,7 +619,8 @@ pub struct SensoryNeuronState {
     pub receptor: SensoryReceptor,
     pub synapses: Vec<SynapseEdge>,
     /// Cached index of the first action-targeting edge in `synapses` (which
-    /// stay sorted by post neuron ID). Maintained by
+    /// keep inter targets first and action targets second, with numeric post-ID
+    /// ordering inside each group). Maintained by
     /// `refresh_action_synapse_starts_and_count` at birth and after pruning.
     //
     // `default` (not `skip`): persisted in the world blob so the post-load
