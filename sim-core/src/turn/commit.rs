@@ -71,7 +71,21 @@ impl<'a> CommitPhaseContext<'a> {
             organism.facing = intent.facing_after_actions;
             if intent.took_action {
                 self.result.actions_applied += 1;
+                assert!(
+                    action_energy_cost.is_finite(),
+                    "energy ledger: nonfinite action cost at turn {}",
+                    self.sim.turn.saturating_add(1)
+                );
+                let energy_before_action = organism.energy;
                 organism.energy -= action_energy_cost;
+                assert!(
+                    organism.energy.is_finite(),
+                    "energy ledger: action cost produced nonfinite energy for organism {:?} at turn {}",
+                    organism.id,
+                    self.sim.turn.saturating_add(1)
+                );
+                self.result.action_cost_energy +=
+                    f64::from(energy_before_action) - f64::from(organism.energy);
             }
         }
     }
@@ -164,9 +178,25 @@ impl<'a> CommitPhaseContext<'a> {
             self.sim.schedule_food_regrowth(target_idx);
         }
 
+        assert!(
+            food.energy.is_finite(),
+            "energy ledger: consumed food {:?} has nonfinite energy at turn {}",
+            food.id,
+            self.sim.turn.saturating_add(1)
+        );
         let gained_energy = food.energy.max(0.0);
         let predator = &mut self.sim.organisms[predator_idx];
+        let energy_before_consumption = predator.energy;
         predator.energy += gained_energy;
+        assert!(
+            predator.energy.is_finite(),
+            "energy ledger: food consumption produced nonfinite energy for organism {:?} at turn {}",
+            predator.id,
+            self.sim.turn.saturating_add(1)
+        );
+        self.result.food_consumption_debit += f64::from(food.energy);
+        self.result.food_consumption_credit +=
+            f64::from(predator.energy) - f64::from(energy_before_consumption);
         predator.consumptions_count = predator.consumptions_count.saturating_add(1);
         match food.kind {
             FoodKind::Plant => {
@@ -264,7 +294,13 @@ impl<'a> CommitPhaseContext<'a> {
         let killed = prey.health <= 0.0;
         let prey_q = prey.q;
         let prey_r = prey.r;
-        let prey_energy = prey.energy.max(0.0);
+        let prey_energy = prey.energy;
+        assert!(
+            prey_energy.is_finite(),
+            "energy ledger: prey {:?} has nonfinite energy at turn {}",
+            prey_id,
+            self.sim.turn.saturating_add(1)
+        );
         let mut event = AttackEvent {
             turn: self.sim.turn.saturating_add(1),
             attacker_id,
@@ -296,7 +332,24 @@ impl<'a> CommitPhaseContext<'a> {
             let gained_energy = self.sim.predation_kill_reward(prey_energy);
             event.energy_gained = gained_energy;
             let predator = &mut self.sim.organisms[predator_idx];
+            let energy_before_predation = predator.energy;
             predator.energy += gained_energy;
+            assert!(
+                predator.energy.is_finite(),
+                "energy ledger: predation produced nonfinite energy for organism {:?} at turn {}",
+                predator.id,
+                self.sim.turn.saturating_add(1)
+            );
+            let prey_energy_f64 = f64::from(prey_energy);
+            let predation_credit = f64::from(predator.energy) - f64::from(energy_before_predation);
+            self.result.predation_prey_energy_removed += prey_energy_f64;
+            self.result.predation_energy_credit += predation_credit;
+            self.result.predation_retention_loss +=
+                f64::from(prey_energy.max(0.0)) - predation_credit;
+            // Predation classifies positive prey energy through its retained
+            // transfer and loss. Removing negative prey energy instead raises
+            // the represented total; expose that signed-debt adjustment.
+            self.result.removal_adjustment -= prey_energy_f64.min(0.0);
             predator.consumptions_count = predator.consumptions_count.saturating_add(1);
             predator.prey_consumptions_count = predator.prey_consumptions_count.saturating_add(1);
 
@@ -351,9 +404,24 @@ impl<'a> CommitPhaseContext<'a> {
         });
         self.sim.occupancy[cell_idx] = None;
         if spawn_corpse {
+            let source_energy = f64::from(corpse_energy);
+            self.result.corpse_source_energy_removed += source_energy;
             if let Some(corpse) = self.sim.spawn_corpse_at_cell(cell_idx, corpse_energy) {
+                assert!(
+                    corpse.energy.is_finite(),
+                    "energy ledger: corpse spawn produced nonfinite energy at turn {}",
+                    self.sim.turn.saturating_add(1)
+                );
+                self.result.corpse_retention_loss +=
+                    f64::from(corpse_energy.max(0.0)) - f64::from(corpse.energy);
                 self.result.food_spawned.push(corpse);
+            } else {
+                // A blocked/zero corpse spawn discards all positive source
+                // energy. (The current caller has already cleared occupancy,
+                // so only a nonpositive source can take this branch.)
+                self.result.corpse_retention_loss += f64::from(corpse_energy.max(0.0));
             }
+            self.result.removal_adjustment -= source_energy.min(0.0);
         }
     }
 

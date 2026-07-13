@@ -795,6 +795,51 @@ pub struct MetricsSnapshot {
     pub total_plant_consumptions: u64,
     pub starvations_last_turn: u64,
     pub age_deaths_last_turn: u64,
+    /// Fail-closed physical energy accounting for the most recently completed
+    /// tick. The row is all-zero before the first tick.
+    #[serde(default)]
+    pub energy_ledger_last_turn: EnergyLedgerRow,
+}
+
+/// Per-tick energy accounting over the two physical compartments: signed
+/// organism energy and food energy. All values are simulation energy units.
+///
+/// Consumption is an internal transfer and therefore has separate debit and
+/// credit columns. Predation/corpse conversion is intentionally lossy and the
+/// retained-away fraction is explicit. `removal_adjustment` is signed: it is
+/// positive when removing an energy-debt organism raises the represented
+/// total, and negative when unrecycled positive energy is discarded.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+pub struct EnergyLedgerRow {
+    pub turn: u64,
+    pub organism_energy_before: f64,
+    pub organism_energy_after: f64,
+    pub food_energy_before: f64,
+    pub food_energy_after: f64,
+    pub plant_spawn_energy: f64,
+    pub passive_metabolism_energy: f64,
+    pub action_cost_energy: f64,
+    pub food_consumption_debit: f64,
+    pub food_consumption_credit: f64,
+    /// Signed prey energy removed from the organism compartment by predation.
+    pub predation_prey_energy_removed: f64,
+    pub predation_energy_credit: f64,
+    pub predation_retention_loss: f64,
+    /// Signed organism energy converted into corpses.
+    pub corpse_source_energy_removed: f64,
+    pub corpse_spawn_energy: f64,
+    pub corpse_retention_loss: f64,
+    /// Signed organism energy removed without conversion (currently
+    /// starvation only).
+    pub unrecycled_energy_removed: f64,
+    pub removal_adjustment: f64,
+    pub organism_residual: f64,
+    pub food_residual: f64,
+    /// Total-compartment residual, deliberately excluding the food-transfer
+    /// mismatch so a non-closing transfer cannot hide as an allowed source.
+    pub total_residual: f64,
+    pub transfer_residual: f64,
+    pub residual_tolerance: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

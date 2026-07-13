@@ -17,8 +17,9 @@ use rayon::{ThreadPool, ThreadPoolBuilder};
 #[cfg(feature = "instrumentation")]
 use sim_types::ActionRecord;
 use sim_types::{
-    ActionType, EntityId, FacingDirection, FoodKind, FoodState, Occupant, OrganismFacing,
-    OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId, TickDelta,
+    ActionType, EnergyLedgerRow, EntityId, FacingDirection, FoodKind, FoodState, Occupant,
+    OrganismFacing, OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId,
+    TickDelta,
 };
 use std::sync::Arc;
 #[cfg(feature = "profiling")]
@@ -30,6 +31,11 @@ const RNG_PREY_MIX: u64 = 0x2545_F491_4F6C_DD1D;
 pub(crate) const ATTACK_DAMAGE_FRACTION: f32 = 0.5;
 pub(crate) const HEALTH_REGEN_FRACTION: f32 = 0.10;
 const INTENT_PARALLEL_MIN_LEN: usize = 64;
+/// Conservative f32 roundoff budget for a tick's compartment totals and
+/// explicitly enumerated flows. The scale term is computed per row, so tiny
+/// task-energy escrows remain tightly audited while large worlds do not fail
+/// merely because many persisted f32 values were summed.
+const ENERGY_LEDGER_EPSILON_MULTIPLIER: f64 = 32.0;
 
 #[derive(Debug, Clone, Copy)]
 struct OrganismIntent {
@@ -118,6 +124,22 @@ struct CommitResult {
     predations: u64,
     actions_applied: u64,
     attack_events: Vec<AttackEvent>,
+    action_cost_energy: f64,
+    food_consumption_debit: f64,
+    food_consumption_credit: f64,
+    predation_prey_energy_removed: f64,
+    predation_energy_credit: f64,
+    predation_retention_loss: f64,
+    corpse_source_energy_removed: f64,
+    corpse_retention_loss: f64,
+    removal_adjustment: f64,
+}
+
+#[derive(Debug, Default)]
+struct LifecycleEnergyFlow {
+    passive_metabolism_energy: f64,
+    unrecycled_energy_removed: f64,
+    removal_adjustment: f64,
 }
 
 macro_rules! profile_turn_phase {
@@ -153,11 +175,25 @@ impl Simulation {
     pub fn tick(&mut self) -> TickDelta {
         self.clear_turn_transient_state();
 
+        let organism_energy_before = checked_energy_total(
+            "organism energy before tick",
+            self.organisms.iter().map(|organism| organism.energy),
+        );
+        let food_energy_before = checked_energy_total(
+            "food energy before tick",
+            self.foods.iter().map(|food| food.energy),
+        );
+
         #[cfg(feature = "profiling")]
         let tick_started = Instant::now();
 
-        let (starvations, age_deaths, lifecycle_removed_positions, lifecycle_food_spawned) =
-            profile_turn_phase!(TurnPhase::Lifecycle, { self.lifecycle_phase() });
+        let (
+            starvations,
+            age_deaths,
+            lifecycle_removed_positions,
+            lifecycle_food_spawned,
+            lifecycle_energy,
+        ) = profile_turn_phase!(TurnPhase::Lifecycle, { self.lifecycle_phase() });
 
         let world_width = self.config.world_width as i32;
 
@@ -205,6 +241,16 @@ impl Simulation {
             self.debug_assert_consistent_state();
         });
 
+        let energy_ledger = build_energy_ledger_row(
+            self.turn.saturating_add(1),
+            organism_energy_before,
+            food_energy_before,
+            &self.organisms,
+            &self.foods,
+            &commit,
+            &lifecycle_energy,
+        );
+
         let removed_positions = profile_turn_phase!(TurnPhase::MetricsAndDelta, {
             self.turn = self.turn.saturating_add(1);
             self.metrics.turns = self.turn;
@@ -217,6 +263,7 @@ impl Simulation {
             self.metrics.total_plant_consumptions += commit.plant_consumptions;
             self.metrics.starvations_last_turn = starvations;
             self.metrics.age_deaths_last_turn = age_deaths;
+            self.metrics.energy_ledger_last_turn = energy_ledger;
             self.refresh_population_metrics();
 
             let mut removed_positions = commit.removed_positions;
@@ -288,6 +335,172 @@ impl Simulation {
 
         #[cfg(feature = "profiling")]
         profiling::record_brain_plasticity_total(plasticity_started.elapsed());
+    }
+}
+
+fn checked_energy_total(label: &str, values: impl Iterator<Item = f32>) -> f64 {
+    let mut total = 0.0_f64;
+    for value in values {
+        assert!(
+            value.is_finite(),
+            "energy ledger: nonfinite {label}: {value}"
+        );
+        total += f64::from(value);
+    }
+    assert!(total.is_finite(), "energy ledger: nonfinite {label} total");
+    total
+}
+
+fn build_energy_ledger_row(
+    turn: u64,
+    organism_energy_before: f64,
+    food_energy_before: f64,
+    organisms: &[OrganismState],
+    foods: &[FoodState],
+    commit: &CommitResult,
+    lifecycle: &LifecycleEnergyFlow,
+) -> EnergyLedgerRow {
+    let organism_energy_after = checked_energy_total(
+        "organism energy after tick",
+        organisms.iter().map(|organism| organism.energy),
+    );
+    let food_energy_after = checked_energy_total(
+        "food energy after tick",
+        foods.iter().map(|food| food.energy),
+    );
+    let plant_spawn_energy = checked_energy_total(
+        "plant spawn energy",
+        commit
+            .food_spawned
+            .iter()
+            .filter(|food| food.kind == FoodKind::Plant)
+            .map(|food| food.energy),
+    );
+    let corpse_spawn_energy = checked_energy_total(
+        "corpse spawn energy",
+        commit
+            .food_spawned
+            .iter()
+            .filter(|food| food.kind == FoodKind::Corpse)
+            .map(|food| food.energy),
+    );
+    let removal_adjustment = lifecycle.removal_adjustment + commit.removal_adjustment;
+
+    let organism_expected =
+        organism_energy_before - lifecycle.passive_metabolism_energy - commit.action_cost_energy
+            + commit.food_consumption_credit
+            + commit.predation_energy_credit
+            - lifecycle.unrecycled_energy_removed
+            - commit.predation_prey_energy_removed
+            - commit.corpse_source_energy_removed;
+    let food_expected = food_energy_before - commit.food_consumption_debit
+        + plant_spawn_energy
+        + corpse_spawn_energy;
+    let organism_residual = organism_energy_after - organism_expected;
+    let food_residual = food_energy_after - food_expected;
+    let transfer_residual = commit.food_consumption_credit - commit.food_consumption_debit;
+    let total_expected = organism_energy_before + food_energy_before + plant_spawn_energy
+        - lifecycle.passive_metabolism_energy
+        - commit.action_cost_energy
+        - commit.predation_retention_loss
+        - commit.corpse_retention_loss
+        + removal_adjustment;
+    let total_residual = organism_energy_after + food_energy_after - total_expected;
+    let flow_scale = (organism_energy_before + food_energy_before).abs()
+        + plant_spawn_energy.abs()
+        + lifecycle.passive_metabolism_energy.abs()
+        + commit.action_cost_energy.abs()
+        + commit.food_consumption_debit.abs()
+        + commit.food_consumption_credit.abs()
+        + commit.predation_prey_energy_removed.abs()
+        + commit.predation_energy_credit.abs()
+        + commit.predation_retention_loss.abs()
+        + commit.corpse_source_energy_removed.abs()
+        + corpse_spawn_energy.abs()
+        + commit.corpse_retention_loss.abs()
+        + lifecycle.unrecycled_energy_removed.abs()
+        + removal_adjustment.abs();
+    let residual_tolerance =
+        ENERGY_LEDGER_EPSILON_MULTIPLIER * f64::from(f32::EPSILON) * flow_scale.max(1.0);
+
+    let row = EnergyLedgerRow {
+        turn,
+        organism_energy_before,
+        organism_energy_after,
+        food_energy_before,
+        food_energy_after,
+        plant_spawn_energy,
+        passive_metabolism_energy: lifecycle.passive_metabolism_energy,
+        action_cost_energy: commit.action_cost_energy,
+        food_consumption_debit: commit.food_consumption_debit,
+        food_consumption_credit: commit.food_consumption_credit,
+        predation_prey_energy_removed: commit.predation_prey_energy_removed,
+        predation_energy_credit: commit.predation_energy_credit,
+        predation_retention_loss: commit.predation_retention_loss,
+        corpse_source_energy_removed: commit.corpse_source_energy_removed,
+        corpse_spawn_energy,
+        corpse_retention_loss: commit.corpse_retention_loss,
+        unrecycled_energy_removed: lifecycle.unrecycled_energy_removed,
+        removal_adjustment,
+        organism_residual,
+        food_residual,
+        total_residual,
+        transfer_residual,
+        residual_tolerance,
+    };
+    assert_energy_ledger_closes(&row);
+    row
+}
+
+fn assert_energy_ledger_closes(row: &EnergyLedgerRow) {
+    let finite_values = [
+        row.organism_energy_before,
+        row.organism_energy_after,
+        row.food_energy_before,
+        row.food_energy_after,
+        row.plant_spawn_energy,
+        row.passive_metabolism_energy,
+        row.action_cost_energy,
+        row.food_consumption_debit,
+        row.food_consumption_credit,
+        row.predation_prey_energy_removed,
+        row.predation_energy_credit,
+        row.predation_retention_loss,
+        row.corpse_source_energy_removed,
+        row.corpse_spawn_energy,
+        row.corpse_retention_loss,
+        row.unrecycled_energy_removed,
+        row.removal_adjustment,
+        row.organism_residual,
+        row.food_residual,
+        row.total_residual,
+        row.transfer_residual,
+        row.residual_tolerance,
+    ];
+    assert!(
+        finite_values.iter().all(|value| value.is_finite()),
+        "energy ledger: nonfinite row at turn {}: {row:?}",
+        row.turn
+    );
+    assert!(
+        row.predation_retention_loss >= -row.residual_tolerance
+            && row.corpse_retention_loss >= -row.residual_tolerance,
+        "energy ledger: negative retention loss at turn {}: {row:?}",
+        row.turn
+    );
+    for (label, residual) in [
+        ("organism compartment", row.organism_residual),
+        ("food compartment", row.food_residual),
+        ("food transfer", row.transfer_residual),
+        ("total compartments", row.total_residual),
+    ] {
+        assert!(
+            residual.abs() <= row.residual_tolerance,
+            "energy ledger: {label} does not close at turn {} (residual {}, tolerance {}): {row:?}",
+            row.turn,
+            residual,
+            row.residual_tolerance
+        );
     }
 }
 

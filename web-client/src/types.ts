@@ -248,6 +248,32 @@ type FoodStateOf<Id> = {
 export type ApiFoodState = FoodStateOf<ApiScalarId>;
 export type FoodState = FoodStateOf<FoodId>;
 
+export type EnergyLedgerRow = {
+  turn: number;
+  organism_energy_before: number;
+  organism_energy_after: number;
+  food_energy_before: number;
+  food_energy_after: number;
+  plant_spawn_energy: number;
+  passive_metabolism_energy: number;
+  action_cost_energy: number;
+  food_consumption_debit: number;
+  food_consumption_credit: number;
+  predation_prey_energy_removed: number;
+  predation_energy_credit: number;
+  predation_retention_loss: number;
+  corpse_source_energy_removed: number;
+  corpse_spawn_energy: number;
+  corpse_retention_loss: number;
+  unrecycled_energy_removed: number;
+  removal_adjustment: number;
+  organism_residual: number;
+  food_residual: number;
+  total_residual: number;
+  transfer_residual: number;
+  residual_tolerance: number;
+};
+
 export type ApiMetricsSnapshot = {
   turns: number;
   organisms: number;
@@ -260,6 +286,7 @@ export type ApiMetricsSnapshot = {
   total_plant_consumptions: number;
   starvations_last_turn: number;
   age_deaths_last_turn: number;
+  energy_ledger_last_turn: EnergyLedgerRow;
 };
 
 export type MetricsSnapshot = ApiMetricsSnapshot & {

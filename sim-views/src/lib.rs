@@ -576,6 +576,7 @@ pub fn state(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
                 "predations": m.predations_last_turn,
                 "starvations": m.starvations_last_turn,
                 "age_deaths": m.age_deaths_last_turn,
+                "energy_ledger": m.energy_ledger_last_turn,
             },
             "totals": {
                 "consumptions": m.total_consumptions,
@@ -628,6 +629,23 @@ pub fn state(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
         m.predations_last_turn,
         m.starvations_last_turn,
         m.age_deaths_last_turn,
+    )?;
+    let ledger = m.energy_ledger_last_turn;
+    writeln!(
+        out,
+        "  energy-ledger: org={:.6}->{:.6} food={:.6}->{:.6} plant_spawn={:.6} metabolism={:.6} action={:.6} retention_loss={:.6} removal_adjustment={:.6} transfer_residual={:.3e} total_residual={:.3e} tol={:.1e}",
+        ledger.organism_energy_before,
+        ledger.organism_energy_after,
+        ledger.food_energy_before,
+        ledger.food_energy_after,
+        ledger.plant_spawn_energy,
+        ledger.passive_metabolism_energy,
+        ledger.action_cost_energy,
+        ledger.predation_retention_loss + ledger.corpse_retention_loss,
+        ledger.removal_adjustment,
+        ledger.transfer_residual,
+        ledger.total_residual,
+        ledger.residual_tolerance,
     )?;
     writeln!(
         out,

@@ -74,7 +74,9 @@ cargo build -p sim-cli --release        # --release strongly recommended
 ### Reads (stdout only, no `--out`)
 - `turn` — current turn.
 - `state` — population, energy/health/age/generation summaries, food, last-turn
-  ecology (+ a pillars line if a sidecar is present).
+  ecology, and the fail-closed per-tick energy ledger (+ a pillars line if a
+  sidecar is present). JSON exposes signed organism/food compartment totals,
+  every explicit source/sink/transfer, residuals, and the scale-aware tolerance.
 - `pillars` — the **raw windowed-mean metrics** (no [0,1] interpretation):
   `plant_consumption_rate` (foraging), `prey_consumption_rate` (predation),
   `action_effectiveness` + `mi_sa` (intelligence), `learning_slope` (learning) —
