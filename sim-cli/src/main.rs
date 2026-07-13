@@ -12,6 +12,7 @@
 
 mod dashboards;
 mod neat;
+mod powerplay;
 mod sweep;
 mod tui;
 
@@ -94,6 +95,7 @@ fn print_help(out: &mut impl Write) -> Result<()> {
          \x20 sweep --grid k=v,v... --seeds N,N --to T [--out-dir D]  parallel grid×seed runs → result file\n\
          \x20 neat [--population N] [--generations N] [--episode-horizons T[,T...]] [--world-seeds N,N] [--audit-seeds N,N] [--holdout-seeds N,N] [--audit-levels N,N] [--audit-every N] [--scale W,POP] [--param k=v]  canonical generational NEAT → result json + champion world.bin\n\
          \x20 neat analyze RESULT.json [RESULT2.json ...]    derive trend, saturation, lesion, and innovation diagnostics\n\
+         \x20 powerplay [--seed N] [--depth 1..4] [--population N] [--generations N]  bounded causal-ecology pilot → result json\n\
          \n\
          READS (stdout only)\n\
          \x20 turn | state | pillars | eco | lineage | genome [--gene G] | food --in w.bin\n\
@@ -161,6 +163,10 @@ fn run() -> Result<()> {
     if cmd == "neat" {
         let mut out = io::stdout().lock();
         return neat::run_neat_cli(&cmd_args, &out_dir, &mut out);
+    }
+    if cmd == "powerplay" {
+        let mut out = io::stdout().lock();
+        return powerplay::run_powerplay_cli(&cmd_args, &out_dir, &mut out);
     }
     // Human-facing interactive mode: a resident world driven from a split-pane
     // TUI, as opposed to the agent-facing one-shot commands below. `--in` is a

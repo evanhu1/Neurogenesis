@@ -34,6 +34,7 @@ mod grid;
 mod metabolism;
 #[path = "brain/plasticity.rs"]
 mod plasticity;
+pub mod powerplay;
 #[cfg(feature = "profiling")]
 #[path = "../profiling/profiling.rs"]
 pub mod profiling;
