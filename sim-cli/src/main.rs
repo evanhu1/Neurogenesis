@@ -10,6 +10,7 @@
 //!
 //! See docs/sim-cli.md (usage) and docs/sim-cli-stateless-spec.md + SPEC.md.
 
+mod conditional;
 mod dashboards;
 mod neat;
 mod powerplay;
@@ -95,6 +96,7 @@ fn print_help(out: &mut impl Write) -> Result<()> {
          \x20 sweep --grid k=v,v... --seeds N,N --to T [--out-dir D]  parallel grid×seed runs → result file\n\
          \x20 neat [--population N] [--generations N] [--episode-horizons T[,T...]] [--world-seeds N,N] [--audit-seeds N,N] [--holdout-seeds N,N] [--audit-levels N,N] [--audit-every N] [--scale W,POP] [--param k=v]  canonical generational NEAT → result json + champion world.bin\n\
          \x20 neat analyze RESULT.json [RESULT2.json ...]    derive trend, saturation, lesion, and innovation diagnostics\n\
+         \x20 conditional-program [--outer-seeds N,N] [--stages N] [--search-budget N] [--starting-rank N] [--delay N]  delayed conditional task-program pilot → result json\n\
          \x20 powerplay [--seed N] [--depth 1..4] [--population N] [--generations N]  bounded causal-ecology pilot → result json\n\
          \n\
          READS (stdout only)\n\
@@ -163,6 +165,10 @@ fn run() -> Result<()> {
     if cmd == "neat" {
         let mut out = io::stdout().lock();
         return neat::run_neat_cli(&cmd_args, &out_dir, &mut out);
+    }
+    if cmd == "conditional-program" {
+        let mut out = io::stdout().lock();
+        return conditional::run_conditional_program_cli(&cmd_args, &out_dir, &mut out);
     }
     if cmd == "powerplay" {
         let mut out = io::stdout().lock();

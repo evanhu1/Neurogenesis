@@ -28,6 +28,7 @@ pub(crate) fn jitter_visual_rgb_uniform(
 }
 
 mod brain;
+pub mod conditional;
 pub mod evolution;
 pub(crate) mod genome;
 mod grid;
