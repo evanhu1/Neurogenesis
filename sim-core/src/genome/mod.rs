@@ -4,7 +4,7 @@ use crate::topology::{
 
 /// Inter-neuron IDs occupy `INTER_ID_BASE..ACTION_ID_BASE`; growing past this
 /// bound would collide inter IDs with the action ID space.
-const MAX_INTER_NEURONS: u32 = ACTION_ID_BASE - INTER_ID_BASE;
+pub(crate) const MAX_INTER_NEURONS: u32 = ACTION_ID_BASE - INTER_ID_BASE;
 use rand::Rng;
 use rand_distr::{Distribution, StandardNormal};
 use sim_types::{

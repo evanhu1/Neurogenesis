@@ -37,6 +37,11 @@ pub(super) fn encode_sensory_inputs(
         occupancy,
     );
     let energy = energy_signal(organism);
+    // Plasticity runs after action commit and uses this snapshot to measure the
+    // action's within-tick energy consequence. Keep the encoded Energy sensor
+    // based on the pre-action value above, then roll the persisted baseline
+    // forward once per sensing pass.
+    organism.energy_at_last_sensing = organism.energy;
     let health = health_signal(organism);
     let ray_scans = scan_rays(
         (organism.q, organism.r),

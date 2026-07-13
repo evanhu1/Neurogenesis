@@ -6,7 +6,7 @@
 //! mixed-founder worlds under fixed world seeds. In-world reproduction does not
 //! exist; all genetic variation is owned by the outer loop.
 
-use crate::{turn::AttackOutcome, Simulation};
+use crate::{genome::MAX_INTER_NEURONS, turn::AttackOutcome, Simulation};
 use anyhow::{anyhow, bail, Result};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -653,6 +653,7 @@ pub struct FrozenOuterLoopContract {
     pub runtime_plasticity_enabled: bool,
     pub leaky_neurons_enabled: bool,
     pub predation_enabled: bool,
+    pub force_random_actions: bool,
     pub cross_pool_predation_only: bool,
     pub attack_damage_fraction: f32,
     pub idle_health_regen_fraction: f32,
@@ -946,6 +947,11 @@ pub fn run_neat(
     mut on_generation: impl FnMut(&GenerationSummary),
 ) -> Result<RunResult> {
     config.validate()?;
+    if world.force_random_actions {
+        bail!(
+            "NEAT requires genome-controlled actions; force_random_actions is reserved for explicit null-control simulations"
+        );
+    }
     configure_evaluation_world(&mut world);
     if !world.leaky_neurons_enabled {
         config.mutate_time_constant_probability = 0.0;
@@ -1008,6 +1014,7 @@ pub fn run_neat(
         runtime_plasticity_enabled: world.runtime_plasticity_enabled,
         leaky_neurons_enabled: world.leaky_neurons_enabled,
         predation_enabled: world.predation_enabled,
+        force_random_actions: world.force_random_actions,
         cross_pool_predation_only: config.cross_pool_predation_only,
         attack_damage_fraction: config.attack_damage_fraction,
         idle_health_regen_fraction: config.idle_health_regen_fraction,
@@ -1354,6 +1361,7 @@ pub fn run_neat(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn audit_frontier_champion_structures(
     champion: &OrganismGenome,
     full_evaluation: FixedSuiteEvaluation,
@@ -2200,6 +2208,7 @@ impl CompetitiveContext<'_> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn evaluate_genome(
     genome: &OrganismGenome,
     scenarios: &[ScenarioManifest],
@@ -2255,6 +2264,7 @@ struct PendingOpponentRespawn {
     ordinal: u64,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn evaluate_genome_on_seeds_detailed(
     genome: &OrganismGenome,
     scenarios: &[ScenarioManifest],
@@ -2361,7 +2371,7 @@ fn evaluate_genome_on_seeds_detailed(
             for organism in sim.organisms() {
                 founder_count_by_pool[(organism.species_id.0 as usize) % pool_len] += 1;
             }
-            if founder_count_by_pool.iter().any(|&count| count == 0) {
+            if founder_count_by_pool.contains(&0) {
                 bail!(
                     "scenario `{}` spawned {} founders for a {}-genome pool; every requested pool entry must be represented",
                     scenario.name,
@@ -3009,6 +3019,7 @@ fn summarize_evaluation_cases(
 /// Evaluate one frozen focal genome against an explicit, common opponent panel.
 /// Every scenario/seed case uses the same ordered opponent genomes, making the
 /// relative-survival component comparable across focal champions.
+#[allow(clippy::too_many_arguments)]
 pub fn evaluate_frozen_panel(
     focal: &OrganismGenome,
     opponents: &[OrganismGenome],
@@ -3049,6 +3060,7 @@ pub fn evaluate_frozen_panel(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn evaluate_genome_on_fixed_suite(
     genome: &OrganismGenome,
     scenarios: &[ScenarioManifest],
@@ -3645,6 +3657,17 @@ fn crossover(
     }
     required.sort_unstable();
     required.dedup();
+    required.retain(|id| a_nodes.contains_key(id) || b_nodes.contains_key(id));
+    // Evaluator intake retains the lowest stable hidden IDs at the runtime
+    // ceiling. Mirror that rule here so selection and reported genotypes see
+    // exactly the phenotype that will be materialized.
+    required.truncate(MAX_INTER_NEURONS as usize);
+    let retained_hidden: BTreeSet<_> = required.iter().copied().collect();
+    child.brain.edges.retain(|edge| {
+        (!is_hidden_gene_node_id(edge.pre_node_id) || retained_hidden.contains(&edge.pre_node_id))
+            && (!is_hidden_gene_node_id(edge.post_node_id)
+                || retained_hidden.contains(&edge.post_node_id))
+    });
     for id in required {
         let node = match (a_nodes.get(&id), b_nodes.get(&id)) {
             (Some(left), Some(right)) => {
@@ -3815,6 +3838,9 @@ fn mutate_add_node(
     rng: &mut ChaCha8Rng,
     offspring_generation: u32,
 ) -> (bool, bool) {
+    if genome.brain.hidden_nodes.len() >= MAX_INTER_NEURONS as usize {
+        return (false, false);
+    }
     let enabled: Vec<_> = genome
         .brain
         .edges

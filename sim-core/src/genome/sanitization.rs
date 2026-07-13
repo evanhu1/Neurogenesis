@@ -78,10 +78,14 @@ fn debug_assert_synapse_genes_well_formed(genome: &OrganismGenome) {
         .windows(2)
         .all(|w| w[0].innovation < w[1].innovation));
     debug_assert!(genome.brain.edges.iter().all(|edge| {
-        edge.innovation == connection_innovation_id(edge.pre_node_id, edge.post_node_id)
-            && is_valid_synapse_pair(genome, edge.pre_node_id, edge.post_node_id)
+        is_valid_synapse_pair(genome, edge.pre_node_id, edge.post_node_id)
             && edge.weight.is_finite()
             && edge.weight == constrain_weight(edge.weight)
+    }));
+    debug_assert!(genome.brain.edges.iter().enumerate().all(|(index, edge)| {
+        !genome.brain.edges[..index].iter().any(|previous| {
+            (previous.pre_node_id, previous.post_node_id) == (edge.pre_node_id, edge.post_node_id)
+        })
     }));
 }
 
@@ -94,19 +98,33 @@ pub(super) fn sanitize_synapse_genes(genome: &mut OrganismGenome) {
             return false;
         }
         edge.weight = constrain_weight(edge.weight);
-        // Endpoint identity is canonical; repair stale/malformed innovation
-        // values rather than allowing one structure to carry two identities.
-        edge.innovation = connection_innovation_id(edge.pre_node_id, edge.post_node_id);
         true
     });
 
+    // Historical markings belong to the evolutionary run and are not
+    // reconstructible from endpoints. Preserve valid supplied innovations,
+    // while choosing the oldest deterministic representative if malformed
+    // input assigns multiple markings to the same structural connection.
+    deduplicate_endpoint_pairs(&mut genome.brain.edges);
     sort_synapse_genes(&mut genome.brain.edges);
     reject_colliding_innovation_groups(&mut genome.brain.edges);
 }
 
-/// Keep one deterministic representative for exact duplicate structures, but
-/// drop the entire innovation group if the same hash names different endpoint
-/// pairs. Retaining either side of a true collision would silently alias two
+fn deduplicate_endpoint_pairs(edges: &mut Vec<SynapseGene>) {
+    edges.sort_unstable_by(|a, b| {
+        a.pre_node_id
+            .cmp(&b.pre_node_id)
+            .then_with(|| a.post_node_id.cmp(&b.post_node_id))
+            .then_with(|| a.innovation.cmp(&b.innovation))
+            .then_with(|| b.enabled.cmp(&a.enabled))
+            .then_with(|| a.weight.total_cmp(&b.weight))
+    });
+    edges.dedup_by_key(|edge| (edge.pre_node_id, edge.post_node_id));
+}
+
+/// Keep one deterministic representative for exact duplicate markings, but
+/// drop the entire innovation group if the same marking names different
+/// endpoint pairs. Retaining either side of a true collision would alias two
 /// unrelated historical loci in every later crossover merge.
 pub(super) fn reject_colliding_innovation_groups(edges: &mut Vec<SynapseGene>) {
     let mut read = 0;

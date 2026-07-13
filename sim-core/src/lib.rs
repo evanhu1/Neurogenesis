@@ -61,6 +61,17 @@ pub enum SimError {
     Serialization(String),
 }
 
+fn validate_runtime_config(config: &WorldConfig) -> Result<(), SimError> {
+    sim_config::validate_world_config(config).map_err(SimError::InvalidConfig)?;
+    if config.seed_genome_config.num_neurons > genome::MAX_INTER_NEURONS {
+        return Err(SimError::InvalidConfig(format!(
+            "seed_genome_config.num_neurons must be <= {} to fit the runtime neuron-ID space",
+            genome::MAX_INTER_NEURONS
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct Simulation {
     config: WorldConfig,
@@ -170,7 +181,7 @@ impl Simulation {
         seed: u64,
         champion_pool: Vec<OrganismGenome>,
     ) -> Result<Self, SimError> {
-        sim_config::validate_world_config(&config).map_err(SimError::InvalidConfig)?;
+        validate_runtime_config(&config)?;
 
         let capacity = grid::world_capacity(config.world_width);
         let mut sim = Self {
@@ -452,7 +463,7 @@ impl Simulation {
     }
 
     pub fn validate_state(&self) -> Result<(), SimError> {
-        sim_config::validate_world_config(&self.config).map_err(SimError::InvalidConfig)?;
+        validate_runtime_config(&self.config)?;
 
         let expected_capacity = grid::world_capacity(self.config.world_width);
         for (name, len) in [
