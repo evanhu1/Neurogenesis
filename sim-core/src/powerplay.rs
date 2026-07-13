@@ -29,7 +29,7 @@ use sim_types::{
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
-const RESULT_SCHEMA_VERSION: u32 = 2;
+const RESULT_SCHEMA_VERSION: u32 = 3;
 const TASK_DOMAIN: u64 = 0x504f_5745_5250_4c59;
 const TASK_ENERGY_EPSILON_MULTIPLIER: f32 = 32.0;
 
@@ -160,13 +160,16 @@ pub struct EcologyProgram {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BehaviorStep {
     pub tick: u64,
-    pub active_stage: usize,
+    pub active_stage_before_tick: usize,
+    pub active_stage_after_tick: usize,
     pub action: ActionType,
     pub q: i32,
     pub r: i32,
     pub facing: FacingDirection,
-    pub food_q: Option<i32>,
-    pub food_r: Option<i32>,
+    pub food_q_before_tick: Option<i32>,
+    pub food_r_before_tick: Option<i32>,
+    pub food_q_after_tick: Option<i32>,
+    pub food_r_after_tick: Option<i32>,
     pub energy: f32,
     pub stage_completed: bool,
 }
@@ -1071,6 +1074,8 @@ fn run_episode(
 
     for _ in 0..horizon {
         move_active_resource(&mut sim, resolved_stages[active_stage])?;
+        let active_stage_before_tick = active_stage;
+        let food_before_tick = sim.foods().first().map(|food| (food.q, food.r));
         let before = sim.metrics().total_plant_consumptions;
         let delta = sim.tick();
         let ledger = delta.metrics.energy_ledger_last_turn;
@@ -1096,16 +1101,19 @@ fn run_episode(
         }
         if capture_steps {
             let organism = sim.organisms().first();
-            let food = sim.foods().first();
+            let food_after_tick = sim.foods().first().map(|food| (food.q, food.r));
             steps.push(BehaviorStep {
                 tick: delta.turn,
-                active_stage: active_stage.min(program.stages.len().saturating_sub(1)),
+                active_stage_before_tick,
+                active_stage_after_tick: active_stage,
                 action: organism.map_or(ActionType::Idle, |value| value.last_action_taken),
                 q: organism.map_or(0, |value| value.q),
                 r: organism.map_or(0, |value| value.r),
                 facing: organism.map_or(FacingDirection::East, |value| value.facing),
-                food_q: food.map(|value| value.q),
-                food_r: food.map(|value| value.r),
+                food_q_before_tick: food_before_tick.map(|position| position.0),
+                food_r_before_tick: food_before_tick.map(|position| position.1),
+                food_q_after_tick: food_after_tick.map(|position| position.0),
+                food_r_after_tick: food_after_tick.map(|position| position.1),
                 energy: organism.map_or(0.0, |value| value.energy),
                 stage_completed: consumed,
             });
