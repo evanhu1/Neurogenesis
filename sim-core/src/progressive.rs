@@ -347,6 +347,8 @@ pub struct ExtensionEffectEvidence {
     pub knockout_controller_fingerprint: String,
     pub enabled_passes: u32,
     pub knockout_passes: u32,
+    pub minimum_enabled_passes: u32,
+    pub maximum_knockout_passes: u32,
     pub enabled_behavior_fingerprints: Vec<String>,
     pub knockout_behavior_fingerprints: Vec<String>,
 }
@@ -367,6 +369,9 @@ pub fn verify_extension_effect(
         || evidence.knockout_behavior_fingerprints.len() != trials
         || evidence.enabled_passes as usize > trials
         || evidence.knockout_passes as usize > trials
+        || evidence.minimum_enabled_passes as usize > trials
+        || evidence.maximum_knockout_passes as usize > trials
+        || evidence.minimum_enabled_passes <= evidence.maximum_knockout_passes
     {
         return Err(ExtensionEffectError::MalformedTrialPanel);
     }
@@ -381,6 +386,15 @@ pub fn verify_extension_effect(
     }
     if evidence.enabled_behavior_fingerprints == evidence.knockout_behavior_fingerprints {
         return Err(ExtensionEffectError::NoBehavioralEffect);
+    }
+    if evidence.enabled_passes < evidence.minimum_enabled_passes
+        || evidence.knockout_passes > evidence.maximum_knockout_passes
+        || evidence.enabled_passes <= evidence.knockout_passes
+    {
+        return Err(ExtensionEffectError::NoCapabilityGain {
+            enabled: evidence.enabled_passes,
+            knockout: evidence.knockout_passes,
+        });
     }
     Ok(())
 }
@@ -397,6 +411,8 @@ pub enum ExtensionEffectError {
     MalformedFingerprint,
     #[error("enabling the residual changes no per-seed behavior trace")]
     NoBehavioralEffect,
+    #[error("residual fails capability thresholds: enabled {enabled}, knockout {knockout}")]
+    NoCapabilityGain { enabled: u32, knockout: u32 },
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]

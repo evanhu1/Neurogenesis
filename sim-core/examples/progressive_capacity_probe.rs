@@ -18,7 +18,13 @@ const PROBE_HIDDEN_NODES: u32 = 1_501;
 struct ProbeTask {
     name: &'static str,
     horizon: u32,
-    criterion: &'static str,
+    criterion: ProbeCriterion,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+enum ProbeCriterion {
+    Survive,
+    TurnRightAtLeast(u32),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -143,12 +149,12 @@ fn main() -> Result<()> {
     let task0 = ProbeTask {
         name: "survive-short",
         horizon: 16,
-        criterion: "at-least-one-live-organism-at-horizon",
+        criterion: ProbeCriterion::Survive,
     };
     let task1 = ProbeTask {
         name: "survive-long",
         horizon: 32,
-        criterion: "at-least-one-live-organism-at-horizon",
+        criterion: ProbeCriterion::Survive,
     };
     let seeds = vec![11, 29];
     let checkpoint0 = make_checkpoint(0, &task0, &base, &seeds, 2, &world)?;
@@ -174,7 +180,7 @@ fn main() -> Result<()> {
     let effect_task = ProbeTask {
         name: "residual-effect",
         horizon: 32,
-        criterion: "at-least-one-live-organism-at-horizon",
+        criterion: ProbeCriterion::TurnRightAtLeast(24),
     };
     let enabled_runs = run_panel(&effect_task, &stage2_genome, &seeds, &world)?;
     let knockout_runs = run_panel(&effect_task, &knockout, &seeds, &world)?;
@@ -186,6 +192,8 @@ fn main() -> Result<()> {
         knockout_controller_fingerprint: knockout_fingerprint.clone(),
         enabled_passes: enabled_runs.iter().filter(|run| run.passed).count() as u32,
         knockout_passes: knockout_runs.iter().filter(|run| run.passed).count() as u32,
+        minimum_enabled_passes: 2,
+        maximum_knockout_passes: 0,
         enabled_behavior_fingerprints: enabled_runs
             .iter()
             .map(|run| run.behavior_fingerprint.clone())
@@ -396,8 +404,14 @@ fn run_task(
 ) -> Result<TaskRun> {
     let mut sim = Simulation::new_with_champion_pool(world.clone(), seed, vec![genome.clone()])?;
     let mut trace = Vec::with_capacity(task.horizon as usize);
+    let mut right_turns = 0_u32;
     for _ in 0..task.horizon {
         sim.advance_n(1);
+        right_turns += sim
+            .organisms()
+            .iter()
+            .filter(|organism| organism.last_action_taken == ActionType::TurnRight)
+            .count() as u32;
         trace.push(BehaviorPoint {
             turn: sim.turn(),
             organisms: sim
@@ -416,6 +430,9 @@ fn run_task(
     }
     Ok(TaskRun {
         behavior_fingerprint: exact_fingerprint(&trace)?,
-        passed: !sim.organisms().is_empty(),
+        passed: match task.criterion {
+            ProbeCriterion::Survive => !sim.organisms().is_empty(),
+            ProbeCriterion::TurnRightAtLeast(minimum) => right_turns >= minimum,
+        },
     })
 }
