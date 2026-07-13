@@ -29,8 +29,9 @@ use sim_types::{
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
-const RESULT_SCHEMA_VERSION: u32 = 1;
+const RESULT_SCHEMA_VERSION: u32 = 2;
 const TASK_DOMAIN: u64 = 0x504f_5745_5250_4c59;
+const TASK_ENERGY_EPSILON_MULTIPLIER: f32 = 32.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PowerPlayConfig {
@@ -118,8 +119,16 @@ impl PowerPlayConfig {
         if self.pass_fraction != 14.0 / 16.0 || self.predecessor_fail_max_fraction != 2.0 / 16.0 {
             bail!("the adversarial pilot gate is fixed at pass >=14/16 and fail <=2/16");
         }
-        if self.world_width < 9 || !self.food_energy.is_finite() || self.food_energy <= 0.0 {
-            bail!("world-width must be >= 9 and food-energy must be finite and positive");
+        let minimum_stage_energy = self.food_energy / self.max_depth as f32;
+        if self.world_width < 9
+            || !self.food_energy.is_normal()
+            || self.food_energy <= 0.0
+            || !minimum_stage_energy.is_normal()
+            || minimum_stage_energy <= 0.0
+        {
+            bail!(
+                "world-width must be >= 9 and food-energy/max-depth must remain finite, normal, and positive"
+            );
         }
         Ok(())
     }
@@ -129,8 +138,10 @@ impl PowerPlayConfig {
 #[serde(rename_all = "snake_case")]
 pub enum ResourceMotion {
     Static,
-    OrbitLeftEveryThreeTicks,
-    OrbitRightEveryThreeTicks,
+    /// Every third tick, drift one cell from the resource's current position
+    /// in a direction coupled to the organism's current facing.
+    FacingCoupledLeftDriftEveryThreeTicks,
+    FacingCoupledRightDriftEveryThreeTicks,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -180,6 +191,8 @@ pub struct EpisodeEvidence {
     pub initial_organism_energy: f32,
     pub final_organism_energy: f32,
     pub organism_energy_closure_error: f32,
+    pub task_energy_residual_tolerance: f32,
+    pub organism_transfer_residual_tolerance: f32,
     /// Largest absolute residual emitted by sim-core's independent fail-closed
     /// per-tick physical energy ledger during this episode.
     pub max_engine_energy_ledger_residual: f64,
@@ -217,6 +230,7 @@ pub struct ModuleEvidence {
     pub protected_seed_is_exact_predecessor: bool,
     pub protected_projection_verified: bool,
     pub protected_knockout_matches_module_knockout: bool,
+    pub candidate_materializes_exactly: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -224,6 +238,12 @@ pub struct SolverTaskEvaluation {
     pub solver_depth: u32,
     pub task_depth: u32,
     pub evaluation: ProgramEvaluation,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskGenerationCandidateEvaluation {
+    pub stage: EcologyStage,
+    pub checkpoint_evaluations: Vec<SolverTaskEvaluation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -238,13 +258,15 @@ pub struct DepthEvidence {
     pub generated_stage: EcologyStage,
     pub task_generation_candidates_checked: usize,
     pub predecessor_evaluation: ProgramEvaluation,
-    /// Task-generator ranking on the mutable search contexts.
-    pub task_generation_search_evaluations: Vec<SolverTaskEvaluation>,
+    /// Complete task-generator ranking evidence on the mutable search
+    /// contexts, including all grammar candidates rather than only the winner.
+    pub task_generation_search_evaluations: Vec<TaskGenerationCandidateEvaluation>,
     /// The proposed task evaluated against every checkpoint available before
     /// this depth on the sealed admission contexts. Every row must be <=2/16.
     pub historical_solver_novelty_evaluations: Vec<SolverTaskEvaluation>,
     pub generations: Vec<GenerationEvidence>,
     pub candidate_evaluation: Option<ProgramEvaluation>,
+    pub candidate_genome: Option<OrganismGenome>,
     /// The new solver evaluated independently on every archived task prefix.
     /// Admission requires every cell to be >=14/16.
     pub candidate_archive_evaluations: Vec<SolverTaskEvaluation>,
@@ -254,6 +276,7 @@ pub struct DepthEvidence {
     pub predecessor_retention_gate: bool,
     pub candidate_retention_gate: bool,
     pub causal_knockout_gate: bool,
+    pub module_integrity_gate: bool,
     pub accepted: bool,
     pub module: ModuleEvidence,
 }
@@ -394,14 +417,20 @@ pub fn run_powerplay(
         )?;
 
         let mut candidate_evaluation = None;
+        let mut candidate_genome = None;
         let mut candidate_archive_evaluations = Vec::new();
         let mut knockout_evaluation = None;
         let mut candidate_retention_gate = false;
         let mut causal_knockout_gate = false;
+        let mut candidate_materializes_exactly = false;
+        let mut module_integrity_gate = false;
         let accepted = if let Some(candidate) = candidate {
             protection.verify(&candidate.genome).map_err(|error| {
                 anyhow!("candidate violates protected controller at depth {depth}: {error}")
             })?;
+            candidate_materializes_exactly =
+                materialize_genome(&base_world, &candidate.genome, config.run_seed)?
+                    == candidate.genome;
             candidate_archive_evaluations = evaluate_solver_on_task_archive(
                 &base_world,
                 depth,
@@ -420,13 +449,20 @@ pub fn run_powerplay(
             causal_knockout_gate = knockout_restores_predecessor_exactly
                 && ablated_eval.full_success_count <= 2
                 && sealed_candidate_eval.full_success_count >= 14;
+            module_integrity_gate = protected_seed_is_exact_predecessor
+                && protected_knockout_matches_module_knockout
+                && knockout_restores_predecessor_exactly
+                && zero_extension_matches_predecessor_behavior
+                && candidate_materializes_exactly;
             candidate_evaluation = Some(sealed_candidate_eval);
+            candidate_genome = Some(candidate.genome.clone());
             knockout_evaluation = Some(ablated_eval);
             let accepted = predecessor_failed_new_task_gate
                 && all_historical_solvers_failed_new_task_gate
                 && predecessor_retention_gate
                 && candidate_retention_gate
-                && causal_knockout_gate;
+                && causal_knockout_gate
+                && module_integrity_gate;
             if accepted {
                 champion = candidate.genome;
                 checkpoints.push((depth, champion.clone()));
@@ -445,6 +481,7 @@ pub fn run_powerplay(
             historical_solver_novelty_evaluations,
             generations,
             candidate_evaluation,
+            candidate_genome,
             candidate_archive_evaluations,
             knockout_evaluation,
             predecessor_failed_new_task_gate,
@@ -452,6 +489,7 @@ pub fn run_powerplay(
             predecessor_retention_gate,
             candidate_retention_gate,
             causal_knockout_gate,
+            module_integrity_gate,
             accepted,
             module: ModuleEvidence {
                 hidden_node_ids: module.hidden_node_ids.clone(),
@@ -461,6 +499,7 @@ pub fn run_powerplay(
                 protected_seed_is_exact_predecessor,
                 protected_projection_verified: true,
                 protected_knockout_matches_module_knockout,
+                candidate_materializes_exactly,
             },
         });
 
@@ -614,8 +653,8 @@ fn grammar() -> Vec<EcologyStage> {
     let mut stages = Vec::new();
     for motion in [
         ResourceMotion::Static,
-        ResourceMotion::OrbitLeftEveryThreeTicks,
-        ResourceMotion::OrbitRightEveryThreeTicks,
+        ResourceMotion::FacingCoupledLeftDriftEveryThreeTicks,
+        ResourceMotion::FacingCoupledRightDriftEveryThreeTicks,
     ] {
         for distance in 1..=3 {
             for relative_turns in [-2, -1, 0, 1, 2, 3] {
@@ -635,8 +674,9 @@ fn generate_failed_task(
     checkpoints: &[(u32, OrganismGenome)],
     program: &EcologyProgram,
     config: &PowerPlayConfig,
-) -> Result<Option<(EcologyStage, Vec<SolverTaskEvaluation>, usize)>> {
-    let mut best: Option<(EcologyStage, Vec<SolverTaskEvaluation>)> = None;
+) -> Result<Option<(EcologyStage, Vec<TaskGenerationCandidateEvaluation>, usize)>> {
+    let mut best_index = None;
+    let mut evidence: Vec<TaskGenerationCandidateEvaluation> = Vec::new();
     let candidates = grammar();
     for stage in &candidates {
         let mut proposed = program.clone();
@@ -660,7 +700,8 @@ fn generate_failed_task(
             .map(|entry| entry.evaluation.mean_completed_fraction)
             .sum::<f64>()
             / evaluations.len() as f64;
-        let ordering = best.as_ref().map_or(Ordering::Less, |(_, incumbent)| {
+        let ordering = best_index.map_or(Ordering::Less, |index: usize| {
+            let incumbent = &evidence[index].checkpoint_evaluations;
             let incumbent_max = incumbent
                 .iter()
                 .map(|entry| entry.evaluation.full_success_rate)
@@ -675,14 +716,20 @@ fn generate_failed_task(
                 .then_with(|| mean_partial.total_cmp(&incumbent_partial))
         });
         if ordering == Ordering::Less {
-            best = Some((*stage, evaluations));
+            best_index = Some(evidence.len());
         }
+        evidence.push(TaskGenerationCandidateEvaluation {
+            stage: *stage,
+            checkpoint_evaluations: evaluations,
+        });
     }
-    Ok(best.and_then(|(stage, evaluations)| {
-        evaluations
+    Ok(best_index.and_then(|index| {
+        let selected = &evidence[index];
+        selected
+            .checkpoint_evaluations
             .iter()
             .all(|entry| entry.evaluation.full_success_rate <= config.predecessor_fail_max_fraction)
-            .then_some((stage, evaluations, candidates.len()))
+            .then_some((selected.stage, evidence, candidates.len()))
     }))
 }
 
@@ -1012,6 +1059,9 @@ fn run_episode(
     let mut active_stage = 0usize;
     let mut completion_ticks = Vec::new();
     let stage_energy = config.food_energy / program.stages.len() as f32;
+    if !stage_energy.is_normal() || stage_energy <= 0.0 {
+        bail!("powerplay stage energy must remain finite, normal, and positive");
+    }
     let mut task_energy_injected = 0.0_f32;
     let mut max_engine_energy_ledger_residual = 0.0_f64;
     let mut max_engine_energy_ledger_tolerance = 0.0_f64;
@@ -1074,6 +1124,56 @@ fn run_episode(
     let final_organism_energy = sim.organisms().first().map_or(0.0, |value| value.energy);
     let organism_energy_closure_error =
         final_organism_energy - initial_organism_energy - captured_energy;
+    let task_energy_scale = config.food_energy.abs()
+        + task_energy_injected.abs()
+        + captured_energy.abs()
+        + standing_food_energy.abs()
+        + unreleased_energy_escrow.abs();
+    let task_energy_residual_tolerance =
+        TASK_ENERGY_EPSILON_MULTIPLIER * f32::EPSILON * task_energy_scale.max(1.0);
+    let observed_organism_gain = final_organism_energy - initial_organism_energy;
+    let organism_transfer_scale = captured_energy.abs() + observed_organism_gain.abs();
+    let organism_transfer_residual_tolerance =
+        TASK_ENERGY_EPSILON_MULTIPLIER * f32::EPSILON * organism_transfer_scale.max(1.0);
+    let energy_evidence = [
+        config.food_energy,
+        stage_energy,
+        task_energy_injected,
+        captured_energy,
+        standing_food_energy,
+        unreleased_energy_escrow,
+        initial_organism_energy,
+        final_organism_energy,
+        resource_energy_closure_error,
+        organism_energy_closure_error,
+        task_energy_residual_tolerance,
+        organism_transfer_residual_tolerance,
+    ];
+    if energy_evidence.iter().any(|value| !value.is_finite())
+        || task_energy_injected < 0.0
+        || captured_energy < 0.0
+        || standing_food_energy < 0.0
+        || unreleased_energy_escrow < -task_energy_residual_tolerance
+        || task_energy_injected > config.food_energy + task_energy_residual_tolerance
+        || resource_energy_closure_error.abs() > task_energy_residual_tolerance
+        || organism_energy_closure_error.abs() > organism_transfer_residual_tolerance
+        || (completed_stages > 0 && captured_energy <= 0.0)
+        || (completed_stages > 0 && observed_organism_gain <= 0.0)
+    {
+        bail!(
+            "powerplay task energy does not close: escrow={} released={} captured={} standing={} locked={} observed_gain={} resource_residual={} organism_residual={} resource_tolerance={} organism_tolerance={}",
+            config.food_energy,
+            task_energy_injected,
+            captured_energy,
+            standing_food_energy,
+            unreleased_energy_escrow,
+            observed_organism_gain,
+            resource_energy_closure_error,
+            organism_energy_closure_error,
+            task_energy_residual_tolerance,
+            organism_transfer_residual_tolerance,
+        );
+    }
     Ok(EpisodeEvidence {
         seed,
         resolved_stages,
@@ -1089,6 +1189,8 @@ fn run_episode(
         initial_organism_energy,
         final_organism_energy,
         organism_energy_closure_error,
+        task_energy_residual_tolerance,
+        organism_transfer_residual_tolerance,
         max_engine_energy_ledger_residual,
         max_engine_energy_ledger_tolerance,
         steps,
@@ -1103,8 +1205,12 @@ fn resolve_stage_context(stage: EcologyStage, seed: u64, stage_index: usize) -> 
     let distance = (i16::from(stage.distance) + distance_delta).clamp(1, 3) as u8;
     let motion = if reflected {
         match stage.motion {
-            ResourceMotion::OrbitLeftEveryThreeTicks => ResourceMotion::OrbitRightEveryThreeTicks,
-            ResourceMotion::OrbitRightEveryThreeTicks => ResourceMotion::OrbitLeftEveryThreeTicks,
+            ResourceMotion::FacingCoupledLeftDriftEveryThreeTicks => {
+                ResourceMotion::FacingCoupledRightDriftEveryThreeTicks
+            }
+            ResourceMotion::FacingCoupledRightDriftEveryThreeTicks => {
+                ResourceMotion::FacingCoupledLeftDriftEveryThreeTicks
+            }
             ResourceMotion::Static => ResourceMotion::Static,
         }
     } else {
@@ -1151,6 +1257,9 @@ fn prepare_episode_state(sim: &mut Simulation) -> Result<()> {
 }
 
 fn spawn_stage_resource(sim: &mut Simulation, stage: EcologyStage, energy: f32) -> Result<()> {
+    if !energy.is_normal() || energy <= 0.0 {
+        bail!("powerplay resource energy must be finite, normal, and positive");
+    }
     if !sim.foods.is_empty() {
         bail!("powerplay attempted to release a stage while another resource remained");
     }
@@ -1185,11 +1294,10 @@ fn spawn_stage_resource(sim: &mut Simulation, stage: EcologyStage, energy: f32) 
 fn move_active_resource(sim: &mut Simulation, stage: EcologyStage) -> Result<()> {
     let rotation = match stage.motion {
         ResourceMotion::Static => return Ok(()),
-        ResourceMotion::OrbitLeftEveryThreeTicks if sim.turn % 3 == 2 => -1,
-        ResourceMotion::OrbitRightEveryThreeTicks if sim.turn % 3 == 2 => 1,
-        ResourceMotion::OrbitLeftEveryThreeTicks | ResourceMotion::OrbitRightEveryThreeTicks => {
-            return Ok(())
-        }
+        ResourceMotion::FacingCoupledLeftDriftEveryThreeTicks if sim.turn % 3 == 2 => -1,
+        ResourceMotion::FacingCoupledRightDriftEveryThreeTicks if sim.turn % 3 == 2 => 1,
+        ResourceMotion::FacingCoupledLeftDriftEveryThreeTicks
+        | ResourceMotion::FacingCoupledRightDriftEveryThreeTicks => return Ok(()),
     };
     let Some(food) = sim.foods.first().cloned() else {
         return Ok(());
@@ -1199,16 +1307,9 @@ fn move_active_resource(sim: &mut Simulation, stage: EcologyStage) -> Result<()>
         .first()
         .ok_or_else(|| anyhow!("powerplay organism died while resource remained"))?;
     let old_idx = sim.cell_index(food.q, food.r);
-    let relative_q = food.q - organism.q;
-    let relative_r = food.r - organism.r;
-    let base_direction = if relative_q == 0 && relative_r == 0 {
-        organism.facing
-    } else {
-        // Motion is an environmental perturbation, not a task-label channel:
-        // rotate around the resource's own prior direction relative to the
-        // organism, approximated deterministically by its release bearing.
-        rotate_by_steps(organism.facing, stage.relative_turns)
-    };
+    // This is deliberately controller-coupled drift, not a geometric orbit:
+    // turning changes the direction in which the visible target moves.
+    let base_direction = rotate_by_steps(organism.facing, stage.relative_turns);
     let target_direction = rotate_by_steps(base_direction, rotation);
     let target = hex_neighbor(
         (food.q, food.r),
