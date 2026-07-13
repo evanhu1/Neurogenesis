@@ -182,6 +182,46 @@ cargo build -p sim-cli --release        # --release strongly recommended
   demonstrate selection, transfer, novelty, capacity growth, or open-endedness.
   Branch transfer is not implemented by this probe.
 
+- `public-decoder-probe [--config P] [--source-seed N]
+  [--source-population N] [--source-generations N]
+  [--source-module-width N] [--decoder-population N]
+  [--decoder-generations N] [--decoder-module-width N]
+  [--ticks-per-stage N] [--world-width N] [--food-energy F]
+  [--search-seeds N,...] [--episode-seeds N,...] [--out-dir D]` — train one
+  protected residual on a public-program declaration before testing any
+  transfer claim. Sixteen mutable cases present valid two-stage PowerPlay
+  programs through the fixed 36-tick FoodRay protocol, restore an identical
+  empty declaration scene, and require one of four physical actions from a
+  frozen rule using both stages' direction, distance, and motion fields.
+  Selection requires meaningful declarations and valid cross-context code
+  swaps `>=14/16`, blank and polarity-swapped controls `<=2/16`, and ordinary
+  no-preamble depth-1 task retention `>=14/16`.
+
+  The first search-qualified genome is frozen and receives exactly one sealed
+  16-case audit whose exact program combinations and simulation seeds are
+  disjoint from search while every individual field value was seen in search.
+  The legacy source checkpoint and exact residual knockout must remain
+  `<=2/16` on meaningful declarations; knockout must restore the exact source
+  genome and its ordinary behavior. Only after that complete gate passes is the
+  exact decoder module reused without mutation in the descendant depth-2
+  checkpoint and tested on a third sealed panel plus depth-2 retention. This is
+  checkpoint reuse along one protected ancestry, not foreign or cross-branch
+  transfer. The reuse retention row is one composite depth-2 task whose two
+  prefix deadlines must both pass; it is not separate replay of standalone
+  depth-1 and depth-2 obligations.
+  Every arm has matched timing, zero cue energy, and fail-closed engine-ledger
+  rows. This is an evaluator-owned decoder-capacity/checkpoint-reuse
+  falsifier, not a TCPE implementation or open-endedness evidence.
+  `valid_code_swap` is only a positive declaration-equivariance arm: it
+  re-pairs another valid program with that program's checksum-derived expected
+  declaration action under the host seed. No ecology task executes, so it is
+  not a wrong-code/same-task intervention. Declaration correctness has no
+  payoff and decoder computation is not energy-priced. The result embeds the
+  complete source PowerPlay artifact and exact genomes/panels/traces, but the
+  external artifact SHA must be accompanied by the git commit and executable
+  hash because those are deliberately recorded as unavailable rather than
+  fabricated.
+
 - `neat [--config P] [--seed N] [--population N] [--generations N]
   [--episode-horizons T[,T...]] [--world-seeds N,N]
   [--audit-seeds N,N|--no-audit]

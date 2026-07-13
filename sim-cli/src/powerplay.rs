@@ -3,7 +3,8 @@ use anyhow::{anyhow, bail, Result};
 use serde_json::json;
 use sim_config::load_world_config_from_path;
 use sim_core::powerplay::{
-    run_powerplay, run_public_preamble_probe, PowerPlayConfig, PublicPreambleProbeConfig,
+    run_powerplay, run_public_decoder_probe, run_public_preamble_probe, PowerPlayConfig,
+    PublicDecoderProbeConfig, PublicPreambleProbeConfig,
 };
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -231,6 +232,146 @@ pub(crate) fn run_public_preamble_probe_cli(
             "requested_pair_count": result.requested_pair_count,
             "evaluated_pair_count": result.evaluated_pair_count,
             "passed_pair_count": result.passed_pair_count,
+            "evaluator_owned": result.evaluator_owned,
+            "evidentiary": result.evidentiary,
+            "open_endedness_demonstrated": result.open_endedness_demonstrated,
+        })
+    )?;
+    Ok(())
+}
+
+pub(crate) fn run_public_decoder_probe_cli(
+    args: &[&str],
+    out_dir: &str,
+    out: &mut impl Write,
+) -> Result<()> {
+    let mut config_path = DEFAULT_CONFIG.to_string();
+    let mut config = PublicDecoderProbeConfig::default();
+    let mut i = 0usize;
+    while i < args.len() {
+        match args[i] {
+            "--config" => {
+                config_path = value(args, i, "--config")?.to_string();
+                i += 2;
+            }
+            "--source-seed" => {
+                config.source_powerplay.run_seed = value(args, i, "--source-seed")?.parse()?;
+                i += 2;
+            }
+            "--source-population" => {
+                config.source_powerplay.population_size =
+                    value(args, i, "--source-population")?.parse()?;
+                i += 2;
+            }
+            "--source-generations" => {
+                config.source_powerplay.generations_per_depth =
+                    value(args, i, "--source-generations")?.parse()?;
+                i += 2;
+            }
+            "--source-module-width" => {
+                config.source_powerplay.module_width =
+                    value(args, i, "--source-module-width")?.parse()?;
+                i += 2;
+            }
+            "--decoder-population" => {
+                config.decoder_population_size = value(args, i, "--decoder-population")?.parse()?;
+                i += 2;
+            }
+            "--decoder-generations" => {
+                config.decoder_generations = value(args, i, "--decoder-generations")?.parse()?;
+                i += 2;
+            }
+            "--decoder-module-width" => {
+                config.decoder_module_width = value(args, i, "--decoder-module-width")?.parse()?;
+                i += 2;
+            }
+            "--ticks-per-stage" => {
+                config.source_powerplay.ticks_per_stage =
+                    value(args, i, "--ticks-per-stage")?.parse()?;
+                i += 2;
+            }
+            "--world-width" => {
+                config.source_powerplay.world_width = value(args, i, "--world-width")?.parse()?;
+                i += 2;
+            }
+            "--food-energy" => {
+                config.source_powerplay.food_energy = value(args, i, "--food-energy")?.parse()?;
+                i += 2;
+            }
+            "--search-seeds" => {
+                config.source_powerplay.search_seeds =
+                    parse_seed_suite(value(args, i, "--search-seeds")?)?;
+                i += 2;
+            }
+            "--episode-seeds" => {
+                config.source_powerplay.episode_seeds =
+                    parse_seed_suite(value(args, i, "--episode-seeds")?)?;
+                i += 2;
+            }
+            "--help" | "-h" => {
+                writeln!(
+                    out,
+                    "public-decoder-probe options: --config P --source-seed N \
+                     --source-population N --source-generations N \
+                     --source-module-width N --decoder-population N \
+                     --decoder-generations N --decoder-module-width N \
+                     --ticks-per-stage N --world-width N --food-energy F \
+                     --search-seeds N,... --episode-seeds N,...\n\
+                     Trains one protected residual to decode valid two-stage \
+                     public programs into an identical-scene declaration, \
+                     performs one sealed held-out recombination audit with \
+                     blank/polarity/code-swap/source/knockout controls and \
+                     ordinary-task retention, then attempts exact module \
+                     exact reuse in the descendant depth-2 checkpoint only if the \
+                     decoder gate passes. Evaluator-owned; not TCPE or \
+                     open-endedness evidence."
+                )?;
+                return Ok(());
+            }
+            other => bail!(
+                "unknown public-decoder-probe arg `{other}` (use `public-decoder-probe --help`)"
+            ),
+        }
+    }
+
+    let world = load_world_config_from_path(Path::new(&config_path))?;
+    eprintln!(
+        "{}",
+        json!({
+            "event": "public_decoder_probe_started",
+            "claim_scope": "evaluator-owned protected decoder and descendant-checkpoint reuse falsifier",
+            "source_seed": config.source_powerplay.run_seed,
+            "source_population": config.source_powerplay.population_size,
+            "source_generations": config.source_powerplay.generations_per_depth,
+            "decoder_population": config.decoder_population_size,
+            "decoder_generations": config.decoder_generations,
+            "decoder_module_width": config.decoder_module_width,
+            "gate": {
+                "meaningful_minimum": config.meaningful_minimum,
+                "code_swap_minimum": config.code_swap_minimum,
+                "control_maximum": config.control_maximum,
+                "ordinary_retention_minimum": config.ordinary_retention_minimum,
+            },
+        })
+    );
+    let result = run_public_decoder_probe(world, config)?;
+    let path = run_output_path(out_dir, "public-decoder-probe")?;
+    let file = File::create(&path)
+        .map_err(|error| anyhow!("cannot create `{}`: {error}", path.display()))?;
+    let mut writer = BufWriter::new(file);
+    serde_json::to_writer_pretty(&mut writer, &result)?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+    writeln!(
+        out,
+        "{}",
+        json!({
+            "result": path,
+            "verdict": result.verdict,
+            "verdict_reason": result.verdict_reason,
+            "decoder_gate_passed": result.training.sealed_decoder_gate_passed,
+            "descendant_checkpoint_reuse_status": result.descendant_checkpoint_reuse.status,
+            "descendant_checkpoint_reuse_passed": result.descendant_checkpoint_reuse.passed,
             "evaluator_owned": result.evaluator_owned,
             "evidentiary": result.evidentiary,
             "open_endedness_demonstrated": result.open_endedness_demonstrated,
