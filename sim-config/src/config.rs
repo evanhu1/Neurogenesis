@@ -86,9 +86,8 @@ pub fn world_config_defaults() -> WorldConfigDefaults {
 
 pub fn seed_genome_config_defaults() -> SeedGenomeConfigDefaults {
     SeedGenomeConfigDefaults {
-        // Finite lifespan cap matching the mutation clamp in sim-core
-        // (`MAX_MUTATED_MAX_ORGANISM_AGE` = 100_000); seeds are no longer
-        // immortal.
+        // Legacy serialized value. The current pure-clonal engine has
+        // energy-only survival and does not enforce an age cap.
         max_organism_age: 100_000,
         gestation_ticks: 2,
         juvenile_eta_scale: 2.0,
@@ -109,6 +108,7 @@ pub fn food_ecology_policy() -> FoodEcologyPolicy {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct SeedGenomeConfig {
     pub num_neurons: u32,
     pub num_synapses: u32,
@@ -238,6 +238,7 @@ impl WorldConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WorldConfigToml {
     world: WorldGeometryToml,
     population: WorldPopulationToml,
@@ -248,16 +249,19 @@ struct WorldConfigToml {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WorldGeometryToml {
     world_width: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WorldPopulationToml {
     num_organisms: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WorldLifecycleToml {
     #[serde(default = "default_passive_metabolism_cost_per_unit")]
     passive_metabolism_cost_per_unit: f32,
@@ -271,6 +275,7 @@ struct WorldLifecycleToml {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WorldFoodToml {
     food_energy: f32,
     #[serde(default = "default_food_regrowth_interval")]
@@ -282,6 +287,7 @@ struct WorldFoodToml {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WorldTerrainToml {
     #[serde(default = "default_terrain_noise_scale")]
     terrain_noise_scale: f32,
@@ -290,6 +296,7 @@ struct WorldTerrainToml {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WorldFlagsToml {
     #[serde(default = "default_runtime_plasticity_enabled")]
     runtime_plasticity_enabled: bool,

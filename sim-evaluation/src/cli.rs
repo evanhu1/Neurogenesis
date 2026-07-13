@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 const DEFAULT_CONFIG_PATH: &str = "sim-evaluation/config.toml";
-const DEFAULT_SEEDS: &str = "42,123,7,2026";
+const DEFAULT_SEEDS: &str = "42,123,7,2026,2718,31415,65537,99991";
 
 #[derive(Debug, Clone, Parser)]
 #[command(name = "sim-evaluation")]
