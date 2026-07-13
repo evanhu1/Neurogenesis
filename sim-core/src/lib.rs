@@ -44,7 +44,8 @@ mod turn;
 
 pub use evolution::{
     evaluate_frozen_panel, run_neat, FitnessObjective, FixedSuiteEvaluation, GenerationSummary,
-    NeatConfig, PanelEvaluation, RunResult, ScenarioPreset, SelectionStrategy,
+    NeatConfig, OpponentRenewalConfig, PanelEvaluation, RunResult, ScenarioPreset,
+    SelectionStrategy,
 };
 
 #[cfg(test)]
@@ -79,6 +80,14 @@ pub struct Simulation {
     /// state; it isolates friendly fire as a predation failure mechanism.
     #[serde(default)]
     cross_pool_predation_pool_count: Option<usize>,
+    #[serde(default)]
+    attack_damage_fraction_override: Option<f32>,
+    #[serde(default)]
+    idle_health_regen_fraction_override: Option<f32>,
+    #[serde(default)]
+    predation_kill_reward_cap_override: Option<f32>,
+    #[serde(skip)]
+    pub(crate) attack_events_last_turn: Vec<turn::AttackEvent>,
     next_organism_id: u64,
     next_food_id: u64,
     organisms: Vec<OrganismState>,
@@ -123,6 +132,10 @@ impl Clone for Simulation {
             rng: self.rng.clone(),
             champion_pool: self.champion_pool.clone(),
             cross_pool_predation_pool_count: self.cross_pool_predation_pool_count,
+            attack_damage_fraction_override: self.attack_damage_fraction_override,
+            idle_health_regen_fraction_override: self.idle_health_regen_fraction_override,
+            predation_kill_reward_cap_override: self.predation_kill_reward_cap_override,
+            attack_events_last_turn: Vec::new(),
             next_organism_id: self.next_organism_id,
             next_food_id: self.next_food_id,
             organisms: self.organisms.clone(),
@@ -168,6 +181,10 @@ impl Simulation {
             rng: ChaCha8Rng::seed_from_u64(seed),
             champion_pool: Vec::new(),
             cross_pool_predation_pool_count: None,
+            attack_damage_fraction_override: None,
+            idle_health_regen_fraction_override: None,
+            predation_kill_reward_cap_override: None,
+            attack_events_last_turn: Vec::new(),
             next_organism_id: 0,
             next_food_id: 0,
             organisms: Vec::new(),
@@ -214,6 +231,40 @@ impl Simulation {
 
     pub fn set_cross_pool_predation_pool_count(&mut self, pool_count: Option<usize>) {
         self.cross_pool_predation_pool_count = pool_count.filter(|&count| count > 0);
+    }
+
+    pub fn set_predation_diagnostic_fractions(
+        &mut self,
+        attack_damage_fraction: f32,
+        idle_health_regen_fraction: f32,
+    ) {
+        self.attack_damage_fraction_override = Some(attack_damage_fraction.clamp(0.0, 1.0));
+        self.idle_health_regen_fraction_override = Some(idle_health_regen_fraction.clamp(0.0, 1.0));
+    }
+
+    pub fn set_predation_kill_reward_cap(&mut self, reward_cap: Option<f32>) {
+        self.predation_kill_reward_cap_override =
+            reward_cap.filter(|value| value.is_finite() && *value >= 0.0);
+    }
+
+    pub(crate) fn predation_kill_reward(&self, prey_energy: f32) -> f32 {
+        let physical_reward = prey_energy.max(0.0) * spawn::CORPSE_ENERGY_RETENTION;
+        self.predation_kill_reward_cap_override
+            .map_or(physical_reward, |cap| physical_reward.min(cap))
+    }
+
+    pub(crate) fn attack_damage_fraction(&self) -> f32 {
+        self.attack_damage_fraction_override
+            .unwrap_or(turn::ATTACK_DAMAGE_FRACTION)
+    }
+
+    pub(crate) fn idle_health_regen_fraction(&self) -> f32 {
+        self.idle_health_regen_fraction_override
+            .unwrap_or(turn::HEALTH_REGEN_FRACTION)
+    }
+
+    pub(crate) fn attack_events_last_turn(&self) -> &[turn::AttackEvent] {
+        &self.attack_events_last_turn
     }
 
     fn build_terrain_cells(&mut self) {

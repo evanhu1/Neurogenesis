@@ -13,6 +13,7 @@ struct IntentBuildContext<'a> {
     runtime_plasticity_enabled: bool,
     leaky_neurons_enabled: bool,
     predation_enabled: bool,
+    idle_health_regen_fraction: f32,
     force_random_actions: bool,
     sim_seed: u64,
     tick: u64,
@@ -36,6 +37,7 @@ impl Simulation {
             runtime_plasticity_enabled: self.config.runtime_plasticity_enabled,
             leaky_neurons_enabled: self.config.leaky_neurons_enabled,
             predation_enabled: self.config.predation_enabled,
+            idle_health_regen_fraction: self.idle_health_regen_fraction(),
             force_random_actions: self.config.force_random_actions,
             sim_seed: self.seed,
             tick: self.turn,
@@ -94,8 +96,9 @@ fn build_intent_for_organism(
 
     organism.last_action_taken = selected_action_state.selected_action;
     if context.predation_enabled && selected_action_state.selected_action == ActionType::Idle {
-        organism.health = (organism.health + organism_health_regeneration(organism))
-            .min(organism.max_health.max(1.0));
+        organism.health = (organism.health
+            + organism_health_regeneration(organism, context.idle_health_regen_fraction))
+        .min(organism.max_health.max(1.0));
     }
     let intent = intent_from_selected_action(
         idx,

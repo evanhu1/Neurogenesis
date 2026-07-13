@@ -2,6 +2,56 @@ use super::*;
 use crate::metabolism::refresh_organism_base_metabolic_cost;
 
 impl Simulation {
+    pub(crate) fn respawn_champion_pool_organism(
+        &mut self,
+        pool_index: usize,
+        energy_fraction: f32,
+        placement_version: u32,
+    ) -> Option<RespawnedOpponent> {
+        let genome = self.champion_pool.get(pool_index)?.clone();
+        let capacity = self.occupancy.len();
+        let event_key = respawn_mix64(
+            self.seed
+                ^ self.turn.rotate_left(17)
+                ^ (pool_index as u64).rotate_left(31)
+                ^ self.next_organism_id.rotate_left(43)
+                ^ u64::from(placement_version),
+        );
+        let cell_idx = (0..capacity)
+            .filter(|&index| self.occupancy[index].is_none() && !self.terrain_map[index])
+            .min_by_key(|&index| respawn_mix64(event_key ^ index as u64))?;
+        let width = self.config.world_width as usize;
+        let q = (cell_idx % width) as i32;
+        let r = (cell_idx / width) as i32;
+        let facing = FacingDirection::ALL
+            [(respawn_mix64(event_key ^ 0xface_cafe) as usize) % FacingDirection::ALL.len()];
+        let max_health = sim_types::offspring_transfer_energy(genome.lifecycle.gestation_ticks);
+        let starting_energy = max_health * energy_fraction.clamp(0.0, 1.0);
+        let organism = self.build_organism(
+            genome,
+            OrganismSpawnParams {
+                species_id: Some(SpeciesId(pool_index as u64)),
+                q,
+                r,
+                generation: 0,
+                facing,
+                starting_energy_override: Some(starting_energy),
+            },
+        );
+        let organism_id = organism.id;
+        if !self.add_organism(organism) {
+            return None;
+        }
+        self.refresh_population_metrics();
+        Some(RespawnedOpponent {
+            organism_id,
+            pool_index,
+            q,
+            r,
+            energy_injected: starting_energy,
+        })
+    }
+
     pub(crate) fn spawn_initial_population(&mut self) {
         let mut open_positions = self.empty_positions();
         open_positions.shuffle(&mut self.rng);
@@ -115,4 +165,18 @@ impl Simulation {
         }
         positions
     }
+}
+
+pub(crate) struct RespawnedOpponent {
+    pub(crate) organism_id: OrganismId,
+    pub(crate) pool_index: usize,
+    pub(crate) q: i32,
+    pub(crate) r: i32,
+    pub(crate) energy_injected: f32,
+}
+
+fn respawn_mix64(mut value: u64) -> u64 {
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^ (value >> 31)
 }

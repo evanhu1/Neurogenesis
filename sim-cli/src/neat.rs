@@ -1,11 +1,12 @@
 use crate::{run_output_path, DEFAULT_CONFIG, REPORT_EVERY};
 use anyhow::{anyhow, bail, Result};
+use ring::digest::{digest, SHA256};
 use serde::Deserialize;
 use serde_json::json;
 use sim_core::evolution::ScenarioManifest;
 use sim_core::{
-    evaluate_frozen_panel, run_neat, FitnessObjective, NeatConfig, RunResult, ScenarioPreset,
-    SelectionStrategy, Simulation,
+    evaluate_frozen_panel, run_neat, FitnessObjective, NeatConfig, OpponentRenewalConfig,
+    RunResult, ScenarioPreset, SelectionStrategy, Simulation,
 };
 use sim_types::OrganismGenome;
 use sim_views::{
@@ -27,7 +28,9 @@ per_connection_weight_mutation_probability mutate_bias_probability bias_perturb_
 mutate_time_constant_probability time_constant_perturb_stddev add_connection_probability \
 add_node_probability disabled_inheritance_probability stagnation_generations \
 young_species_grace_generations min_young_species_offspring \
-elitism_min_species_size eval_opponents cross_pool_predation_only";
+elitism_min_species_size eval_opponents cross_pool_predation_only attack_damage_fraction \
+idle_health_regen_fraction opponent_renewal_enabled opponent_respawn_delay_ticks \
+opponent_respawn_energy_fraction opponent_respawn_placement_version opponent_kill_reward_cap";
 
 /// Canonical generational NEAT runner. It owns no persistent world: each
 /// candidate is evaluated in deterministic fixed-seed episodes, and the durable
@@ -38,6 +41,9 @@ pub(crate) fn run_neat_cli(args: &[&str], out_dir: &str, out: &mut impl Write) -
     }
     if args.first() == Some(&"evaluate-panel") {
         return run_neat_panel_evaluation(&args[1..], out);
+    }
+    if args.first() == Some(&"crossplay") {
+        return run_neat_crossplay(&args[1..], out);
     }
     let mut config_path = DEFAULT_CONFIG.to_string();
     let mut run_seed = 0u64;
@@ -146,6 +152,7 @@ pub(crate) fn run_neat_cli(args: &[&str], out_dir: &str, out: &mut impl Write) -
                      default scale: 25,30; objective: lower-tail candidate survival-time fraction;\n\
                      analyze: neat analyze RESULT.json [RESULT2.json ...]\n\
                      frozen panel: neat evaluate-panel --focal RESULT.json --opponents RESULT.json,RESULT.json --horizons 500,1000 --world-seeds 131,149\n\
+                     checkpoint crossplay: neat crossplay RESULT.json --checkpoints all --horizons 1000,2000,4000 --world-seeds 131,149\n\
                      NEAT params: {PARAMS}"
                 )?;
                 return Ok(());
@@ -180,6 +187,9 @@ pub(crate) fn run_neat_cli(args: &[&str], out_dir: &str, out: &mut impl Write) -
             "objective": neat.fitness_objective.name(),
             "eval_opponents": neat.eval_opponents,
             "cross_pool_predation_only": neat.cross_pool_predation_only,
+            "attack_damage_fraction": neat.attack_damage_fraction,
+            "idle_health_regen_fraction": neat.idle_health_regen_fraction,
+            "opponent_renewal": neat.opponent_renewal,
             "scenarios": neat.scenarios,
         })
     );
@@ -303,6 +313,11 @@ fn run_neat_panel_evaluation(args: &[&str], out: &mut impl Write) -> Result<()> 
     let mut objective = FitnessObjective::SurvivalTimesRelativeAdvantage;
     let mut objective_cvar_fraction = 0.5_f64;
     let mut survival_window_weights = vec![1.0_f64];
+    let mut cross_pool_predation_only = false;
+    let mut attack_damage_fraction = 0.5_f32;
+    let mut idle_health_regen_fraction = 0.10_f32;
+    let mut opponent_renewal = OpponentRenewalConfig::default();
+    let mut focal_pool_index = 0usize;
     let mut i = 0usize;
     while i < args.len() {
         match args[i] {
@@ -346,10 +361,51 @@ fn run_neat_panel_evaluation(args: &[&str], out: &mut impl Write) -> Result<()> 
                     parse_f64_list(value(args, i, "--window-weights")?, "--window-weights")?;
                 i += 2;
             }
+            "--cross-pool-only" => {
+                cross_pool_predation_only = true;
+                i += 1;
+            }
+            "--damage-fraction" => {
+                attack_damage_fraction = value(args, i, "--damage-fraction")?.parse()?;
+                i += 2;
+            }
+            "--regen-fraction" => {
+                idle_health_regen_fraction = value(args, i, "--regen-fraction")?.parse()?;
+                i += 2;
+            }
+            "--renew-opponents" => {
+                opponent_renewal.enabled = true;
+                i += 1;
+            }
+            "--respawn-delay" => {
+                opponent_renewal.respawn_delay_ticks =
+                    value(args, i, "--respawn-delay")?.parse()?;
+                i += 2;
+            }
+            "--respawn-energy" => {
+                opponent_renewal.respawn_energy_fraction =
+                    value(args, i, "--respawn-energy")?.parse()?;
+                i += 2;
+            }
+            "--placement-version" => {
+                opponent_renewal.placement_version =
+                    value(args, i, "--placement-version")?.parse()?;
+                i += 2;
+            }
+            "--kill-reward-cap" => {
+                let raw = value(args, i, "--kill-reward-cap")?;
+                opponent_renewal.kill_reward_cap =
+                    (raw != "none").then(|| raw.parse()).transpose()?;
+                i += 2;
+            }
+            "--focal-slot" => {
+                focal_pool_index = value(args, i, "--focal-slot")?.parse()?;
+                i += 2;
+            }
             "--help" | "-h" => {
                 writeln!(
                     out,
-                    "neat evaluate-panel --focal RESULT.json --opponents RESULT.json[,RESULT.json...] [--horizons N,N] [--window-weights W,W] [--world-seeds N,N] [--levels N,N] [--objective survival_fraction|late_weighted_survival|survival_times_relative_advantage] [--cvar F]"
+                    "neat evaluate-panel --focal RESULT.json --opponents RESULT.json[,RESULT.json...] [--horizons N,N] [--window-weights W,W] [--world-seeds N,N] [--levels N,N] [--objective survival_fraction|late_weighted_survival|survival_times_relative_advantage] [--cvar F] [--cross-pool-only] [--damage-fraction F] [--regen-fraction F] [--focal-slot 0|1|2] [--renew-opponents] [--respawn-delay N] [--respawn-energy F] [--placement-version N] [--kill-reward-cap none|F]"
                 )?;
                 return Ok(());
             }
@@ -360,11 +416,21 @@ fn run_neat_panel_evaluation(args: &[&str], out: &mut impl Write) -> Result<()> 
     if opponent_paths.is_empty() {
         bail!("evaluate-panel needs at least one --opponents result");
     }
+    if focal_pool_index > opponent_paths.len() {
+        bail!("evaluate-panel --focal-slot exceeds the realized founder-pool size");
+    }
     if horizons.is_empty() || horizons.contains(&0) {
         bail!("evaluate-panel horizons must be nonempty and positive");
     }
     if !(0.0..=1.0).contains(&objective_cvar_fraction) || objective_cvar_fraction == 0.0 {
         bail!("evaluate-panel --cvar must be in (0,1]");
+    }
+    if !attack_damage_fraction.is_finite()
+        || !(0.0..=1.0).contains(&attack_damage_fraction)
+        || !idle_health_regen_fraction.is_finite()
+        || !(0.0..=1.0).contains(&idle_health_regen_fraction)
+    {
+        bail!("evaluate-panel damage and regen fractions must be finite in [0,1]");
     }
 
     let focal = read_neat_result(&focal_path)?;
@@ -411,6 +477,11 @@ fn run_neat_panel_evaluation(args: &[&str], out: &mut impl Write) -> Result<()> 
             &world_seeds,
             objective_cvar_fraction,
             objective,
+            cross_pool_predation_only,
+            attack_damage_fraction,
+            idle_health_regen_fraction,
+            opponent_renewal,
+            focal_pool_index,
         )?;
         evaluations.push(json!({
             "horizon": horizon,
@@ -422,7 +493,7 @@ fn run_neat_panel_evaluation(args: &[&str], out: &mut impl Write) -> Result<()> 
         out,
         "{}",
         json!({
-            "schema_version": 1,
+            "schema_version": 2,
             "focal": focal_path,
             "focal_run_seed": focal.seed,
             "opponents": opponent_paths,
@@ -430,6 +501,11 @@ fn run_neat_panel_evaluation(args: &[&str], out: &mut impl Write) -> Result<()> 
             "objective": objective,
             "objective_cvar_fraction": objective_cvar_fraction,
             "survival_window_weights": survival_window_weights,
+            "cross_pool_predation_only": cross_pool_predation_only,
+            "attack_damage_fraction": attack_damage_fraction,
+            "idle_health_regen_fraction": idle_health_regen_fraction,
+            "focal_pool_index": focal_pool_index,
+            "opponent_renewal": opponent_renewal,
             "world_seeds": world_seeds,
             "curriculum_levels": levels,
             "evaluations": evaluations,
@@ -438,12 +514,309 @@ fn run_neat_panel_evaluation(args: &[&str], out: &mut impl Write) -> Result<()> 
     .map_err(Into::into)
 }
 
+fn run_neat_crossplay(args: &[&str], out: &mut impl Write) -> Result<()> {
+    let mut result_path = None::<String>;
+    let mut selected_generations = None::<Vec<u32>>;
+    let mut horizons = vec![1_000_u64, 2_000, 4_000];
+    let mut world_seeds = None::<Vec<u64>>;
+    let mut levels = None::<Vec<u32>>;
+    let mut scenario_names = None::<Vec<String>>;
+    let mut slots = vec![0usize, 1, 2];
+    let mut objective = FitnessObjective::SurvivalFraction;
+    let mut objective_cvar_fraction = 0.5_f64;
+    let mut cross_pool_predation_only = true;
+    let mut attack_damage_fraction = 0.5_f32;
+    let mut idle_health_regen_fraction = 0.10_f32;
+    let mut opponent_renewal = OpponentRenewalConfig::default();
+    let mut i = 0usize;
+    while i < args.len() {
+        match args[i] {
+            "--checkpoints" => {
+                let raw = value(args, i, "--checkpoints")?;
+                selected_generations = if raw == "all" {
+                    None
+                } else {
+                    Some(parse_u32_list(raw, "--checkpoints")?)
+                };
+                i += 2;
+            }
+            "--horizons" => {
+                horizons = parse_u64_list(value(args, i, "--horizons")?, "--horizons")?;
+                i += 2;
+            }
+            "--world-seeds" => {
+                world_seeds = Some(parse_u64_list(
+                    value(args, i, "--world-seeds")?,
+                    "--world-seeds",
+                )?);
+                i += 2;
+            }
+            "--levels" => {
+                levels = Some(parse_u32_list(value(args, i, "--levels")?, "--levels")?);
+                i += 2;
+            }
+            "--scenarios" => {
+                scenario_names = Some(
+                    value(args, i, "--scenarios")?
+                        .split(',')
+                        .filter(|value| !value.trim().is_empty())
+                        .map(|value| value.trim().to_string())
+                        .collect(),
+                );
+                i += 2;
+            }
+            "--slots" => {
+                let raw = value(args, i, "--slots")?;
+                slots = if raw == "all" {
+                    vec![0, 1, 2]
+                } else {
+                    parse_usize_list(raw, "--slots")?
+                };
+                i += 2;
+            }
+            "--objective" => {
+                objective = FitnessObjective::parse(value(args, i, "--objective")?)?;
+                i += 2;
+            }
+            "--cvar" => {
+                objective_cvar_fraction = value(args, i, "--cvar")?.parse()?;
+                i += 2;
+            }
+            "--cross-pool-only" => {
+                cross_pool_predation_only = true;
+                i += 1;
+            }
+            "--allow-same-pool" => {
+                cross_pool_predation_only = false;
+                i += 1;
+            }
+            "--damage-fraction" => {
+                attack_damage_fraction = value(args, i, "--damage-fraction")?.parse()?;
+                i += 2;
+            }
+            "--regen-fraction" => {
+                idle_health_regen_fraction = value(args, i, "--regen-fraction")?.parse()?;
+                i += 2;
+            }
+            "--renew-opponents" => {
+                opponent_renewal.enabled = true;
+                i += 1;
+            }
+            "--respawn-delay" => {
+                opponent_renewal.respawn_delay_ticks =
+                    value(args, i, "--respawn-delay")?.parse()?;
+                i += 2;
+            }
+            "--respawn-energy" => {
+                opponent_renewal.respawn_energy_fraction =
+                    value(args, i, "--respawn-energy")?.parse()?;
+                i += 2;
+            }
+            "--placement-version" => {
+                opponent_renewal.placement_version =
+                    value(args, i, "--placement-version")?.parse()?;
+                i += 2;
+            }
+            "--kill-reward-cap" => {
+                let raw = value(args, i, "--kill-reward-cap")?;
+                opponent_renewal.kill_reward_cap =
+                    (raw != "none").then(|| raw.parse()).transpose()?;
+                i += 2;
+            }
+            "--help" | "-h" => {
+                writeln!(
+                    out,
+                    "neat crossplay RESULT.json [--checkpoints all|G,G] [--horizons N,N] [--world-seeds N,N] [--levels N,N] [--scenarios baseline,scarcity,sparse_search] [--slots all|0,1,2] [--objective survival_fraction|late_weighted_survival|survival_times_relative_advantage] [--cvar F] [--cross-pool-only|--allow-same-pool] [--damage-fraction F] [--regen-fraction F] [--renew-opponents] [--respawn-delay N] [--respawn-energy F] [--placement-version N] [--kill-reward-cap none|F]"
+                )?;
+                return Ok(());
+            }
+            value if !value.starts_with('-') && result_path.is_none() => {
+                result_path = Some(value.to_string());
+                i += 1;
+            }
+            other => bail!("unknown neat crossplay arg `{other}`"),
+        }
+    }
+    let result_path = result_path.ok_or_else(|| anyhow!("crossplay needs RESULT.json"))?;
+    if horizons.is_empty() || horizons.contains(&0) {
+        bail!("crossplay horizons must be nonempty and positive");
+    }
+    if slots.is_empty() || slots.iter().any(|&slot| slot > 2) {
+        bail!("crossplay slots must be a nonempty subset of 0,1,2");
+    }
+    slots.sort_unstable();
+    slots.dedup();
+    if !(0.0..=1.0).contains(&objective_cvar_fraction) || objective_cvar_fraction == 0.0 {
+        bail!("crossplay --cvar must be in (0,1]");
+    }
+    if !attack_damage_fraction.is_finite()
+        || !(0.0..=1.0).contains(&attack_damage_fraction)
+        || !idle_health_regen_fraction.is_finite()
+        || !(0.0..=1.0).contains(&idle_health_regen_fraction)
+    {
+        bail!("crossplay damage and regen fractions must be finite in [0,1]");
+    }
+
+    let source = read_neat_result(&result_path)?;
+    let world_seeds = world_seeds.unwrap_or_else(|| {
+        if source.neat_config.sealed_holdout_world_seeds.is_empty() {
+            source.neat_config.development_world_seeds.clone()
+        } else {
+            source.neat_config.sealed_holdout_world_seeds.clone()
+        }
+    });
+    if world_seeds.is_empty() {
+        bail!("crossplay needs --world-seeds when the result has no audit seeds");
+    }
+    let scenarios = source
+        .fixed_audit_scenarios
+        .iter()
+        .filter(|scenario| {
+            levels
+                .as_ref()
+                .is_none_or(|levels| levels.contains(&scenario.curriculum_level))
+                && scenario_names
+                    .as_ref()
+                    .is_none_or(|names| names.contains(&scenario.name))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if scenarios.is_empty() {
+        bail!("crossplay selected no scenarios");
+    }
+
+    let mut checkpoints = source
+        .generations
+        .iter()
+        .filter_map(|generation| {
+            generation
+                .checkpoint_champion_genome
+                .as_ref()
+                .map(|genome| (generation.generation, genome.clone()))
+        })
+        .filter(|(generation, _)| {
+            selected_generations
+                .as_ref()
+                .is_none_or(|selected| selected.contains(generation))
+        })
+        .map(|(generation, genome)| CrossplayCheckpoint {
+            generation,
+            genome_hash: genome_sha256(&genome),
+            genome,
+            duplicate_of_generation: None,
+        })
+        .collect::<Vec<_>>();
+    checkpoints.sort_by_key(|checkpoint| checkpoint.generation);
+    if checkpoints.len() < 2 {
+        bail!("crossplay needs at least two persisted checkpoint genomes");
+    }
+    let mut first_generation_by_hash = BTreeMap::<String, u32>::new();
+    for checkpoint in &mut checkpoints {
+        checkpoint.duplicate_of_generation = first_generation_by_hash
+            .get(&checkpoint.genome_hash)
+            .copied();
+        first_generation_by_hash
+            .entry(checkpoint.genome_hash.clone())
+            .or_insert(checkpoint.generation);
+    }
+
+    let mut cells =
+        Vec::with_capacity(checkpoints.len() * checkpoints.len() * slots.len() * horizons.len());
+    for focal in &checkpoints {
+        for opponent in &checkpoints {
+            let opponents = [opponent.genome.clone(), opponent.genome.clone()];
+            for &focal_pool_index in &slots {
+                for &horizon in &horizons {
+                    let evaluation = evaluate_frozen_panel(
+                        &focal.genome,
+                        &opponents,
+                        &scenarios,
+                        horizon,
+                        &[1.0],
+                        &world_seeds,
+                        objective_cvar_fraction,
+                        objective,
+                        cross_pool_predation_only,
+                        attack_damage_fraction,
+                        idle_health_regen_fraction,
+                        opponent_renewal,
+                        focal_pool_index,
+                    )?;
+                    cells.push(json!({
+                        "focal_generation": focal.generation,
+                        "focal_genome_hash": focal.genome_hash,
+                        "opponent_generation": opponent.generation,
+                        "opponent_genome_hash": opponent.genome_hash,
+                        "focal_pool_index": focal_pool_index,
+                        "horizon": horizon,
+                        "summary": evaluation.summary,
+                        "cases": evaluation.cases,
+                    }));
+                }
+            }
+        }
+    }
+    writeln!(
+        out,
+        "{}",
+        json!({
+            "schema_version": 1,
+            "source": result_path,
+            "source_run_seed": source.seed,
+            "checkpoints": checkpoints.iter().map(|checkpoint| json!({
+                "generation": checkpoint.generation,
+                "genome_hash_sha256": checkpoint.genome_hash,
+                "duplicate_of_generation": checkpoint.duplicate_of_generation,
+            })).collect::<Vec<_>>(),
+            "contract": {
+                "horizons": horizons,
+                "world_seeds": world_seeds,
+                "curriculum_levels": levels,
+                "scenario_names": scenario_names,
+                "focal_pool_indices": slots,
+                "objective": objective,
+                "objective_cvar_fraction": objective_cvar_fraction,
+                "cross_pool_predation_only": cross_pool_predation_only,
+                "attack_damage_fraction": attack_damage_fraction,
+                "idle_health_regen_fraction": idle_health_regen_fraction,
+                "opponent_renewal": opponent_renewal,
+            },
+            "cells": cells,
+        })
+    )
+    .map_err(Into::into)
+}
+
+struct CrossplayCheckpoint {
+    generation: u32,
+    genome_hash: String,
+    genome: OrganismGenome,
+    duplicate_of_generation: Option<u32>,
+}
+
+fn genome_sha256(genome: &OrganismGenome) -> String {
+    let bytes = bincode::serialize(genome).expect("genome serialization must be infallible");
+    digest(&SHA256, &bytes)
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 #[derive(Deserialize)]
 struct PanelResultSource {
     seed: u64,
     champion_genome: OrganismGenome,
     fixed_audit_scenarios: Vec<ScenarioManifest>,
     neat_config: PanelSeedConfig,
+    generations: Vec<PanelGenerationSource>,
+}
+
+#[derive(Deserialize)]
+struct PanelGenerationSource {
+    generation: u32,
+    #[serde(default)]
+    checkpoint_champion_genome: Option<OrganismGenome>,
 }
 
 #[derive(Deserialize)]
@@ -617,6 +990,23 @@ fn analyze_result(path: &str, result: &RunResult) -> serde_json::Value {
             "training_opponent_draws": result.champion_evaluation.opponent_draws,
             "training_duplicate_opponent_draws": result.champion_evaluation.duplicate_opponent_draws,
             "training_mean_prey_consumptions": result.champion_evaluation.mean_prey_consumptions,
+            "training_attack_funnel": {
+                "no_organism_targets": result.champion_evaluation.mean_attack_no_organism_targets,
+                "same_pool_blocked": result.champion_evaluation.mean_attack_same_pool_blocked,
+                "eligible_attempts": result.champion_evaluation.mean_attack_eligible_attempts,
+                "hits": result.champion_evaluation.mean_attack_hits,
+                "nonlethal_hits": result.champion_evaluation.mean_attack_nonlethal_hits,
+                "kills": result.champion_evaluation.mean_attack_kills,
+                "same_pair_followups": result.champion_evaluation.mean_attack_same_pair_followups,
+                "damage_dealt": result.champion_evaluation.mean_attack_damage_dealt,
+                "energy_gained": result.champion_evaluation.mean_attack_energy_gained,
+            },
+            "training_opponent_renewal": {
+                "respawns": result.champion_evaluation.mean_opponent_respawns,
+                "energy_injected": result.champion_evaluation.mean_respawn_energy_injected,
+                "pool_deficit_ticks": result.champion_evaluation.mean_opponent_pool_deficit_ticks,
+                "respawned_opponents_killed": result.champion_evaluation.mean_respawned_opponents_killed,
+            },
             "development_score": result.champion_development_evaluation.as_ref().map(|suite| suite.mean_level_objective_score),
             "development_levels": result.champion_development_evaluation.as_ref().map(suite_level_summary),
             "sealed_score": result.sealed_holdout_evaluation.as_ref().map(|suite| suite.mean_level_objective_score),
@@ -706,6 +1096,13 @@ fn suite_level_summary(suite: &sim_core::FixedSuiteEvaluation) -> Vec<serde_json
                 "plant_capture_fraction": level.evaluation.mean_plant_capture_fraction,
                 "plant_consumptions_per_tick": level.evaluation.mean_plant_consumptions_per_tick,
                 "prey_consumptions": level.evaluation.mean_prey_consumptions,
+                "attack_eligible_attempts": level.evaluation.mean_attack_eligible_attempts,
+                "attack_nonlethal_hits": level.evaluation.mean_attack_nonlethal_hits,
+                "attack_kills": level.evaluation.mean_attack_kills,
+                "attack_energy_gained": level.evaluation.mean_attack_energy_gained,
+                "opponent_respawns": level.evaluation.mean_opponent_respawns,
+                "respawn_energy_injected": level.evaluation.mean_respawn_energy_injected,
+                "opponent_pool_deficit_ticks": level.evaluation.mean_opponent_pool_deficit_ticks,
                 "standing_plant_fraction": level.evaluation.mean_standing_plant_fraction,
                 "spatial_coverage": level.evaluation.mean_spatial_coverage,
             })
@@ -781,6 +1178,18 @@ fn parse_u64_list(raw: &str, flag: &str) -> Result<Vec<u64>> {
 
 fn parse_u32_list(raw: &str, flag: &str) -> Result<Vec<u32>> {
     let values: Vec<u32> = raw
+        .split(',')
+        .filter(|part| !part.trim().is_empty())
+        .map(|part| part.trim().parse())
+        .collect::<std::result::Result<_, _>>()?;
+    if values.is_empty() {
+        bail!("{flag} needs at least one value");
+    }
+    Ok(values)
+}
+
+fn parse_usize_list(raw: &str, flag: &str) -> Result<Vec<usize>> {
+    let values: Vec<usize> = raw
         .split(',')
         .filter(|part| !part.trim().is_empty())
         .map(|part| part.trim().parse())
@@ -887,6 +1296,22 @@ fn apply_neat_param(config: &mut NeatConfig, key: &str, value: &str) -> Result<(
         "elitism_min_species_size" => config.elitism_min_species_size = value.parse()?,
         "eval_opponents" => config.eval_opponents = value.parse()?,
         "cross_pool_predation_only" => config.cross_pool_predation_only = value.parse()?,
+        "attack_damage_fraction" => config.attack_damage_fraction = value.parse()?,
+        "idle_health_regen_fraction" => config.idle_health_regen_fraction = value.parse()?,
+        "opponent_renewal_enabled" => config.opponent_renewal.enabled = value.parse()?,
+        "opponent_respawn_delay_ticks" => {
+            config.opponent_renewal.respawn_delay_ticks = value.parse()?
+        }
+        "opponent_respawn_energy_fraction" => {
+            config.opponent_renewal.respawn_energy_fraction = value.parse()?
+        }
+        "opponent_respawn_placement_version" => {
+            config.opponent_renewal.placement_version = value.parse()?
+        }
+        "opponent_kill_reward_cap" => {
+            config.opponent_renewal.kill_reward_cap =
+                (value != "none").then(|| value.parse()).transpose()?
+        }
         _ => bail!("unknown NEAT parameter `{key}`; valid: {PARAMS}"),
     }
     Ok(())

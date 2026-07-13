@@ -108,14 +108,31 @@ impl<'a> CommitPhaseContext<'a> {
             };
             let target_idx = target_r as usize * self.world_width_usize + target_q as usize;
 
+            if intent.wants_attack && self.sim.config.predation_enabled {
+                let event = match self.sim.occupancy[target_idx] {
+                    Some(Occupant::Organism(prey_id)) => {
+                        self.resolve_attack_damage(idx, prey_id, target_idx)
+                    }
+                    None | Some(Occupant::Wall) | Some(Occupant::Food(_)) => AttackEvent {
+                        turn: self.sim.turn.saturating_add(1),
+                        attacker_id: intent.id,
+                        attacker_species_id: self.sim.organisms[idx].species_id,
+                        victim_id: None,
+                        victim_species_id: None,
+                        outcome: AttackOutcome::NoOrganismTarget,
+                        victim_health_before: 0.0,
+                        victim_health_after: 0.0,
+                        damage: 0.0,
+                        energy_gained: 0.0,
+                    },
+                };
+                self.result.attack_events.push(event);
+                continue;
+            }
+
             match self.sim.occupancy[target_idx] {
                 Some(Occupant::Food(food_id)) if intent.wants_eat => {
                     self.consume_food(idx, target_idx, food_id);
-                }
-                Some(Occupant::Organism(prey_id))
-                    if self.sim.config.predation_enabled && intent.wants_attack =>
-                {
-                    self.resolve_attack_damage(idx, prey_id, target_idx);
                 }
                 None | Some(Occupant::Wall) => {}
                 Some(Occupant::Food(_)) | Some(Occupant::Organism(_)) => {}
@@ -185,18 +202,33 @@ impl<'a> CommitPhaseContext<'a> {
         predator_idx: usize,
         prey_id: OrganismId,
         target_idx: usize,
-    ) {
-        let Some(prey_idx) = organism_index_by_id(&self.sim.organisms, prey_id) else {
-            return;
+    ) -> AttackEvent {
+        let attacker_id = self.sim.organisms[predator_idx].id;
+        let attacker_species_id = self.sim.organisms[predator_idx].species_id;
+        let base_event = |outcome, victim_species_id| AttackEvent {
+            turn: self.sim.turn.saturating_add(1),
+            attacker_id,
+            attacker_species_id,
+            victim_id: Some(prey_id),
+            victim_species_id,
+            outcome,
+            victim_health_before: 0.0,
+            victim_health_after: 0.0,
+            damage: 0.0,
+            energy_gained: 0.0,
         };
+        let Some(prey_idx) = organism_index_by_id(&self.sim.organisms, prey_id) else {
+            return base_event(AttackOutcome::NoOrganismTarget, None);
+        };
+        let victim_species_id = self.sim.organisms[prey_idx].species_id;
         if predator_idx == prey_idx || self.dead_organisms[prey_idx] {
-            return;
+            return base_event(AttackOutcome::NoOrganismTarget, Some(victim_species_id));
         }
         if let Some(pool_count) = self.sim.cross_pool_predation_pool_count {
             let predator_pool = self.sim.organisms[predator_idx].species_id.0 as usize % pool_count;
             let prey_pool = self.sim.organisms[prey_idx].species_id.0 as usize % pool_count;
             if predator_pool == prey_pool {
-                return;
+                return base_event(AttackOutcome::SamePoolBlocked, Some(victim_species_id));
             }
         }
 
@@ -220,17 +252,35 @@ impl<'a> CommitPhaseContext<'a> {
         let sample =
             deterministic_predation_sample(self.sim.seed, self.sim.turn, predator_id, prey_id);
         if sample >= predation_success {
-            return;
+            return base_event(AttackOutcome::Missed, Some(victim_species_id));
         }
 
+        let attack_damage_fraction = self.sim.attack_damage_fraction();
         let prey = &mut self.sim.organisms[prey_idx];
-        let damage = (predator_max_health * ATTACK_DAMAGE_FRACTION).min(prey.health.max(0.0));
+        let victim_health_before = prey.health.max(0.0);
+        let damage = (predator_max_health * attack_damage_fraction).min(victim_health_before);
         prey.health = (prey.health - damage).max(0.0);
         prey.damage_taken_last_turn += damage;
         let killed = prey.health <= 0.0;
         let prey_q = prey.q;
         let prey_r = prey.r;
         let prey_energy = prey.energy.max(0.0);
+        let mut event = AttackEvent {
+            turn: self.sim.turn.saturating_add(1),
+            attacker_id,
+            attacker_species_id,
+            victim_id: Some(prey_id),
+            victim_species_id: Some(victim_species_id),
+            outcome: if killed {
+                AttackOutcome::Killed
+            } else {
+                AttackOutcome::NonlethalHit
+            },
+            victim_health_before,
+            victim_health_after: prey.health,
+            damage,
+            energy_gained: 0.0,
+        };
 
         #[cfg(feature = "instrumentation")]
         self.sim.mark_action_succeeded(predator_idx);
@@ -243,7 +293,8 @@ impl<'a> CommitPhaseContext<'a> {
             // CORPSE_ENERGY_RETENTION), so total energy is conserved and no
             // corpse is left behind. This turns the existing predation behavior
             // into prey_consumption directly, establishing a predator niche.
-            let gained_energy = prey_energy * CORPSE_ENERGY_RETENTION;
+            let gained_energy = self.sim.predation_kill_reward(prey_energy);
+            event.energy_gained = gained_energy;
             let predator = &mut self.sim.organisms[predator_idx];
             predator.energy += gained_energy;
             predator.consumptions_count = predator.consumptions_count.saturating_add(1);
@@ -271,6 +322,7 @@ impl<'a> CommitPhaseContext<'a> {
                 false,
             );
         }
+        event
     }
 
     /// Commit-phase death bookkeeping. `spawn_corpse` is false for a predation

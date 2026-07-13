@@ -9,7 +9,6 @@ use crate::brain::scan_rays;
 use crate::brain::{action_index, evaluate_brain, BrainEvalContext, BrainScratch};
 use crate::grid::{hex_neighbor, rotate_left, rotate_right};
 use crate::plasticity::{apply_runtime_weight_updates, compute_pending_coactivations};
-use crate::spawn::CORPSE_ENERGY_RETENTION;
 use crate::Simulation;
 #[cfg(feature = "profiling")]
 use crate::{profiling, profiling::TurnPhase};
@@ -19,7 +18,7 @@ use rayon::{ThreadPool, ThreadPoolBuilder};
 use sim_types::ActionRecord;
 use sim_types::{
     ActionType, EntityId, FacingDirection, FoodKind, FoodState, Occupant, OrganismFacing,
-    OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, TickDelta,
+    OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId, TickDelta,
 };
 use std::sync::Arc;
 #[cfg(feature = "profiling")]
@@ -28,8 +27,8 @@ use std::time::Instant;
 const RNG_TURN_MIX: u64 = 0x9E37_79B9_7F4A_7C15;
 const RNG_ORGANISM_MIX: u64 = 0xBF58_476D_1CE4_E5B9;
 const RNG_PREY_MIX: u64 = 0x2545_F491_4F6C_DD1D;
-const ATTACK_DAMAGE_FRACTION: f32 = 0.5;
-const HEALTH_REGEN_FRACTION: f32 = 0.10;
+pub(crate) const ATTACK_DAMAGE_FRACTION: f32 = 0.5;
+pub(crate) const HEALTH_REGEN_FRACTION: f32 = 0.10;
 const INTENT_PARALLEL_MIN_LEN: usize = 64;
 
 #[derive(Debug, Clone, Copy)]
@@ -71,6 +70,29 @@ struct MoveResolution {
     to: (i32, i32),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AttackOutcome {
+    NoOrganismTarget,
+    SamePoolBlocked,
+    Missed,
+    NonlethalHit,
+    Killed,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct AttackEvent {
+    pub(crate) turn: u64,
+    pub(crate) attacker_id: OrganismId,
+    pub(crate) attacker_species_id: SpeciesId,
+    pub(crate) victim_id: Option<OrganismId>,
+    pub(crate) victim_species_id: Option<SpeciesId>,
+    pub(crate) outcome: AttackOutcome,
+    pub(crate) victim_health_before: f32,
+    pub(crate) victim_health_after: f32,
+    pub(crate) damage: f32,
+    pub(crate) energy_gained: f32,
+}
+
 /// Reusable per-tick scratch buffers owned by `Simulation` so the commit /
 /// reproduction / move phases avoid O(population) heap allocations every tick.
 /// Each user takes a buffer with `std::mem::take`, clears + resizes it, and
@@ -95,6 +117,7 @@ struct CommitResult {
     plant_consumptions: u64,
     predations: u64,
     actions_applied: u64,
+    attack_events: Vec<AttackEvent>,
 }
 
 macro_rules! profile_turn_phase {
@@ -155,6 +178,7 @@ impl Simulation {
         let mut commit = profile_turn_phase!(TurnPhase::Commit, {
             self.commit_phase(world_width, &intents, &resolutions, &mut gestation_started)
         });
+        self.attack_events_last_turn = std::mem::take(&mut commit.attack_events);
         // Old-age corpses spawned during the lifecycle phase ride the same
         // food-spawned channel as commit-phase corpses so the client sees them.
         commit.food_spawned.extend(lifecycle_food_spawned);
@@ -267,8 +291,8 @@ impl Simulation {
     }
 }
 
-fn organism_health_regeneration(organism: &OrganismState) -> f32 {
-    (organism.max_health.max(1.0) * HEALTH_REGEN_FRACTION).max(0.0)
+fn organism_health_regeneration(organism: &OrganismState, regen_fraction: f32) -> f32 {
+    (organism.max_health.max(1.0) * regen_fraction).max(0.0)
 }
 
 fn organism_index_by_id(organisms: &[OrganismState], id: OrganismId) -> Option<usize> {

@@ -6,7 +6,7 @@
 //! mixed-founder worlds under fixed world seeds. In-world reproduction does not
 //! exist; all genetic variation is owned by the outer loop.
 
-use crate::Simulation;
+use crate::{turn::AttackOutcome, Simulation};
 use anyhow::{anyhow, bail, Result};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -49,6 +49,11 @@ pub struct NeatConfig {
     /// from other founder-pool entries. This removes friendly fire to test
     /// whether identity ambiguity is the binding predation constraint.
     pub cross_pool_predation_only: bool,
+    /// Evaluator-only combat mechanics used for causal diagnostics. Canonical
+    /// simulation defaults are 0.5 damage and 0.10 idle regeneration.
+    pub attack_damage_fraction: f32,
+    pub idle_health_regen_fraction: f32,
+    pub opponent_renewal: OpponentRenewalConfig,
     /// Durable frozen opponents. One is selected deterministically per case;
     /// remaining opponent slots are sampled from the contemporary population.
     pub fixed_anchor_genomes: Vec<OrganismGenome>,
@@ -116,6 +121,9 @@ impl Default for NeatConfig {
             survival_window_weights: vec![1.0],
             eval_opponents: 4,
             cross_pool_predation_only: false,
+            attack_damage_fraction: 0.5,
+            idle_health_regen_fraction: 0.10,
+            opponent_renewal: OpponentRenewalConfig::default(),
             fixed_anchor_genomes: Vec::new(),
             world_seeds: vec![11, 29, 47],
             training_seed_rotation_period: 5,
@@ -192,6 +200,14 @@ impl NeatConfig {
         if !self.fixed_anchor_genomes.is_empty() && self.eval_opponents == 0 {
             bail!("fixed anchors require eval_opponents >= 1");
         }
+        if !self.attack_damage_fraction.is_finite()
+            || !(0.0..=1.0).contains(&self.attack_damage_fraction)
+            || !self.idle_health_regen_fraction.is_finite()
+            || !(0.0..=1.0).contains(&self.idle_health_regen_fraction)
+        {
+            bail!("attack_damage_fraction and idle_health_regen_fraction must be finite in [0, 1]");
+        }
+        self.opponent_renewal.validate()?;
         if self.world_seeds.is_empty() || self.evaluator_workers == 0 {
             bail!("NEAT needs at least one world seed and evaluator worker");
         }
@@ -286,6 +302,43 @@ impl NeatConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct OpponentRenewalConfig {
+    pub enabled: bool,
+    pub respawn_delay_ticks: u64,
+    pub respawn_energy_fraction: f32,
+    pub placement_version: u32,
+    /// `None` preserves physical prey-energy transfer. `Some(0)` makes
+    /// renewable opponents pure pressure rather than an injected food source.
+    pub kill_reward_cap: Option<f32>,
+}
+
+impl Default for OpponentRenewalConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            respawn_delay_ticks: 25,
+            respawn_energy_fraction: 1.0,
+            placement_version: 1,
+            kill_reward_cap: None,
+        }
+    }
+}
+
+impl OpponentRenewalConfig {
+    fn validate(self) -> Result<()> {
+        if !self.respawn_energy_fraction.is_finite()
+            || !(0.0..=1.0).contains(&self.respawn_energy_fraction)
+            || self
+                .kill_reward_cap
+                .is_some_and(|cap| !cap.is_finite() || cap < 0.0)
+        {
+            bail!("opponent renewal energy fraction must be in [0,1] and kill reward cap must be finite and nonnegative");
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FitnessObjective {
@@ -347,6 +400,19 @@ pub struct Evaluation {
     pub mean_consumptions: f64,
     pub mean_plant_consumptions: f64,
     pub mean_prey_consumptions: f64,
+    pub mean_attack_no_organism_targets: f64,
+    pub mean_attack_same_pool_blocked: f64,
+    pub mean_attack_eligible_attempts: f64,
+    pub mean_attack_hits: f64,
+    pub mean_attack_nonlethal_hits: f64,
+    pub mean_attack_kills: f64,
+    pub mean_attack_same_pair_followups: f64,
+    pub mean_attack_damage_dealt: f64,
+    pub mean_attack_energy_gained: f64,
+    pub mean_opponent_respawns: f64,
+    pub mean_respawn_energy_injected: f64,
+    pub mean_opponent_pool_deficit_ticks: f64,
+    pub mean_respawned_opponents_killed: f64,
     /// Fraction of all plant spawn events in the scored window that were
     /// consumed. Reported with standing-plant pressure because regrowth supply
     /// itself depends on successful harvests.
@@ -385,12 +451,33 @@ pub struct CaseEvaluation {
     pub weighted_alive_ticks_by_pool: Vec<f64>,
     pub fixed_anchor_index: Option<usize>,
     pub founder_pool_size: usize,
+    pub focal_pool_index: usize,
     pub world_founders: usize,
     pub candidate_founders: u64,
     pub candidate_end_survivors: u64,
     pub consumptions: u64,
     pub plant_consumptions: u64,
     pub prey_consumptions: u64,
+    pub attack_no_organism_targets: u64,
+    pub attack_same_pool_blocked: u64,
+    pub attack_eligible_attempts: u64,
+    pub attack_hits: u64,
+    pub attack_nonlethal_hits: u64,
+    pub attack_kills: u64,
+    pub attack_same_pair_followups: u64,
+    pub attack_followup_latency_ticks_sum: u64,
+    pub attack_damage_dealt: f64,
+    pub attack_victim_health_before_sum: f64,
+    pub attack_victim_health_after_sum: f64,
+    pub attack_energy_gained: f64,
+    pub opponent_respawns: u64,
+    pub respawn_energy_injected: f64,
+    pub opponent_pool_deficit_ticks: u64,
+    pub respawn_spawn_failures: u64,
+    pub respawned_opponents_killed: u64,
+    pub respawn_kill_latency_ticks_sum: u64,
+    pub respawn_kills_within_25_ticks: u64,
+    pub respawn_max_same_cell_count: u64,
     pub plant_supply_events: u64,
     /// Plant instances that existed early enough to be consumed during this
     /// scoring window. Final-tick spawns are excluded because food regrowth is
@@ -567,6 +654,9 @@ pub struct FrozenOuterLoopContract {
     pub leaky_neurons_enabled: bool,
     pub predation_enabled: bool,
     pub cross_pool_predation_only: bool,
+    pub attack_damage_fraction: f32,
+    pub idle_health_regen_fraction: f32,
+    pub opponent_renewal: OpponentRenewalConfig,
     pub intent_parallel_threads: u32,
 }
 
@@ -919,6 +1009,9 @@ pub fn run_neat(
         leaky_neurons_enabled: world.leaky_neurons_enabled,
         predation_enabled: world.predation_enabled,
         cross_pool_predation_only: config.cross_pool_predation_only,
+        attack_damage_fraction: config.attack_damage_fraction,
+        idle_health_regen_fraction: config.idle_health_regen_fraction,
+        opponent_renewal: config.opponent_renewal,
         intent_parallel_threads: world.intent_parallel_threads,
     };
     let world_width = world.world_width;
@@ -1083,6 +1176,9 @@ pub fn run_neat(
             &config.development_world_seeds,
             config.objective_cvar_fraction,
             config.cross_pool_predation_only,
+            config.attack_damage_fraction,
+            config.idle_health_regen_fraction,
+            config.opponent_renewal,
         )?)
     };
     let sealed_holdout_evaluation = if config.sealed_holdout_world_seeds.is_empty() {
@@ -1096,6 +1192,9 @@ pub fn run_neat(
             &config.sealed_holdout_world_seeds,
             config.objective_cvar_fraction,
             config.cross_pool_predation_only,
+            config.attack_damage_fraction,
+            config.idle_health_regen_fraction,
+            config.opponent_renewal,
         )?)
     };
     let champion_has_evolved_structure = champion_genome.brain.edges.iter().any(|edge| {
@@ -1118,6 +1217,9 @@ pub fn run_neat(
                     &config.development_world_seeds,
                     config.objective_cvar_fraction,
                     config.cross_pool_predation_only,
+                    config.attack_damage_fraction,
+                    config.idle_health_regen_fraction,
+                    config.opponent_renewal,
                 )?)
             } else {
                 Some(full.clone())
@@ -1136,6 +1238,9 @@ pub fn run_neat(
                     &config.development_world_seeds,
                     config.objective_cvar_fraction,
                     config.cross_pool_predation_only,
+                    config.attack_damage_fraction,
+                    config.idle_health_regen_fraction,
+                    config.opponent_renewal,
                 )?)
             } else {
                 Some(full.clone())
@@ -1166,6 +1271,9 @@ pub fn run_neat(
                     &config.sealed_holdout_world_seeds,
                     config.objective_cvar_fraction,
                     config.cross_pool_predation_only,
+                    config.attack_damage_fraction,
+                    config.idle_health_regen_fraction,
+                    config.opponent_renewal,
                 )?)
             } else {
                 Some(full.clone())
@@ -1193,6 +1301,9 @@ pub fn run_neat(
                     &config.world_seeds,
                     config.objective_cvar_fraction,
                     config.cross_pool_predation_only,
+                    config.attack_damage_fraction,
+                    config.idle_health_regen_fraction,
+                    config.opponent_renewal,
                 )?,
             )
         };
@@ -1205,10 +1316,13 @@ pub fn run_neat(
         ablation_seeds,
         config.objective_cvar_fraction,
         config.cross_pool_predation_only,
+        config.attack_damage_fraction,
+        config.idle_health_regen_fraction,
+        config.opponent_renewal,
         &mut innovations,
     )?;
     Ok(RunResult {
-        result_schema_version: 8,
+        result_schema_version: 10,
         algorithm: "NEAT".to_string(),
         objective: config.fitness_objective.name().to_string(),
         seed,
@@ -1249,6 +1363,9 @@ fn audit_frontier_champion_structures(
     audit_seeds: &[u64],
     objective_cvar_fraction: f64,
     cross_pool_predation_only: bool,
+    attack_damage_fraction: f32,
+    idle_health_regen_fraction: f32,
+    opponent_renewal: OpponentRenewalConfig,
     innovations: &mut InnovationRegistry,
 ) -> Result<()> {
     let active = active_structure(champion);
@@ -1281,6 +1398,9 @@ fn audit_frontier_champion_structures(
                 audit_seeds,
                 objective_cvar_fraction,
                 cross_pool_predation_only,
+                attack_damage_fraction,
+                idle_health_regen_fraction,
+                opponent_renewal,
             )?;
             Some(full_evaluation.mean_level_objective_score - evaluation.mean_level_objective_score)
         } else {
@@ -1316,6 +1436,9 @@ fn audit_frontier_champion_structures(
                 audit_seeds,
                 objective_cvar_fraction,
                 cross_pool_predation_only,
+                attack_damage_fraction,
+                idle_health_regen_fraction,
+                opponent_renewal,
             )?;
             Some(full_evaluation.mean_level_objective_score - evaluation.mean_level_objective_score)
         } else {
@@ -1463,6 +1586,9 @@ fn observe_complexification(
             &config.development_world_seeds,
             config.objective_cvar_fraction,
             config.cross_pool_predation_only,
+            config.attack_damage_fraction,
+            config.idle_health_regen_fraction,
+            config.opponent_renewal,
         )?)
     };
     let has_evolved_structure = population[best_index]
@@ -1496,6 +1622,9 @@ fn observe_complexification(
                     &config.development_world_seeds,
                     config.objective_cvar_fraction,
                     config.cross_pool_predation_only,
+                    config.attack_damage_fraction,
+                    config.idle_health_regen_fraction,
+                    config.opponent_renewal,
                 )?),
                 Some(evaluate_genome_on_fixed_suite(
                     &ancestral,
@@ -1505,6 +1634,9 @@ fn observe_complexification(
                     &config.development_world_seeds,
                     config.objective_cvar_fraction,
                     config.cross_pool_predation_only,
+                    config.attack_damage_fraction,
+                    config.idle_health_regen_fraction,
+                    config.opponent_renewal,
                 )?),
             )
         };
@@ -1816,6 +1948,9 @@ fn evaluate_population(
                     config.objective_cvar_fraction,
                     config.fitness_objective,
                     config.cross_pool_predation_only,
+                    config.attack_damage_fraction,
+                    config.idle_health_regen_fraction,
+                    config.opponent_renewal,
                     ctx.as_ref(),
                 );
                 results.lock().expect("evaluation result lock poisoned")[index] = Some(result);
@@ -2074,6 +2209,9 @@ fn evaluate_genome(
     objective_cvar_fraction: f64,
     fitness_objective: FitnessObjective,
     cross_pool_predation_only: bool,
+    attack_damage_fraction: f32,
+    idle_health_regen_fraction: f32,
+    opponent_renewal: OpponentRenewalConfig,
     competitive: Option<&CompetitiveContext>,
 ) -> Result<Evaluation> {
     let mut cases = Vec::with_capacity(
@@ -2093,6 +2231,10 @@ fn evaluate_genome(
                 objective_cvar_fraction,
                 fitness_objective,
                 cross_pool_predation_only,
+                attack_damage_fraction,
+                idle_health_regen_fraction,
+                opponent_renewal,
+                0,
                 competitive,
                 None,
             )?
@@ -2107,6 +2249,12 @@ struct EvaluationBundle {
     cases: Vec<CaseEvaluation>,
 }
 
+struct PendingOpponentRespawn {
+    due_turn: u64,
+    pool_index: usize,
+    ordinal: u64,
+}
+
 fn evaluate_genome_on_seeds_detailed(
     genome: &OrganismGenome,
     scenarios: &[ScenarioManifest],
@@ -2116,6 +2264,10 @@ fn evaluate_genome_on_seeds_detailed(
     objective_cvar_fraction: f64,
     fitness_objective: FitnessObjective,
     cross_pool_predation_only: bool,
+    attack_damage_fraction: f32,
+    idle_health_regen_fraction: f32,
+    opponent_renewal: OpponentRenewalConfig,
+    focal_pool_index: usize,
     competitive: Option<&CompetitiveContext>,
     fixed_opponents: Option<&[OrganismGenome]>,
 ) -> Result<EvaluationBundle> {
@@ -2133,8 +2285,8 @@ fn evaluate_genome_on_seeds_detailed(
             // world with sampled opponents (candidate is pool entry 0).
             let mut founder_pool = if let Some(opponents) = fixed_opponents {
                 let mut genomes = Vec::with_capacity(opponents.len() + 1);
-                genomes.push(genome.clone());
                 genomes.extend_from_slice(opponents);
+                genomes.insert(focal_pool_index.min(opponents.len()), genome.clone());
                 FounderPool {
                     genomes,
                     opponent_population_indices: (0..opponents.len()).collect(),
@@ -2161,6 +2313,11 @@ fn evaluate_genome_on_seeds_detailed(
                 .opponent_population_indices
                 .truncate(founder_pool.genomes.len().saturating_sub(1));
             let pool_len = founder_pool.genomes.len();
+            if focal_pool_index >= pool_len {
+                bail!(
+                    "focal pool index {focal_pool_index} is outside realized pool size {pool_len}"
+                );
+            }
             if fitness_objective == FitnessObjective::SurvivalTimesRelativeAdvantage
                 && pool_len != requested_pool_len
             {
@@ -2186,6 +2343,11 @@ fn evaluate_genome_on_seeds_detailed(
             if cross_pool_predation_only {
                 sim.set_cross_pool_predation_pool_count(Some(pool_len));
             }
+            sim.set_predation_diagnostic_fractions(
+                attack_damage_fraction,
+                idle_health_regen_fraction,
+            );
+            sim.set_predation_kill_reward_cap(opponent_renewal.kill_reward_cap);
             let world_founders = sim.organisms().len();
             if world_founders == 0 {
                 bail!("scenario `{}` spawned no founders", scenario.name);
@@ -2223,7 +2385,13 @@ fn evaluate_genome_on_seeds_detailed(
             let mut total_survival_tick_weight = 0.0_f64;
             let world_width = sim.config().world_width as usize;
             let mut visited = vec![false; world_width.saturating_mul(world_width)];
-            record_candidate_visited_cells(sim.organisms(), pool_len, world_width, &mut visited);
+            record_candidate_visited_cells(
+                sim.organisms(),
+                pool_len,
+                focal_pool_index,
+                world_width,
+                &mut visited,
+            );
             let food_tiles = sim.food_tile_count() as u64;
             let initial_plants = sim
                 .foods()
@@ -2239,9 +2407,73 @@ fn evaluate_genome_on_seeds_detailed(
             let mut final_tick_plant_spawns = 0u64;
             let mut case_consumptions = 0u64;
             let mut case_plant_consumptions = 0u64;
+            let mut attack_no_organism_targets = 0u64;
+            let mut attack_same_pool_blocked = 0u64;
+            let mut attack_eligible_attempts = 0u64;
+            let mut attack_hits = 0u64;
+            let mut attack_nonlethal_hits = 0u64;
+            let mut attack_kills = 0u64;
+            let mut attack_same_pair_followups = 0u64;
+            let mut attack_followup_latency_ticks_sum = 0u64;
+            let mut attack_damage_dealt = 0.0_f64;
+            let mut attack_victim_health_before_sum = 0.0_f64;
+            let mut attack_victim_health_after_sum = 0.0_f64;
+            let mut attack_energy_gained = 0.0_f64;
+            let mut last_hit_by_pair = HashMap::<(OrganismId, OrganismId), u64>::new();
+            let mut pending_respawns = Vec::<PendingOpponentRespawn>::new();
+            let mut respawn_ordinals = vec![0u64; pool_len];
+            let mut respawn_turn_by_id = HashMap::<OrganismId, u64>::new();
+            let mut respawn_cell_counts = HashMap::<(i32, i32), u64>::new();
+            let mut opponent_respawns = 0u64;
+            let mut respawn_energy_injected = 0.0_f64;
+            let mut opponent_pool_deficit_ticks = 0u64;
+            let mut respawn_spawn_failures = 0u64;
+            let mut respawned_opponents_killed = 0u64;
+            let mut respawn_kill_latency_ticks_sum = 0u64;
+            let mut respawn_kills_within_25_ticks = 0u64;
             let mut world_plant_consumptions = 0u64;
             for _ in 0..episode_ticks {
                 let delta = sim.tick();
+                for event in sim.attack_events_last_turn() {
+                    if (event.attacker_species_id.0 as usize) % pool_len != focal_pool_index {
+                        continue;
+                    }
+                    debug_assert!(event.victim_id.is_some() || event.victim_species_id.is_none());
+                    match event.outcome {
+                        AttackOutcome::NoOrganismTarget => attack_no_organism_targets += 1,
+                        AttackOutcome::SamePoolBlocked => attack_same_pool_blocked += 1,
+                        AttackOutcome::Missed => attack_eligible_attempts += 1,
+                        AttackOutcome::NonlethalHit | AttackOutcome::Killed => {
+                            attack_eligible_attempts += 1;
+                            attack_hits += 1;
+                            attack_nonlethal_hits +=
+                                u64::from(event.outcome == AttackOutcome::NonlethalHit);
+                            attack_kills += u64::from(event.outcome == AttackOutcome::Killed);
+                            attack_damage_dealt += f64::from(event.damage);
+                            attack_victim_health_before_sum +=
+                                f64::from(event.victim_health_before);
+                            attack_victim_health_after_sum += f64::from(event.victim_health_after);
+                            attack_energy_gained += f64::from(event.energy_gained);
+                            if let Some(victim_id) = event.victim_id {
+                                if event.outcome == AttackOutcome::Killed {
+                                    if let Some(spawn_turn) = respawn_turn_by_id.get(&victim_id) {
+                                        let latency = event.turn.saturating_sub(*spawn_turn);
+                                        respawned_opponents_killed += 1;
+                                        respawn_kill_latency_ticks_sum += latency;
+                                        respawn_kills_within_25_ticks += u64::from(latency <= 25);
+                                    }
+                                }
+                                if let Some(previous_turn) = last_hit_by_pair
+                                    .insert((event.attacker_id, victim_id), event.turn)
+                                {
+                                    attack_same_pair_followups += 1;
+                                    attack_followup_latency_ticks_sum +=
+                                        event.turn.saturating_sub(previous_turn);
+                                }
+                            }
+                        }
+                    }
+                }
                 let tick_index = delta.turn.saturating_sub(1);
                 let weight_index = ((tick_index as u128 * survival_window_weights.len() as u128)
                     / episode_ticks as u128)
@@ -2271,12 +2503,13 @@ fn evaluate_genome_on_seeds_detailed(
                 record_candidate_visited_cells(
                     sim.organisms(),
                     pool_len,
+                    focal_pool_index,
                     world_width,
                     &mut visited,
                 );
                 for organism in sim.organisms() {
                     let pool_index = (organism.species_id.0 as usize) % pool_len;
-                    if pool_index != 0 {
+                    if pool_index != focal_pool_index {
                         continue;
                     }
                     let action_index = organism.last_action_taken.index();
@@ -2286,8 +2519,8 @@ fn evaluate_genome_on_seeds_detailed(
                     candidate_action_observations = candidate_action_observations
                         .checked_add(1)
                         .ok_or_else(|| anyhow!("action-observation counter overflow"))?;
-                    alive_ticks_by_pool[0] += 1;
-                    weighted_alive_ticks_by_pool[0] += survival_tick_weight;
+                    alive_ticks_by_pool[focal_pool_index] += 1;
+                    weighted_alive_ticks_by_pool[focal_pool_index] += survival_tick_weight;
                     let previous = candidate_consumption_counts
                         .insert(
                             organism.id,
@@ -2309,8 +2542,10 @@ fn evaluate_genome_on_seeds_detailed(
                         candidate_time_to_first_plant = Some(delta.turn);
                     }
                 }
-                for (pool_index, alive_ticks) in alive_ticks_by_pool.iter_mut().enumerate().skip(1)
-                {
+                for (pool_index, alive_ticks) in alive_ticks_by_pool.iter_mut().enumerate() {
+                    if pool_index == focal_pool_index {
+                        continue;
+                    }
                     let alive_count = sim
                         .organisms()
                         .iter()
@@ -2321,6 +2556,66 @@ fn evaluate_genome_on_seeds_detailed(
                     *alive_ticks += alive_count;
                     weighted_alive_ticks_by_pool[pool_index] +=
                         alive_count as f64 * survival_tick_weight;
+                }
+                if opponent_renewal.enabled && pool_len > 1 {
+                    let mut current_by_pool = vec![0u64; pool_len];
+                    for organism in sim.organisms() {
+                        current_by_pool[(organism.species_id.0 as usize) % pool_len] += 1;
+                    }
+                    let mut pending_by_pool = vec![0u64; pool_len];
+                    for request in &pending_respawns {
+                        pending_by_pool[request.pool_index] += 1;
+                    }
+                    for pool_index in 0..pool_len {
+                        if pool_index == focal_pool_index {
+                            continue;
+                        }
+                        let target = founder_count_by_pool[pool_index];
+                        opponent_pool_deficit_ticks +=
+                            target.saturating_sub(current_by_pool[pool_index]);
+                        let missing = target
+                            .saturating_sub(current_by_pool[pool_index])
+                            .saturating_sub(pending_by_pool[pool_index]);
+                        for _ in 0..missing {
+                            let ordinal = respawn_ordinals[pool_index];
+                            respawn_ordinals[pool_index] += 1;
+                            pending_respawns.push(PendingOpponentRespawn {
+                                due_turn: delta
+                                    .turn
+                                    .saturating_add(opponent_renewal.respawn_delay_ticks),
+                                pool_index,
+                                ordinal,
+                            });
+                        }
+                    }
+                    pending_respawns.sort_by_key(|request| {
+                        (request.due_turn, request.pool_index, request.ordinal)
+                    });
+                    let mut waiting = Vec::with_capacity(pending_respawns.len());
+                    for mut request in pending_respawns.drain(..) {
+                        if request.due_turn > delta.turn {
+                            waiting.push(request);
+                            continue;
+                        }
+                        if let Some(respawned) = sim.respawn_champion_pool_organism(
+                            request.pool_index,
+                            opponent_renewal.respawn_energy_fraction,
+                            opponent_renewal.placement_version,
+                        ) {
+                            debug_assert_eq!(respawned.pool_index, request.pool_index);
+                            opponent_respawns += 1;
+                            respawn_energy_injected += f64::from(respawned.energy_injected);
+                            respawn_turn_by_id.insert(respawned.organism_id, delta.turn);
+                            *respawn_cell_counts
+                                .entry((respawned.q, respawned.r))
+                                .or_default() += 1;
+                        } else {
+                            respawn_spawn_failures += 1;
+                            request.due_turn = delta.turn.saturating_add(1);
+                            waiting.push(request);
+                        }
+                    }
+                    pending_respawns = waiting;
                 }
             }
             let final_standing_plants = sim
@@ -2353,17 +2648,27 @@ fn evaluate_genome_on_seeds_detailed(
             // out-lasting rivals for too-little food. Dense from generation 0
             // (a brain that lives longer scores higher even if none survive to
             // the end).
-            let candidate_founders = founder_count_by_pool[0].max(1);
-            let candidate_alive_ticks = alive_ticks_by_pool[0];
+            let candidate_founders = founder_count_by_pool[focal_pool_index].max(1);
+            let candidate_alive_ticks = alive_ticks_by_pool[focal_pool_index];
             let absolute_survival_fraction =
                 candidate_alive_ticks as f64 / (candidate_founders as f64 * episode_ticks as f64);
-            let late_weighted_survival_fraction = weighted_alive_ticks_by_pool[0]
+            let late_weighted_survival_fraction = weighted_alive_ticks_by_pool[focal_pool_index]
                 / (candidate_founders as f64 * total_survival_tick_weight);
             let (relative_survival_advantage, zero_combined_alive_ticks) = if pool_len == 1 {
                 (1.0, false)
             } else {
-                let opponent_founders = founder_count_by_pool[1..].iter().sum::<u64>();
-                let opponent_alive_ticks = alive_ticks_by_pool[1..].iter().sum::<u64>();
+                let opponent_founders = founder_count_by_pool
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| *index != focal_pool_index)
+                    .map(|(_, value)| *value)
+                    .sum::<u64>();
+                let opponent_alive_ticks = alive_ticks_by_pool
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| *index != focal_pool_index)
+                    .map(|(_, value)| *value)
+                    .sum::<u64>();
                 debug_assert!(opponent_founders > 0);
                 let candidate_mean_alive_ticks =
                     candidate_alive_ticks as f64 / candidate_founders as f64;
@@ -2387,7 +2692,7 @@ fn evaluate_genome_on_seeds_detailed(
             let candidate_end_survivors = sim
                 .organisms()
                 .iter()
-                .filter(|o| (o.species_id.0 as usize).is_multiple_of(pool_len))
+                .filter(|o| (o.species_id.0 as usize) % pool_len == focal_pool_index)
                 .count() as u64;
             let case_prey_consumptions = case_consumptions.saturating_sub(case_plant_consumptions);
             let actionable_plant_supply = plant_supply_events
@@ -2441,12 +2746,37 @@ fn evaluate_genome_on_seeds_detailed(
                 weighted_alive_ticks_by_pool,
                 fixed_anchor_index: founder_pool.fixed_anchor_index,
                 founder_pool_size: pool_len,
+                focal_pool_index,
                 world_founders,
                 candidate_founders,
                 candidate_end_survivors,
                 consumptions: case_consumptions,
                 plant_consumptions: case_plant_consumptions,
                 prey_consumptions: case_prey_consumptions,
+                attack_no_organism_targets,
+                attack_same_pool_blocked,
+                attack_eligible_attempts,
+                attack_hits,
+                attack_nonlethal_hits,
+                attack_kills,
+                attack_same_pair_followups,
+                attack_followup_latency_ticks_sum,
+                attack_damage_dealt,
+                attack_victim_health_before_sum,
+                attack_victim_health_after_sum,
+                attack_energy_gained,
+                opponent_respawns,
+                respawn_energy_injected,
+                opponent_pool_deficit_ticks,
+                respawn_spawn_failures,
+                respawned_opponents_killed,
+                respawn_kill_latency_ticks_sum,
+                respawn_kills_within_25_ticks,
+                respawn_max_same_cell_count: respawn_cell_counts
+                    .values()
+                    .copied()
+                    .max()
+                    .unwrap_or(0),
                 plant_supply_events,
                 actionable_plant_supply,
                 final_tick_plant_spawns,
@@ -2578,6 +2908,71 @@ fn summarize_evaluation_cases(
             .map(|case| case.prey_consumptions as f64)
             .sum::<f64>()
             / n,
+        mean_attack_no_organism_targets: cases
+            .iter()
+            .map(|case| case.attack_no_organism_targets as f64)
+            .sum::<f64>()
+            / n,
+        mean_attack_same_pool_blocked: cases
+            .iter()
+            .map(|case| case.attack_same_pool_blocked as f64)
+            .sum::<f64>()
+            / n,
+        mean_attack_eligible_attempts: cases
+            .iter()
+            .map(|case| case.attack_eligible_attempts as f64)
+            .sum::<f64>()
+            / n,
+        mean_attack_hits: cases
+            .iter()
+            .map(|case| case.attack_hits as f64)
+            .sum::<f64>()
+            / n,
+        mean_attack_nonlethal_hits: cases
+            .iter()
+            .map(|case| case.attack_nonlethal_hits as f64)
+            .sum::<f64>()
+            / n,
+        mean_attack_kills: cases
+            .iter()
+            .map(|case| case.attack_kills as f64)
+            .sum::<f64>()
+            / n,
+        mean_attack_same_pair_followups: cases
+            .iter()
+            .map(|case| case.attack_same_pair_followups as f64)
+            .sum::<f64>()
+            / n,
+        mean_attack_damage_dealt: cases
+            .iter()
+            .map(|case| case.attack_damage_dealt)
+            .sum::<f64>()
+            / n,
+        mean_attack_energy_gained: cases
+            .iter()
+            .map(|case| case.attack_energy_gained)
+            .sum::<f64>()
+            / n,
+        mean_opponent_respawns: cases
+            .iter()
+            .map(|case| case.opponent_respawns as f64)
+            .sum::<f64>()
+            / n,
+        mean_respawn_energy_injected: cases
+            .iter()
+            .map(|case| case.respawn_energy_injected)
+            .sum::<f64>()
+            / n,
+        mean_opponent_pool_deficit_ticks: cases
+            .iter()
+            .map(|case| case.opponent_pool_deficit_ticks as f64)
+            .sum::<f64>()
+            / n,
+        mean_respawned_opponents_killed: cases
+            .iter()
+            .map(|case| case.respawned_opponents_killed as f64)
+            .sum::<f64>()
+            / n,
         mean_plant_capture_fraction: mean_optional(
             cases.iter().map(|case| case.plant_capture_fraction),
         ),
@@ -2623,6 +3018,11 @@ pub fn evaluate_frozen_panel(
     world_seeds: &[u64],
     objective_cvar_fraction: f64,
     fitness_objective: FitnessObjective,
+    cross_pool_predation_only: bool,
+    attack_damage_fraction: f32,
+    idle_health_regen_fraction: f32,
+    opponent_renewal: OpponentRenewalConfig,
+    focal_pool_index: usize,
 ) -> Result<PanelEvaluation> {
     if opponents.is_empty() {
         bail!("frozen-panel evaluation needs at least one opponent");
@@ -2635,7 +3035,11 @@ pub fn evaluate_frozen_panel(
         world_seeds,
         objective_cvar_fraction,
         fitness_objective,
-        false,
+        cross_pool_predation_only,
+        attack_damage_fraction,
+        idle_health_regen_fraction,
+        opponent_renewal,
+        focal_pool_index,
         None,
         Some(opponents),
     )?;
@@ -2653,6 +3057,9 @@ fn evaluate_genome_on_fixed_suite(
     world_seeds: &[u64],
     objective_cvar_fraction: f64,
     cross_pool_predation_only: bool,
+    attack_damage_fraction: f32,
+    idle_health_regen_fraction: f32,
+    opponent_renewal: OpponentRenewalConfig,
 ) -> Result<FixedSuiteEvaluation> {
     let mut by_level = BTreeMap::<u32, Vec<ScenarioManifest>>::new();
     for scenario in scenarios {
@@ -2683,6 +3090,10 @@ fn evaluate_genome_on_fixed_suite(
                     objective_cvar_fraction,
                     FitnessObjective::SurvivalFraction,
                     cross_pool_predation_only,
+                    attack_damage_fraction,
+                    idle_health_regen_fraction,
+                    opponent_renewal,
+                    0,
                     None,
                     None,
                 )?
@@ -2709,12 +3120,13 @@ fn evaluate_genome_on_fixed_suite(
 fn record_candidate_visited_cells(
     organisms: &[sim_types::OrganismState],
     pool_len: usize,
+    focal_pool_index: usize,
     world_width: usize,
     visited: &mut [bool],
 ) {
     for organism in organisms
         .iter()
-        .filter(|organism| (organism.species_id.0 as usize).is_multiple_of(pool_len))
+        .filter(|organism| (organism.species_id.0 as usize) % pool_len == focal_pool_index)
     {
         let index = organism.r as usize * world_width + organism.q as usize;
         if let Some(cell) = visited.get_mut(index) {

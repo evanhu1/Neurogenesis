@@ -1,0 +1,430 @@
+<div id="ng-research-atlas">
+  <style>
+    #ng-research-atlas {
+      --ink: #17231d;
+      --muted: #607067;
+      --paper: #f5f2e9;
+      --panel: #fffdf7;
+      --line: #d8d4c8;
+      --green: #174f3c;
+      --green-soft: #dce9df;
+      --lime: #b9d56a;
+      --amber: #d48b31;
+      --amber-soft: #f5e4c6;
+      --red: #a74b3f;
+      --red-soft: #f2dcd7;
+      --blue: #456d83;
+      --blue-soft: #dbe8ed;
+      --shadow: 0 18px 50px rgba(38, 52, 44, 0.10);
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 85% 2%, rgba(185, 213, 106, .28), transparent 23rem),
+        radial-gradient(circle at 6% 32%, rgba(69, 109, 131, .13), transparent 25rem),
+        var(--paper);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100%;
+      overflow: hidden;
+    }
+    #ng-research-atlas * { box-sizing: border-box; }
+    #ng-research-atlas a { color: inherit; }
+    #ng-research-atlas button, #ng-research-atlas select { font: inherit; }
+    #ng-research-atlas .shell { width: min(1180px, calc(100% - 36px)); margin: 0 auto; }
+    #ng-research-atlas .hero { padding: 72px 0 36px; }
+    #ng-research-atlas .eyebrow {
+      display: flex; align-items: center; gap: 10px; color: var(--green);
+      font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+    }
+    #ng-research-atlas .eyebrow::before { content: ""; width: 28px; height: 2px; background: var(--green); }
+    #ng-research-atlas h1 {
+      max-width: 900px; margin: 22px 0 18px; font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(42px, 7vw, 82px); font-weight: 400; line-height: .98; letter-spacing: -.045em;
+    }
+    #ng-research-atlas .lead { max-width: 760px; margin: 0; color: var(--muted); font-size: clamp(17px, 2vw, 21px); line-height: 1.55; }
+    #ng-research-atlas .hero-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 42px; align-items: end; }
+    #ng-research-atlas .hero-note {
+      border-left: 1px solid var(--ink); padding: 8px 0 8px 24px; color: var(--muted); line-height: 1.55;
+    }
+    #ng-research-atlas .hero-note strong { color: var(--ink); display: block; margin-bottom: 6px; }
+    #ng-research-atlas .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin-top: 48px; background: var(--line); border: 1px solid var(--line); }
+    #ng-research-atlas .stat { background: rgba(255,253,247,.88); padding: 22px; min-height: 126px; }
+    #ng-research-atlas .stat-value { font-family: Georgia, serif; font-size: 36px; line-height: 1; }
+    #ng-research-atlas .stat-label { margin-top: 10px; color: var(--muted); font-size: 13px; line-height: 1.35; }
+    #ng-research-atlas .nav { display: flex; gap: 8px; flex-wrap: wrap; padding: 18px 0 28px; border-top: 1px solid var(--line); }
+    #ng-research-atlas .nav a, #ng-research-atlas .filter-btn {
+      display: inline-flex; align-items: center; min-height: 36px; padding: 8px 13px; border: 1px solid var(--line);
+      border-radius: 999px; background: rgba(255,253,247,.64); color: var(--ink); text-decoration: none; cursor: pointer;
+    }
+    #ng-research-atlas .nav a:hover, #ng-research-atlas .filter-btn:hover { border-color: var(--green); }
+    #ng-research-atlas .filter-btn[aria-pressed="true"] { background: var(--green); border-color: var(--green); color: #fff; }
+    #ng-research-atlas section { padding: 58px 0; border-top: 1px solid var(--line); }
+    #ng-research-atlas .section-head { display: grid; grid-template-columns: .8fr 1.2fr; gap: 36px; margin-bottom: 34px; }
+    #ng-research-atlas .kicker { color: var(--green); font-size: 12px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; }
+    #ng-research-atlas h2 { margin: 8px 0 0; font-family: Georgia, serif; font-size: clamp(30px, 4vw, 48px); font-weight: 400; line-height: 1.05; letter-spacing: -.03em; }
+    #ng-research-atlas .section-copy { color: var(--muted); line-height: 1.65; max-width: 700px; }
+    #ng-research-atlas .current-model { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; align-items: stretch; }
+    #ng-research-atlas .model-step { position: relative; padding: 20px; min-height: 190px; background: var(--panel); border-top: 4px solid var(--line); box-shadow: var(--shadow); }
+    #ng-research-atlas .model-step::after { content: "→"; position: absolute; right: -14px; top: 48%; z-index: 2; color: var(--muted); font-size: 22px; }
+    #ng-research-atlas .model-step:last-child::after { display: none; }
+    #ng-research-atlas .model-step.pass { border-color: var(--green); }
+    #ng-research-atlas .model-step.fail { border-color: var(--red); }
+    #ng-research-atlas .model-step.next { border-color: var(--amber); background: #fff9ec; }
+    #ng-research-atlas .step-num { color: var(--muted); font-size: 12px; }
+    #ng-research-atlas .model-step h3 { margin: 22px 0 8px; font-size: 17px; }
+    #ng-research-atlas .model-step p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+    #ng-research-atlas .verdict-tag { display: inline-flex; margin-top: 14px; padding: 4px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+    #ng-research-atlas .tag-pass { background: var(--green-soft); color: var(--green); }
+    #ng-research-atlas .tag-fail { background: var(--red-soft); color: var(--red); }
+    #ng-research-atlas .tag-mixed { background: var(--amber-soft); color: #7a4b10; }
+    #ng-research-atlas .figure-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+    #ng-research-atlas .figure { background: rgba(255,253,247,.86); border: 1px solid var(--line); padding: 24px; min-height: 330px; }
+    #ng-research-atlas .figure.wide { grid-column: 1 / -1; min-height: 280px; }
+    #ng-research-atlas .figure h3 { margin: 0; font-size: 17px; }
+    #ng-research-atlas .figure-sub { margin: 6px 0 22px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+    #ng-research-atlas canvas { display: block; width: 100%; height: 230px; }
+    #ng-research-atlas .funnel { display: grid; gap: 12px; margin-top: 28px; }
+    #ng-research-atlas .funnel-row { display: grid; grid-template-columns: 150px 1fr 54px; gap: 12px; align-items: center; }
+    #ng-research-atlas .funnel-track { height: 26px; background: #e9e6dc; position: relative; overflow: hidden; }
+    #ng-research-atlas .funnel-fill { height: 100%; min-width: 2px; background: var(--blue); }
+    #ng-research-atlas .funnel-row:nth-child(2) .funnel-fill { background: var(--amber); }
+    #ng-research-atlas .funnel-row:nth-child(3) .funnel-fill { background: var(--green); }
+    #ng-research-atlas .funnel-row:nth-child(4) .funnel-fill { background: var(--lime); }
+    #ng-research-atlas .funnel-label { font-size: 13px; }
+    #ng-research-atlas .funnel-value { font-variant-numeric: tabular-nums; text-align: right; font-weight: 700; }
+    #ng-research-atlas .coverage { display: grid; gap: 16px; margin-top: 26px; }
+    #ng-research-atlas .coverage-line { display: grid; grid-template-columns: 78px 1fr; gap: 15px; align-items: center; }
+    #ng-research-atlas .coverage-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+    #ng-research-atlas .coverage-step { padding: 12px 6px; text-align: center; background: var(--green-soft); border-bottom: 3px solid var(--green); font-size: 13px; }
+    #ng-research-atlas .coverage-step.regress { background: var(--amber-soft); border-color: var(--amber); }
+    #ng-research-atlas .method-strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); margin-top: 32px; }
+    #ng-research-atlas .method { background: var(--panel); padding: 18px; }
+    #ng-research-atlas .method strong { display: block; font-size: 13px; margin-bottom: 7px; }
+    #ng-research-atlas .method span { color: var(--muted); font-size: 12px; line-height: 1.4; display: block; }
+    #ng-research-atlas .filters { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 24px; }
+    #ng-research-atlas .experiment-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    #ng-research-atlas .experiment { background: rgba(255,253,247,.90); border: 1px solid var(--line); }
+    #ng-research-atlas .experiment[hidden] { display: none; }
+    #ng-research-atlas .experiment summary { list-style: none; cursor: pointer; padding: 20px; display: grid; grid-template-columns: 48px 1fr auto; gap: 14px; align-items: start; }
+    #ng-research-atlas .experiment summary::-webkit-details-marker { display: none; }
+    #ng-research-atlas .round-mark { width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; background: var(--ink); color: var(--paper); font-family: Georgia, serif; }
+    #ng-research-atlas .experiment h3 { margin: 0 0 5px; font-size: 16px; }
+    #ng-research-atlas .experiment-summary { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+    #ng-research-atlas .status-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; background: var(--amber); }
+    #ng-research-atlas .status-dot.fail { background: var(--red); }
+    #ng-research-atlas .status-dot.pass { background: var(--green); }
+    #ng-research-atlas .experiment-body { border-top: 1px solid var(--line); padding: 20px 20px 22px 82px; }
+    #ng-research-atlas .evidence { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+    #ng-research-atlas .evidence li + li { margin-top: 5px; }
+    #ng-research-atlas .verdict { margin: 16px 0 0; padding: 14px; background: var(--red-soft); color: #5f2d27; font-size: 13px; line-height: 1.5; }
+    #ng-research-atlas .verdict.pass { background: var(--green-soft); color: #173e31; }
+    #ng-research-atlas .verdict.mixed { background: var(--amber-soft); color: #6b4313; }
+    #ng-research-atlas .artifact { margin-top: 13px; color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+    #ng-research-atlas .instrument-timeline { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; margin-top: 30px; }
+    #ng-research-atlas .instrument-node { min-height: 170px; padding: 15px 12px; background: var(--panel); border-top: 4px solid var(--blue); }
+    #ng-research-atlas .instrument-node strong { font-family: Georgia, serif; font-size: 22px; font-weight: 400; }
+    #ng-research-atlas .instrument-node span { display: block; margin-top: 12px; color: var(--muted); font-size: 12px; line-height: 1.42; }
+    #ng-research-atlas .next-grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 20px; }
+    #ng-research-atlas .next-primary { padding: 30px; background: var(--green); color: #fff; min-height: 320px; }
+    #ng-research-atlas .next-primary .kicker { color: var(--lime); }
+    #ng-research-atlas .next-primary h2 { color: #fff; max-width: 650px; }
+    #ng-research-atlas .next-primary p { max-width: 650px; color: rgba(255,255,255,.74); line-height: 1.6; }
+    #ng-research-atlas .next-list { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); }
+    #ng-research-atlas .next-item { background: var(--panel); padding: 20px; }
+    #ng-research-atlas .next-item strong { display: block; margin-bottom: 6px; }
+    #ng-research-atlas .next-item span { color: var(--muted); font-size: 13px; line-height: 1.45; }
+    #ng-research-atlas footer { padding: 34px 0 54px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; line-height: 1.5; }
+    @media (max-width: 900px) {
+      #ng-research-atlas .hero-grid, #ng-research-atlas .section-head, #ng-research-atlas .next-grid { grid-template-columns: 1fr; }
+      #ng-research-atlas .stats { grid-template-columns: repeat(2, 1fr); }
+      #ng-research-atlas .current-model { grid-template-columns: 1fr 1fr; }
+      #ng-research-atlas .model-step::after { display: none; }
+      #ng-research-atlas .instrument-timeline { grid-template-columns: repeat(4, 1fr); }
+    }
+    @media (max-width: 650px) {
+      #ng-research-atlas .shell { width: min(100% - 22px, 1180px); }
+      #ng-research-atlas .hero { padding-top: 44px; }
+      #ng-research-atlas .stats, #ng-research-atlas .figure-grid, #ng-research-atlas .experiment-grid, #ng-research-atlas .current-model { grid-template-columns: 1fr; }
+      #ng-research-atlas .figure.wide { grid-column: auto; }
+      #ng-research-atlas .method-strip { grid-template-columns: 1fr; }
+      #ng-research-atlas .instrument-timeline { grid-template-columns: repeat(2, 1fr); }
+      #ng-research-atlas .funnel-row { grid-template-columns: 110px 1fr 44px; }
+      #ng-research-atlas .experiment summary { grid-template-columns: 42px 1fr 10px; padding: 16px; }
+      #ng-research-atlas .experiment-body { padding: 17px; }
+    }
+  </style>
+
+  <header class="hero shell">
+    <div class="eyebrow">NeuroGenesis research atlas · July 10–11, 2026</div>
+    <div class="hero-grid">
+      <div>
+        <h1>Ten rounds toward an evolution signal that does not run out.</h1>
+        <p class="lead">A visual record of what the NEAT outer loop can already do, every shortcut evolution exploited, and why the evidence now points from better scoring toward an energy-conserving ecology.</p>
+      </div>
+      <div class="hero-note">
+        <strong>Current conclusion</strong>
+        Genome complexification is functional, but the environment is not yet generative enough to sustain a Red Queen. Predation ends when founders run out; artificial renewal either kills the focal or becomes an energy subsidy.
+      </div>
+    </div>
+    <div class="stats" aria-label="Research summary">
+      <div class="stat"><div class="stat-value">10</div><div class="stat-label">research rounds completed</div></div>
+      <div class="stat"><div class="stat-value">13</div><div class="stat-label">separate experiments and gates</div></div>
+      <div class="stat"><div class="stat-value">v3→v10</div><div class="stat-label">evaluator schema evolution</div></div>
+      <div class="stat"><div class="stat-value">0</div><div class="stat-label">credible bottomless signals found—yet</div></div>
+    </div>
+  </header>
+
+  <nav class="nav shell" aria-label="Page sections">
+    <a href="#picture">Current picture</a>
+    <a href="#evidence">Key evidence</a>
+    <a href="#experiments">All experiments</a>
+    <a href="#instruments">Instruments</a>
+    <a href="#next">Next hypothesis</a>
+  </nav>
+
+  <main>
+    <section id="picture">
+      <div class="shell">
+        <div class="section-head">
+          <div><div class="kicker">Current causal model</div><h2>Where the ladder breaks</h2></div>
+          <p class="section-copy">The experiments progressively removed scoring, combat, identity, and measurement confounds. What remains is a physical bottleneck: opponents provide only a finite reservoir unless the evaluator mints more energy.</p>
+        </div>
+        <div class="current-model" aria-label="Current causal chain">
+          <article class="model-step pass"><div class="step-num">01</div><h3>NEAT adds useful structure</h3><p>Added nodes and connections can be causally required on sealed worlds.</p><span class="verdict-tag tag-pass">mechanism works</span></article>
+          <article class="model-step fail"><div class="step-num">02</div><h3>Survival area saturates</h3><p>Passive reserve-burning and durable foraging can earn similar bounded scores.</p><span class="verdict-tag tag-fail">signal bottoms out</span></article>
+          <article class="model-step fail"><div class="step-num">03</div><h3>Predation front-loads</h3><p>Controllers can kill, but the prey cohort and its energy are exhausted early.</p><span class="verdict-tag tag-fail">finite interaction</span></article>
+          <article class="model-step fail"><div class="step-num">04</div><h3>Artificial renewal bifurcates</h3><p>Without reward the focal dies; with reward, respawned bodies become a food fountain.</p><span class="verdict-tag tag-fail">energy trilemma</span></article>
+          <article class="model-step next"><div class="step-num">05</div><h3>Endogenous renewal</h3><p>Make organisms earn energy, invest it in offspring, and become renewable challenges without evaluator subsidy.</p><span class="verdict-tag tag-mixed">next test</span></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="evidence">
+      <div class="shell">
+        <div class="section-head">
+          <div><div class="kicker">Four decisive views</div><h2>The evidence that changed direction</h2></div>
+          <p class="section-copy">These plots summarize the strongest causal results. Hover or focus the cap chart to inspect the viability cliff.</p>
+        </div>
+        <div class="figure-grid">
+          <article class="figure">
+            <h3>Round 4 · Relative-survival treatment is seed-dependent</h3>
+            <p class="figure-sub">Product-minus-absolute score. Large wins and losses cancel to a misleading small mean.</p>
+            <canvas id="round4-chart" role="img" aria-label="Diverging bars showing development and sealed score effects for seeds 101, 202, 303, and 404"></canvas>
+          </article>
+          <article class="figure">
+            <h3>Round 8 · The Attack funnel fails before combat</h3>
+            <p class="figure-sub">No-regeneration arm, all horizons combined. Equal-size eligible attacks always hit.</p>
+            <div class="funnel" aria-label="Attack outcome percentages">
+              <div class="funnel-row"><div class="funnel-label">No organism target</div><div class="funnel-track"><div class="funnel-fill" style="width:70.7%"></div></div><div class="funnel-value">70.7%</div></div>
+              <div class="funnel-row"><div class="funnel-label">Protected same-pool</div><div class="funnel-track"><div class="funnel-fill" style="width:20.5%"></div></div><div class="funnel-value">20.5%</div></div>
+              <div class="funnel-row"><div class="funnel-label">Eligible cross-pool</div><div class="funnel-track"><div class="funnel-fill" style="width:8.8%"></div></div><div class="funnel-value">8.8%</div></div>
+              <div class="funnel-row"><div class="funnel-label">Followed up after wound</div><div class="funnel-track"><div class="funnel-fill" style="width:85.8%"></div></div><div class="funnel-value">85.8%</div></div>
+            </div>
+          </article>
+          <article class="figure wide">
+            <h3>Round 10 · Renewable-opponent reward has a viability cliff</h3>
+            <p class="figure-sub">8,000-tick endpoint survival versus the share of injected respawn energy returned to the focal. No tested cap is both durable and non-farming across scenarios.</p>
+            <canvas id="cap-chart" role="img" aria-label="Line chart of reward cap, endpoint survival, and reward to injected energy ratio"></canvas>
+            <div id="cap-detail" class="figure-sub" aria-live="polite">Select a point to inspect the cap regime.</div>
+          </article>
+          <article class="figure wide">
+            <h3>Round 9 · Historical coverage expands, then stalls</h3>
+            <p class="figure-sub">Older unique checkpoints beaten at generations 0, 8, 16, and 23. Every lineage ends at 2/3 coverage; none expands at the final checkpoint.</p>
+            <div class="coverage" aria-label="Historical coverage by lineage">
+              <div class="coverage-line"><strong>Seed 101</strong><div class="coverage-steps"><div class="coverage-step">0</div><div class="coverage-step">1 / 1</div><div class="coverage-step">2 / 2</div><div class="coverage-step regress">2 / 3</div></div></div>
+              <div class="coverage-line"><strong>Seed 202</strong><div class="coverage-steps"><div class="coverage-step">0</div><div class="coverage-step">1 / 1</div><div class="coverage-step regress">1 / 2</div><div class="coverage-step regress">2 / 3</div></div></div>
+              <div class="coverage-line"><strong>Seed 303</strong><div class="coverage-steps"><div class="coverage-step">0</div><div class="coverage-step">1 / 1</div><div class="coverage-step">2 / 2</div><div class="coverage-step regress">2 / 3</div></div></div>
+              <div class="coverage-line"><strong>Seed 404</strong><div class="coverage-steps"><div class="coverage-step">0</div><div class="coverage-step">1 / 1</div><div class="coverage-step">2 / 2</div><div class="coverage-step regress">2 / 3</div></div></div>
+            </div>
+          </article>
+        </div>
+        <div class="method-strip" aria-label="Evidence standards">
+          <div class="method"><strong>Seed is the replicate</strong><span>Nested worlds, horizons, and scenarios are not treated as independent outer-loop evidence.</span></div>
+          <div class="method"><strong>Sealed means untouched</strong><span>Development audits can guide interpretation; sealed worlds are final-only.</span></div>
+          <div class="method"><strong>Knockouts test causality</strong><span>More topology is not progress unless removing it degrades competence.</span></div>
+          <div class="method"><strong>Slots are rotated</strong><span>Deterministic ID ordering creates enough bias to manufacture false crossplay edges.</span></div>
+          <div class="method"><strong>Late phases matter</strong><span>Early kills, energy, or survival area cannot stand in for 4–8k persistence.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="experiments">
+      <div class="shell">
+        <div class="section-head">
+          <div><div class="kicker">Complete record</div><h2>Every experiment so far</h2></div>
+          <p class="section-copy">Open a card for setup, evidence, verdict, and the durable artifact location. Filters group experiments by the question they answered.</p>
+        </div>
+        <div class="filters" aria-label="Filter experiments">
+          <button class="filter-btn" type="button" data-filter="all" aria-pressed="true">All</button>
+          <button class="filter-btn" type="button" data-filter="selection" aria-pressed="false">Selection signals</button>
+          <button class="filter-btn" type="button" data-filter="ecology" aria-pressed="false">Ecology & interaction</button>
+          <button class="filter-btn" type="button" data-filter="instrument" aria-pressed="false">Instrumentation gates</button>
+        </div>
+        <div id="experiment-grid" class="experiment-grid"></div>
+      </div>
+    </section>
+
+    <section id="instruments">
+      <div class="shell">
+        <div class="section-head">
+          <div><div class="kicker">Research cockpit</div><h2>The evaluator learned too</h2></div>
+          <p class="section-copy">Each rejected hypothesis exposed a missing measurement. The result schema evolved from basic founder survival into a reproducible causal laboratory.</p>
+        </div>
+        <div class="instrument-timeline" aria-label="Evaluator schema timeline">
+          <div class="instrument-node"><strong>v3</strong><span>Candidate-scoped founders, consumption, actions, coverage; stale reproduction semantics removed.</span></div>
+          <div class="instrument-node"><strong>v4</strong><span>Absolute and relative survival components, opponent identities, frozen panels.</span></div>
+          <div class="instrument-node"><strong>v5</strong><span>Strict multi-horizon training and audit cases.</span></div>
+          <div class="instrument-node"><strong>v6</strong><span>Late-weighted survival and fixed durable anchors.</span></div>
+          <div class="instrument-node"><strong>v7</strong><span>Checkpoint genomes and explicit prey-consumption fields.</span></div>
+          <div class="instrument-node"><strong>v8</strong><span>Cross-pool predation oracle and reproducible combat contract.</span></div>
+          <div class="instrument-node"><strong>v9</strong><span>Full Attack funnel, damage/regen controls, slot-aware panels and crossplay.</span></div>
+          <div class="instrument-node"><strong>v10</strong><span>Opponent renewal, energy injection, source provenance, spawn and farming diagnostics.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="next">
+      <div class="shell next-grid">
+        <article class="next-primary">
+          <div class="kicker">Next converged hypothesis</div>
+          <h2>Renew organisms with energy they earned—not bodies the evaluator minted.</h2>
+          <p>Restore a minimal energy-conserving reproduction loop, or a strictly equivalent plant-funded birth ledger. Parents must acquire ecological energy, invest it into offspring, and expose predators to renewable challenges without creating a subsidy. Only then does historical crossplay become a test of a real Red Queen rather than a finite melee.</p>
+        </article>
+        <div class="next-list">
+          <div class="next-item"><strong>Conservation gate</strong><span>Every offspring joule must trace to parent reserves or plant-derived energy; no hidden evaluator injection.</span></div>
+          <div class="next-item"><strong>Demographic gate</strong><span>Opponents must replenish through their own competence without producing runaway population growth.</span></div>
+          <div class="next-item"><strong>Open-endedness gate</strong><span>Later checkpoints must expand reciprocal historical coverage, retain 8k durability, and show opponent-facing causal structure.</span></div>
+          <div class="next-item"><strong>Failure condition</strong><span>If reproduction only yields a fixed producer–predator equilibrium or another exploitable scalar, reject it and preserve the evidence.</span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="shell">
+    Source of record: <code>artifacts/research/log.md</code> and durable JSON artifacts under <code>artifacts/research/round-001</code> through <code>round-010-renewal</code>. Values shown are screening evidence unless explicitly described as a frozen causal gate.
+  </footer>
+
+  <script>
+    (() => {
+      const root = document.getElementById('ng-research-atlas');
+      const experiments = [
+        {round:'0',title:'Evaluator repair after reproduction removal',category:'instrument',status:'pass',summary:'Made candidate-lineage measurements honest before testing hypotheses.',evidence:['Removed stale births, maturity, and offspring semantics.','Scoped consumption, action fractions, coverage, and first-food timing to the focal lineage.','Capped realized founder pools and required every source to be represented.'],verdict:'Schema v3 established a trustworthy baseline; one stale human predation test remained intentionally excluded.',artifact:'artifacts/research/log.md'},
+        {round:'1A',title:'Structural mutation ON vs OFF',category:'selection',status:'mixed',summary:'Added topology can matter causally, but does not reliably raise final competence.',evidence:['Seed 101 sealed: ON .8204 vs OFF .7134.','Seed 202 sealed: ON .8369 vs OFF .8802.','Both ON champions had positive sealed structure-knockout deltas.'],verdict:'Keep structural mutation. Reject the claim that structure alone creates continuing complexification.',artifact:'artifacts/research/round-001/structure/'},
+        {round:'1B',title:'Candidate-scoped novelty local competition',category:'selection',status:'fail',summary:'Novelty archives grew while competence and endpoint novelty did not.',evidence:['NSLC lost sealed and development competence in both matched seeds.','Archive size reached 74/78 mechanically.','Late fixed-audit slopes regressed.'],verdict:'Reject NSLC as the default selection strategy.',artifact:'artifacts/research/round-001/novelty/'},
+        {round:'1C',title:'Contemporary mixed evaluation',category:'ecology',status:'fail',summary:'Mixing opponents produced one durable forager and one zero-consumption idler.',evidence:['Mean mixed-minus-isolated effect: −.0374 development, −.0272 sealed.','Seed 101 exploited founder reserves and covered only ~4% of the world.','Seed 202 remained a genuinely strong forager.'],verdict:'Mixed evaluation is not automatically coevolution and is not a robust default.',artifact:'artifacts/research/round-001/mixed/'},
+        {round:'2',title:'Frozen champion durability replay',category:'instrument',status:'pass',summary:'Separated true sustainability from finite-horizon reserve burning.',evidence:['Seed-101 idler consumed nothing and died around tick 767.','Durable seed-101 focal retained 14/30 founders at tick 4,000.','Both seed-202 policies retained 30/30 with stable late harvest.'],verdict:'Passive runway exploitation is real but seed-dependent; the objective admits two qualitatively different basins.',artifact:'artifacts/research/round-002-horizon/'},
+        {round:'3',title:'Relative-survival product objective',category:'selection',status:'fail',summary:'A sensible frozen ranking collapses in an all-passive ecology.',evidence:['Durable focal beat the known idler on mixed frozen panels.','Idler versus idlers kept relative advantage near neutral.','Two durable policies reversed rank between 1k and 2k.'],verdict:'Retain relative advantage as a diagnostic, not a bottomless fitness signal.',artifact:'artifacts/research/round-003-objective-gate/'},
+        {round:'4',title:'Multi-horizon evolutionary screen',category:'selection',status:'fail',summary:'The relative product changed basins but split 2–2 across seeds and increased passive cases.',evidence:['Mean effects were small because large positive and negative seed effects canceled.','Sealed zero-consumption cases rose from 3/48 to 13/48.','Seed 101 selected a generation-zero idler with high relative advantage.'],verdict:'Reject the product objective as the default. Evolution learned to exploit the new scalar.',artifact:'artifacts/research/round-004-multihorizon/'},
+        {round:'5',title:'Late-weighted survival with durable anchors',category:'selection',status:'fail',summary:'Anchors crowded out focal lineages and rewarded metabolic passivity.',evidence:['Known durable focal scored .03010 vs idler .03371.','Durable focal won only 3/9 frozen cases.','Both focal lineages went extinct while anchors monopolized the ecology.'],verdict:'Gate failed; the planned 16-run evolutionary screen was stopped.',artifact:'artifacts/research/round-005-weighted-anchor/gate/'},
+        {round:'6',title:'Direct predation substrate',category:'ecology',status:'fail',summary:'The motor path can consume organisms, but mostly as shallow cannibalism or collapse.',evidence:['Only seed 101 transferred prey use across suites, with 33–38% worse survival.','Seed 303 became 99.1% Idle and abandoned plants.','Seeds 202/404 consumed no prey.'],verdict:'Current predation is not a strategic substrate or arms race.',artifact:'artifacts/research/round-006-predation-smoke/'},
+        {round:'7',title:'Cross-pool predation oracle',category:'ecology',status:'mixed',summary:'Removing friendly fire rescues foraging, not a predator niche.',evidence:['Seed 303: Idle 99.1%→49.4%, plants 0→627/case, endpoint 1.7%→47.2%.','Three seeds still produced zero cross-pool kills.','Seed 101 averaged only 1.5 cross-pool kills/case.'],verdict:'Kin-blind damage caused collapse, but was not the binding constraint on predation.',artifact:'artifacts/research/round-007-cross-pool-oracle/'},
+        {round:'8',title:'Attack funnel and damage × regeneration',category:'instrument',status:'pass',summary:'Localized the dominant loss to action context rather than hit mechanics.',evidence:['70.7% of Attacks targeted no organism; 20.5% targeted protected clones.','Every eligible equal-size attempt hit.','One-hit damage improved early survival but slightly lowered 4k endpoint survival.'],verdict:'Do not adopt one-hit lethality. Multi-hit completion is secondary; opportunity-conditioned action is primary.',artifact:'artifacts/research/round-008-attack-funnel/'},
+        {round:'9',title:'Historical checkpoint crossplay',category:'ecology',status:'fail',summary:'Every lineage formed a short ordering, then plateaued or regressed.',evidence:['All four final checkpoints covered only 2/3 of history.','No lineage had positive 2k→4k predation energy.','No decisive replicated nontransitive cycle appeared.'],verdict:'Do not add archive selection yet; it would preserve a finite benchmark rather than manufacture a Red Queen.',artifact:'artifacts/research/round-009-crossplay/'},
+        {round:'10',title:'Renewable opponents and reward caps',category:'ecology',status:'fail',summary:'Artificial renewal creates an immortal hazard or an external energy farm.',evidence:['Zero reward maintained 97.64% opponent uptime but all focals died by 1k.','Physical reward returned ~61% of injected energy and retained 42.9% endpoints at 8k.','Caps 25/50 died; 100 survived only in baseline; 150 returned to subsidy dependence.'],verdict:'Reject evaluator-minted renewal. Renew opponent energy endogenously through reproduction or a plant-funded birth ledger.',artifact:'artifacts/research/round-010-renewal/'}
+      ];
+
+      const grid = root.querySelector('#experiment-grid');
+      const statusClass = s => s === 'pass' ? 'pass' : s === 'fail' ? 'fail' : '';
+      const verdictClass = s => s === 'pass' ? 'pass' : s === 'mixed' ? 'mixed' : '';
+      experiments.forEach((x, index) => {
+        const el = document.createElement('details');
+        el.className = 'experiment';
+        el.dataset.category = x.category;
+        if (index === 0) el.open = true;
+        el.innerHTML = `<summary><span class="round-mark">${x.round}</span><span><h3>${x.title}</h3><p class="experiment-summary">${x.summary}</p></span><span class="status-dot ${statusClass(x.status)}" aria-label="${x.status} verdict"></span></summary><div class="experiment-body"><ul class="evidence">${x.evidence.map(v => `<li>${v}</li>`).join('')}</ul><p class="verdict ${verdictClass(x.status)}"><strong>Verdict:</strong> ${x.verdict}</p><div class="artifact">${x.artifact}</div></div>`;
+        grid.appendChild(el);
+      });
+
+      root.querySelectorAll('.filter-btn').forEach(button => {
+        button.addEventListener('click', () => {
+          const filter = button.dataset.filter;
+          root.querySelectorAll('.filter-btn').forEach(peer => peer.setAttribute('aria-pressed', String(peer === button)));
+          root.querySelectorAll('.experiment').forEach(card => { card.hidden = filter !== 'all' && card.dataset.category !== filter; });
+        });
+      });
+
+      function setupCanvas(canvas) {
+        const rect = canvas.getBoundingClientRect();
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.max(1, Math.round(rect.width * dpr));
+        canvas.height = Math.max(1, Math.round(rect.height * dpr));
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        return {ctx, width: rect.width, height: rect.height};
+      }
+
+      function css(name) { return getComputedStyle(root).getPropertyValue(name).trim(); }
+
+      function drawRound4() {
+        const canvas = root.querySelector('#round4-chart');
+        const {ctx, width:w, height:h} = setupCanvas(canvas);
+        const rows = [
+          {seed:'101', dev:-.1160, sealed:-.1089},
+          {seed:'202', dev:.0785, sealed:.0706},
+          {seed:'303', dev:-.0014, sealed:-.0118},
+          {seed:'404', dev:.1126, sealed:.1138}
+        ];
+        const pad = {l:52,r:18,t:16,b:30};
+        const center = pad.l + (w-pad.l-pad.r)/2;
+        const scale = (w-pad.l-pad.r)/(.28);
+        ctx.clearRect(0,0,w,h);
+        ctx.strokeStyle = css('--line'); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(center,pad.t); ctx.lineTo(center,h-pad.b); ctx.stroke();
+        ctx.font = '12px system-ui'; ctx.fillStyle = css('--muted'); ctx.textBaseline='middle';
+        rows.forEach((r,i) => {
+          const y = 34 + i*46;
+          ctx.fillText(`seed ${r.seed}`, 0, y+9);
+          [['dev',r.dev,css('--blue'),-6],['sealed',r.sealed,css('--green'),9]].forEach(([name,val,color,dy]) => {
+            const x = center + val*scale;
+            ctx.fillStyle=color;
+            ctx.fillRect(Math.min(center,x), y+dy, Math.max(2,Math.abs(x-center)), 9);
+          });
+        });
+        ctx.textBaseline='alphabetic'; ctx.fillStyle=css('--muted');
+        ctx.fillText('treatment worse', pad.l, h-7); ctx.textAlign='right'; ctx.fillText('treatment better', w-pad.r, h-7); ctx.textAlign='left';
+      }
+
+      const capData = [
+        {cap:'0', endpoint:0, ratio:0, note:'Renewal is pure pressure; every focal dies before 1k.'},
+        {cap:'10', endpoint:0, ratio:.5, note:'Plant-equivalent payout remains an extinction floor.'},
+        {cap:'25', endpoint:0, ratio:1.6, note:'More early reward, still zero late focal interaction.'},
+        {cap:'50', endpoint:0, ratio:14.2, note:'Transient 1k survival; universal extinction by 4k.'},
+        {cap:'100', endpoint:3.19, ratio:16.1, note:'Just above the cliff; only baseline survives and captures 33.2% locally.'},
+        {cap:'150', endpoint:28.75, ratio:35.7, note:'Durability returns by sliding back into subsidy dependence.'},
+        {cap:'physical', endpoint:42.92, ratio:61.1, note:'Sustained interaction, but a distributed renewable-energy farm.'}
+      ];
+      let capPoints = [];
+      function drawCap() {
+        const canvas = root.querySelector('#cap-chart');
+        const {ctx, width:w, height:h} = setupCanvas(canvas);
+        const p={l:42,r:26,t:18,b:42}; const iw=w-p.l-p.r, ih=h-p.t-p.b;
+        ctx.clearRect(0,0,w,h); ctx.font='11px system-ui';
+        ctx.strokeStyle=css('--line'); ctx.fillStyle=css('--muted'); ctx.lineWidth=1;
+        [0,25,50,75].forEach(v=>{const y=p.t+ih-(v/75)*ih;ctx.beginPath();ctx.moveTo(p.l,y);ctx.lineTo(w-p.r,y);ctx.stroke();ctx.fillText(`${v}%`,2,y+4);});
+        const x=i=>p.l+(i/(capData.length-1))*iw;
+        const y=v=>p.t+ih-(v/75)*ih;
+        [['endpoint',css('--green')],['ratio',css('--amber')]].forEach(([key,color])=>{
+          ctx.strokeStyle=color;ctx.lineWidth=2;ctx.beginPath();capData.forEach((d,i)=>{const px=x(i),py=y(d[key]);i?ctx.lineTo(px,py):ctx.moveTo(px,py);});ctx.stroke();
+          capData.forEach((d,i)=>{ctx.fillStyle=color;ctx.beginPath();ctx.arc(x(i),y(d[key]),4,0,Math.PI*2);ctx.fill();});
+        });
+        capPoints=capData.map((d,i)=>({x:x(i),data:d}));
+        ctx.fillStyle=css('--muted');ctx.textAlign='center';capData.forEach((d,i)=>ctx.fillText(d.cap,x(i),h-18));ctx.textAlign='left';
+        ctx.fillStyle=css('--green');ctx.fillRect(p.l,2,10,3);ctx.fillStyle=css('--muted');ctx.fillText('8k endpoint',p.l+15,7);
+        ctx.fillStyle=css('--amber');ctx.fillRect(p.l+102,2,10,3);ctx.fillStyle=css('--muted');ctx.fillText('reward / injected',p.l+117,7);
+      }
+      const capCanvas=root.querySelector('#cap-chart');
+      capCanvas.addEventListener('click', e=>{
+        const rect=capCanvas.getBoundingClientRect(); const px=e.clientX-rect.left;
+        const closest=capPoints.reduce((a,b)=>Math.abs(b.x-px)<Math.abs(a.x-px)?b:a);
+        root.querySelector('#cap-detail').textContent=`Cap ${closest.data.cap}: ${closest.data.endpoint}% endpoint · ${closest.data.ratio}% reward/injection. ${closest.data.note}`;
+      });
+      capCanvas.addEventListener('keydown', e=>{
+        if(e.key==='Enter'||e.key===' '){e.preventDefault();root.querySelector('#cap-detail').textContent='Cap 100: 3.19% endpoint · 16.1% overall reward/injection, but baseline alone captures 33.2%. The regime is not robust.';}
+      });
+      capCanvas.tabIndex=0;
+
+      let resizeTimer;
+      const drawAll=()=>{drawRound4();drawCap();};
+      window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(drawAll,100);});
+      drawAll();
+    })();
+  </script>
+</div>
