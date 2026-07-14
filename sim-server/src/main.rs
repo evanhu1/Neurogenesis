@@ -1,7 +1,7 @@
 //! sim-server — a thin, stateless file-server over `world.bin` files.
 //!
 //! A world is a file on disk under `--world-root`; every request loads it, runs
-//! one command (mirroring the sim-cli verbs via the shared `sim-views` crate),
+//! one command (mirroring the cli verbs via the shared `views` crate),
 //! and — for mutating commands — saves it back. The one stateful surface is the
 //! `/worlds/{name}/stream` WebSocket, which holds a world resident only for the
 //! duration of a live animation feed and persists it on disconnect. There is no
@@ -16,22 +16,22 @@ use axum::{Json, Router};
 use clap::Parser;
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use sim_core::{SimError, Simulation};
 use sim_server::protocol::{
     ApiError, ChampionPoolEntry, ChampionPoolResponse, OrganismDetail, StreamFrame,
     WorldSnapshotView,
 };
-use sim_types::{OrganismGenome, OrganismState};
-use sim_views::{ReadCtx, Recorder};
 use std::path::{Path as FsPath, PathBuf};
 use std::sync::{Arc, RwLock as StdRwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tower_http::cors::CorsLayer;
 use tracing::{error, info, warn};
+use types::{OrganismGenome, OrganismState};
 use uuid::Uuid;
+use views::{ReadCtx, Recorder};
+use world_sim::{SimError, Simulation};
 
 /// Reporting-interval width minted for freshly-created worlds and assumed for
-/// worlds whose sidecar is absent. Matches the sim-cli / eval default.
+/// worlds whose sidecar is absent. Matches the cli / eval default.
 const DEFAULT_REPORT_EVERY: u64 = 10_000;
 
 #[derive(Clone)]
@@ -86,11 +86,11 @@ fn load_bundle(root: &FsPath, name: &str) -> Result<Loaded, AppError> {
         return Err(AppError::NotFound(format!("world `{name}` not found")));
     }
     let path_str = path.to_string_lossy();
-    let sim = sim_views::load_world(&path_str)
+    let sim = views::load_world(&path_str)
         .map_err(|e| AppError::BadRequest(format!("loading world `{name}`: {e}")))?;
-    let sidecar = sim_views::sibling_metrics_path(&path_str);
+    let sidecar = views::sibling_metrics_path(&path_str);
     let (report_every, recorder) = if FsPath::new(&sidecar).exists() {
-        let (report_every, recorder) = sim_views::load_sidecar(&sidecar)
+        let (report_every, recorder) = views::load_sidecar(&sidecar)
             .map_err(|e| AppError::Internal(format!("loading metrics for `{name}`: {e}")))?;
         (report_every, Some(recorder))
     } else {
@@ -112,23 +112,23 @@ fn save_bundle(
 ) -> Result<(), AppError> {
     let path = world_bin_path(root, name);
     let path_str = path.to_string_lossy();
-    sim_views::save_world(sim, &path_str)
+    views::save_world(sim, &path_str)
         .map_err(|e| AppError::Internal(format!("saving world `{name}`: {e}")))?;
     if let Some(rec) = recorder {
-        let sidecar = sim_views::sibling_metrics_path(&path_str);
-        sim_views::save_sidecar(report_every, rec, &sidecar)
+        let sidecar = views::sibling_metrics_path(&path_str);
+        views::save_sidecar(report_every, rec, &sidecar)
             .map_err(|e| AppError::Internal(format!("saving metrics for `{name}`: {e}")))?;
     }
     Ok(())
 }
 
-/// Build a JSON `Response` from bytes a `sim-views` read wrote (already a
+/// Build a JSON `Response` from bytes a `views` read wrote (already a
 /// complete JSON document + trailing newline).
 fn json_bytes_response(bytes: Vec<u8>) -> Response {
     ([(header::CONTENT_TYPE, "application/json")], bytes).into_response()
 }
 
-/// Run a `sim-views` read against a loaded world, capturing its JSON output.
+/// Run a `views` read against a loaded world, capturing its JSON output.
 fn run_read(
     loaded: &Loaded,
     f: impl FnOnce(&ReadCtx, &mut Vec<u8>) -> anyhow::Result<()>,
@@ -137,7 +137,7 @@ fn run_read(
         sim: &loaded.sim,
         recorder: loaded.recorder.as_ref(),
         report_every: loaded.report_every,
-        format: sim_views::output::Format::Json,
+        format: views::output::Format::Json,
         scaled: false,
     };
     let mut buf = Vec::new();
@@ -166,7 +166,7 @@ async fn blocking_read(
 // Champion pool (persisted set of the best genomes seen; unchanged semantics)
 // ---------------------------------------------------------------------------
 
-const CHAMPION_POOL_SCHEMA_VERSION: u32 = 5;
+const CHAMPION_POOL_SCHEMA_VERSION: u32 = 6;
 const CHAMPION_POOL_MAX_GENOMES: usize = 32;
 const CHAMPION_POOL_MAX_CANDIDATES_PER_WORLD: usize = 32;
 
@@ -185,7 +185,7 @@ struct ChampionGenomeRecord {
     generation: u64,
     age_turns: u64,
     consumptions_count: u64,
-    energy: f32,
+    energy: u32,
 }
 
 struct ChampionPoolStore {
@@ -214,7 +214,7 @@ fn compare_champion_records(
         .generation
         .cmp(&left.generation)
         .then_with(|| right.consumptions_count.cmp(&left.consumptions_count))
-        .then_with(|| right.energy.total_cmp(&left.energy))
+        .then_with(|| right.energy.cmp(&left.energy))
         .then_with(|| right.age_turns.cmp(&left.age_turns))
         .then_with(|| {
             right
@@ -343,7 +343,7 @@ impl ChampionPoolStore {
     }
 
     /// Build a read-only pool containing a single genome loaded from a
-    /// bincode-encoded evaluation snapshot. Every initial organism will start
+    /// bincode-encoded genome snapshot. Every initial organism will start
     /// with this genome; champion-save endpoints no-op against disk.
     fn from_snapshot_file(snapshot_path: &FsPath) -> Result<Self, AppError> {
         let bytes = std::fs::read(snapshot_path).map_err(|err| {
@@ -365,7 +365,7 @@ impl ChampionPoolStore {
             generation: 0,
             age_turns: 0,
             consumptions_count: 0,
-            energy: 0.0,
+            energy: 0,
         };
         Ok(Self {
             pool_path: None,
@@ -554,7 +554,7 @@ struct NewWorldRequest {
     name: Option<String>,
     seed: Option<u64>,
     config: Option<String>,
-    /// Inline `key=value` config overrides (same vocabulary as `sim-cli --set`).
+    /// Inline `key=value` config overrides (same vocabulary as `cli --set`).
     #[serde(default)]
     set: Vec<String>,
     /// `[world_width, num_organisms]` scale override (marks the world non-canonical).
@@ -623,8 +623,7 @@ struct Cli {
     /// Override the default champion pool JSON path.
     #[arg(long)]
     champion_pool_path: Option<PathBuf>,
-    /// Bincode-encoded `OrganismGenome` from an evaluation snapshot
-    /// (`artifacts/evaluation/.../seed_<seed>/genomes/tNNNNNN.bin`). When set,
+    /// Bincode-encoded `OrganismGenome` snapshot. When set,
     /// every initial organism spawns with this genome and champion-save
     /// endpoints do not touch disk.
     #[arg(long)]
@@ -781,7 +780,7 @@ fn build_new_world(
         })
         .collect::<Result<_, _>>()?;
 
-    let mut config = sim_views::world_config_with_overrides(&config_path, &sets)
+    let mut config = views::world_config_with_overrides(&config_path, &sets)
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
     if let Some(threads) = req.threads {
         config.intent_parallel_threads = threads;
@@ -798,7 +797,7 @@ fn build_new_world(
     }
     let champions = pool.snapshot_genomes()?;
     let sim = Simulation::new_with_champion_pool(config, req.seed.unwrap_or(0), champions)?;
-    let recorder = sim_views::start_recording(&sim, report_every);
+    let recorder = views::start_recording(&sim, report_every);
     save_bundle(root, &name, &sim, Some(&recorder), report_every)?;
     let snapshot = sim.snapshot().into();
     Ok(WorldResponse { name, snapshot })
@@ -827,7 +826,7 @@ async fn get_organism(
         let loaded = load_bundle(&root, &name)?;
         let organism = loaded
             .sim
-            .focused_organism(sim_types::OrganismId(id))
+            .focused_organism(types::OrganismId(id))
             .ok_or_else(|| AppError::NotFound(format!("no live organism with id {id}")))?;
         let active_action_neuron_id = organism.last_action_taken.neuron_id();
         Ok(OrganismDetail {
@@ -854,9 +853,9 @@ async fn step_world(
             .as_ref()
             .is_some_and(|rec| rec.recorded_through_turn != loaded.sim.turn())
         {
-            loaded.recorder = Some(sim_views::start_recording(&loaded.sim, loaded.report_every));
+            loaded.recorder = Some(views::start_recording(&loaded.sim, loaded.report_every));
         }
-        sim_views::advance(
+        views::advance(
             &mut loaded.sim,
             loaded.recorder.as_mut(),
             req.count.max(1) as u64,
@@ -891,11 +890,11 @@ async fn run_to_world(
             .as_ref()
             .is_some_and(|rec| rec.recorded_through_turn != loaded.sim.turn())
         {
-            loaded.recorder = Some(sim_views::start_recording(&loaded.sim, loaded.report_every));
+            loaded.recorder = Some(views::start_recording(&loaded.sim, loaded.report_every));
         }
         let current = loaded.sim.turn();
         if req.turn > current {
-            sim_views::advance(
+            views::advance(
                 &mut loaded.sim,
                 loaded.recorder.as_mut(),
                 req.turn - current,
@@ -919,7 +918,7 @@ async fn run_to_world(
 }
 
 // ---------------------------------------------------------------------------
-// CLI-parity reads (forwarded from sim-views as raw JSON)
+// CLI-parity reads (forwarded from views as raw JSON)
 // ---------------------------------------------------------------------------
 
 async fn read_state(
@@ -927,7 +926,7 @@ async fn read_state(
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
     blocking_read(state.world_root.clone(), name, |l| {
-        run_read(l, |c, b| sim_views::state(c, &[], b))
+        run_read(l, |c, b| views::state(c, &[], b))
     })
     .await
 }
@@ -937,7 +936,7 @@ async fn read_turn(
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
     blocking_read(state.world_root.clone(), name, |l| {
-        run_read(l, |c, b| sim_views::turn(c, &[], b))
+        run_read(l, |c, b| views::turn(c, &[], b))
     })
     .await
 }
@@ -947,7 +946,7 @@ async fn read_pillars(
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
     blocking_read(state.world_root.clone(), name, |l| {
-        run_read(l, |c, b| sim_views::pillars(c, &[], b))
+        run_read(l, |c, b| views::pillars(c, &[], b))
     })
     .await
 }
@@ -957,7 +956,7 @@ async fn read_eco(
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
     blocking_read(state.world_root.clone(), name, |l| {
-        run_read(l, |c, b| sim_views::eco(c, &[], b))
+        run_read(l, |c, b| views::eco(c, &[], b))
     })
     .await
 }
@@ -967,7 +966,7 @@ async fn read_lineage(
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
     blocking_read(state.world_root.clone(), name, |l| {
-        run_read(l, |c, b| sim_views::lineage(c, &[], b))
+        run_read(l, |c, b| views::lineage(c, &[], b))
     })
     .await
 }
@@ -977,7 +976,7 @@ async fn read_food(
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
     blocking_read(state.world_root.clone(), name, |l| {
-        run_read(l, |c, b| sim_views::food(c, &[], b))
+        run_read(l, |c, b| views::food(c, &[], b))
     })
     .await
 }
@@ -996,7 +995,7 @@ async fn read_genome(
         if q.drift {
             args.push("--drift");
         }
-        run_read(l, |c, b| sim_views::genome(c, &args, b))
+        run_read(l, |c, b| views::genome(c, &args, b))
     })
     .await
 }
@@ -1017,7 +1016,7 @@ async fn read_timeseries(
             args.push("--last");
             args.push(last);
         }
-        run_read(l, |c, b| sim_views::timeseries(c, &args, b))
+        run_read(l, |c, b| views::timeseries(c, &args, b))
     })
     .await
 }
@@ -1028,7 +1027,7 @@ async fn read_inspect(
 ) -> Result<Response, AppError> {
     blocking_read(state.world_root.clone(), name, move |l| {
         let id = id.to_string();
-        run_read(l, |c, b| sim_views::inspect(c, &[&id], b))
+        run_read(l, |c, b| views::inspect(c, &[&id], b))
     })
     .await
 }
@@ -1039,7 +1038,7 @@ async fn read_decide(
 ) -> Result<Response, AppError> {
     blocking_read(state.world_root.clone(), name, move |l| {
         let id = id.to_string();
-        run_read(l, |c, b| sim_views::decide(c, &[&id], b))
+        run_read(l, |c, b| views::decide(c, &[&id], b))
     })
     .await
 }
@@ -1057,7 +1056,7 @@ async fn read_brain(
             args.push("--view");
             args.push(view);
         }
-        run_read(l, |c, b| sim_views::brain(c, &args, b))
+        run_read(l, |c, b| views::brain(c, &args, b))
     })
     .await
 }
@@ -1073,7 +1072,7 @@ async fn read_top(
         if let Some(n) = n.as_deref() {
             args.push(n);
         }
-        run_read(l, |c, b| sim_views::top(c, &args, b))
+        run_read(l, |c, b| views::top(c, &args, b))
     })
     .await
 }
@@ -1083,7 +1082,7 @@ async fn read_hist(
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
     blocking_read(state.world_root.clone(), name, move |l| {
-        run_read(l, |c, b| sim_views::hist(c, &[&field], b))
+        run_read(l, |c, b| views::hist(c, &[&field], b))
     })
     .await
 }
@@ -1104,7 +1103,7 @@ async fn read_find(
             args.push("--fields");
             args.push(fields);
         }
-        run_read(l, |c, b| sim_views::find(c, &args, b))
+        run_read(l, |c, b| views::find(c, &args, b))
     })
     .await
 }
@@ -1207,7 +1206,7 @@ async fn stream_loop(socket: WebSocket, root: Arc<PathBuf>, name: String, tps: u
         .as_ref()
         .is_some_and(|rec| rec.recorded_through_turn != sim.turn())
     {
-        recorder = Some(sim_views::start_recording(&sim, report_every));
+        recorder = Some(views::start_recording(&sim, report_every));
     }
 
     let (mut sender, mut receiver) = socket.split();
@@ -1231,7 +1230,7 @@ async fn stream_loop(socket: WebSocket, root: Arc<PathBuf>, name: String, tps: u
                 }
             }
             _ = tokio::time::sleep(step_delay) => {
-                let delta = sim_views::tick_recording(&mut sim, recorder.as_mut());
+                let delta = views::tick_recording(&mut sim, recorder.as_mut());
                 if send_frame(&mut sender, &StreamFrame::TickDelta(delta.into()))
                     .await
                     .is_err()
@@ -1271,16 +1270,14 @@ async fn send_frame(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sim_types::{
+    use types::{
         action_gene_node_id, connection_innovation_id, seed_hidden_gene_node_id,
         sensory_gene_node_id, ActionType, BrainState, FacingDirection, HiddenNodeGene, OrganismId,
         SensoryReceptor, SpeciesId, SynapseGene,
     };
 
-    fn make_record(generation: u64, consumptions: u64, energy: f32) -> ChampionGenomeRecord {
+    fn make_record(generation: u64, consumptions: u64, energy: u32) -> ChampionGenomeRecord {
         let mut genome = OrganismGenome::test_fixture();
-        genome.lifecycle.max_organism_age = u32::MAX;
-        genome.topology.vision_distance = generation as u32 + 2;
         genome.brain.hidden_nodes = (0..generation as u32 + 1)
             .map(|index| HiddenNodeGene {
                 id: seed_hidden_gene_node_id(index),
@@ -1302,8 +1299,8 @@ mod tests {
 
     #[test]
     fn merge_champion_entries_prefers_higher_ranked_unique_genomes() {
-        let weak = make_record(3, 1, 10.0);
-        let strong = make_record(8, 9, 80.0);
+        let weak = make_record(3, 1, 10);
+        let strong = make_record(8, 9, 80);
         let duplicate_strong = strong.clone();
 
         let merged = merge_champion_entries(
@@ -1318,9 +1315,9 @@ mod tests {
 
     #[test]
     fn select_champion_candidates_deduplicates_identical_genomes() {
-        let strong = make_record(10, 2, 40.0);
+        let strong = make_record(10, 2, 40);
         let weaker_duplicate = ChampionGenomeRecord {
-            energy: 5.0,
+            energy: 5,
             generation: 2,
             ..strong.clone()
         };
@@ -1345,9 +1342,6 @@ mod tests {
                 strong.age_turns,
                 FacingDirection::East,
                 strong.energy,
-                strong.energy.max(1.0),
-                strong.energy.max(1.0),
-                0.0,
                 strong.consumptions_count,
                 0,
                 0,
@@ -1364,9 +1358,6 @@ mod tests {
                 weaker_duplicate.age_turns,
                 FacingDirection::East,
                 weaker_duplicate.energy,
-                weaker_duplicate.energy.max(1.0),
-                weaker_duplicate.energy.max(1.0),
-                0.0,
                 weaker_duplicate.consumptions_count,
                 0,
                 0,
@@ -1384,12 +1375,12 @@ mod tests {
 
     #[test]
     fn champion_persistence_round_trip_preserves_brain_layout_and_edges() {
-        let food_receptor = SensoryReceptor::FoodRay { ray_offset: 0 };
-        let organism_receptor = SensoryReceptor::OrganismRay { ray_offset: 0 };
+        let proximity_receptor = SensoryReceptor::RayProximity { ray_offset: 0 };
+        let affordance_receptor = SensoryReceptor::RayEnergyAffordance { ray_offset: 0 };
         let forward_action = ActionType::Forward;
         let attack_action = ActionType::Attack;
 
-        let mut record = make_record(4, 3, 25.0);
+        let mut record = make_record(4, 3, 25);
         record.genome.brain.hidden_nodes = vec![
             HiddenNodeGene {
                 id: seed_hidden_gene_node_id(0),
@@ -1417,12 +1408,12 @@ mod tests {
         };
         record.genome.brain.edges = vec![
             edge(
-                sensory_gene_node_id(food_receptor.current_index().unwrap() as u32),
+                sensory_gene_node_id(proximity_receptor.current_index().unwrap() as u32),
                 seed_hidden_gene_node_id(0),
                 0.75,
             ),
             edge(
-                sensory_gene_node_id(organism_receptor.current_index().unwrap() as u32),
+                sensory_gene_node_id(affordance_receptor.current_index().unwrap() as u32),
                 action_gene_node_id(action_index(attack_action)),
                 -0.5,
             ),

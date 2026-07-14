@@ -1,0 +1,306 @@
+#[cfg(feature = "profiling")]
+use config::load_world_config_from_path;
+#[cfg(feature = "profiling")]
+use std::path::PathBuf;
+#[cfg(feature = "profiling")]
+use std::time::{Duration, Instant};
+#[cfg(feature = "profiling")]
+use types::WorldConfig;
+#[cfg(feature = "profiling")]
+use world_sim::profiling::{self, PhaseCounterSnapshot, ProfilingSnapshot};
+#[cfg(feature = "profiling")]
+use world_sim::Simulation;
+
+#[cfg(feature = "profiling")]
+#[derive(Clone)]
+struct Args {
+    turns: u32,
+    warmup_turns: u32,
+    seed: u64,
+    config: Option<PathBuf>,
+}
+
+#[cfg(feature = "profiling")]
+fn main() {
+    if let Err(err) = run() {
+        eprintln!("{err}");
+        std::process::exit(1);
+    }
+}
+
+#[cfg(not(feature = "profiling"))]
+fn main() {
+    eprintln!(
+        "This example requires the `profiling` feature.\n\
+         Run: cargo run -p world-sim --release --features profiling --example profile_turn_path -- --help"
+    );
+    std::process::exit(1);
+}
+
+#[cfg(feature = "profiling")]
+fn run() -> Result<(), String> {
+    let args = parse_args()?;
+    let config = if let Some(path) = args.config.as_ref() {
+        load_world_config_from_path(path)
+            .map_err(|err| format!("failed to load config from {}: {err}", path.display()))?
+    } else {
+        let mut cfg = types::WorldConfig::perf_fixture();
+        if let Some(threads) = std::env::var("SIM_CORE_INTENT_PARALLEL_THREADS")
+            .ok()
+            .and_then(|raw| raw.parse::<u32>().ok())
+            .filter(|v| *v > 0)
+        {
+            cfg.intent_parallel_threads = threads;
+        }
+        cfg
+    };
+    let mut sim = Simulation::new(config.clone(), args.seed)
+        .map_err(|err| format!("failed to initialize simulation: {err}"))?;
+
+    if args.warmup_turns > 0 {
+        sim.advance_n(args.warmup_turns);
+    }
+
+    profiling::reset();
+    let started = Instant::now();
+    sim.advance_n(args.turns);
+    let elapsed = started.elapsed();
+    let snapshot = profiling::snapshot();
+
+    print_report(args, &config, &snapshot, elapsed);
+    Ok(())
+}
+
+#[cfg(feature = "profiling")]
+fn parse_args() -> Result<Args, String> {
+    let mut args = Args {
+        turns: 1_000,
+        warmup_turns: 200,
+        seed: 42,
+        config: None,
+    };
+
+    let mut iter = std::env::args().skip(1);
+    while let Some(flag) = iter.next() {
+        match flag.as_str() {
+            "--turns" => args.turns = parse_value(&mut iter, "--turns")?,
+            "--warmup-turns" => args.warmup_turns = parse_value(&mut iter, "--warmup-turns")?,
+            "--seed" => args.seed = parse_value(&mut iter, "--seed")?,
+            "--config" => args.config = Some(parse_value(&mut iter, "--config")?),
+            "--help" | "-h" => {
+                print_help();
+                std::process::exit(0);
+            }
+            _ => {
+                return Err(format!("unknown flag `{flag}`. Use `--help` for usage."));
+            }
+        }
+    }
+
+    if args.turns == 0 {
+        return Err("`--turns` must be >= 1".to_owned());
+    }
+
+    Ok(args)
+}
+
+#[cfg(feature = "profiling")]
+fn parse_value<T>(iter: &mut impl Iterator<Item = String>, flag: &str) -> Result<T, String>
+where
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
+    let raw = iter
+        .next()
+        .ok_or_else(|| format!("missing value for `{flag}`"))?;
+    raw.parse::<T>()
+        .map_err(|err| format!("invalid value `{raw}` for `{flag}`: {err}"))
+}
+
+#[cfg(feature = "profiling")]
+fn print_help() {
+    println!("Profiles the per-turn hot path with phase-level and brain-stage timing.");
+    println!();
+    println!("Usage:");
+    println!(
+        "  cargo run -p world-sim --release --features profiling --example profile_turn_path -- [options]"
+    );
+    println!();
+    println!("Options:");
+    println!("  --turns <u32>                Number of measured turns (default: 1000)");
+    println!("  --warmup-turns <u32>         Warmup turns before reset (default: 200)");
+    println!("  --seed <u64>                 Simulation seed (default: 42)");
+    println!("  --config <path>              Load world+seed config from TOML path");
+}
+
+#[cfg(feature = "profiling")]
+fn print_report(
+    args: Args,
+    config: &WorldConfig,
+    snapshot: &ProfilingSnapshot,
+    wall_elapsed: Duration,
+) {
+    let tick_ns = snapshot.tick_total.total_ns.max(1);
+    let wall_ns = duration_to_ns(wall_elapsed);
+
+    println!("== world-sim turn profile ==");
+    if let Some(path) = args.config.as_ref() {
+        println!("config_path: {}", path.display());
+    } else {
+        println!("config_path: <WorldConfig::perf_fixture>");
+    }
+    println!("turns: {}", args.turns);
+    println!("warmup_turns: {}", args.warmup_turns);
+    println!("seed: {}", args.seed);
+    println!(
+        "config_summary: world_width={} num_organisms={} vision_range={} neurons={} synapses={} runtime_plasticity_enabled={} intent_parallel_threads={}",
+        config.world_width,
+        config.num_organisms,
+        config.vision_range,
+        config.seed_genome_config.num_neurons,
+        config.seed_genome_config.num_synapses,
+        config.runtime_plasticity_enabled,
+        config.intent_parallel_threads,
+    );
+    println!("wall_time_ms: {:.3}", ns_to_ms(wall_ns));
+    println!(
+        "avg_wall_us_per_turn: {:.3}",
+        wall_ns as f64 / args.turns as f64 / 1_000.0
+    );
+    println!(
+        "instrumented_tick_total_ms: {:.3}",
+        ns_to_ms(snapshot.tick_total.total_ns)
+    );
+    println!();
+
+    let mut turn_rows = vec![
+        ("intents", snapshot.intents),
+        ("commit", snapshot.commit),
+        ("reproduction", snapshot.reproduction),
+        ("move_resolution", snapshot.move_resolution),
+        ("snapshot", snapshot.snapshot),
+        ("lifecycle", snapshot.lifecycle),
+        ("spawn", snapshot.spawn),
+        ("prune_species", snapshot.prune_species),
+        ("consistency_check", snapshot.consistency_check),
+        ("metrics_and_delta", snapshot.metrics_and_delta),
+        ("age", snapshot.age),
+    ];
+    turn_rows.sort_by(|a, b| b.1.total_ns.cmp(&a.1.total_ns));
+
+    println!("-- Turn Phase Breakdown (sorted by total time) --");
+    println!(
+        "{:<24} {:>12} {:>10} {:>14}",
+        "phase", "total_ms", "%tick", "avg_us/call"
+    );
+    for (label, counter) in turn_rows {
+        println!(
+            "{:<24} {:>12.3} {:>9.2}% {:>14.3}",
+            label,
+            ns_to_ms(counter.total_ns),
+            pct(counter.total_ns, tick_ns),
+            avg_us(counter)
+        );
+    }
+    println!();
+
+    println!("-- Brain Totals --");
+    println!(
+        "{:<24} {:>12} {:>10} {:>14} {:>10}",
+        "section", "total_ms", "%intents", "avg_us/call", "calls"
+    );
+    println!(
+        "{:<24} {:>12.3} {:>9.2}% {:>14.3} {:>10}",
+        "evaluate_brain_total",
+        ns_to_ms(snapshot.brain_eval_total.total_ns),
+        pct(
+            snapshot.brain_eval_total.total_ns,
+            snapshot.intents.total_ns.max(1)
+        ),
+        avg_us(snapshot.brain_eval_total),
+        snapshot.brain_eval_total.calls
+    );
+    println!(
+        "{:<24} {:>12.3} {:>9.2}% {:>14.3} {:>10}",
+        "apply_plasticity_total",
+        ns_to_ms(snapshot.brain_plasticity_total.total_ns),
+        pct(
+            snapshot.brain_plasticity_total.total_ns,
+            snapshot.intents.total_ns.max(1)
+        ),
+        avg_us(snapshot.brain_plasticity_total),
+        snapshot.brain_plasticity_total.calls
+    );
+    println!();
+
+    let mut brain_rows = vec![
+        ("inter_accumulation", snapshot.brain_inter_accumulation),
+        ("action_accumulation", snapshot.brain_action_accumulation),
+        (
+            "plasticity_inter_tuning",
+            snapshot.brain_plasticity_inter_tuning,
+        ),
+        (
+            "plasticity_sensory_tuning",
+            snapshot.brain_plasticity_sensory_tuning,
+        ),
+        ("inter_activation", snapshot.brain_inter_activation),
+        (
+            "action_activation_resolve",
+            snapshot.brain_action_activation_resolve,
+        ),
+        ("scan_ahead", snapshot.brain_scan_ahead),
+        ("sensory_encoding", snapshot.brain_sensory_encoding),
+        ("inter_setup", snapshot.brain_inter_setup),
+        ("plasticity_setup", snapshot.brain_plasticity_setup),
+        ("plasticity_prune", snapshot.brain_plasticity_prune),
+    ];
+    brain_rows.sort_by(|a, b| b.1.total_ns.cmp(&a.1.total_ns));
+
+    println!("-- Brain Stage Breakdown (sorted by total time) --");
+    println!(
+        "{:<28} {:>12} {:>10} {:>14} {:>10}",
+        "stage", "total_ms", "%brain", "avg_us/call", "calls"
+    );
+    let brain_total_ns = brain_rows
+        .iter()
+        .map(|(_, counter)| counter.total_ns)
+        .sum::<u64>()
+        .max(1);
+    for (label, counter) in brain_rows {
+        println!(
+            "{:<28} {:>12.3} {:>9.2}% {:>14.3} {:>10}",
+            label,
+            ns_to_ms(counter.total_ns),
+            pct(counter.total_ns, brain_total_ns),
+            avg_us(counter),
+            counter.calls
+        );
+    }
+}
+
+#[cfg(feature = "profiling")]
+fn avg_us(counter: PhaseCounterSnapshot) -> f64 {
+    if counter.calls == 0 {
+        return 0.0;
+    }
+    counter.total_ns as f64 / counter.calls as f64 / 1_000.0
+}
+
+#[cfg(feature = "profiling")]
+fn ns_to_ms(ns: u64) -> f64 {
+    ns as f64 / 1_000_000.0
+}
+
+#[cfg(feature = "profiling")]
+fn pct(part: u64, whole: u64) -> f64 {
+    if whole == 0 {
+        return 0.0;
+    }
+    part as f64 * 100.0 / whole as f64
+}
+
+#[cfg(feature = "profiling")]
+fn duration_to_ns(duration: Duration) -> u64 {
+    duration.as_nanos().min(u128::from(u64::MAX)) as u64
+}

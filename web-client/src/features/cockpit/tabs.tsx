@@ -1,4 +1,4 @@
-// The research-cockpit read tabs — each surfaces one sim-cli read (pillars, eco,
+// The research-cockpit read tabs — each surfaces one cli read (pillars, eco,
 // lineage, genome, timeseries, find) as a designed panel. They fetch the live
 // server endpoints and reflect the world file's last-persisted state (see
 // `useWorldRead`). Styling matches the inspector: mono numerics, tracked labels.
@@ -140,7 +140,7 @@ export function EcologyTab({ worldName, revision, active }: TabProps) {
             <Stat label="Population" value={fmtInt(e.population)} />
             <Stat label="Descendants" value={fmtInt(e.descendants)} />
             <Stat label="Plants" value={fmtInt(e.food.plants)} />
-            <Stat label="Corpses" value={fmtInt(e.food.corpses)} />
+            <Stat label="Plant Energy" value={fmtInt(e.food.total_energy)} />
           </div>
           {!e.trajectory ? (
             <p className="text-[11px] text-ink/35">{e.note ?? 'Advance the world to record a trajectory.'}</p>
@@ -414,7 +414,7 @@ export function FindTab({
           </button>
         </div>
         <p className="text-[10px] leading-4 text-ink/30">
-          Fields: id energy health age generation species consumptions plant prey
+          Fields: id energy energy_flow age generation species consumptions plant prey
           neurons synapses vision hebb_eta. Operators: &lt; &lt;= &gt; &gt;= == != · join
           with and/or.
         </p>

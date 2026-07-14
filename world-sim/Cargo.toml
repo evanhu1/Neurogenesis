@@ -1,0 +1,38 @@
+[package]
+name = "world-sim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+profiling = ["brain/profiling"]
+instrumentation = ["brain/instrumentation", "types/instrumentation", "dep:metrics"]
+
+[dependencies]
+anyhow.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ciborium.workspace = true
+thiserror.workspace = true
+rand_distr.workspace = true
+ring = "0.17.14"
+brain = { path = "../brain" }
+config = { path = "../config" }
+metrics = { path = "../metrics", optional = true }
+types = { path = "../types" }
+rayon = "1.10"
+
+[dev-dependencies]
+serde_json.workspace = true
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "turn_throughput"
+harness = false
+
+[[example]]
+name = "profile_turn_path"
+path = "profiling/profile_turn_path.rs"

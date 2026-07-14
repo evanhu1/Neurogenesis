@@ -92,11 +92,8 @@ export function InspectorContent({
       coreStats: [
         { label: 'Age', value: String(focusedOrganism.age_turns) },
         { label: 'Gen', value: String(focusedOrganism.generation) },
-        {
-          label: 'Health',
-          value: `${formatFloat(focusedOrganism.health, 1)} / ${formatFloat(focusedOrganism.max_health, 1)}`,
-        },
-        { label: 'Energy', value: formatFloat(focusedOrganism.energy, 2) },
+        { label: 'Energy', value: String(focusedOrganism.energy) },
+        { label: 'Last Flow', value: String(focusedOrganism.energy_flow_last_tick) },
         { label: 'Action', value: focusedOrganism.last_action_taken },
         { label: 'Plants', value: String(focusedOrganism.plant_consumptions_count) },
         { label: 'Prey', value: String(focusedOrganism.prey_consumptions_count) },
@@ -109,10 +106,7 @@ export function InspectorContent({
       genomeStats: [
         { label: 'Neurons', value: String(genome.brain.hidden_nodes.length) },
         { label: 'Synapses', value: String(genome.brain.edges.filter((edge) => edge.enabled).length) },
-        { label: 'Vision', value: String(genome.topology.vision_distance) },
-        { label: 'Maturity', value: String(genome.lifecycle.age_of_maturity) },
-        { label: 'Gestation', value: String(genome.lifecycle.gestation_ticks) },
-        { label: 'Max Age', value: String(genome.lifecycle.max_organism_age) },
+        { label: 'Plasticity Maturity', value: String(genome.lifecycle.plasticity_maturity_ticks) },
         { label: 'Hebb Gain', value: formatFloat(genome.plasticity.hebb_eta_gain, 3) },
         { label: 'Juvenile Eta', value: formatFloat(genome.plasticity.juvenile_eta_scale, 3) },
         { label: 'Elig Ret', value: formatFloat(genome.plasticity.eligibility_retention, 3) },

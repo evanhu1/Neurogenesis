@@ -6,7 +6,7 @@ license.workspace = true
 
 [features]
 default = []
-instrumentation = ["sim-core/instrumentation", "sim-types/instrumentation"]
+instrumentation = ["world-sim/instrumentation", "types/instrumentation"]
 
 [dependencies]
 anyhow.workspace = true
@@ -21,10 +21,10 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
 tower-http.workspace = true
-sim-config = { path = "../sim-config" }
-sim-core = { path = "../sim-core" }
-sim-types = { path = "../sim-types" }
-sim-views = { path = "../sim-views" }
+config = { path = "../config" }
+world-sim = { path = "../world-sim" }
+types = { path = "../types" }
+views = { path = "../views" }
 
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json"] }

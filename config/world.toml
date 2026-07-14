@@ -1,0 +1,28 @@
+[world]
+world_width = 50 # Toroidal world width used for both axial dimensions of the hex grid.
+vision_range = 5 # Fixed number of cells scanned along each of the six egocentric vision rays.
+
+[population]
+num_organisms = 100 # Target number of organisms to place when seeding the initial population.
+
+[lifecycle]
+starting_energy = 250 # Remaining lifetime ticks assigned to every founder.
+attack_energy_transfer = 10 # Maximum energy ticks conserved from victim to attacker per successful adjacent attack.
+action_temperature = 0.08 # Softmax temperature for action sampling; lower values make choices more deterministic.
+intent_parallel_threads = 8 # Worker threads used during the intent-evaluation phase.
+
+[food]
+food_energy = 20 # Energy a plant yields when eaten (transferred in full; no digestion multiplier).
+food_regrowth_interval = 200 # Exact turns between consumption and deterministic regrowth eligibility.
+food_tile_fraction = 0.20 # Exact fraction of non-wall cells selected as persistent plant tiles by a deterministic random ranking.
+
+[terrain]
+terrain_noise_scale = 0.01 # Perlin noise input scale for terrain-wall generation.
+terrain_threshold = 0.70 # Noise cutoff for turning a cell into impassable wall terrain.
+
+# Flags for running experiments.
+[flags]
+runtime_plasticity_enabled = false # Whether runtime Hebbian plasticity updates are applied after each tick.
+leaky_neurons_enabled = false # Whether feed-forward hidden units also retain explicit leaky state across ticks.
+predation_enabled = true # Gives organism ray hits a -1 affordance and enables Attack as direct conserved energy theft.
+force_random_actions = false # Debug toggle that ignores policy logits and forces random actions.

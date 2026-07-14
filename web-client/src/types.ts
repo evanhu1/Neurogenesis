@@ -1,4 +1,4 @@
-// Wire (`Api*`) types mirror the Rust schema exactly (sim-types + sim-server/protocol).
+// Wire (`Api*`) types mirror the Rust schema exactly (types + sim-server/protocol).
 // UI types are identical except scalar ids are unwrapped to plain numbers; both views
 // are generated from shared `...Of<Id>` shapes so they cannot drift apart.
 
@@ -27,7 +27,6 @@ export type ActionType =
   | 'Eat'
   | 'Attack';
 
-export type FoodKind = 'Plant' | 'Corpse';
 export type TerrainType = 'Mountain';
 
 export type NeuronType = 'Sensory' | 'Inter' | 'Action';
@@ -40,14 +39,8 @@ export type FacingDirection =
   | 'SouthWest'
   | 'SouthEast';
 
-export type TopologyGenes = {
-  vision_distance: number;
-};
-
 export type LifecycleGenes = {
-  age_of_maturity: number;
-  gestation_ticks: number;
-  max_organism_age: number;
+  plasticity_maturity_ticks: number;
 };
 
 export type PlasticityGenes = {
@@ -62,10 +55,7 @@ export type PlasticityGenes = {
 export type SeedGenomeConfig = {
   num_neurons: number;
   num_synapses: number;
-  vision_distance: number;
-  age_of_maturity: number;
-  gestation_ticks: number;
-  max_organism_age: number;
+  plasticity_maturity_ticks: number;
   hebb_eta_gain: number;
   juvenile_eta_scale: number;
   eligibility_retention: number;
@@ -75,15 +65,14 @@ export type SeedGenomeConfig = {
 
 export type WorldConfig = {
   world_width: number;
+  vision_range: number;
   num_organisms: number;
+  starting_energy: number;
+  attack_energy_transfer: number;
   food_energy: number;
-  passive_metabolism_cost_per_unit: number;
-  body_mass_metabolic_cost_coeff: number;
-  move_action_energy_cost: number;
   action_temperature: number;
   intent_parallel_threads: number;
   food_regrowth_interval: number;
-  food_regrowth_jitter: number;
   food_tile_fraction: number;
   terrain_noise_scale: number;
   terrain_threshold: number;
@@ -91,10 +80,6 @@ export type WorldConfig = {
   leaky_neurons_enabled: boolean;
   predation_enabled: boolean;
   force_random_actions: boolean;
-  protocol_cache_enabled: boolean;
-  cache_energy_fraction: number;
-  cache_release_efficiency: number;
-  protocol_interaction_energy_cost: number;
   seed_genome_config: SeedGenomeConfig;
 };
 
@@ -133,7 +118,6 @@ export type BrainTopologyGenes = {
 };
 
 export type OrganismGenome = {
-  topology: TopologyGenes;
   lifecycle: LifecycleGenes;
   plasticity: PlasticityGenes;
   brain: BrainTopologyGenes;
@@ -152,11 +136,10 @@ export type ApiNeuronState = NeuronStateOf<ApiScalarId>;
 export type NeuronState = NeuronStateOf<NeuronId>;
 
 export type SensoryReceptor =
-  | { receptor_type: 'FoodRay'; ray_offset: number }
-  | { receptor_type: 'ContactAhead' }
-  | { receptor_type: 'Energy' }
-  | { receptor_type: 'OrganismRay'; ray_offset: number }
-  | { receptor_type: 'Health' };
+  | { receptor_type: 'RayProximity'; ray_offset: number }
+  | { receptor_type: 'RayEnergyAffordance'; ray_offset: number }
+  | { receptor_type: 'SelfEnergy' }
+  | { receptor_type: 'EnergyFlowLastTick' };
 
 type SensoryNeuronStateOf<Id> = {
   neuron: NeuronStateOf<Id>;
@@ -203,15 +186,12 @@ type OrganismStateOf<Id> = {
   age_turns: number;
   facing: FacingDirection;
   energy: number;
-  health: number;
-  max_health: number;
   energy_at_last_sensing: number;
-  damage_taken_last_turn: number;
+  energy_flow_last_tick: number;
   consumptions_count: number;
   plant_consumptions_count: number;
   prey_consumptions_count: number;
   last_action_taken: ActionType;
-  base_metabolic_cost: number;
   brain: BrainStateOf<Id>;
   genome: OrganismGenome;
 };
@@ -228,9 +208,7 @@ type WorldOrganismStateOf<Id> = {
   age_turns: number;
   facing: FacingDirection;
   energy: number;
-  health: number;
-  max_health: number;
-  damage_taken_last_turn: number;
+  energy_flow_last_tick: number;
   consumptions_count: number;
   plant_consumptions_count: number;
   prey_consumptions_count: number;
@@ -245,7 +223,6 @@ type FoodStateOf<Id> = {
   q: number;
   r: number;
   energy: number;
-  kind: FoodKind;
   visual: VisualProperties;
 };
 
@@ -258,32 +235,17 @@ export type EnergyLedgerRow = {
   organism_energy_after: number;
   food_energy_before: number;
   food_energy_after: number;
-  artifact_energy_before: number;
-  artifact_energy_after: number;
   plant_spawn_energy: number;
-  passive_metabolism_energy: number;
-  action_cost_energy: number;
+  tick_drain_energy: number;
   food_consumption_debit: number;
   food_consumption_credit: number;
-  food_to_artifact_credit: number;
-  artifact_release_debit: number;
-  artifact_release_credit: number;
-  artifact_release_loss: number;
-  protocol_interaction_cost_energy: number;
-  predation_prey_energy_removed: number;
-  predation_energy_credit: number;
-  predation_retention_loss: number;
-  corpse_source_energy_removed: number;
-  corpse_spawn_energy: number;
-  corpse_retention_loss: number;
-  unrecycled_energy_removed: number;
-  removal_adjustment: number;
+  attack_transfer_debit: number;
+  attack_transfer_credit: number;
   organism_residual: number;
   food_residual: number;
-  artifact_residual: number;
   total_residual: number;
-  food_split_transfer_residual: number;
-  artifact_release_transfer_residual: number;
+  food_transfer_residual: number;
+  attack_transfer_residual: number;
   transfer_residual: number;
   residual_tolerance: number;
 };
@@ -508,7 +470,7 @@ export type EcoView = {
   turn: number;
   population: number;
   descendants: number;
-  food: { plants: number; corpses: number; total_energy: number };
+  food: { plants: number; total_energy: number };
   trajectory: EcoTrajectory | null;
   note?: string;
 };

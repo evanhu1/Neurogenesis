@@ -1,0 +1,16 @@
+[package]
+name = "views"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ciborium.workspace = true
+toml.workspace = true
+config = { path = "../config" }
+world-sim = { path = "../world-sim", features = ["instrumentation"] }
+types = { path = "../types", features = ["instrumentation"] }
+metrics = { path = "../metrics" }

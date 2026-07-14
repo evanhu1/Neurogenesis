@@ -1,0 +1,15 @@
+[package]
+name = "brain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+profiling = []
+instrumentation = ["types/instrumentation"]
+
+[dependencies]
+rand.workspace = true
+rand_distr.workspace = true
+types = { path = "../types" }

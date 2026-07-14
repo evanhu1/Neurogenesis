@@ -1,4 +1,4 @@
-.PHONY: fmt lint test check perf-test evaluate web-install web-build start
+.PHONY: fmt lint test check perf-test neat web-install web-build start
 
 fmt:
 	cargo fmt --all
@@ -13,10 +13,10 @@ test:
 	cargo test --workspace
 
 perf-test:
-	cargo test -p sim-core --release performance_regression -- --ignored --nocapture
+	cargo test -p world-sim --release performance_regression -- --ignored --nocapture
 
-evaluate:
-	cargo run -p sim-evaluation --release -- $(ARGS)
+neat:
+	cargo run -p cli --release -- neat $(ARGS)
 
 web-install:
 	cd web-client && npm install

@@ -1,0 +1,13 @@
+[package]
+name = "types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+instrumentation = []
+
+[dependencies]
+serde.workspace = true
+strum = { version = "0.27", features = ["derive"] }

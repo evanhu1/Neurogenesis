@@ -10,27 +10,21 @@ const defaultOutputDir = path.join(repoRoot, "artifacts", "llm-context");
 const targets = [
   {
     key: "brain",
-    source: "sim-core/src/brain.rs",
+    source: "brain/src/lib.rs",
     output: "brain_context.rs",
-    title: "sim-core brain module",
+    title: "brain crate",
   },
   {
-    key: "genome",
-    source: "sim-core/src/genome.rs",
-    output: "genome_context.rs",
-    title: "sim-core genome module",
+    key: "world",
+    source: "world-sim/src/lib.rs",
+    output: "world_sim_context.rs",
+    title: "world simulation crate",
   },
   {
-    key: "turn",
-    source: "sim-core/src/turn.rs",
-    output: "turn_context.rs",
-    title: "sim-core turn module",
-  },
-  {
-    key: "evaluation",
-    source: "sim-evaluation/src/main.rs",
-    output: "evaluation_context.rs",
-    title: "sim-evaluation module",
+    key: "evolution",
+    source: "evolution/src/lib.rs",
+    output: "evolution_context.rs",
+    title: "evolution crate",
   },
 ];
 
@@ -100,12 +94,16 @@ async function resolveChildModulePath(parentRelativePath, moduleName) {
 
   const nestedModulePath = path.join(parentDirectory, parentBaseName, `${moduleName}.rs`);
   const siblingModulePath = path.join(parentDirectory, `${moduleName}.rs`);
+  const directoryModulePath = path.join(parentDirectory, moduleName, "mod.rs");
 
   if (await fileExists(nestedModulePath)) {
     return nestedModulePath;
   }
   if (await fileExists(siblingModulePath)) {
     return siblingModulePath;
+  }
+  if (await fileExists(directoryModulePath)) {
+    return directoryModulePath;
   }
   throw new Error(
     `Unable to resolve module '${moduleName}' declared from '${parentRelativePath}'`,

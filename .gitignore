@@ -7,9 +7,11 @@ web-client/dist/
 .vscode/
 sim-server/champion_pool.json
 sim-server/worlds/
-artifacts/
+/artifacts/*
+!/artifacts/research/
+/artifacts/research/*
+!/artifacts/research/README.md
 .autoresearch_archive/
-sim-evaluation/reports/
 # Stray scratch worlds at the repo root (put real worlds under artifacts/)
 /in.bin
 /in.metrics

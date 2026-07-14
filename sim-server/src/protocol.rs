@@ -2,10 +2,10 @@
 //! the client-facing views the server serializes over HTTP + the WebSocket
 //! animation stream. Render-shaped organism/food/terrain data only — the
 //! CLI-parity research reads (state/pillars/inspect/brain/…) are produced by
-//! `sim-views` and forwarded as raw JSON, so they have no structs here.
+//! `views` and forwarded as raw JSON, so they have no structs here.
 
 use serde::{Deserialize, Serialize};
-use sim_types::{
+use types::{
     organism_visual, FacingDirection, FoodState, MetricsSnapshot, OrganismFacing, OrganismGenome,
     OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId, TerrainCell,
     TickDelta, VisualProperties, WorldSnapshot,
@@ -28,10 +28,8 @@ pub struct WorldOrganismState {
     pub generation: u64,
     pub age_turns: u64,
     pub facing: FacingDirection,
-    pub energy: f32,
-    pub health: f32,
-    pub max_health: f32,
-    pub damage_taken_last_turn: f32,
+    pub energy: u32,
+    pub energy_flow_last_tick: i32,
     pub consumptions_count: u64,
     pub plant_consumptions_count: u64,
     pub prey_consumptions_count: u64,
@@ -49,9 +47,7 @@ impl From<&OrganismState> for WorldOrganismState {
             age_turns: organism.age_turns,
             facing: organism.facing,
             energy: organism.energy,
-            health: organism.health,
-            max_health: organism.max_health,
-            damage_taken_last_turn: organism.damage_taken_last_turn,
+            energy_flow_last_tick: organism.energy_flow_last_tick,
             consumptions_count: organism.consumptions_count,
             plant_consumptions_count: organism.plant_consumptions_count,
             prey_consumptions_count: organism.prey_consumptions_count,
@@ -66,7 +62,7 @@ impl From<&OrganismState> for WorldOrganismState {
 pub struct WorldSnapshotView {
     pub turn: u64,
     pub rng_seed: u64,
-    pub config: sim_types::WorldConfig,
+    pub config: types::WorldConfig,
     pub organisms: Vec<WorldOrganismState>,
     pub foods: Vec<FoodState>,
     pub terrain: Vec<TerrainCell>,
@@ -135,7 +131,7 @@ pub enum StreamFrame {
 pub struct OrganismDetail {
     pub turn: u64,
     pub organism: OrganismState,
-    pub active_action_neuron_id: Option<sim_types::NeuronId>,
+    pub active_action_neuron_id: Option<types::NeuronId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -146,7 +142,7 @@ pub struct ChampionPoolEntry {
     pub generation: u64,
     pub age_turns: u64,
     pub consumptions_count: u64,
-    pub energy: f32,
+    pub energy: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

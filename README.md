@@ -1,193 +1,107 @@
-<div align="center">
+# NeuroGenesis
 
-# Neurogenesis
+NeuroGenesis is a deterministic artificial-life research substrate. A hex-grid
+world evaluates organisms driven by evolvable neural networks; a separate
+generational NEAT loop mutates, recombines, speciates, and selects their genomes.
+Given a configuration and seed, every world and evolutionary run is reproducible.
 
-### Watch brains evolve from nothing
+The project currently studies whether competitive neuroevolution can keep
+discovering stronger, behaviorally distinct strategies rather than merely
+optimizing one fixed behavior.
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/evanhu1/Neurogenesis)
+## What runs where
 
-This is a neuroevolution artificial-life simulation built in Rust. 2,000 digital
-creatures spawn into a world with the simplest possible brains: **zero hidden
-neurons and ten synapses.** Then ecology (energy, food, predators, and death)
-and evolution (mutation and selection) "train" intelligent brains over thousands
-of generations.
-
-![A live Neurogenesis run: each triangle is an organism driven by its own neural network. The right panel shows the live brain of a selected organism.](docs/demo.gif)
-
-_In this demo run, ~1,300 generations evolved brains to **9 inter neurons and
-25+ synapses**, learning to search for food, predate other organisms and run
-from predators._
-
-</div>
-
-## How brains evolve
-
-The seed genome has **0 inter neurons**. There is no hidden layer at the start;
-sensors wire straight to actions. Over generations, NEAT-style structural
-mutations add neurons and synapses, runtime plasticity tunes the weights during
-each organism's lifetime, and selection decides what was worth the metabolic
-cost.
-
-|                              The world up close                              |                                      A brain, mid-life                                      |
-| :--------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------: |
-| ![Close-up of the hex world: organisms, plants, and terrain](docs/world.png) | ![Organism inspector showing live stats and the evolved neural network](docs/inspector.png) |
-
-## Why
-
-The brain is the only existence proof of general intelligence, and it was
-produced by evolution. It took ~600 million years from the first neuron, but
-nature had to solve problems we don't: physical embodiment, scarce energy,
-generation times measured in years, and 2 billion years just to assemble the
-molecular machinery of reproduction itself.
-
-Evolution _in silico_ rewrites those constraints. Generations take seconds,
-populations are observable down to the synapse, and any run can be replayed
-exactly from its seed. Can a well-designed evolutionary search over brain-like
-systems be a path to AGI? This project is an attempt to find out.
-
-## Core features
-
-**The engine**
-
-- Deterministic and multithreaded at the same time: every random choice is a
-  stateless hash of `(seed, turn, organism IDs)`, so the parallel plasticity
-  pass cannot reorder history. Fixed config + seed reproduces the same world,
-  tick for tick, on a given build.
-- Thousands of ticks per second of whole-world simulation on a laptop (a
-  30-second Fast-mode burst covered 230,000 ticks, ~7,700 t/s). The tick hot
-  path is allocation-conscious Rust: parallel vectors, binary search, and
-  rejection sampling instead of hash maps and scans.
-- A Criterion benchmark (`turn_throughput`) tracks engine speed.
-
-**The brain**
-
-- Lifetime learning is **unsupervised Hebbian plasticity** — no reward, no value
-  head, no dopamine. A covariance rule (Δw = η·eligibility − decay·w)
-  accumulates centered pre/post coactivation into a per-synapse eligibility
-  trace, decayed by an evolvable retention gene. The same rule runs everywhere:
-  between inter neurons and at the motor boundary (inter→action), where the
-  squashed action logit stands in as the postsynaptic activation.
-- Juveniles learn at 2× the adult rate (an evolvable critical period); synapse
-  pruning only activates at maturity.
-- Thinking costs energy. Metabolism scales with neuron count and vision range,
-  plus Kleiber mass^0.75 body scaling, so every neuron a lineage keeps has to
-  pay for itself.
-- The interface to the world: 18 sensory neurons in (3 vision rays × 4 channels
-  of RGB + shape, plus contact, energy, health, energy flux, and
-  proprioception), 6 action neurons out (turn, move, eat, attack, reproduce),
-  selected by softmax sampling.
-
-**Evolution**
-
-- NEAT-style structural mutation: add a synapse, remove a synapse, split an edge
-  into a new neuron. New synapses are drawn uniformly at random from the
-  unconnected (pre, post) pairs.
-- Meta-mutation: per-operator mutation rates are themselves genes.
-- A persistent champion pool seeds new worlds from the best genomes of past
-  sessions, and periodic injections of fresh seed genomes keep diversity
-  flowing.
-
-**The ecology**
-
-- A 250×250 toroidal hex grid with Perlin-noise terrain walls, a hidden
-  fertility map, and event-driven plant regrowth. One entity per cell.
-- Energy enters only as plants (a fixed yield each) and drains through
-  metabolism; eating transfers an item's energy in full. There is no population
-  cap — thermodynamics regulates the population.
-- Predation is real and every kill leaves a corpse worth eating, so death feeds
-  the food web — a corpse carries 80% of its owner's leftover energy.
-- No species registry, no speciation bookkeeping, no hand-written fitness
-  target. Selection pressure comes from the ecology itself.
-
-## Run it in 60 seconds
-
-Prerequisites: Rust toolchain + Node.js.
-
-```bash
-# 1. Backend
-cargo run -p sim-server
-
-# 2. Frontend (new shell; npm install on first run)
-cd web-client && npm install && npm run dev
-
-# 3. Open http://127.0.0.1:5173 and press Run
+```
+config/       canonical world.toml and seed_genome.toml
+types/        shared wire/domain types
+brain/        genomes, expression, feed-forward evaluation, plasticity
+world-sim/    deterministic world, sensing, metabolism, tick pipeline
+evolution/    NEAT population management and competitive evaluation
+metrics/      raw observation facts and derived behavioral metrics
+views/        shared inspection and output rendering
+cli/          headless research interface
+sim-server/ + web-client/   optional interactive viewer
+research/     tracked experiment record and proposed work
 ```
 
-![The Neurogenesis lab: world view, population telemetry, simulation controls, and the organism inspector](docs/hero.png)
+`config/world.toml` and `config/seed_genome.toml` are the only baseline
+configuration files. Generated worlds and experiment outputs belong under
+`artifacts/`; the human-readable research record belongs under `research/`.
 
-Things to try:
+## Model
 
-- **Fast mode** — rendering pauses and the engine runs flat out (hundreds of
-  thousands of ticks in minutes). Switch back to live view to inspect what the
-  population evolved during the burst.
-- **Click an organism** — live brain activity, genome, and per-operator mutation
-  rates.
-- **Save champions** — the server keeps a persistent champion-genome pool and
-  bootstraps new worlds from it, so progress compounds across sessions.
+An organism observes six egocentric rays. Each ray supplies a proximity signal
+and a signed energy-affordance signal; it also sees its own normalized energy
+and the energy gained or lost on the previous tick. Its controller is a
+feed-forward neural network by default: activations do not carry through time.
+The optional leaky-neuron and Hebbian-plasticity flags add explicitly configured
+within-lifetime state and learning.
 
-## Measuring whether intelligence is actually emerging
+The world uses a simple conserved-energy economy:
 
-`sim-evaluation` runs multi-seed, hundreds-of-thousands-of-ticks benchmarks
-where the sim emits raw facts to partitioned Parquet and every metric is derived
-post-hoc. The report card is four deliberately hard-to-game competence axes,
-each pooled from descendant lifetimes: **foraging** and **predation**
-(plant/prey consumptions per action), **intelligence** (successful action rate ×
-Miller-Madow mutual information MI(S;A) between sensed state and action), and
-**learning** (within-life slope of action success vs age — does the organism
-improve over its own lifetime?). Change the analysis and re-derive every report
-without re-running the experiment. A random-action control (`--control`) keeps
-the numbers honest — it should score ≈0 on every axis (MI and the learning slope
-both collapse to zero under random behaviour).
+- Every organism loses one energy per tick and dies at zero.
+- Eating a plant transfers the plant's full energy to the eater.
+- A successful adjacent attack transfers up to `attack_energy_transfer` from
+  victim to attacker.
+- Food tiles regrow deterministically after their configured interval.
 
-![Evaluation report with pillar scores for foraging, predation, intelligence, and learning](docs/evaluation.png)
+There is no reproduction inside a world. A finite simulation episode is an
+evaluator. The `evolution` crate owns all genetic change between generations.
+
+## Research workflow
+
+Build the CLI, create a world, advance it, then inspect its raw behavior.
 
 ```bash
-# Default 8-seed evolution-loop benchmark → report.html / timeseries.csv / summary.json
-cargo run -p sim-evaluation --release --
+cargo build -p cli --release
 
-# Custom seeds
-cargo run -p sim-evaluation --release -- --seed 42,123,7
-
-# Random-action control (should score ~0 on every pillar)
-cargo run -p sim-evaluation --release -- --control
-
-# Quick smoke run
-cargo run -p sim-evaluation --release -- --ticks 1000 --report-every 250
-
-# Re-derive reports from a persisted dataset without re-running the sim
-cargo run -p sim-evaluation --release -- analyze latest
-cargo run -p sim-evaluation --release -- analyze 20260416T002137Z   # timestamp prefix
-cargo run -p sim-evaluation --release -- analyze <path>             # run root or seed dir
+./target/release/cli new --seed 7 --out artifacts/worlds/example.bin
+./target/release/cli run-to 5000 --in artifacts/worlds/example.bin
+./target/release/cli pillars --in artifacts/worlds/example.bin
+./target/release/cli top energy 10 --in artifacts/worlds/example.bin
 ```
 
-Artifacts land under `artifacts/evaluation/...`.
+Run canonical generational NEAT through the same CLI:
+
+```bash
+cargo run -p cli --release -- neat \
+  --population 24 --generations 50 --episode-horizons 5000 \
+  --world-seeds 7,17,27,37 --out-dir artifacts/research/runs
+```
+
+The result JSON contains each generation's population evaluations, champion,
+species statistics, behavioral diagnostics, and the complete frozen world/NEAT
+contract. `neat analyze RESULT.json` and `neat crossplay RESULT.json` derive
+trajectory and historical-competition diagnostics without silently changing the
+evolutionary run.
+
+Read [docs/cli.md](docs/cli.md) before using the CLI: it explains the
+world-as-file model, sidecar metrics, commands, and their semantics.
 
 ## Development
 
 ```bash
-cargo check --workspace   # fast compile check
-cargo test --workspace    # run all tests
-make fmt                  # format
-make lint                 # clippy, warnings as errors
-cargo bench -p sim-core --bench turn_throughput   # engine throughput benchmark
+cargo check --workspace
+cargo test --workspace
+make fmt
+make lint
+cd web-client && npm run typecheck && npm run build
 ```
 
-Workspace layout: `sim-types` (shared domain types), `sim-config` (world +
-seed-genome TOML baselines), `sim-core` (the deterministic engine), `sim-server`
-(Axum HTTP + WebSocket), `web-client` (React + Tailwind + Vite canvas UI),
-`sim-evaluation` (headless evaluation harness).
+The canonical tick order is in
+`world-sim/src/turn/mod.rs::Simulation::tick`. Preserve determinism whenever
+changing that code: tie-breaking and action/predation sampling must remain
+independent of thread scheduling.
 
-The canonical tick order lives in `sim-core/src/turn/mod.rs::Simulation::tick`;
-treat it as the source of truth for phase ordering.
+For the interactive viewer:
 
-Server flags:
+```bash
+cargo run -p sim-server
+cd web-client && npm run dev
+```
 
-- `--champion-pool-path <path>` — override the default `champion_pool.json` used
-  for champion persistence.
-- `--seed-genome-snapshot <path.bin>` — boot every organism from a single
-  evaluation-snapshot genome (`.../genomes/tNNNNNN.bin`); champion saves no-op
-  for the session.
+## Research record
 
-Config baselines live in `sim-config/config.toml` and
-`sim-config/seed_genome.toml` (the evaluation copies in `sim-evaluation/` are
-kept in sync with them).
+[research/README.md](research/README.md) explains the tracked experiment atlas,
+how results are archived, and how new proposals are registered. The standing
+research question and current evidence are in [research/BRIEF.md](research/BRIEF.md).
