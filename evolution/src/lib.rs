@@ -1797,8 +1797,56 @@ fn evaluate_population_three_lineages(
         }
     }
     for index in 0..population.len() {
-        if all_cases[index].is_empty() || diagnostic_cases[index].is_empty() {
+        if all_cases[index].is_empty() {
             bail!("balanced three-lineage evaluator produced incomplete cases for genome {index}");
+        }
+        if diagnostic_cases[index].is_empty() {
+            // A triadic membership records direct behavioral facts only for its
+            // instrumented lineage. With fewer than three seed/scenario/horizon
+            // cases per membership, a deterministic slot rotation can still
+            // leave a genome uninstrumented across all of its otherwise valid
+            // competitive cases. Fitness is complete and must not change here;
+            // replay one of that genome's actual triples solely to recover its
+            // observational action/ecology diagnostics.
+            let member_indices = groups
+                .iter()
+                .copied()
+                .find(|members| members.contains(&index))
+                .expect("every balanced three-lineage genome has a membership");
+            let focal_position = member_indices
+                .iter()
+                .position(|&member| member == index)
+                .expect("selected membership contains the focal genome");
+            let opponent_positions = (0..3)
+                .filter(|&position| position != focal_position)
+                .collect::<Vec<_>>();
+            let opponents = opponent_positions
+                .iter()
+                .map(|&position| snapshot[member_indices[position]].clone())
+                .collect::<Vec<_>>();
+            let opponent_population_indices = opponent_positions
+                .iter()
+                .map(|&position| member_indices[position])
+                .collect::<Vec<_>>();
+            for &episode_ticks in &config.episode_horizons {
+                let mut supplemental = evaluate_genome_on_seeds_detailed(
+                    &snapshot[index],
+                    scenarios,
+                    episode_ticks,
+                    &config.survival_window_weights,
+                    training_seeds,
+                    config.objective_cvar_fraction,
+                    config.fitness_objective,
+                    config.cross_pool_predation_only,
+                    focal_position,
+                    Some(&opponents),
+                )?
+                .cases;
+                for case in &mut supplemental {
+                    case.opponent_population_indices = opponent_population_indices.clone();
+                }
+                diagnostic_cases[index].extend(supplemental);
+            }
         }
         let mut evaluation =
             summarize_evaluation_cases(&all_cases[index], config.objective_cvar_fraction);
