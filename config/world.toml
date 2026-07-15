@@ -7,7 +7,8 @@ num_organisms = 100 # Target number of organisms to place when seeding the initi
 
 [lifecycle]
 starting_energy = 250 # Remaining lifetime ticks assigned to every founder.
-attack_energy_transfer = 10 # Maximum energy ticks conserved from victim to attacker per successful adjacent attack.
+attack_energy_transfer = 40 # Maximum energy conserved from victim to attacker per successful adjacent attack.
+attack_attempt_cost = 10 # Energy dissipated by every attack action, including misses and blocked friendly-fire attempts.
 action_temperature = 0.08 # Softmax temperature for action sampling; lower values make choices more deterministic.
 intent_parallel_threads = 8 # Worker threads used during the intent-evaluation phase.
 
@@ -24,5 +25,5 @@ terrain_threshold = 0.70 # Noise cutoff for turning a cell into impassable wall 
 [flags]
 runtime_plasticity_enabled = false # Whether runtime Hebbian plasticity updates are applied after each tick.
 leaky_neurons_enabled = false # Whether feed-forward hidden units also retain explicit leaky state across ticks.
-predation_enabled = true # Gives organism ray hits a -1 affordance and enables Attack as direct conserved energy theft.
+predation_enabled = true # Gives organism ray hits a -1 affordance and enables dissipative adjacent energy theft.
 force_random_actions = false # Debug toggle that ignores policy logits and forces random actions.

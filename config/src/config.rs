@@ -71,6 +71,7 @@ struct WorldPopulationToml {
 struct WorldLifecycleToml {
     starting_energy: u32,
     attack_energy_transfer: u32,
+    attack_attempt_cost: u32,
     action_temperature: f32,
     intent_parallel_threads: u32,
 }
@@ -107,6 +108,7 @@ impl WorldConfigToml {
             num_organisms: self.population.num_organisms,
             starting_energy: self.lifecycle.starting_energy,
             attack_energy_transfer: self.lifecycle.attack_energy_transfer,
+            attack_attempt_cost: self.lifecycle.attack_attempt_cost,
             food_energy: self.food.food_energy,
             action_temperature: self.lifecycle.action_temperature,
             intent_parallel_threads: self.lifecycle.intent_parallel_threads,
@@ -181,6 +183,12 @@ pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
     }
     if config.attack_energy_transfer == 0 {
         return Err("attack_energy_transfer must be greater than zero".to_owned());
+    }
+    if config.attack_attempt_cost == 0 {
+        return Err("attack_attempt_cost must be greater than zero".to_owned());
+    }
+    if config.attack_energy_transfer <= config.attack_attempt_cost {
+        return Err("attack_energy_transfer must be greater than attack_attempt_cost".to_owned());
     }
     if config.food_energy == 0 {
         return Err("food_energy must be greater than zero".to_owned());

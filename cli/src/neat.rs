@@ -21,19 +21,40 @@ const PARAMS: &str = "compatibility_threshold excess_coefficient disjoint_coeffi
 target_species compatibility_threshold_adjustment weight_coefficient survival_fraction \
 crossover_probability interspecies_mate_probability \
 curriculum_enabled curriculum_promotion_threshold curriculum_promotion_patience \
-training_seed_rotation_period objective_cvar_fraction fitness_objective survival_window_weights \
+training_seed_rotation_period survival_window_weights \
 selection_strategy novelty_k novelty_archive_additions_per_generation \
 mutate_weight_probability replace_weight_probability weight_perturb_stddev \
 per_connection_weight_mutation_probability mutate_bias_probability bias_perturb_stddev \
 mutate_time_constant_probability time_constant_perturb_stddev add_connection_probability \
 add_node_probability disabled_inheritance_probability stagnation_generations \
 young_species_grace_generations min_young_species_offspring \
-elitism_min_species_size eval_opponents eval_lineages_per_world cross_pool_predation_only";
+elitism_min_species_size cross_pool_predation_only";
+
+struct NeatRunRequest {
+    config_path: String,
+    run_seed: u64,
+    founders: Option<u32>,
+    world_width: Option<u32>,
+    sets: Vec<(String, String)>,
+    neat: NeatConfig,
+}
 
 /// Canonical generational NEAT runner. It owns no persistent world: each
 /// candidate is evaluated in deterministic fixed-seed episodes, and the durable
 /// artifacts contain the full effective algorithm/environment contract.
 pub(crate) fn run_neat_cli(args: &[&str], out_dir: &str, out: &mut impl Write) -> Result<()> {
+    if args.first() == Some(&"run") {
+        return run_neat_cli(&args[1..], out_dir, out);
+    }
+    if args.first() == Some(&"plan") {
+        return run_neat_plan(&args[1..], out);
+    }
+    if args.first() == Some(&"batch") {
+        return crate::experiment::run_batch_cli(&args[1..], out_dir, out);
+    }
+    if args.first() == Some(&"summarize") {
+        return crate::experiment::run_summarize_cli(&args[1..], out);
+    }
     if args.first() == Some(&"analyze") {
         return run_neat_analysis(&args[1..], out);
     }
@@ -43,11 +64,28 @@ pub(crate) fn run_neat_cli(args: &[&str], out_dir: &str, out: &mut impl Write) -
     if args.first() == Some(&"crossplay") {
         return run_neat_crossplay(&args[1..], out);
     }
+    let Some(request) = parse_neat_run(args, out)? else {
+        return Ok(());
+    };
+    execute_neat_run(request, out_dir, out)
+}
+
+fn parse_neat_run(args: &[&str], out: &mut impl Write) -> Result<Option<NeatRunRequest>> {
     let mut config_path = DEFAULT_CONFIG.to_string();
     let mut run_seed = 0u64;
-    let mut scale = None;
+    let mut founders = None;
+    let mut world_width = None;
     let mut sets = Vec::new();
-    let mut neat = NeatConfig::default();
+    // Research runs use one deliberately short baseline evaluator unless the
+    // caller explicitly changes it. Multi-horizon curricula remain an engine
+    // capability, not part of the core CLI contract.
+    let mut neat = NeatConfig {
+        episode_horizons: vec![500],
+        scenarios: vec![ScenarioPreset::Baseline],
+        ..NeatConfig::default()
+    };
+    let mut memberships_per_genome = None::<usize>;
+    let mut cases_per_genome = None::<usize>;
     let mut i = 0;
     while i < args.len() {
         match args[i] {
@@ -67,13 +105,20 @@ pub(crate) fn run_neat_cli(args: &[&str], out_dir: &str, out: &mut impl Write) -
                 neat.generations = value(args, i, "--generations")?.parse()?;
                 i += 2;
             }
-            "--episode-horizons" => {
-                neat.episode_horizons =
-                    parse_u64_list(value(args, i, "--episode-horizons")?, "--episode-horizons")?;
+            "--horizon" => {
+                neat.episode_horizons = vec![value(args, i, "--horizon")?.parse()?];
                 i += 2;
             }
-            "--opponents" => {
-                neat.eval_opponents = value(args, i, "--opponents")?.parse()?;
+            "--lineages-per-world" => {
+                neat.eval_lineages_per_world = value(args, i, "--lineages-per-world")?.parse()?;
+                i += 2;
+            }
+            "--memberships-per-genome" => {
+                memberships_per_genome = Some(value(args, i, "--memberships-per-genome")?.parse()?);
+                i += 2;
+            }
+            "--cases-per-genome" => {
+                cases_per_genome = Some(value(args, i, "--cases-per-genome")?.parse()?);
                 i += 2;
             }
             "--world-seeds" => {
@@ -89,16 +134,32 @@ pub(crate) fn run_neat_cli(args: &[&str], out_dir: &str, out: &mut impl Write) -
                 neat.evaluator_workers = value(args, i, "--workers")?.parse()?;
                 i += 2;
             }
-            "--scale" => {
-                scale = Some(parse_scale(value(args, i, "--scale")?)?);
+            "--founders" => {
+                founders = Some(value(args, i, "--founders")?.parse()?);
                 i += 2;
             }
-            "--no-scale" => {
-                scale = None;
-                i += 1;
+            "--world-width" => {
+                world_width = Some(value(args, i, "--world-width")?.parse()?);
+                i += 2;
+            }
+            "--objective" => {
+                neat.fitness_objective = FitnessObjective::parse(value(args, i, "--objective")?)?;
+                i += 2;
+            }
+            "--cvar" => {
+                neat.objective_cvar_fraction = value(args, i, "--cvar")?.parse()?;
+                i += 2;
             }
             "--set" => {
-                sets.push(parse_assignment(value(args, i, "--set")?)?);
+                let assignment = parse_assignment(value(args, i, "--set")?)?;
+                match assignment.0.as_str() {
+                    "world_width" => bail!("use --world-width instead of --set world_width=..."),
+                    "num_organisms" => bail!("use --founders instead of --set num_organisms=..."),
+                    "intent_parallel_threads" => bail!(
+                        "NEAT parallelizes evaluator worlds and fixes intent threads to 1; use --workers to control parallelism"
+                    ),
+                    _ => sets.push(assignment),
+                }
                 i += 2;
             }
             "--param" => {
@@ -109,31 +170,172 @@ pub(crate) fn run_neat_cli(args: &[&str], out_dir: &str, out: &mut impl Write) -
             "--help" | "-h" => {
                 writeln!(
                     out,
-                    "neat options: --config P --seed N --population N --generations N \
-                     --episode-horizons T[,T...] [--opponents N] --world-seeds N,N \
-                     [--scenarios baseline,scarcity,sparse_search] \
-                     --workers K --scale W,POP \
-                     [--no-scale] [--set world_key=value] [--param neat_key=value]\n\
-                     --opponents is the number of contemporary-opponent exposures per candidate;\n\
-                     set --param eval_lineages_per_world=3 for simultaneous two-opponent mini-ecosystems;\n\
-                     defaults: 5000 ticks, 4 training seeds, 8 pairwise opponent exposures, relative survival objective;\n\
-                     default scale: the canonical world config (currently 50,100);\n\
-                     analyze: neat analyze RESULT.json [RESULT2.json ...]\n\
-                     frozen panel: neat evaluate-panel --focal RESULT.json --opponents RESULT.json,RESULT.json --horizons 500,1000 --world-seeds 131,149\n\
-                     checkpoint crossplay: neat crossplay RESULT.json --checkpoints all --horizons 1000,2000,4000 --world-seeds 131,149\n\
-                     NEAT params: {PARAMS}"
+                    "NEAT run: cli [run] [OPTIONS]\n\
+                     Preflight only: cli plan [OPTIONS]\n\
+                     \n\
+                     --seed N                    evolutionary run seed\n\
+                     --population N              genomes per generation\n\
+                     --generations N             generations to evaluate\n\
+                     --horizon N                 evaluator ticks (default 500)\n\
+                     --lineages-per-world N      simultaneous lineages (2 or 3)\n\
+                     --memberships-per-genome N  ecosystem worlds joined per genome\n\
+                     --cases-per-genome N        alternative exact scored-case budget\n\
+                     --world-seeds N,N           deterministic training layouts\n\
+                     --scenarios baseline[,scarcity,sparse_search]\n\
+                     --objective survival|survival_times_relative_advantage\n\
+                     --cvar F                    worst-case fraction aggregated into fitness\n\
+                     --workers N                 parallel evaluator groups\n\
+                     --founders N                organisms divided equally among lineages\n\
+                     --world-width N             hex-world width\n\
+                     --set world_key=value       explicit ecology override\n\
+                     --config PATH               canonical world TOML\n\
+                     \n\
+                     Exactly one of --memberships-per-genome and --cases-per-genome may be used.\n\
+                     `plan` resolves both to memberships, opponent exposures, cases, and worlds.\n\
+                     Advanced algorithm overrides: --param key=value (valid: {PARAMS})"
                 )?;
-                return Ok(());
+                return Ok(None);
             }
-            other => bail!("unknown neat arg `{other}` (use `neat --help`)"),
+            other => bail!("unknown NEAT argument `{other}` (use `cli --help`)"),
         }
     }
+    if memberships_per_genome.is_some() && cases_per_genome.is_some() {
+        bail!("use either --memberships-per-genome or --cases-per-genome, not both");
+    }
+    let opponents_per_membership = neat
+        .eval_lineages_per_world
+        .checked_sub(1)
+        .ok_or_else(|| anyhow!("--lineages-per-world must be 2 or 3"))?;
+    if opponents_per_membership == 0 {
+        bail!("--lineages-per-world must be 2 or 3");
+    }
+    let cases_per_membership = neat
+        .world_seeds
+        .len()
+        .saturating_mul(neat.scenarios.len())
+        .saturating_mul(neat.episode_horizons.len());
+    let memberships = if let Some(cases) = cases_per_genome {
+        if cases == 0 || cases_per_membership == 0 || !cases.is_multiple_of(cases_per_membership) {
+            bail!(
+                "--cases-per-genome {cases} is not an exact multiple of {cases_per_membership} cases per membership ({} world seeds × {} scenarios × {} horizons)",
+                neat.world_seeds.len(),
+                neat.scenarios.len(),
+                neat.episode_horizons.len()
+            );
+        }
+        cases / cases_per_membership
+    } else if let Some(memberships) = memberships_per_genome {
+        memberships
+    } else {
+        // Preserve the engine's default evaluation budget while expressing it
+        // in the unambiguous world-membership unit.
+        neat.eval_opponents / opponents_per_membership
+    };
+    if memberships == 0 {
+        bail!("--memberships-per-genome must be at least 1");
+    }
+    neat.eval_opponents = memberships.saturating_mul(opponents_per_membership);
     neat.validate()?;
-    let mut world = world_config_with_overrides(&config_path, &sets)?;
-    if let Some((width, founders)) = scale {
+    Ok(Some(NeatRunRequest {
+        config_path,
+        run_seed,
+        founders,
+        world_width,
+        sets,
+        neat,
+    }))
+}
+
+fn resolve_neat_world(request: &NeatRunRequest) -> Result<types::WorldConfig> {
+    let mut world = world_config_with_overrides(&request.config_path, &request.sets)?;
+    if let Some(width) = request.world_width {
         world.world_width = width;
+    }
+    if let Some(founders) = request.founders {
         world.num_organisms = founders;
     }
+    if world.world_width == 0 || world.num_organisms == 0 {
+        bail!("world width and founder count must both be at least 1");
+    }
+    if !(world.num_organisms as usize).is_multiple_of(request.neat.eval_lineages_per_world) {
+        bail!(
+            "founder count {} must be divisible by {} lineages per world; use --founders with an exact multiple",
+            world.num_organisms,
+            request.neat.eval_lineages_per_world
+        );
+    }
+    Ok(world)
+}
+
+fn run_neat_plan(args: &[&str], out: &mut impl Write) -> Result<()> {
+    let Some(request) = parse_neat_run(args, out)? else {
+        return Ok(());
+    };
+    let world = resolve_neat_world(&request)?;
+    let lineages = request.neat.eval_lineages_per_world;
+    let opponent_exposures = request.neat.eval_opponents;
+    let memberships = opponent_exposures / (lineages - 1);
+    let cases_per_membership = request.neat.world_seeds.len()
+        * request.neat.scenarios.len()
+        * request.neat.episode_horizons.len();
+    let cases_per_genome = memberships * cases_per_membership;
+    let ecosystem_groups = request.neat.population_size * memberships / lineages;
+    let worlds_per_generation = ecosystem_groups * cases_per_membership;
+    let total_worlds = worlds_per_generation * request.neat.generations as usize;
+    let scored_cases_per_generation = request.neat.population_size * cases_per_genome;
+    let horizon = request.neat.episode_horizons[0];
+    let available_workers = std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1);
+    writeln!(
+        out,
+        "{}",
+        json!({
+            "mode": "neat_plan",
+            "valid": true,
+            "run_seed": request.run_seed,
+            "population": request.neat.population_size,
+            "generations": request.neat.generations,
+            "horizon": horizon,
+            "fitness_objective": request.neat.fitness_objective,
+            "objective_score_name": request.neat.fitness_objective.name(),
+            "objective_cvar_fraction": request.neat.objective_cvar_fraction,
+            "lineages_per_world": lineages,
+            "opponents_per_membership": lineages - 1,
+            "memberships_per_genome": memberships,
+            "opponent_exposures_per_genome": opponent_exposures,
+            "world_seeds": request.neat.world_seeds,
+            "scenarios": request.neat.scenarios,
+            "cases_per_membership": cases_per_membership,
+            "scored_cases_per_genome": cases_per_genome,
+            "ecosystem_groups_per_generation": ecosystem_groups,
+            "evaluation_worlds_per_generation": worlds_per_generation,
+            "scored_lineage_cases_per_generation": scored_cases_per_generation,
+            "total_evaluation_worlds": total_worlds,
+            "total_scored_lineage_cases": scored_cases_per_generation * request.neat.generations as usize,
+            "total_world_ticks": (total_worlds as u128) * u128::from(horizon),
+            "world": {
+                "width": world.world_width,
+                "founders": world.num_organisms,
+                "founders_per_lineage": world.num_organisms as usize / lineages,
+            },
+            "workers": {
+                "requested_evaluator_workers": request.neat.evaluator_workers,
+                "effective_group_workers": request.neat.evaluator_workers.min(ecosystem_groups).max(1),
+                "available_parallelism": available_workers,
+                "intent_threads_per_world": 1,
+            },
+        })
+    )
+    .map_err(Into::into)
+}
+
+fn execute_neat_run(request: NeatRunRequest, out_dir: &str, out: &mut impl Write) -> Result<()> {
+    // Plan and execution enforce the identical founder-divisibility and
+    // world-override contract.
+    let world = resolve_neat_world(&request)?;
+    let run_seed = request.run_seed;
+    let neat = request.neat;
 
     eprintln!(
         "{}",
@@ -167,11 +369,20 @@ pub(crate) fn run_neat_cli(args: &[&str], out_dir: &str, out: &mut impl Write) -
             "best_action_effectiveness": generation.best_action_effectiveness,
             "best_plant_consumption_rate": generation.best_plant_consumption_rate,
             "best_prey_consumption_rate": generation.best_prey_consumption_rate,
-            "best_mi_sa": generation.best_mi_sa,
-            "best_learning_slope": generation.best_learning_slope,
             "best_plant_intake_fraction": generation.best_plant_intake_fraction,
             "best_prey_intake_fraction": generation.best_prey_intake_fraction,
             "best_mean_attack_kills": generation.best_mean_attack_kills,
+            "champion_total_energy_accumulated": generation.champion_plant_energy_acquired
+                + generation.champion_attack_energy_received,
+            "champion_net_energy_profit": generation.champion_plant_energy_acquired
+                + generation.champion_attack_energy_received
+                - generation.champion_attack_energy_lost
+                - generation.champion_attack_attempt_energy_cost,
+            "mean_total_energy_accumulated": generation.mean_gross_energy_acquired,
+            "mean_net_energy_profit": generation.mean_plant_energy_acquired
+                + generation.mean_attack_energy_received
+                - generation.mean_attack_energy_lost
+                - generation.mean_attack_attempt_energy_cost,
             "mean_action_effectiveness": generation.mean_action_effectiveness,
             "mean_plant_consumption_rate": generation.mean_plant_consumption_rate,
             "mean_prey_consumption_rate": generation.mean_prey_consumption_rate,
@@ -332,11 +543,11 @@ fn run_neat_panel_evaluation(args: &[&str], out: &mut impl Write) -> Result<()> 
             "--help" | "-h" => {
                 writeln!(
                     out,
-                    "neat evaluate-panel --focal RESULT.json --opponents RESULT.json[,RESULT.json...] [--horizons N,N] [--window-weights W,W] [--world-seeds N,N] [--levels N,N] [--objective survival_fraction|late_weighted_survival|survival_times_relative_advantage] [--cvar F] [--cross-pool-only] [--focal-slot 0|1|2]"
+                    "cli evaluate-panel --focal RESULT.json --opponents RESULT.json[,RESULT.json...] [--horizons N,N] [--window-weights W,W] [--world-seeds N,N] [--levels N,N] [--objective survival_fraction|late_weighted_survival|survival_times_relative_advantage] [--cvar F] [--cross-pool-only] [--focal-slot 0|1|2]"
                 )?;
                 return Ok(());
             }
-            other => bail!("unknown neat evaluate-panel arg `{other}`"),
+            other => bail!("unknown evaluate-panel argument `{other}`"),
         }
     }
     let focal_path = focal_path.ok_or_else(|| anyhow!("evaluate-panel needs --focal"))?;
@@ -484,7 +695,7 @@ fn run_neat_crossplay(args: &[&str], out: &mut impl Write) -> Result<()> {
             "--help" | "-h" => {
                 writeln!(
                     out,
-                    "neat crossplay RESULT.json [--checkpoints all|G,G] [--horizons N,N] [--world-seeds N,N] [--levels N,N] [--scenarios baseline,scarcity,sparse_search] [--objective survival_fraction|late_weighted_survival|survival_times_relative_advantage] [--cvar F] [--cross-pool-only|--allow-same-pool]\nEvery matchup uses two distinct genomes and the balanced training evaluator; clone-versus-clone self-play is never emitted. World seeds must be a multiple of four. Evaluation settings default to the source run's training contract."
+                    "cli crossplay RESULT.json [--checkpoints all|G,G] [--horizons N,N] [--world-seeds N,N] [--levels N,N] [--scenarios baseline,scarcity,sparse_search] [--objective survival_fraction|late_weighted_survival|survival_times_relative_advantage] [--cvar F] [--cross-pool-only|--allow-same-pool]\nThis is explicitly a two-lineage transfer assay, even when the source run trained with three lineages. Every distinct-genome matchup is evaluated in both founder slots; clone-versus-clone comparisons are omitted. It does not measure native three-lineage competence. World seeds must be a multiple of four. Other settings default to the source run contract."
                 )?;
                 return Ok(());
             }
@@ -492,7 +703,7 @@ fn run_neat_crossplay(args: &[&str], out: &mut impl Write) -> Result<()> {
                 result_path = Some(value.to_string());
                 i += 1;
             }
-            other => bail!("unknown neat crossplay arg `{other}`"),
+            other => bail!("unknown crossplay argument `{other}`"),
         }
     }
     let result_path = result_path.ok_or_else(|| anyhow!("crossplay needs RESULT.json"))?;
@@ -744,6 +955,17 @@ fn analyze_result(path: &str, result: &RunResult) -> serde_json::Value {
         .iter()
         .filter(|record| record.max_expressed_frequency >= 0.10)
         .count();
+    let champion_attack_attempts = result.champion_evaluation.mean_attack_no_organism_targets
+        + result.champion_evaluation.mean_attack_same_pool_blocked
+        + result.champion_evaluation.mean_attack_insufficient_energy
+        + result.champion_evaluation.mean_attack_eligible_attempts;
+    let champion_attack_precision = (champion_attack_attempts > 0.0)
+        .then(|| result.champion_evaluation.mean_attack_hits / champion_attack_attempts);
+    let champion_total_energy_accumulated = result.champion_evaluation.mean_gross_energy_acquired;
+    let champion_net_energy_profit = result.champion_evaluation.mean_plant_energy_acquired
+        + result.champion_evaluation.mean_attack_energy_received
+        - result.champion_evaluation.mean_attack_energy_lost
+        - result.champion_evaluation.mean_attack_attempt_energy_cost;
 
     json!({
         "path": path,
@@ -769,8 +991,6 @@ fn analyze_result(path: &str, result: &RunResult) -> serde_json::Value {
             "prey_consumption_rate": result.champion_evaluation.mean_prey_consumption_rate,
             "plant_intake_fraction": result.champion_evaluation.plant_intake_fraction,
             "prey_intake_fraction": result.champion_evaluation.prey_intake_fraction,
-            "mi_sa": result.champion_evaluation.mean_mi_sa,
-            "learning_slope": result.champion_evaluation.mean_learning_slope,
             "training_attack_funnel": {
                 "no_organism_targets": result.champion_evaluation.mean_attack_no_organism_targets,
                 "same_pool_blocked": result.champion_evaluation.mean_attack_same_pool_blocked,
@@ -779,7 +999,17 @@ fn analyze_result(path: &str, result: &RunResult) -> serde_json::Value {
                 "nonlethal_hits": result.champion_evaluation.mean_attack_nonlethal_hits,
                 "kills": result.champion_evaluation.mean_attack_kills,
                 "same_pair_followups": result.champion_evaluation.mean_attack_same_pair_followups,
-                "energy_transferred": result.champion_evaluation.mean_attack_energy_transferred,
+                "distinct_victims": result.champion_evaluation.mean_distinct_attack_victims,
+                "precision": champion_attack_precision,
+                "energy_received": result.champion_evaluation.mean_attack_energy_received,
+                "energy_lost": result.champion_evaluation.mean_attack_energy_lost,
+                "attempt_energy_cost": result.champion_evaluation.mean_attack_attempt_energy_cost,
+                "net_energy_balance": result.champion_evaluation.mean_net_attack_energy_balance,
+            },
+            "training_energy_flow": {
+                "total_energy_accumulated": champion_total_energy_accumulated,
+                "net_energy_profit": champion_net_energy_profit,
+                "plant_energy_acquired": result.champion_evaluation.mean_plant_energy_acquired,
             },
         },
         "trends": {
@@ -883,18 +1113,6 @@ fn value<'a>(args: &[&'a str], i: usize, flag: &str) -> Result<&'a str> {
         .ok_or_else(|| anyhow!("{flag} needs a value"))
 }
 
-fn parse_scale(raw: &str) -> Result<(u32, u32)> {
-    let (width, founders) = raw
-        .split_once(',')
-        .ok_or_else(|| anyhow!("--scale wants WIDTH,POP"))?;
-    let width: u32 = width.trim().parse()?;
-    let founders: u32 = founders.trim().parse()?;
-    if width == 0 || founders == 0 {
-        bail!("--scale width and population must be >= 1");
-    }
-    Ok((width, founders))
-}
-
 fn parse_u64_list(raw: &str, flag: &str) -> Result<Vec<u64>> {
     let values: Vec<u64> = raw
         .split(',')
@@ -980,8 +1198,6 @@ fn apply_neat_param(config: &mut NeatConfig, key: &str, value: &str) -> Result<(
         }
         "curriculum_promotion_patience" => config.curriculum_promotion_patience = value.parse()?,
         "training_seed_rotation_period" => config.training_seed_rotation_period = value.parse()?,
-        "objective_cvar_fraction" => config.objective_cvar_fraction = value.parse()?,
-        "fitness_objective" => config.fitness_objective = FitnessObjective::parse(value)?,
         "survival_window_weights" => {
             config.survival_window_weights = parse_f64_list(value, "survival_window_weights")?
         }
@@ -1013,8 +1229,6 @@ fn apply_neat_param(config: &mut NeatConfig, key: &str, value: &str) -> Result<(
         }
         "min_young_species_offspring" => config.min_young_species_offspring = value.parse()?,
         "elitism_min_species_size" => config.elitism_min_species_size = value.parse()?,
-        "eval_opponents" => config.eval_opponents = value.parse()?,
-        "eval_lineages_per_world" => config.eval_lineages_per_world = value.parse()?,
         "cross_pool_predation_only" => config.cross_pool_predation_only = value.parse()?,
         _ => bail!("unknown NEAT parameter `{key}`; valid: {PARAMS}"),
     }

@@ -92,6 +92,10 @@ pub struct Simulation {
     food_tiles: Vec<bool>,
     food_regrowth_due_turn: Vec<u64>,
     food_regrowth_schedule: BTreeMap<u64, Vec<usize>>,
+    /// Immutable geometry-only acceleration table. It is derived entirely
+    /// from config, omitted from world files, and rebuilt on load.
+    #[serde(skip)]
+    vision_ray_table: sensing::VisionRayTable,
     /// Wire-format terrain cells, sorted by (q, r). Terrain is immutable after
     /// world generation, so this is built once per reset and cloned per
     /// snapshot instead of being rebuilt and re-sorted on every call.
@@ -137,6 +141,7 @@ impl Clone for Simulation {
             food_tiles: self.food_tiles.clone(),
             food_regrowth_due_turn: self.food_regrowth_due_turn.clone(),
             food_regrowth_schedule: self.food_regrowth_schedule.clone(),
+            vision_ray_table: self.vision_ray_table.clone(),
             terrain_cells: self.terrain_cells.clone(),
             #[cfg(feature = "instrumentation")]
             action_records: self.action_records.clone(),
@@ -165,6 +170,8 @@ impl Simulation {
         validate_runtime_config(&config)?;
 
         let capacity = grid::world_capacity(config.world_width);
+        let vision_ray_table =
+            sensing::VisionRayTable::new(config.world_width, config.vision_range);
         let mut sim = Self {
             config,
             experiment_scaled: false,
@@ -184,6 +191,7 @@ impl Simulation {
             food_tiles: Vec::new(),
             food_regrowth_due_turn: Vec::new(),
             food_regrowth_schedule: BTreeMap::new(),
+            vision_ray_table,
             #[cfg(feature = "instrumentation")]
             action_records: Vec::new(),
             cached_thread_pool: std::sync::OnceLock::new(),
@@ -334,9 +342,10 @@ impl Simulation {
     /// Round-trips deterministically: `save` then [`Simulation::load`] yields a
     /// world that advances byte-identically to the original (the RNG state and
     /// all id counters are persisted exactly). Transient/parallelism fields
-    /// (`turn_scratch`, `cached_thread_pool`) are not written and start empty
-    /// on load. Instrumentation action records are observational only but are
-    /// persisted so post-save CLI inspection describes the last executed tick.
+    /// (`turn_scratch`, `cached_thread_pool`, and the derived vision-ray table)
+    /// are not written. Instrumentation action records are observational only
+    /// but are persisted so post-save CLI inspection describes the last
+    /// executed tick.
     pub fn save<W: std::io::Write>(&self, writer: W) -> Result<(), SimError> {
         ciborium::into_writer(self, writer).map_err(|e| SimError::Serialization(e.to_string()))
     }
@@ -346,8 +355,10 @@ impl Simulation {
     /// a corrupt or incompatible blob fails loudly rather than ticking into
     /// undefined behavior.
     pub fn load<R: std::io::Read>(reader: R) -> Result<Self, SimError> {
-        let sim: Self =
+        let mut sim: Self =
             ciborium::from_reader(reader).map_err(|e| SimError::Serialization(e.to_string()))?;
+        sim.vision_ray_table =
+            sensing::VisionRayTable::new(sim.config.world_width, sim.config.vision_range);
         sim.validate_state()?;
         Ok(sim)
     }

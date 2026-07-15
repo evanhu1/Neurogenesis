@@ -105,21 +105,41 @@ impl<'a> CommitPhaseContext<'a> {
             let target_idx = target_r as usize * self.world_width_usize + target_q as usize;
 
             if intent.wants_attack && self.sim.config.predation_enabled {
-                let event = match self.sim.occupancy[target_idx] {
-                    Some(Occupant::Organism(prey_id)) => {
-                        self.resolve_attack_transfer(idx, prey_id, target_idx)
-                    }
-                    None | Some(Occupant::Wall) | Some(Occupant::Food(_)) => AttackEvent {
+                let attacker_energy_cost = self.charge_attack_attempt(idx);
+                let event = if self.dead_organisms[idx] {
+                    AttackEvent {
                         turn: self.sim.turn.saturating_add(1),
                         attacker_id: intent.id,
                         attacker_species_id: self.sim.organisms[idx].species_id,
                         victim_id: None,
                         victim_species_id: None,
-                        outcome: AttackOutcome::NoOrganismTarget,
+                        outcome: AttackOutcome::InsufficientEnergy,
                         victim_energy_before: 0,
                         victim_energy_after: 0,
                         energy_transferred: 0,
-                    },
+                        attacker_energy_cost,
+                    }
+                } else {
+                    match self.sim.occupancy[target_idx] {
+                        Some(Occupant::Organism(prey_id)) => self.resolve_attack_transfer(
+                            idx,
+                            prey_id,
+                            target_idx,
+                            attacker_energy_cost,
+                        ),
+                        None | Some(Occupant::Wall) | Some(Occupant::Food(_)) => AttackEvent {
+                            turn: self.sim.turn.saturating_add(1),
+                            attacker_id: intent.id,
+                            attacker_species_id: self.sim.organisms[idx].species_id,
+                            victim_id: None,
+                            victim_species_id: None,
+                            outcome: AttackOutcome::NoOrganismTarget,
+                            victim_energy_before: 0,
+                            victim_energy_after: 0,
+                            energy_transferred: 0,
+                            attacker_energy_cost,
+                        },
+                    }
                 };
                 self.result.attack_events.push(event);
                 continue;
@@ -133,6 +153,27 @@ impl<'a> CommitPhaseContext<'a> {
                 Some(Occupant::Food(_)) | Some(Occupant::Organism(_)) => {}
             }
         }
+    }
+
+    /// Pay the cost of emitting an attack before looking at its target. An
+    /// organism that cannot pay the full cost spends its remaining energy,
+    /// dies, and cannot recover by receiving a transfer from that attempt.
+    fn charge_attack_attempt(&mut self, attacker_idx: usize) -> u32 {
+        let configured_cost = self.sim.config.attack_attempt_cost;
+        let attacker = &mut self.sim.organisms[attacker_idx];
+        let paid = configured_cost.min(attacker.energy);
+        attacker.energy -= paid;
+        attacker.energy_flow_last_tick =
+            add_signed_energy_flow(attacker.energy_flow_last_tick, paid, false);
+        self.result.attack_attempt_cost += f64::from(paid);
+
+        if attacker.energy == 0 {
+            let attacker_id = attacker.id;
+            let position = (attacker.q, attacker.r);
+            let cell_idx = attacker.r as usize * self.world_width_usize + attacker.q as usize;
+            self.kill_organism(attacker_idx, attacker_id, cell_idx, position);
+        }
+        paid
     }
 
     fn consume_food(&mut self, predator_idx: usize, target_idx: usize, food_id: types::FoodId) {
@@ -186,6 +227,7 @@ impl<'a> CommitPhaseContext<'a> {
         predator_idx: usize,
         prey_id: OrganismId,
         target_idx: usize,
+        attacker_energy_cost: u32,
     ) -> AttackEvent {
         let attacker_id = self.sim.organisms[predator_idx].id;
         let attacker_species_id = self.sim.organisms[predator_idx].species_id;
@@ -199,6 +241,7 @@ impl<'a> CommitPhaseContext<'a> {
             victim_energy_before: 0,
             victim_energy_after: 0,
             energy_transferred: 0,
+            attacker_energy_cost,
         };
         let Some(prey_idx) = organism_index_by_id(&self.sim.organisms, prey_id) else {
             return base_event(AttackOutcome::NoOrganismTarget, None);
@@ -239,6 +282,7 @@ impl<'a> CommitPhaseContext<'a> {
             victim_energy_before,
             victim_energy_after: prey.energy,
             energy_transferred,
+            attacker_energy_cost,
         };
 
         #[cfg(feature = "instrumentation")]
@@ -249,15 +293,14 @@ impl<'a> CommitPhaseContext<'a> {
             predator.energy = predator
                 .energy
                 .checked_add(energy_transferred)
-                .expect("attack energy transfer overflow");
+                .expect("attack energy credit overflow");
             predator.energy_flow_last_tick =
                 add_signed_energy_flow(predator.energy_flow_last_tick, energy_transferred, true);
             predator.consumptions_count = predator.consumptions_count.saturating_add(1);
             predator.prey_consumptions_count = predator.prey_consumptions_count.saturating_add(1);
             self.result.predations += 1;
             self.result.consumptions += 1;
-            self.result.attack_transfer_debit += f64::from(energy_transferred);
-            self.result.attack_transfer_credit += f64::from(energy_transferred);
+            self.result.attack_transfer_energy += f64::from(energy_transferred);
             #[cfg(feature = "instrumentation")]
             {
                 let predator = &self.sim.organisms[predator_idx];

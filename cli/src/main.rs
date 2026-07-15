@@ -1,16 +1,13 @@
-//! cli — stateless, world-as-file research CLI for the NeuroGenesis engine.
+//! cli — NEAT research CLI for the NeuroGenesis engine.
 //!
-//! Each invocation reads a world from `--in`, runs one command, and (for
-//! mutating commands) writes the advanced world to `--out` (default `--in`).
-//! Metrics live in a `<world>.metrics` sidecar that follows the world. All
-//! world IO, advancement, and read rendering live in the shared `views`
-//! crate (which the web server also uses), so live metrics match the offline
-//! eval and the agent/human views are identical. Output is JSON by default;
-//! `--text` overrides per call.
+//! Generational NEAT is the default mode. The lower-level stateless,
+//! world-as-file simulator remains available under the explicit `world`
+//! namespace. Output is JSON by default; `--text` overrides per call.
 //!
 //! See docs/cli.md (usage) and docs/cli-stateless-spec.md + SPEC.md.
 
 mod dashboards;
+mod experiment;
 mod neat;
 mod sweep;
 mod tui;
@@ -29,9 +26,8 @@ use world_sim::Simulation;
 pub(crate) const DEFAULT_CONFIG: &str = config::CANONICAL_WORLD_CONFIG_PATH;
 /// Default reporting-interval width (matches the eval; override at `new`).
 pub(crate) const REPORT_EVERY: u64 = 10_000;
-/// Default directory for run-mode result files (sweep, etc.). Override with the
-/// global `--out-dir` flag. Under `artifacts/` so results survive a session.
-const DEFAULT_OUT_DIR: &str = "artifacts/runs";
+/// Default directory for generated research runs. Override with `--out-dir`.
+const DEFAULT_OUT_DIR: &str = "artifacts/research/runs";
 
 /// Build a timestamped result-file path under `out_dir`, creating the directory.
 /// Run modes (sweep, …) write their result artifact here so output is durable
@@ -78,36 +74,60 @@ fn is_read_only(cmd: &str) -> bool {
 fn print_help(out: &mut impl Write) -> Result<()> {
     writeln!(
         out,
-        "cli — stateless world-as-file research CLI (agent-facing). JSON output by default; `--text` to override.\n\
+        "cli — deterministic NEAT research CLI. JSON output by default.\n\
+         \n\
+         CORE WORKFLOW\n\
+         \x20 cli [RUN OPTIONS]             run one generational NEAT experiment\n\
+         \x20 cli plan [RUN OPTIONS]        validate and print the resolved compute contract\n\
+         \x20 cli batch ...                 run a reproducible multi-seed experiment suite\n\
+         \x20 cli summarize ...             summarize persisted experiment results\n\
+         \x20 cli analyze RESULT...         derive trajectories and diagnostics\n\
+         \x20 cli crossplay RESULT ...      pairwise transfer assay over frozen champions\n\
+         \x20 cli evaluate-panel ...        evaluate a frozen focal/opponent panel\n\
+         \n\
+         RUN OPTIONS\n\
+         \x20 --seed N --population N --generations N --horizon N\n\
+         \x20 --lineages-per-world N --memberships-per-genome N --world-seeds N,N\n\
+         \x20 --scenarios baseline[,scarcity,sparse_search] --workers N\n\
+         \x20 --founders N [--world-width N] [--set world_key=value]\n\
+         \n\
+         WORLD SIMULATOR\n\
+         \x20 cli world <command> ...       explicit stateless world-as-file tools\n\
+         \x20 cli world help                list simulator commands\n\
+         \n\
+         Full reference: docs/cli.md."
+    )
+    .map_err(Into::into)
+}
+
+fn print_world_help(out: &mut impl Write) -> Result<()> {
+    writeln!(
+        out,
+        "cli world — stateless world-as-file simulator.\n\
          \n\
          WORLD I/O\n\
-         \x20 --in <world.bin>     read a world (required by every command except `new`)\n\
-         \x20 --out <world.bin>    write the advanced world (mutating cmds; defaults to --in = advance in place)\n\
-         \x20 --metrics <path>     metric sidecar (defaults to the `<world>.metrics` sibling; --no-metrics to disable)\n\
+         \x20 --in <world.bin>     input world (required except by `new`)\n\
+         \x20 --out <world.bin>    output world (mutating commands default to --in)\n\
+         \x20 --metrics <path>     metric sidecar (defaults beside the world)\n\
+         \x20 --no-metrics         disable metric-sidecar loading and persistence\n\
          \n\
-         MUTATING (persist the world)\n\
-         \x20 new [--config P] [--seed N] [--seed-genome-snapshot P] [--set k=v]... [--scale W,POP] [--threads K] [--report-every R] --out w.bin\n\
-         \x20 step [N] --in w.bin [--out w.bin]            advance N ticks (default 1)\n\
-         \x20 run-to T --in w.bin [--out w.bin]            advance until turn == T\n\
-         \x20 watch T [--every E] --in w.bin [--out w.bin] advance to T, emitting a metrics row every E ticks\n\
-         \x20 bench [N] --in w.bin                         time N ticks (world discarded)\n\
-         \x20 sweep --grid k=v,v... --seeds N,N --to T [--out-dir D]  parallel grid×seed runs → result file\n\
-         \x20 neat [--population N] [--generations N] [--episode-horizons T[,T...]] [--world-seeds N,N] [--audit-seeds N,N] [--holdout-seeds N,N] [--audit-levels N,N] [--audit-every N] [--scale W,POP] [--param k=v]  canonical generational NEAT → result json + champion world.bin\n\
-         \x20 neat analyze RESULT.json [RESULT2.json ...]    derive trend, saturation, lesion, and innovation diagnostics\n\
-         \x20 neat crossplay RESULT.json                      compare chronological champions in competitive worlds\n\
-         \x20 neat evaluate-panel --focal RUN --opponents RUN[,RUN] [--world-seeds N,N]  evaluate a frozen champion panel\n\
+         MUTATING\n\
+         \x20 new [--config P] [--seed N] [--seed-genome-snapshot P] [--set k=v]... [--scale W,POP] [--threads K] [--report-every R] --out WORLD\n\
+         \x20 step [N] --in WORLD [--out WORLD]\n\
+         \x20 run-to T --in WORLD [--out WORLD]\n\
+         \x20 watch T [--every E] --in WORLD [--out WORLD]\n\
+         \x20 bench [N] --in WORLD\n\
+         \x20 sweep --grid k=v,v... --seeds N,N --to T [--out-dir D]\n\
          \n\
-         READS (stdout only)\n\
-         \x20 turn | state | pillars | eco | lineage | genome [--gene G] | food --in w.bin\n\
-         \x20 timeseries [--cols LIST] [--last K] --in w.bin\n\
-         \x20 inspect ID | top FIELD [N] | hist FIELD | find EXPR | brain ID [--view V] | decide ID --in w.bin\n\
-         \x20 query --in w.bin                             read-only commands from stdin (one per line), one load\n\
+         READ-ONLY\n\
+         \x20 turn | state | pillars | eco | lineage | genome | food --in WORLD\n\
+         \x20 timeseries | inspect | top | hist | find | brain | decide --in WORLD\n\
+         \x20 query --in WORLD\n\
          \n\
-         INTERACTIVE (human-facing, not for agents)\n\
-         \x20 tui --in w.bin | tui --new [--seed N] [--set k=v]...  split-pane REPL over a resident world; explicit `save`\n\
+         INTERACTIVE\n\
+         \x20 tui --in WORLD | tui --new [--seed N] [--set k=v]...\n\
          \n\
-         pillars/eco-trajectory/timeseries need a metric sidecar (minted by `new`, follows the world).\n\
-         Snapshot/fork a world with `cp`; full reference in docs/cli.md."
+         See docs/cli.md for command semantics and sidecar rules."
     )
     .map_err(Into::into)
 }
@@ -125,13 +145,79 @@ fn main() {
 /// command, then persists the world + sidecar for mutating commands.
 fn run() -> Result<()> {
     let argv: Vec<String> = std::env::args().skip(1).collect();
-    let cmd: String = argv.first().cloned().unwrap_or_default();
-    if cmd.is_empty() || cmd == "help" || cmd == "--help" || cmd == "-h" {
+    let first = argv.first().map(String::as_str).unwrap_or("");
+    if first.is_empty() || first == "help" || first == "--help" || first == "-h" {
         let mut out = io::stdout().lock();
         print_help(&mut out)?;
         return Ok(());
     }
-    let cmd = cmd.as_str();
+
+    if first == "world" {
+        return run_world_mode(&argv[1..]);
+    }
+    if matches!(
+        first,
+        "new"
+            | "step"
+            | "run-to"
+            | "watch"
+            | "bench"
+            | "sweep"
+            | "turn"
+            | "state"
+            | "pillars"
+            | "eco"
+            | "lineage"
+            | "genome"
+            | "food"
+            | "timeseries"
+            | "inspect"
+            | "top"
+            | "hist"
+            | "find"
+            | "brain"
+            | "decide"
+            | "query"
+            | "tui"
+    ) {
+        bail!("`{first}` is a world-simulator command; use `cli world {first} ...`");
+    }
+    // NEAT is the research default: both direct run flags (`cli --seed ...`)
+    // and analysis subcommands (`cli plan`, `cli crossplay`, ...) arrive here.
+    run_neat_mode(&argv)
+}
+
+fn run_neat_mode(argv: &[String]) -> Result<()> {
+    let mut out_dir = DEFAULT_OUT_DIR.to_string();
+    let mut rest = Vec::with_capacity(argv.len());
+    let batch_separator = (argv.first().map(String::as_str) == Some("batch"))
+        .then(|| argv.iter().position(|arg| arg == "--"))
+        .flatten();
+    let mut index = 0usize;
+    while index < argv.len() {
+        let arg = &argv[index];
+        let is_batch_shared_arg = batch_separator.is_some_and(|separator| index > separator);
+        if arg == "--out-dir" && !is_batch_shared_arg {
+            out_dir = argv
+                .get(index + 1)
+                .ok_or_else(|| anyhow!("--out-dir needs a path"))?
+                .clone();
+            index += 2;
+        } else {
+            rest.push(arg.as_str());
+            index += 1;
+        }
+    }
+    let mut out = io::stdout().lock();
+    neat::run_neat_cli(&rest, &out_dir, &mut out)
+}
+
+fn run_world_mode(argv: &[String]) -> Result<()> {
+    let cmd = argv.first().map(String::as_str).unwrap_or("");
+    if cmd.is_empty() || cmd == "help" || cmd == "--help" || cmd == "-h" {
+        let mut out = io::stdout().lock();
+        return print_world_help(&mut out);
+    }
 
     // Pull global flags (orthogonal to every command) out of the arg stream.
     let mut in_path: Option<String> = None;
@@ -140,17 +226,38 @@ fn run() -> Result<()> {
     let mut out_dir: String = DEFAULT_OUT_DIR.to_string();
     let mut no_metrics = false;
     let mut rest: Vec<String> = Vec::new();
-    let mut it = argv.into_iter().skip(1);
+    let mut it = argv.iter().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
-            "--in" => in_path = Some(it.next().ok_or_else(|| anyhow!("--in needs a path"))?),
-            "--out" => out_path = Some(it.next().ok_or_else(|| anyhow!("--out needs a path"))?),
-            "--metrics" => {
-                metrics_flag = Some(it.next().ok_or_else(|| anyhow!("--metrics needs a path"))?)
+            "--in" => {
+                in_path = Some(
+                    it.next()
+                        .ok_or_else(|| anyhow!("--in needs a path"))?
+                        .clone(),
+                )
             }
-            "--out-dir" => out_dir = it.next().ok_or_else(|| anyhow!("--out-dir needs a path"))?,
+            "--out" => {
+                out_path = Some(
+                    it.next()
+                        .ok_or_else(|| anyhow!("--out needs a path"))?
+                        .clone(),
+                )
+            }
+            "--metrics" => {
+                metrics_flag = Some(
+                    it.next()
+                        .ok_or_else(|| anyhow!("--metrics needs a path"))?
+                        .clone(),
+                )
+            }
+            "--out-dir" => {
+                out_dir = it
+                    .next()
+                    .ok_or_else(|| anyhow!("--out-dir needs a path"))?
+                    .clone()
+            }
             "--no-metrics" => no_metrics = true,
-            _ => rest.push(a),
+            _ => rest.push(a.clone()),
         }
     }
     let cmd_args: Vec<&str> = rest.iter().map(String::as_str).collect();
@@ -159,10 +266,6 @@ fn run() -> Result<()> {
     if cmd == "sweep" {
         let mut out = io::stdout().lock();
         return sweep::run_sweep(&cmd_args, &out_dir, &mut out);
-    }
-    if cmd == "neat" {
-        let mut out = io::stdout().lock();
-        return neat::run_neat_cli(&cmd_args, &out_dir, &mut out);
     }
     // Human-facing interactive mode: a resident world driven from a split-pane
     // TUI, as opposed to the agent-facing one-shot commands below. `--in` is a

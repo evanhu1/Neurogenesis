@@ -69,6 +69,7 @@ export type WorldConfig = {
   num_organisms: number;
   starting_energy: number;
   attack_energy_transfer: number;
+  attack_attempt_cost: number;
   food_energy: number;
   action_temperature: number;
   intent_parallel_threads: number;
@@ -239,13 +240,12 @@ export type EnergyLedgerRow = {
   tick_drain_energy: number;
   food_consumption_debit: number;
   food_consumption_credit: number;
-  attack_transfer_debit: number;
-  attack_transfer_credit: number;
+  attack_transfer_energy: number;
+  attack_attempt_cost: number;
   organism_residual: number;
   food_residual: number;
   total_residual: number;
   food_transfer_residual: number;
-  attack_transfer_residual: number;
   transfer_residual: number;
   residual_tolerance: number;
 };

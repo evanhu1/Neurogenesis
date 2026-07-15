@@ -21,6 +21,7 @@ pub struct WorldConfig {
     pub num_organisms: u32,
     pub starting_energy: u32,
     pub attack_energy_transfer: u32,
+    pub attack_attempt_cost: u32,
     pub food_energy: u32,
     pub action_temperature: f32,
     pub intent_parallel_threads: u32,
@@ -43,7 +44,8 @@ impl WorldConfig {
             vision_range: 5,
             num_organisms: 2_000,
             starting_energy: 250,
-            attack_energy_transfer: 10,
+            attack_energy_transfer: 40,
+            attack_attempt_cost: 10,
             food_energy: 20,
             action_temperature: 0.5,
             intent_parallel_threads: 8,
@@ -75,7 +77,8 @@ impl WorldConfig {
             vision_range: 5,
             num_organisms: 10,
             starting_energy: 250,
-            attack_energy_transfer: 10,
+            attack_energy_transfer: 40,
+            attack_attempt_cost: 10,
             food_energy: 20,
             action_temperature: 0.5,
             intent_parallel_threads: 8,
@@ -843,8 +846,8 @@ pub struct MetricsSnapshot {
 /// Per-tick energy accounting over organism and food energy. All values are
 /// simulation energy units.
 ///
-/// Consumption and predation are internal transfers and therefore have
-/// matching debit and credit columns. Plants are the only external source.
+/// Plant consumption and successful predation are internal transfers. Every
+/// emitted attack has a separate dissipative attempt cost, including misses.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 pub struct EnergyLedgerRow {
     pub turn: u64,
@@ -856,17 +859,16 @@ pub struct EnergyLedgerRow {
     pub tick_drain_energy: f64,
     pub food_consumption_debit: f64,
     pub food_consumption_credit: f64,
-    pub attack_transfer_debit: f64,
-    pub attack_transfer_credit: f64,
+    pub attack_transfer_energy: f64,
+    pub attack_attempt_cost: f64,
     pub organism_residual: f64,
     pub food_residual: f64,
     /// Total-compartment residual, deliberately excluding internal transfer
     /// mismatches so a non-closing transfer cannot hide as an allowed source.
     pub total_residual: f64,
     pub food_transfer_residual: f64,
-    pub attack_transfer_residual: f64,
-    /// Sum of the independent transfer residuals, retained as a compact
-    /// diagnostic but never used as their only hard gate.
+    /// Plant-transfer residual retained as a compact transfer diagnostic.
+    /// Attack transfers are applied as one conserved amount.
     pub transfer_residual: f64,
     pub residual_tolerance: f64,
 }

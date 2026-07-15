@@ -1,6 +1,13 @@
 use crate::grid::rotate_by_steps;
 use brain::VISION_RAY_COUNT;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 use types::{Occupant, OrganismId, OrganismState, SensoryReceptor};
+
+#[cfg(feature = "profiling")]
+use crate::profiling::{self, BrainStage};
+#[cfg(feature = "profiling")]
+use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(crate) struct VisionSignal {
@@ -17,20 +24,92 @@ pub(crate) struct ScanResult {
 
 type RayScans = [ScanResult; VISION_RAY_COUNT];
 
+/// Immutable `(origin cell, absolute direction, distance) -> cell index`
+/// lookup. The table removes coordinate updates and toroidal modulo operations
+/// from the per-organism sensing hot path. It contains no world state, so
+/// sharing it across simulation clones is behaviorally inert.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct VisionRayTable {
+    world_width: u32,
+    vision_range: u32,
+    cell_indices: Arc<[u32]>,
+}
+
+type RayGeometryKey = (u32, u32);
+type SharedRayIndices = Arc<[u32]>;
+type RayTableCache = Mutex<HashMap<RayGeometryKey, SharedRayIndices>>;
+
+static VISION_RAY_TABLE_CACHE: OnceLock<RayTableCache> = OnceLock::new();
+
+impl VisionRayTable {
+    pub(crate) fn new(world_width: u32, vision_range: u32) -> Self {
+        let cache = VISION_RAY_TABLE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut cache = cache.lock().expect("vision ray table cache lock poisoned");
+        let cell_indices = cache
+            .entry((world_width, vision_range))
+            .or_insert_with(|| {
+                let width = world_width as usize;
+                let range = vision_range as usize;
+                let capacity = width * width;
+                let mut cell_indices = Vec::with_capacity(capacity * VISION_RAY_COUNT * range);
+
+                for origin_idx in 0..capacity {
+                    let origin_q = (origin_idx % width) as i32;
+                    let origin_r = (origin_idx / width) as i32;
+                    for &facing in types::FacingDirection::ALL {
+                        let (dq, dr) = facing_delta(facing);
+                        let mut q = origin_q;
+                        let mut r = origin_r;
+                        for _ in 0..range {
+                            q = (q + dq).rem_euclid(world_width as i32);
+                            r = (r + dr).rem_euclid(world_width as i32);
+                            let cell_idx = r as usize * width + q as usize;
+                            cell_indices.push(
+                                u32::try_from(cell_idx).expect("world cell index must fit in u32"),
+                            );
+                        }
+                    }
+                }
+                cell_indices.into()
+            })
+            .clone();
+
+        Self {
+            world_width,
+            vision_range,
+            cell_indices,
+        }
+    }
+
+    #[inline(always)]
+    fn ray(&self, position: (i32, i32), facing: types::FacingDirection) -> &[u32] {
+        debug_assert_eq!(self.cell_indices.len(), self.expected_len());
+        let width = self.world_width as usize;
+        let origin_idx = position.1 as usize * width + position.0 as usize;
+        let start =
+            (origin_idx * VISION_RAY_COUNT + facing_index(facing)) * self.vision_range as usize;
+        &self.cell_indices[start..start + self.vision_range as usize]
+    }
+
+    fn expected_len(&self) -> usize {
+        self.world_width as usize
+            * self.world_width as usize
+            * VISION_RAY_COUNT
+            * self.vision_range as usize
+    }
+}
+
 #[derive(Clone, Copy)]
 struct RaycastContext<'a> {
     organism_id: OrganismId,
-    world_width: i32,
     occupancy: &'a [Option<Occupant>],
-    vision_range: u32,
     predation_enabled: bool,
 }
 
 pub(super) fn encode_sensory_inputs(
     organism: &mut OrganismState,
-    world_width: i32,
+    ray_table: &VisionRayTable,
     occupancy: &[Option<Occupant>],
-    vision_range: u32,
     starting_energy: u32,
     plant_energy: u32,
     predation_enabled: bool,
@@ -43,16 +122,21 @@ pub(super) fn encode_sensory_inputs(
     // forward once per sensing pass.
     organism.energy_at_last_sensing = organism.energy;
     organism.energy_flow_last_tick = 0;
+    #[cfg(feature = "profiling")]
+    let scan_started = Instant::now();
     let ray_scans = scan_rays(
         (organism.q, organism.r),
         organism.facing,
         organism.id,
-        world_width,
+        ray_table,
         occupancy,
-        vision_range,
         predation_enabled,
     );
+    #[cfg(feature = "profiling")]
+    profiling::record_brain_stage(BrainStage::ScanAhead, scan_started.elapsed());
 
+    #[cfg(feature = "profiling")]
+    let encoding_started = Instant::now();
     for sensory_neuron in &mut organism.brain.sensory {
         sensory_neuron.neuron.activation = match sensory_neuron.receptor {
             SensoryReceptor::RayProximity { ray_offset } => {
@@ -65,6 +149,8 @@ pub(super) fn encode_sensory_inputs(
             SensoryReceptor::EnergyFlowLastTick => energy_flow,
         };
     }
+    #[cfg(feature = "profiling")]
+    profiling::record_brain_stage(BrainStage::SensoryEncoding, encoding_started.elapsed());
 
     ray_scans
 }
@@ -80,24 +166,18 @@ pub(crate) fn scan_rays(
     position: (i32, i32),
     facing: types::FacingDirection,
     organism_id: OrganismId,
-    world_width: i32,
+    ray_table: &VisionRayTable,
     occupancy: &[Option<Occupant>],
-    vision_range: u32,
     predation_enabled: bool,
 ) -> RayScans {
     let context = RaycastContext {
         organism_id,
-        world_width,
         occupancy,
-        vision_range,
         predation_enabled,
     };
     std::array::from_fn(|idx| {
-        scan_ray(
-            position,
-            rotate_by_steps(facing, SensoryReceptor::RAY_OFFSETS[idx]),
-            context,
-        )
+        let ray_facing = rotate_by_steps(facing, SensoryReceptor::RAY_OFFSETS[idx]);
+        scan_ray(ray_table.ray(position, ray_facing), context)
     })
 }
 
@@ -116,25 +196,14 @@ fn energy_flow_signal(organism: &OrganismState, plant_energy: u32) -> f32 {
     (organism.energy_flow_last_tick as f32 / plant_energy.max(1) as f32).clamp(-1.0, 1.0)
 }
 
-fn scan_ray(
-    position: (i32, i32),
-    ray_facing: types::FacingDirection,
-    context: RaycastContext<'_>,
-) -> ScanResult {
-    let max_dist = context.vision_range.max(1);
+fn scan_ray(cell_indices: &[u32], context: RaycastContext<'_>) -> ScanResult {
+    let max_dist = cell_indices.len().max(1) as u32;
     let inv_max_dist = 1.0 / max_dist as f32;
-    let width = context.world_width;
-    let width_usize = width as usize;
-    let (dq, dr) = facing_delta(ray_facing);
-    let mut q = position.0;
-    let mut r = position.1;
 
-    for distance in 1..=max_dist {
-        q = (q + dq).rem_euclid(width);
-        r = (r + dr).rem_euclid(width);
-        let idx = r as usize * width_usize + q as usize;
+    for (distance_idx, &cell_idx) in cell_indices.iter().enumerate() {
+        let distance = distance_idx as u32 + 1;
         let distance_signal = (max_dist - distance + 1) as f32 * inv_max_dist;
-        let signal = match context.occupancy[idx] {
+        let signal = match context.occupancy[cell_idx as usize] {
             Some(Occupant::Food(_)) => VisionSignal {
                 proximity: distance_signal,
                 energy_affordance: 1.0,
@@ -159,6 +228,19 @@ fn scan_ray(
 }
 
 #[inline(always)]
+fn facing_index(facing: types::FacingDirection) -> usize {
+    use types::FacingDirection::*;
+    match facing {
+        East => 0,
+        NorthEast => 1,
+        NorthWest => 2,
+        West => 3,
+        SouthWest => 4,
+        SouthEast => 5,
+    }
+}
+
+#[inline(always)]
 fn facing_delta(facing: types::FacingDirection) -> (i32, i32) {
     use types::FacingDirection::*;
     match facing {
@@ -173,7 +255,7 @@ fn facing_delta(facing: types::FacingDirection) -> (i32, i32) {
 
 #[cfg(test)]
 mod tests {
-    use super::{energy_signal, scan_ray, RaycastContext};
+    use super::{energy_signal, scan_ray, RaycastContext, VisionRayTable};
     use rand::SeedableRng;
     use rand_chacha::ChaCha8Rng;
     use types::{
@@ -229,14 +311,12 @@ mod tests {
         let world_width = 5;
         let mut occupancy = vec![None; (world_width * world_width) as usize];
         occupancy[world_width as usize + 3] = Some(Occupant::Food(FoodId(0)));
+        let ray_table = VisionRayTable::new(world_width, 4);
         let scan = scan_ray(
-            (1, 1),
-            FacingDirection::East,
+            ray_table.ray((1, 1), FacingDirection::East),
             RaycastContext {
                 organism_id: OrganismId(1),
-                world_width,
                 occupancy: &occupancy,
-                vision_range: 4,
                 predation_enabled: true,
             },
         );

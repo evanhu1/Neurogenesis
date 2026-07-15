@@ -9,13 +9,13 @@ const UTILIZATION_THRESHOLD: f32 = 0.03;
 struct IntentBuildContext<'a> {
     world_width: i32,
     occupancy: &'a [Option<Occupant>],
+    vision_ray_table: &'a crate::sensing::VisionRayTable,
     action_temperature: f32,
     runtime_plasticity_enabled: bool,
     leaky_neurons_enabled: bool,
     predation_enabled: bool,
     starting_energy: u32,
     plant_energy: u32,
-    vision_range: u32,
     force_random_actions: bool,
     sim_seed: u64,
     tick: u64,
@@ -35,13 +35,13 @@ impl Simulation {
         let context = IntentBuildContext {
             world_width,
             occupancy: &self.occupancy,
+            vision_ray_table: &self.vision_ray_table,
             action_temperature: self.config.action_temperature,
             runtime_plasticity_enabled: self.config.runtime_plasticity_enabled,
             leaky_neurons_enabled: self.config.leaky_neurons_enabled,
             predation_enabled: self.config.predation_enabled,
             starting_energy: self.config.starting_energy,
             plant_energy: self.config.food_energy,
-            vision_range: self.config.vision_range,
             force_random_actions: self.config.force_random_actions,
             sim_seed: self.seed,
             tick: self.turn,
@@ -129,9 +129,8 @@ fn select_action_for_organism(
                 (organism.q, organism.r),
                 organism.facing,
                 organism.id,
-                context.world_width,
+                context.vision_ray_table,
                 context.occupancy,
-                context.vision_range,
                 context.predation_enabled,
             );
             ray_scans.map(|scan| scan.food_visible)
@@ -148,13 +147,14 @@ fn select_action_for_organism(
 
     let ray_scans = crate::sensing::encode_sensory_inputs(
         organism,
-        context.world_width,
+        context.vision_ray_table,
         context.occupancy,
-        context.vision_range,
         context.starting_energy,
         context.plant_energy,
         context.predation_enabled,
     );
+    #[cfg(not(feature = "instrumentation"))]
+    let _ = ray_scans;
     let evaluation = evaluate_brain(
         organism,
         BrainEvalContext {

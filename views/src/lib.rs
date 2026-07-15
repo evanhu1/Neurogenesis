@@ -611,17 +611,16 @@ pub fn state(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
     let ledger = m.energy_ledger_last_turn;
     writeln!(
         out,
-        "  energy-ledger: org={:.0}->{:.0} food={:.0}->{:.0} plant_spawn={:.0} tick_drain={:.0} attack_debit={:.0} attack_credit={:.0} food_residual={:.3e} attack_residual={:.3e} total_residual={:.3e} tol={:.1e}",
+        "  energy-ledger: org={:.0}->{:.0} food={:.0}->{:.0} plant_spawn={:.0} tick_drain={:.0} attack_transfer={:.0} attack_cost={:.0} food_residual={:.3e} total_residual={:.3e} tol={:.1e}",
         ledger.organism_energy_before,
         ledger.organism_energy_after,
         ledger.food_energy_before,
         ledger.food_energy_after,
         ledger.plant_spawn_energy,
         ledger.tick_drain_energy,
-        ledger.attack_transfer_debit,
-        ledger.attack_transfer_credit,
+        ledger.attack_transfer_energy,
+        ledger.attack_attempt_cost,
         ledger.food_transfer_residual,
-        ledger.attack_transfer_residual,
         ledger.total_residual,
         ledger.residual_tolerance,
     )?;

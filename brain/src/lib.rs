@@ -7,7 +7,7 @@ mod topology;
 
 use crate::genome::inter_alpha_from_log_time_constant;
 #[cfg(feature = "profiling")]
-use crate::profiling::{self, BrainStage};
+use crate::profiling::BrainStage;
 use crate::topology::{
     action_neuron_id, constrain_weight, inter_index, inter_neuron_id,
     refresh_action_synapse_starts_and_count,

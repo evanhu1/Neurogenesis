@@ -37,12 +37,13 @@ feed-forward neural network by default: activations do not carry through time.
 The optional leaky-neuron and Hebbian-plasticity flags add explicitly configured
 within-lifetime state and learning.
 
-The world uses a simple conserved-energy economy:
+The world uses a simple energy economy:
 
 - Every organism loses one energy per tick and dies at zero.
 - Eating a plant transfers the plant's full energy to the eater.
-- A successful adjacent attack transfers up to `attack_energy_transfer` from
-  victim to attacker.
+- Every attack action pays `attack_attempt_cost`, including misses. A successful
+  adjacent attack then conserves up to `attack_energy_transfer` from victim to
+  attacker.
 - Food tiles regrow deterministically after their configured interval.
 
 There is no reproduction inside a world. A finite simulation episode is an
@@ -50,30 +51,40 @@ evaluator. The `evolution` crate owns all genetic change between generations.
 
 ## Research workflow
 
-Build the CLI, create a world, advance it, then inspect its raw behavior.
+Build the CLI and preflight the exact evaluation budget before starting a run:
 
 ```bash
 cargo build -p cli --release
 
-./target/release/cli new --seed 7 --out artifacts/worlds/example.bin
-./target/release/cli run-to 5000 --in artifacts/worlds/example.bin
-./target/release/cli pillars --in artifacts/worlds/example.bin
-./target/release/cli top energy 10 --in artifacts/worlds/example.bin
+./target/release/cli plan \
+  --population 48 --generations 40 --horizon 500 \
+  --lineages-per-world 3 --memberships-per-genome 12 \
+  --world-seeds 11,29,47 --scenarios baseline --founders 102
 ```
 
-Run canonical generational NEAT through the same CLI:
+NEAT is the default mode, so the same options without `plan` execute the run:
 
 ```bash
-cargo run -p cli --release -- neat \
-  --population 24 --generations 50 --episode-horizons 5000 \
-  --world-seeds 7,17,27,37 --out-dir artifacts/research/runs
+cargo run -p cli --release -- \
+  --seed 17 --population 48 --generations 40 --horizon 500 \
+  --lineages-per-world 3 --memberships-per-genome 12 \
+  --world-seeds 11,29,47 --scenarios baseline --founders 102 \
+  --out-dir artifacts/research/runs
 ```
 
 The result JSON contains each generation's population evaluations, champion,
 species statistics, behavioral diagnostics, and the complete frozen world/NEAT
-contract. `neat analyze RESULT.json` and `neat crossplay RESULT.json` derive
-trajectory and historical-competition diagnostics without silently changing the
-evolutionary run.
+contract. `cli analyze RESULT.json` derives trajectory diagnostics. `cli
+crossplay RESULT.json` is explicitly a pairwise transfer assay over frozen
+champions; it does not recreate a three-lineage training ecosystem.
+
+The ordinary simulator remains available as an explicit special mode:
+
+```bash
+./target/release/cli world new --seed 7 --out artifacts/worlds/example.bin
+./target/release/cli world run-to 500 --in artifacts/worlds/example.bin
+./target/release/cli world pillars --in artifacts/worlds/example.bin
+```
 
 Read [docs/cli.md](docs/cli.md) before using the CLI: it explains the
 world-as-file model, sidecar metrics, commands, and their semantics.

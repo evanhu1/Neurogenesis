@@ -40,20 +40,19 @@ fn main() {
 #[cfg(feature = "profiling")]
 fn run() -> Result<(), String> {
     let args = parse_args()?;
-    let config = if let Some(path) = args.config.as_ref() {
+    let mut config = if let Some(path) = args.config.as_ref() {
         load_world_config_from_path(path)
             .map_err(|err| format!("failed to load config from {}: {err}", path.display()))?
     } else {
-        let mut cfg = types::WorldConfig::perf_fixture();
-        if let Some(threads) = std::env::var("SIM_CORE_INTENT_PARALLEL_THREADS")
-            .ok()
-            .and_then(|raw| raw.parse::<u32>().ok())
-            .filter(|v| *v > 0)
-        {
-            cfg.intent_parallel_threads = threads;
-        }
-        cfg
+        types::WorldConfig::perf_fixture()
     };
+    if let Some(threads) = std::env::var("SIM_CORE_INTENT_PARALLEL_THREADS")
+        .ok()
+        .and_then(|raw| raw.parse::<u32>().ok())
+        .filter(|v| *v > 0)
+    {
+        config.intent_parallel_threads = threads;
+    }
     let mut sim = Simulation::new(config.clone(), args.seed)
         .map_err(|err| format!("failed to initialize simulation: {err}"))?;
 

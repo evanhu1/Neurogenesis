@@ -102,12 +102,12 @@ impl Default for NeatConfig {
         Self {
             population_size: 50,
             generations: 20,
-            episode_horizons: vec![5_000],
+            episode_horizons: vec![500],
             survival_window_weights: vec![1.0],
             eval_opponents: 8,
             eval_lineages_per_world: 2,
             cross_pool_predation_only: false,
-            world_seeds: vec![11, 29, 47, 61],
+            world_seeds: vec![11, 29, 47],
             training_seed_rotation_period: 0,
             scenarios: ScenarioPreset::ALL.to_vec(),
             objective_cvar_fraction: 1.0,
@@ -396,21 +396,32 @@ pub struct Evaluation {
     pub trophic_role: TrophicRole,
     pub plant_intake_fraction: Option<f64>,
     pub prey_intake_fraction: Option<f64>,
-    /// Candidate-lineage diagnostics only; these do not contribute to fitness.
-    /// Naive gross intake: every recorded food consumption is valued at the
-    /// world's configured food energy, plus direct attack energy gained.
-    pub mean_total_energy_obtained: f64,
+    /// Candidate-lineage energy-flow diagnostics only; these never contribute
+    /// to fitness. Gross acquired energy is plant energy plus attack-transfer
+    /// credits. Starting energy is excluded, and attack transfers are counted
+    /// exactly once rather than also being valued as prey consumptions.
+    pub mean_gross_energy_acquired: f64,
+    pub mean_plant_energy_acquired: f64,
+    pub mean_attack_energy_received: f64,
+    pub mean_attack_energy_lost: f64,
+    pub mean_attack_attempt_energy_cost: f64,
+    pub mean_net_attack_energy_balance: f64,
     pub mean_consumptions: f64,
     pub mean_plant_consumptions: f64,
     pub mean_prey_consumptions: f64,
     pub mean_attack_no_organism_targets: f64,
     pub mean_attack_same_pool_blocked: f64,
+    pub mean_attack_insufficient_energy: f64,
     pub mean_attack_eligible_attempts: f64,
     pub mean_attack_hits: f64,
     pub mean_attack_nonlethal_hits: f64,
     pub mean_attack_kills: f64,
     pub mean_attack_same_pair_followups: f64,
-    pub mean_attack_energy_transferred: f64,
+    pub mean_distinct_attack_victims: f64,
+    /// Ratio of successful focal hits after the first hit by the same attacker
+    /// against the same victim to all successful focal hits, pooled across
+    /// cases. `None` means no successful focal hits occurred.
+    pub attack_repeat_hit_fraction: Option<f64>,
     /// Fraction of all plant spawn events in the scored window that were
     /// consumed. Reported with standing-plant pressure because regrowth supply
     /// itself depends on successful harvests.
@@ -429,6 +440,28 @@ pub struct Evaluation {
     /// including Idle. This is an observational behavior descriptor only.
     pub mean_action_fractions: [f64; 6],
     pub mean_world_final_population: f64,
+}
+
+#[derive(Debug, Clone, Default)]
+struct LineageCaseDiagnostics {
+    consumptions: u64,
+    plant_consumptions: u64,
+    plant_energy_acquired: f64,
+    attack_no_organism_targets: u64,
+    attack_same_pool_blocked: u64,
+    attack_insufficient_energy: u64,
+    attack_eligible_attempts: u64,
+    attack_hits: u64,
+    attack_nonlethal_hits: u64,
+    attack_kills: u64,
+    attack_same_pair_followups: u64,
+    attack_followup_latency_ticks_sum: u64,
+    attack_energy_received: f64,
+    attack_energy_lost: f64,
+    attack_attempt_energy_cost: f64,
+    attack_victim_energy_before_sum: f64,
+    attack_victim_energy_after_sum: f64,
+    distinct_attack_victims: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -459,19 +492,30 @@ pub struct CaseEvaluation {
     pub prey_consumption_rate: Option<f64>,
     pub mi_sa: Option<f64>,
     pub learning_slope: Option<f64>,
-    pub total_energy_obtained: f64,
+    /// Plant energy plus attack-transfer credits acquired by the focal lineage.
+    /// Starting energy is excluded and each direct transfer is counted once.
+    pub gross_energy_acquired: f64,
+    pub plant_energy_acquired: f64,
+    pub attack_energy_received: f64,
+    pub attack_energy_lost: f64,
+    pub attack_attempt_energy_cost: f64,
+    pub net_attack_energy_balance: f64,
     pub consumptions: u64,
     pub plant_consumptions: u64,
     pub prey_consumptions: u64,
     pub attack_no_organism_targets: u64,
     pub attack_same_pool_blocked: u64,
+    pub attack_insufficient_energy: u64,
     pub attack_eligible_attempts: u64,
     pub attack_hits: u64,
     pub attack_nonlethal_hits: u64,
     pub attack_kills: u64,
     pub attack_same_pair_followups: u64,
     pub attack_followup_latency_ticks_sum: u64,
-    pub attack_energy_transferred: f64,
+    pub distinct_attack_victims: u64,
+    /// Successful hits after the first successful hit by the same attacker
+    /// against the same victim, divided by all successful focal hits.
+    pub attack_repeat_hit_fraction: Option<f64>,
     pub attack_victim_energy_before_sum: f64,
     pub attack_victim_energy_after_sum: f64,
     pub plant_supply_events: u64,
@@ -490,6 +534,11 @@ pub struct CaseEvaluation {
     pub spatial_coverage: f64,
     pub action_fractions: [f64; 6],
     pub world_final_population: usize,
+    /// Observation-only facts for every lineage in the shared world. They are
+    /// retained in memory just long enough to construct accurate mirrored
+    /// `CaseEvaluation`s and are not part of the result schema.
+    #[serde(skip)]
+    lineage_diagnostics_by_pool: Vec<LineageCaseDiagnostics>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -656,12 +705,26 @@ pub struct GenerationSummary {
     pub mean_plant_consumption_rate: Option<f64>,
     pub mean_prey_consumption_rate: Option<f64>,
     pub population_trophic_roles: TrophicRoleCounts,
-    /// Exact population distribution of naive gross energy intake (one value
-    /// per member, sorted ascending), plus convenient summaries.
-    pub best_total_energy_obtained: f64,
-    pub mean_total_energy_obtained: f64,
-    pub median_total_energy_obtained: f64,
-    pub total_energy_obtained_distribution: Vec<f64>,
+    /// Exact population distribution of gross acquired energy (plant energy +
+    /// attack-transfer credits, excluding starting energy), plus summaries.
+    pub best_gross_energy_acquired: f64,
+    pub mean_gross_energy_acquired: f64,
+    pub median_gross_energy_acquired: f64,
+    pub gross_energy_acquired_distribution: Vec<f64>,
+    pub champion_plant_energy_acquired: f64,
+    pub mean_plant_energy_acquired: f64,
+    pub champion_attack_energy_received: f64,
+    pub mean_attack_energy_received: f64,
+    pub champion_attack_energy_lost: f64,
+    pub mean_attack_energy_lost: f64,
+    pub champion_attack_attempt_energy_cost: f64,
+    pub mean_attack_attempt_energy_cost: f64,
+    pub champion_net_attack_energy_balance: f64,
+    pub mean_net_attack_energy_balance: f64,
+    pub champion_distinct_attack_victims: f64,
+    pub mean_distinct_attack_victims: f64,
+    pub champion_attack_repeat_hit_fraction: Option<f64>,
+    pub mean_attack_repeat_hit_fraction: Option<f64>,
     pub champion_action_fractions: [f64; 6],
     pub mean_action_fractions: [f64; 6],
     pub champion_realized_plant_supply_per_tick: f64,
@@ -1276,7 +1339,7 @@ pub fn run_neat(
         })
         .collect();
     Ok(RunResult {
-        result_schema_version: 20,
+        result_schema_version: 22,
         algorithm: if config.eval_opponents > 0 {
             "competitive_NEAT"
         } else {
@@ -2293,7 +2356,45 @@ fn mirrored_multilineage_case(
         }
     };
     mirrored.opponent_population_indices = opponent_population_indices;
+    if let Some(diagnostics) = source.lineage_diagnostics_by_pool.get(focal_pool_index) {
+        apply_lineage_case_diagnostics(&mut mirrored, diagnostics);
+    }
     mirrored
+}
+
+fn apply_lineage_case_diagnostics(case: &mut CaseEvaluation, diagnostics: &LineageCaseDiagnostics) {
+    case.consumptions = diagnostics.consumptions;
+    case.plant_consumptions = diagnostics.plant_consumptions;
+    case.prey_consumptions = diagnostics
+        .consumptions
+        .saturating_sub(diagnostics.plant_consumptions);
+    case.plant_energy_acquired = diagnostics.plant_energy_acquired;
+    case.attack_energy_received = diagnostics.attack_energy_received;
+    case.attack_energy_lost = diagnostics.attack_energy_lost;
+    case.attack_attempt_energy_cost = diagnostics.attack_attempt_energy_cost;
+    case.net_attack_energy_balance = diagnostics.attack_energy_received
+        - diagnostics.attack_energy_lost
+        - diagnostics.attack_attempt_energy_cost;
+    case.gross_energy_acquired =
+        diagnostics.plant_energy_acquired + diagnostics.attack_energy_received;
+    case.attack_no_organism_targets = diagnostics.attack_no_organism_targets;
+    case.attack_same_pool_blocked = diagnostics.attack_same_pool_blocked;
+    case.attack_insufficient_energy = diagnostics.attack_insufficient_energy;
+    case.attack_eligible_attempts = diagnostics.attack_eligible_attempts;
+    case.attack_hits = diagnostics.attack_hits;
+    case.attack_nonlethal_hits = diagnostics.attack_nonlethal_hits;
+    case.attack_kills = diagnostics.attack_kills;
+    case.attack_same_pair_followups = diagnostics.attack_same_pair_followups;
+    case.attack_followup_latency_ticks_sum = diagnostics.attack_followup_latency_ticks_sum;
+    case.distinct_attack_victims = diagnostics.distinct_attack_victims;
+    case.attack_repeat_hit_fraction = (diagnostics.attack_hits > 0)
+        .then(|| diagnostics.attack_same_pair_followups as f64 / diagnostics.attack_hits as f64);
+    case.attack_victim_energy_before_sum = diagnostics.attack_victim_energy_before_sum;
+    case.attack_victim_energy_after_sum = diagnostics.attack_victim_energy_after_sum;
+    case.plant_capture_fraction = (case.actionable_plant_supply > 0)
+        .then(|| diagnostics.plant_consumptions as f64 / case.actionable_plant_supply as f64);
+    case.plant_consumptions_per_tick =
+        diagnostics.plant_consumptions as f64 / case.episode_horizon as f64;
 }
 
 fn copy_observational_diagnostics(target: &mut Evaluation, source: Evaluation) {
@@ -2305,18 +2406,25 @@ fn copy_observational_diagnostics(target: &mut Evaluation, source: Evaluation) {
     target.trophic_role = source.trophic_role;
     target.plant_intake_fraction = source.plant_intake_fraction;
     target.prey_intake_fraction = source.prey_intake_fraction;
-    target.mean_total_energy_obtained = source.mean_total_energy_obtained;
+    target.mean_gross_energy_acquired = source.mean_gross_energy_acquired;
+    target.mean_plant_energy_acquired = source.mean_plant_energy_acquired;
+    target.mean_attack_energy_received = source.mean_attack_energy_received;
+    target.mean_attack_energy_lost = source.mean_attack_energy_lost;
+    target.mean_attack_attempt_energy_cost = source.mean_attack_attempt_energy_cost;
+    target.mean_net_attack_energy_balance = source.mean_net_attack_energy_balance;
     target.mean_consumptions = source.mean_consumptions;
     target.mean_plant_consumptions = source.mean_plant_consumptions;
     target.mean_prey_consumptions = source.mean_prey_consumptions;
     target.mean_attack_no_organism_targets = source.mean_attack_no_organism_targets;
     target.mean_attack_same_pool_blocked = source.mean_attack_same_pool_blocked;
+    target.mean_attack_insufficient_energy = source.mean_attack_insufficient_energy;
     target.mean_attack_eligible_attempts = source.mean_attack_eligible_attempts;
     target.mean_attack_hits = source.mean_attack_hits;
     target.mean_attack_nonlethal_hits = source.mean_attack_nonlethal_hits;
     target.mean_attack_kills = source.mean_attack_kills;
     target.mean_attack_same_pair_followups = source.mean_attack_same_pair_followups;
-    target.mean_attack_energy_transferred = source.mean_attack_energy_transferred;
+    target.mean_distinct_attack_victims = source.mean_distinct_attack_victims;
+    target.attack_repeat_hit_fraction = source.attack_repeat_hit_fraction;
     target.mean_plant_capture_fraction = source.mean_plant_capture_fraction;
     target.mean_plant_consumptions_per_tick = source.mean_plant_consumptions_per_tick;
     target.mean_realized_plant_supply_per_tick = source.mean_realized_plant_supply_per_tick;
@@ -2682,22 +2790,32 @@ fn evaluate_genome_on_seeds_detailed(
             let mut candidate_action_counts = [0u64; 6];
             let mut candidate_action_observations = 0u64;
             let mut candidate_time_to_first_plant = None;
+            let mut lineage_diagnostics_by_pool = vec![LineageCaseDiagnostics::default(); pool_len];
+            let mut distinct_attack_victims_by_pool = vec![BTreeSet::<OrganismId>::new(); pool_len];
+            let mut last_hit_by_pair = HashMap::<(OrganismId, OrganismId), u64>::new();
+            #[cfg(feature = "instrumentation")]
+            let organism_pool_by_id = sim
+                .organisms()
+                .iter()
+                .map(|organism| (organism.id, (organism.species_id.0 as usize) % pool_len))
+                .collect::<HashMap<_, _>>();
+            #[cfg(feature = "instrumentation")]
+            let mut lineage_consumption_counts = sim
+                .organisms()
+                .iter()
+                .map(|organism| {
+                    (
+                        organism.id,
+                        (
+                            organism.consumptions_count,
+                            organism.plant_consumptions_count,
+                        ),
+                    )
+                })
+                .collect::<HashMap<_, _>>();
+            #[cfg(not(feature = "instrumentation"))]
             let mut candidate_consumption_counts = HashMap::<OrganismId, (u64, u64)>::new();
             let mut final_tick_plant_spawns = 0u64;
-            let mut case_consumptions = 0u64;
-            let mut case_plant_consumptions = 0u64;
-            let mut attack_no_organism_targets = 0u64;
-            let mut attack_same_pool_blocked = 0u64;
-            let mut attack_eligible_attempts = 0u64;
-            let mut attack_hits = 0u64;
-            let mut attack_nonlethal_hits = 0u64;
-            let mut attack_kills = 0u64;
-            let mut attack_same_pair_followups = 0u64;
-            let mut attack_followup_latency_ticks_sum = 0u64;
-            let mut attack_energy_transferred = 0.0_f64;
-            let mut attack_victim_energy_before_sum = 0.0_f64;
-            let mut attack_victim_energy_after_sum = 0.0_f64;
-            let mut last_hit_by_pair = HashMap::<(OrganismId, OrganismId), u64>::new();
             let mut world_plant_consumptions = 0u64;
             for _ in 0..episode_ticks {
                 let delta = sim.tick();
@@ -2709,34 +2827,83 @@ fn evaluate_genome_on_seeds_detailed(
                         &delta,
                         sim.action_records(),
                     );
+                    // Action records retain the post-commit cumulative intake
+                    // counters even for organisms removed later in this tick.
+                    // This makes lineage plant-energy accounting exact without
+                    // changing the simulation event model.
+                    for record in sim.action_records().iter().flatten() {
+                        let pool_index = organism_pool_by_id[&record.organism_id];
+                        let previous = lineage_consumption_counts
+                            .insert(
+                                record.organism_id,
+                                (record.consumptions_count, record.plant_consumptions_count),
+                            )
+                            .unwrap_or((0, 0));
+                        let consumption_delta =
+                            record.consumptions_count.saturating_sub(previous.0);
+                        let plant_delta =
+                            record.plant_consumptions_count.saturating_sub(previous.1);
+                        let diagnostics = &mut lineage_diagnostics_by_pool[pool_index];
+                        diagnostics.consumptions = diagnostics
+                            .consumptions
+                            .checked_add(consumption_delta)
+                            .ok_or_else(|| anyhow!("lineage consumption counter overflow"))?;
+                        diagnostics.plant_consumptions = diagnostics
+                            .plant_consumptions
+                            .checked_add(plant_delta)
+                            .ok_or_else(|| anyhow!("lineage plant counter overflow"))?;
+                        if pool_index == focal_pool_index
+                            && plant_delta > 0
+                            && candidate_time_to_first_plant.is_none()
+                        {
+                            candidate_time_to_first_plant = Some(delta.turn);
+                        }
+                    }
                 }
                 for event in sim.attack_events_last_turn() {
-                    if (event.attacker_species_id.0 as usize) % pool_len != focal_pool_index {
-                        continue;
-                    }
+                    let attacker_pool = (event.attacker_species_id.0 as usize) % pool_len;
+                    let attacker = &mut lineage_diagnostics_by_pool[attacker_pool];
+                    attacker.attack_attempt_energy_cost += f64::from(event.attacker_energy_cost);
                     debug_assert!(event.victim_id.is_some() || event.victim_species_id.is_none());
                     match event.outcome {
-                        AttackOutcome::NoOrganismTarget => attack_no_organism_targets += 1,
-                        AttackOutcome::SamePoolBlocked => attack_same_pool_blocked += 1,
+                        AttackOutcome::InsufficientEnergy => {
+                            attacker.attack_insufficient_energy += 1;
+                        }
+                        AttackOutcome::NoOrganismTarget => {
+                            attacker.attack_no_organism_targets += 1;
+                        }
+                        AttackOutcome::SamePoolBlocked => {
+                            attacker.attack_same_pool_blocked += 1;
+                        }
                         AttackOutcome::NonlethalHit | AttackOutcome::Killed => {
-                            attack_eligible_attempts += 1;
-                            attack_hits += 1;
-                            attack_nonlethal_hits +=
+                            attacker.attack_eligible_attempts += 1;
+                            attacker.attack_hits += 1;
+                            attacker.attack_nonlethal_hits +=
                                 u64::from(event.outcome == AttackOutcome::NonlethalHit);
-                            attack_kills += u64::from(event.outcome == AttackOutcome::Killed);
-                            attack_energy_transferred += f64::from(event.energy_transferred);
-                            attack_victim_energy_before_sum +=
+                            attacker.attack_kills +=
+                                u64::from(event.outcome == AttackOutcome::Killed);
+                            attacker.attack_energy_received += f64::from(event.energy_transferred);
+                            attacker.attack_victim_energy_before_sum +=
                                 f64::from(event.victim_energy_before);
-                            attack_victim_energy_after_sum += f64::from(event.victim_energy_after);
+                            attacker.attack_victim_energy_after_sum +=
+                                f64::from(event.victim_energy_after);
                             if let Some(victim_id) = event.victim_id {
+                                distinct_attack_victims_by_pool[attacker_pool].insert(victim_id);
                                 if let Some(previous_turn) = last_hit_by_pair
                                     .insert((event.attacker_id, victim_id), event.turn)
                                 {
-                                    attack_same_pair_followups += 1;
-                                    attack_followup_latency_ticks_sum +=
+                                    attacker.attack_same_pair_followups += 1;
+                                    attacker.attack_followup_latency_ticks_sum +=
                                         event.turn.saturating_sub(previous_turn);
                                 }
                             }
+                            let victim_pool = (event
+                                .victim_species_id
+                                .expect("a successful attack has a victim species")
+                                .0 as usize)
+                                % pool_len;
+                            lineage_diagnostics_by_pool[victim_pool].attack_energy_lost +=
+                                f64::from(event.energy_transferred);
                         }
                     }
                 }
@@ -2778,25 +2945,35 @@ fn evaluate_genome_on_seeds_detailed(
                         .ok_or_else(|| anyhow!("action-observation counter overflow"))?;
                     alive_ticks_by_pool[focal_pool_index] += 1;
                     weighted_alive_ticks_by_pool[focal_pool_index] += survival_tick_weight;
-                    let previous = candidate_consumption_counts
-                        .insert(
-                            organism.id,
-                            (
-                                organism.consumptions_count,
-                                organism.plant_consumptions_count,
-                            ),
-                        )
-                        .unwrap_or((0, 0));
-                    let consumption_delta = organism.consumptions_count.saturating_sub(previous.0);
-                    let plant_delta = organism.plant_consumptions_count.saturating_sub(previous.1);
-                    case_consumptions = case_consumptions
-                        .checked_add(consumption_delta)
-                        .ok_or_else(|| anyhow!("candidate consumption counter overflow"))?;
-                    case_plant_consumptions = case_plant_consumptions
-                        .checked_add(plant_delta)
-                        .ok_or_else(|| anyhow!("candidate plant-consumption counter overflow"))?;
-                    if plant_delta > 0 && candidate_time_to_first_plant.is_none() {
-                        candidate_time_to_first_plant = Some(delta.turn);
+                    #[cfg(not(feature = "instrumentation"))]
+                    {
+                        let previous = candidate_consumption_counts
+                            .insert(
+                                organism.id,
+                                (
+                                    organism.consumptions_count,
+                                    organism.plant_consumptions_count,
+                                ),
+                            )
+                            .unwrap_or((0, 0));
+                        let consumption_delta =
+                            organism.consumptions_count.saturating_sub(previous.0);
+                        let plant_delta =
+                            organism.plant_consumptions_count.saturating_sub(previous.1);
+                        let diagnostics = &mut lineage_diagnostics_by_pool[focal_pool_index];
+                        diagnostics.consumptions = diagnostics
+                            .consumptions
+                            .checked_add(consumption_delta)
+                            .ok_or_else(|| anyhow!("candidate consumption counter overflow"))?;
+                        diagnostics.plant_consumptions = diagnostics
+                            .plant_consumptions
+                            .checked_add(plant_delta)
+                            .ok_or_else(|| {
+                                anyhow!("candidate plant-consumption counter overflow")
+                            })?;
+                        if plant_delta > 0 && candidate_time_to_first_plant.is_none() {
+                            candidate_time_to_first_plant = Some(delta.turn);
+                        }
                     }
                 }
                 for (pool_index, alive_ticks) in alive_ticks_by_pool.iter_mut().enumerate() {
@@ -2917,10 +3094,29 @@ fn evaluate_genome_on_seeds_detailed(
                 mi_sa,
                 learning_slope,
             ) = (None, None, None, None, None);
+            for (diagnostics, victims) in lineage_diagnostics_by_pool
+                .iter_mut()
+                .zip(&distinct_attack_victims_by_pool)
+            {
+                diagnostics.distinct_attack_victims = victims.len() as u64;
+                diagnostics.plant_energy_acquired =
+                    diagnostics.plant_consumptions as f64 * f64::from(scenario.world.food_energy);
+            }
+            let focal_diagnostics = &lineage_diagnostics_by_pool[focal_pool_index];
+            let case_consumptions = focal_diagnostics.consumptions;
+            let case_plant_consumptions = focal_diagnostics.plant_consumptions;
             let case_prey_consumptions = case_consumptions.saturating_sub(case_plant_consumptions);
-            let total_energy_obtained = case_consumptions as f64
-                * f64::from(scenario.world.food_energy)
-                + attack_energy_transferred;
+            let plant_energy_acquired = focal_diagnostics.plant_energy_acquired;
+            let attack_energy_received = focal_diagnostics.attack_energy_received;
+            let attack_energy_lost = focal_diagnostics.attack_energy_lost;
+            let attack_attempt_energy_cost = focal_diagnostics.attack_attempt_energy_cost;
+            let net_attack_energy_balance =
+                attack_energy_received - attack_energy_lost - attack_attempt_energy_cost;
+            let gross_energy_acquired = plant_energy_acquired + attack_energy_received;
+            let attack_repeat_hit_fraction = (focal_diagnostics.attack_hits > 0).then(|| {
+                focal_diagnostics.attack_same_pair_followups as f64
+                    / focal_diagnostics.attack_hits as f64
+            });
             let actionable_plant_supply = plant_supply_events
                 .checked_sub(final_tick_plant_spawns)
                 .ok_or_else(|| anyhow!("final plant spawns exceed realized supply"))?;
@@ -2982,21 +3178,29 @@ fn evaluate_genome_on_seeds_detailed(
                 prey_consumption_rate,
                 mi_sa,
                 learning_slope,
-                total_energy_obtained,
+                gross_energy_acquired,
+                plant_energy_acquired,
+                attack_energy_received,
+                attack_energy_lost,
+                attack_attempt_energy_cost,
+                net_attack_energy_balance,
                 consumptions: case_consumptions,
                 plant_consumptions: case_plant_consumptions,
                 prey_consumptions: case_prey_consumptions,
-                attack_no_organism_targets,
-                attack_same_pool_blocked,
-                attack_eligible_attempts,
-                attack_hits,
-                attack_nonlethal_hits,
-                attack_kills,
-                attack_same_pair_followups,
-                attack_followup_latency_ticks_sum,
-                attack_energy_transferred,
-                attack_victim_energy_before_sum,
-                attack_victim_energy_after_sum,
+                attack_no_organism_targets: focal_diagnostics.attack_no_organism_targets,
+                attack_same_pool_blocked: focal_diagnostics.attack_same_pool_blocked,
+                attack_insufficient_energy: focal_diagnostics.attack_insufficient_energy,
+                attack_eligible_attempts: focal_diagnostics.attack_eligible_attempts,
+                attack_hits: focal_diagnostics.attack_hits,
+                attack_nonlethal_hits: focal_diagnostics.attack_nonlethal_hits,
+                attack_kills: focal_diagnostics.attack_kills,
+                attack_same_pair_followups: focal_diagnostics.attack_same_pair_followups,
+                attack_followup_latency_ticks_sum: focal_diagnostics
+                    .attack_followup_latency_ticks_sum,
+                distinct_attack_victims: focal_diagnostics.distinct_attack_victims,
+                attack_repeat_hit_fraction,
+                attack_victim_energy_before_sum: focal_diagnostics.attack_victim_energy_before_sum,
+                attack_victim_energy_after_sum: focal_diagnostics.attack_victim_energy_after_sum,
                 plant_supply_events,
                 actionable_plant_supply,
                 final_tick_plant_spawns,
@@ -3011,6 +3215,7 @@ fn evaluate_genome_on_seeds_detailed(
                 spatial_coverage,
                 action_fractions,
                 world_final_population: sim.organisms().len(),
+                lineage_diagnostics_by_pool,
             });
         }
     }
@@ -3140,9 +3345,34 @@ fn summarize_evaluation_cases(
             .then(|| plant_consumptions as f64 / total_intake as f64),
         prey_intake_fraction: (total_intake > 0)
             .then(|| prey_consumptions as f64 / total_intake as f64),
-        mean_total_energy_obtained: cases
+        mean_gross_energy_acquired: cases
             .iter()
-            .map(|case| case.total_energy_obtained)
+            .map(|case| case.gross_energy_acquired)
+            .sum::<f64>()
+            / n,
+        mean_plant_energy_acquired: cases
+            .iter()
+            .map(|case| case.plant_energy_acquired)
+            .sum::<f64>()
+            / n,
+        mean_attack_energy_received: cases
+            .iter()
+            .map(|case| case.attack_energy_received)
+            .sum::<f64>()
+            / n,
+        mean_attack_energy_lost: cases
+            .iter()
+            .map(|case| case.attack_energy_lost)
+            .sum::<f64>()
+            / n,
+        mean_attack_attempt_energy_cost: cases
+            .iter()
+            .map(|case| case.attack_attempt_energy_cost)
+            .sum::<f64>()
+            / n,
+        mean_net_attack_energy_balance: cases
+            .iter()
+            .map(|case| case.net_attack_energy_balance)
             .sum::<f64>()
             / n,
         mean_consumptions: cases
@@ -3170,6 +3400,11 @@ fn summarize_evaluation_cases(
             .map(|case| case.attack_same_pool_blocked as f64)
             .sum::<f64>()
             / n,
+        mean_attack_insufficient_energy: cases
+            .iter()
+            .map(|case| case.attack_insufficient_energy as f64)
+            .sum::<f64>()
+            / n,
         mean_attack_eligible_attempts: cases
             .iter()
             .map(|case| case.attack_eligible_attempts as f64)
@@ -3195,11 +3430,21 @@ fn summarize_evaluation_cases(
             .map(|case| case.attack_same_pair_followups as f64)
             .sum::<f64>()
             / n,
-        mean_attack_energy_transferred: cases
+        mean_distinct_attack_victims: cases
             .iter()
-            .map(|case| case.attack_energy_transferred)
+            .map(|case| case.distinct_attack_victims as f64)
             .sum::<f64>()
             / n,
+        attack_repeat_hit_fraction: {
+            let hits = cases.iter().map(|case| case.attack_hits).sum::<u64>();
+            (hits > 0).then(|| {
+                cases
+                    .iter()
+                    .map(|case| case.attack_same_pair_followups)
+                    .sum::<u64>() as f64
+                    / hits as f64
+            })
+        },
         mean_plant_capture_fraction: mean_optional(
             cases.iter().map(|case| case.plant_capture_fraction),
         ),
@@ -4164,20 +4409,20 @@ fn generation_summary(
         fitnesses[fitnesses.len() / 2]
     };
     let best = &population[best_index];
-    let mut total_energy_obtained_distribution = population
+    let mut gross_energy_acquired_distribution = population
         .iter()
-        .map(|individual| individual.evaluation.mean_total_energy_obtained)
+        .map(|individual| individual.evaluation.mean_gross_energy_acquired)
         .collect::<Vec<_>>();
-    total_energy_obtained_distribution.sort_by(f64::total_cmp);
-    let mean_total_energy_obtained =
-        total_energy_obtained_distribution.iter().sum::<f64>() / population.len() as f64;
-    let median_total_energy_obtained = if total_energy_obtained_distribution.len().is_multiple_of(2)
+    gross_energy_acquired_distribution.sort_by(f64::total_cmp);
+    let mean_gross_energy_acquired =
+        gross_energy_acquired_distribution.iter().sum::<f64>() / population.len() as f64;
+    let median_gross_energy_acquired = if gross_energy_acquired_distribution.len().is_multiple_of(2)
     {
-        let high = total_energy_obtained_distribution.len() / 2;
-        (total_energy_obtained_distribution[high - 1] + total_energy_obtained_distribution[high])
+        let high = gross_energy_acquired_distribution.len() / 2;
+        (gross_energy_acquired_distribution[high - 1] + gross_energy_acquired_distribution[high])
             / 2.0
     } else {
-        total_energy_obtained_distribution[total_energy_obtained_distribution.len() / 2]
+        gross_energy_acquired_distribution[gross_energy_acquired_distribution.len() / 2]
     };
     let mut mean_action_fractions = [0.0; 6];
     for individual in population {
@@ -4288,13 +4533,55 @@ fn generation_summary(
                 .map(|individual| individual.evaluation.mean_prey_consumption_rate),
         ),
         population_trophic_roles,
-        best_total_energy_obtained: total_energy_obtained_distribution
+        best_gross_energy_acquired: gross_energy_acquired_distribution
             .last()
             .copied()
             .unwrap_or(0.0),
-        mean_total_energy_obtained,
-        median_total_energy_obtained,
-        total_energy_obtained_distribution,
+        mean_gross_energy_acquired,
+        median_gross_energy_acquired,
+        gross_energy_acquired_distribution,
+        champion_plant_energy_acquired: best.evaluation.mean_plant_energy_acquired,
+        mean_plant_energy_acquired: population
+            .iter()
+            .map(|individual| individual.evaluation.mean_plant_energy_acquired)
+            .sum::<f64>()
+            / population.len() as f64,
+        champion_attack_energy_received: best.evaluation.mean_attack_energy_received,
+        mean_attack_energy_received: population
+            .iter()
+            .map(|individual| individual.evaluation.mean_attack_energy_received)
+            .sum::<f64>()
+            / population.len() as f64,
+        champion_attack_energy_lost: best.evaluation.mean_attack_energy_lost,
+        mean_attack_energy_lost: population
+            .iter()
+            .map(|individual| individual.evaluation.mean_attack_energy_lost)
+            .sum::<f64>()
+            / population.len() as f64,
+        champion_attack_attempt_energy_cost: best.evaluation.mean_attack_attempt_energy_cost,
+        mean_attack_attempt_energy_cost: population
+            .iter()
+            .map(|individual| individual.evaluation.mean_attack_attempt_energy_cost)
+            .sum::<f64>()
+            / population.len() as f64,
+        champion_net_attack_energy_balance: best.evaluation.mean_net_attack_energy_balance,
+        mean_net_attack_energy_balance: population
+            .iter()
+            .map(|individual| individual.evaluation.mean_net_attack_energy_balance)
+            .sum::<f64>()
+            / population.len() as f64,
+        champion_distinct_attack_victims: best.evaluation.mean_distinct_attack_victims,
+        mean_distinct_attack_victims: population
+            .iter()
+            .map(|individual| individual.evaluation.mean_distinct_attack_victims)
+            .sum::<f64>()
+            / population.len() as f64,
+        champion_attack_repeat_hit_fraction: best.evaluation.attack_repeat_hit_fraction,
+        mean_attack_repeat_hit_fraction: mean_optional(
+            population
+                .iter()
+                .map(|individual| individual.evaluation.attack_repeat_hit_fraction),
+        ),
         champion_action_fractions: best.evaluation.mean_action_fractions,
         mean_action_fractions,
         champion_realized_plant_supply_per_tick: best

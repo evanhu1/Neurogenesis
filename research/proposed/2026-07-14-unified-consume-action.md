@@ -31,7 +31,8 @@ remains implicit in both arms.
 In the treatment, `Consume` resolves against the adjacent forward cell:
 
 - plant: transfer the plant's energy;
-- organism: transfer attack energy when predation is enabled;
+- organism: pay the configured attack-attempt cost, then transfer the configured
+  amount from victim to attacker when predation is enabled;
 - wall or empty cell: fail.
 
 No energy values, sensor inputs, target ranges, tick ordering, or evaluation
@@ -48,7 +49,8 @@ connections rather than the control's 14 x 5 = 70.
 - Held-out world seeds: `101,131,151,181,211,241,271,311`
 - Population: 24 genomes
 - Generations: 20 (`0..19`)
-- Episode horizon: 5,000 ticks
+- Episode horizon: 500 ticks, extended for both arms only if end survival shows
+  material censoring
 - Evaluation: contemporary-only pairwise, eight opponent exposures and 32
   scored cases per genome
 - World: canonical 50x50, 100 founders, 20% plant tiles, predation enabled

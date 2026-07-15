@@ -72,6 +72,7 @@ struct MoveResolution {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttackOutcome {
+    InsufficientEnergy,
     NoOrganismTarget,
     SamePoolBlocked,
     NonlethalHit,
@@ -89,6 +90,7 @@ pub struct AttackEvent {
     pub victim_energy_before: u32,
     pub victim_energy_after: u32,
     pub energy_transferred: u32,
+    pub attacker_energy_cost: u32,
 }
 
 /// Reusable per-tick scratch buffers owned by `Simulation` so the commit /
@@ -117,8 +119,8 @@ struct CommitResult {
     attack_events: Vec<AttackEvent>,
     food_consumption_debit: f64,
     food_consumption_credit: f64,
-    attack_transfer_debit: f64,
-    attack_transfer_credit: f64,
+    attack_transfer_energy: f64,
+    attack_attempt_cost: f64,
 }
 
 #[derive(Debug, Default)]
@@ -360,24 +362,23 @@ fn build_energy_ledger_row(inputs: EnergyLedgerInputs<'_>) -> EnergyLedgerRow {
 
     let organism_expected = organism_energy_before - lifecycle.tick_drain_energy
         + commit.food_consumption_credit
-        + commit.attack_transfer_credit
-        - commit.attack_transfer_debit;
+        - commit.attack_attempt_cost;
     let food_expected = food_energy_before - commit.food_consumption_debit + plant_spawn_energy;
     let organism_residual = organism_energy_after - organism_expected;
     let food_residual = food_energy_after - food_expected;
     let food_transfer_residual = commit.food_consumption_credit - commit.food_consumption_debit;
-    let attack_transfer_residual = commit.attack_transfer_credit - commit.attack_transfer_debit;
-    let transfer_residual = food_transfer_residual + attack_transfer_residual;
+    let transfer_residual = food_transfer_residual;
     let total_expected = organism_energy_before + food_energy_before + plant_spawn_energy
-        - lifecycle.tick_drain_energy;
+        - lifecycle.tick_drain_energy
+        - commit.attack_attempt_cost;
     let total_residual = organism_energy_after + food_energy_after - total_expected;
     let flow_scale = (organism_energy_before + food_energy_before).abs()
         + plant_spawn_energy.abs()
         + lifecycle.tick_drain_energy.abs()
         + commit.food_consumption_debit.abs()
         + commit.food_consumption_credit.abs()
-        + commit.attack_transfer_debit.abs()
-        + commit.attack_transfer_credit.abs();
+        + commit.attack_transfer_energy.abs()
+        + commit.attack_attempt_cost.abs();
     let residual_tolerance =
         ENERGY_LEDGER_EPSILON_MULTIPLIER * f64::from(f32::EPSILON) * flow_scale.max(1.0);
 
@@ -391,13 +392,12 @@ fn build_energy_ledger_row(inputs: EnergyLedgerInputs<'_>) -> EnergyLedgerRow {
         tick_drain_energy: lifecycle.tick_drain_energy,
         food_consumption_debit: commit.food_consumption_debit,
         food_consumption_credit: commit.food_consumption_credit,
-        attack_transfer_debit: commit.attack_transfer_debit,
-        attack_transfer_credit: commit.attack_transfer_credit,
+        attack_transfer_energy: commit.attack_transfer_energy,
+        attack_attempt_cost: commit.attack_attempt_cost,
         organism_residual,
         food_residual,
         total_residual,
         food_transfer_residual,
-        attack_transfer_residual,
         transfer_residual,
         residual_tolerance,
     };
@@ -415,13 +415,12 @@ fn assert_energy_ledger_closes(row: &EnergyLedgerRow) {
         row.tick_drain_energy,
         row.food_consumption_debit,
         row.food_consumption_credit,
-        row.attack_transfer_debit,
-        row.attack_transfer_credit,
+        row.attack_transfer_energy,
+        row.attack_attempt_cost,
         row.organism_residual,
         row.food_residual,
         row.total_residual,
         row.food_transfer_residual,
-        row.attack_transfer_residual,
         row.transfer_residual,
         row.residual_tolerance,
     ];
@@ -434,7 +433,6 @@ fn assert_energy_ledger_closes(row: &EnergyLedgerRow) {
         ("organism compartment", row.organism_residual),
         ("food compartment", row.food_residual),
         ("plant-to-organism transfer", row.food_transfer_residual),
-        ("attack transfer", row.attack_transfer_residual),
         ("combined physical transfers", row.transfer_residual),
         ("total compartments", row.total_residual),
     ] {
