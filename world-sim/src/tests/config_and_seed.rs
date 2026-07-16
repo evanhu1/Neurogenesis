@@ -20,7 +20,7 @@ fn stochastic_action_sampling_is_deterministic_for_repeated_runs() {
 }
 
 #[test]
-fn champion_pool_init_reset_and_replay_are_deterministic() {
+fn founder_genome_pool_init_reset_and_replay_are_deterministic() {
     let mut cfg = stable_test_config();
     cfg.world_width = 24;
     cfg.num_organisms = 32;
@@ -52,10 +52,11 @@ fn champion_pool_init_reset_and_replay_are_deterministic() {
         })
         .collect();
 
-    let champion_pool = vec![champion_a.clone(), champion_b.clone()];
-    let mut run = Simulation::new_with_champion_pool(cfg.clone(), 2026, champion_pool.clone())
-        .expect("simulation should initialize");
-    let mut replay = Simulation::new_with_champion_pool(cfg, 2026, champion_pool)
+    let founder_genome_pool = vec![champion_a.clone(), champion_b.clone()];
+    let mut run =
+        Simulation::new_with_founder_genome_pool(cfg.clone(), 2026, founder_genome_pool.clone())
+            .expect("simulation should initialize");
+    let mut replay = Simulation::new_with_founder_genome_pool(cfg, 2026, founder_genome_pool)
         .expect("simulation should initialize");
     let initial_snapshot = run.snapshot();
 
@@ -78,7 +79,7 @@ fn champion_pool_init_reset_and_replay_are_deterministic() {
 }
 
 #[test]
-fn reset_preserves_champion_pool_bootstrap_behavior() {
+fn reset_preserves_founder_genome_pool_bootstrap_behavior() {
     let mut cfg = stable_test_config();
     cfg.world_width = 18;
     cfg.num_organisms = 16;
@@ -95,7 +96,7 @@ fn reset_preserves_champion_pool_bootstrap_behavior() {
         })
         .collect();
 
-    let mut sim = Simulation::new_with_champion_pool(cfg, 99, vec![champion.clone()])
+    let mut sim = Simulation::new_with_founder_genome_pool(cfg, 99, vec![champion.clone()])
         .expect("simulation should initialize");
     let initial_snapshot = sim.snapshot();
 
@@ -107,26 +108,4 @@ fn reset_preserves_champion_pool_bootstrap_behavior() {
         .organisms()
         .iter()
         .all(|organism| organism.genome == champion));
-}
-
-#[test]
-fn higher_food_tile_fraction_increases_initial_plant_supply() {
-    let mut dense_cfg = stable_test_config();
-    dense_cfg.world_width = 48;
-    dense_cfg.num_organisms = 1;
-    dense_cfg.food_tile_fraction = 0.6;
-
-    let mut sparse_cfg = dense_cfg.clone();
-    sparse_cfg.food_tile_fraction = 0.1;
-
-    let dense = Simulation::new(dense_cfg, 2026).expect("simulation should initialize");
-    let sparse = Simulation::new(sparse_cfg, 2026).expect("simulation should initialize");
-
-    let dense_food = dense.snapshot().foods.len();
-    let sparse_food = sparse.snapshot().foods.len();
-
-    assert!(
-        sparse_food < dense_food,
-        "lowering the food tile fraction should reduce initial plant supply: dense={dense_food} sparse={sparse_food}"
-    );
 }

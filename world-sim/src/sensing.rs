@@ -12,14 +12,12 @@ use std::time::Instant;
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(crate) struct VisionSignal {
     pub(crate) proximity: f32,
-    pub(crate) energy_affordance: f32,
 }
 
 #[cfg_attr(not(feature = "instrumentation"), allow(dead_code))]
 #[derive(Clone, Copy, Default)]
 pub(crate) struct ScanResult {
     pub(crate) signal: VisionSignal,
-    pub(crate) food_visible: bool,
 }
 
 type RayScans = [ScanResult; VISION_RAY_COUNT];
@@ -103,7 +101,6 @@ impl VisionRayTable {
 struct RaycastContext<'a> {
     organism_id: OrganismId,
     occupancy: &'a [Option<Occupant>],
-    predation_enabled: bool,
 }
 
 pub(super) fn encode_sensory_inputs(
@@ -111,11 +108,11 @@ pub(super) fn encode_sensory_inputs(
     ray_table: &VisionRayTable,
     occupancy: &[Option<Occupant>],
     starting_energy: u32,
-    plant_energy: u32,
-    predation_enabled: bool,
+    energy_flow_scale: u32,
+    _predation_enabled: bool,
 ) -> RayScans {
     let energy = energy_signal(organism, starting_energy);
-    let energy_flow = energy_flow_signal(organism, plant_energy);
+    let energy_flow = energy_flow_signal(organism, energy_flow_scale);
     // Plasticity runs after action commit and uses this snapshot to measure the
     // action's within-tick energy consequence. Keep the encoded Energy sensor
     // based on the pre-action value above, then roll the persisted baseline
@@ -130,7 +127,7 @@ pub(super) fn encode_sensory_inputs(
         organism.id,
         ray_table,
         occupancy,
-        predation_enabled,
+        _predation_enabled,
     );
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::ScanAhead, scan_started.elapsed());
@@ -141,9 +138,6 @@ pub(super) fn encode_sensory_inputs(
         sensory_neuron.neuron.activation = match sensory_neuron.receptor {
             SensoryReceptor::RayProximity { ray_offset } => {
                 ray_signal(&ray_scans, ray_offset).proximity
-            }
-            SensoryReceptor::RayEnergyAffordance { ray_offset } => {
-                ray_signal(&ray_scans, ray_offset).energy_affordance
             }
             SensoryReceptor::SelfEnergy => energy,
             SensoryReceptor::EnergyFlowLastTick => energy_flow,
@@ -168,12 +162,11 @@ pub(crate) fn scan_rays(
     organism_id: OrganismId,
     ray_table: &VisionRayTable,
     occupancy: &[Option<Occupant>],
-    predation_enabled: bool,
+    _predation_enabled: bool,
 ) -> RayScans {
     let context = RaycastContext {
         organism_id,
         occupancy,
-        predation_enabled,
     };
     std::array::from_fn(|idx| {
         let ray_facing = rotate_by_steps(facing, SensoryReceptor::RAY_OFFSETS[idx]);
@@ -192,8 +185,8 @@ fn energy_signal(organism: &OrganismState, starting_energy: u32) -> f32 {
     energy / (energy + starting_energy as f32)
 }
 
-fn energy_flow_signal(organism: &OrganismState, plant_energy: u32) -> f32 {
-    (organism.energy_flow_last_tick as f32 / plant_energy.max(1) as f32).clamp(-1.0, 1.0)
+fn energy_flow_signal(organism: &OrganismState, energy_flow_scale: u32) -> f32 {
+    (organism.energy_flow_last_tick as f32 / energy_flow_scale.max(1) as f32).clamp(-1.0, 1.0)
 }
 
 fn scan_ray(cell_indices: &[u32], context: RaycastContext<'_>) -> ScanResult {
@@ -204,24 +197,15 @@ fn scan_ray(cell_indices: &[u32], context: RaycastContext<'_>) -> ScanResult {
         let distance = distance_idx as u32 + 1;
         let distance_signal = (max_dist - distance + 1) as f32 * inv_max_dist;
         let signal = match context.occupancy[cell_idx as usize] {
-            Some(Occupant::Food(_)) => VisionSignal {
-                proximity: distance_signal,
-                energy_affordance: 1.0,
-            },
             Some(Occupant::Organism(id)) if id != context.organism_id => VisionSignal {
                 proximity: distance_signal,
-                energy_affordance: if context.predation_enabled { -1.0 } else { 0.0 },
             },
             Some(Occupant::Wall) => VisionSignal {
                 proximity: distance_signal,
-                energy_affordance: 0.0,
             },
             Some(Occupant::Organism(_)) | None => continue,
         };
-        return ScanResult {
-            food_visible: signal.energy_affordance > 0.0,
-            signal,
-        };
+        return ScanResult { signal };
     }
 
     ScanResult::default()
@@ -258,9 +242,7 @@ mod tests {
     use super::{energy_signal, scan_ray, RaycastContext, VisionRayTable};
     use rand::SeedableRng;
     use rand_chacha::ChaCha8Rng;
-    use types::{
-        BrainState, FacingDirection, FoodId, Occupant, OrganismId, OrganismState, SpeciesId,
-    };
+    use types::{BrainState, FacingDirection, Occupant, OrganismId, OrganismState, SpeciesId};
 
     fn test_organism() -> OrganismState {
         let config = config::default_world_config();
@@ -280,13 +262,13 @@ mod tests {
             FacingDirection::East,
             config.starting_energy,
             0,
-            0,
-            0,
             types::ActionType::Idle,
             BrainState {
                 sensory: Vec::new(),
                 inter: Vec::new(),
                 action: Vec::new(),
+                recurrent_synapses: Vec::new(),
+                previous_inter_activations: Vec::new(),
                 synapse_count: 0,
                 sensory_mean_activation: Vec::new(),
                 inter_mean_activation: Vec::new(),
@@ -310,18 +292,15 @@ mod tests {
     fn scan_ray_reports_nearest_entity_type_and_distance() {
         let world_width = 5;
         let mut occupancy = vec![None; (world_width * world_width) as usize];
-        occupancy[world_width as usize + 3] = Some(Occupant::Food(FoodId(0)));
+        occupancy[world_width as usize + 3] = Some(Occupant::Organism(OrganismId(2)));
         let ray_table = VisionRayTable::new(world_width, 4);
         let scan = scan_ray(
             ray_table.ray((1, 1), FacingDirection::East),
             RaycastContext {
                 organism_id: OrganismId(1),
                 occupancy: &occupancy,
-                predation_enabled: true,
             },
         );
-        assert!(scan.food_visible);
         assert_eq!(scan.signal.proximity, 0.75);
-        assert_eq!(scan.signal.energy_affordance, 1.0);
     }
 }

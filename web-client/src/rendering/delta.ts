@@ -44,13 +44,8 @@ export function applyTickDelta(snapshot: WorldSnapshot, delta: TickDelta): World
   }
 
   const removedOrganisms = new Set<number>();
-  const removedFoods = new Set<number>();
   for (const entry of delta.removed_positions) {
-    if (entry.entity_id.entity_type === 'Organism') {
-      removedOrganisms.add(entry.entity_id.id);
-    } else {
-      removedFoods.add(entry.entity_id.id);
-    }
+    removedOrganisms.add(entry.entity_id.id);
   }
 
   const organisms = snapshot.organisms
@@ -67,19 +62,11 @@ export function applyTickDelta(snapshot: WorldSnapshot, delta: TickDelta): World
     })
     .concat(delta.spawned);
 
-  const foods =
-    removedFoods.size === 0 && delta.food_spawned.length === 0
-      ? snapshot.foods
-      : snapshot.foods
-          .filter((food) => !removedFoods.has(food.id))
-          .concat(delta.food_spawned);
-
   return {
     ...snapshot,
     turn: delta.turn,
     metrics: recomputeMetrics(delta.metrics, organisms, snapshot.metrics.total_species_created),
     organisms,
-    foods,
   };
 }
 

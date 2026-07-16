@@ -31,13 +31,6 @@ const FACING_UNIT_VECTORS: Record<FacingDirection, { x: number; y: number }> = {
   SouthWest: { x: -HEX_DIAGONAL_UNIT_X, y: HEX_DIAGONAL_UNIT_Y },
   SouthEast: { x: HEX_DIAGONAL_UNIT_X, y: HEX_DIAGONAL_UNIT_Y },
 };
-// Food draws as a round "bush" inside the cell so vegetation reads against
-// the grass instead of blending into it.
-const FOOD_FILL_ALPHA = 0.9;
-const FOOD_RADIUS_SCALE = 0.42;
-const FOOD_MIN_RADIUS_PX = 1;
-const FOOD_STROKE_COLOR = 'rgba(40, 58, 22, 0.4)';
-const FOOD_STROKE_WIDTH = 0.25;
 const ORGANISM_RADIUS_SCALE = 0.26;
 const ORGANISM_MIN_RADIUS_PX = 1.2;
 const ORGANISM_PICK_RADIUS_SCALE = 0.42;
@@ -71,7 +64,6 @@ export type WorldViewport = {
 
 export type RenderVisibility = {
   organisms: boolean;
-  plants: boolean;
 };
 
 type LayerCache = {
@@ -82,7 +74,6 @@ type LayerCache = {
 };
 
 type TerrainLayerCache = LayerCache & { terrainSeed: number };
-type PlantLayerCache = LayerCache & { foods: WorldSnapshot['foods'] | null };
 type OrganismLayerCache = LayerCache & {
   organisms: WorldSnapshot['organisms'] | null;
   focusedOrganismId: number | null;
@@ -111,7 +102,6 @@ type HexSprite = {
 
 export type WorldRenderCache = {
   terrain: TerrainLayerCache;
-  plants: PlantLayerCache;
   organisms: OrganismLayerCache;
   terrainMask: TerrainMaskCache | null;
   geometry: LayoutGeometryCache | null;
@@ -121,7 +111,6 @@ export type WorldRenderCache = {
 export function createWorldRenderCache(): WorldRenderCache {
   return {
     terrain: { surface: null, width: 0, height: 0, worldWidth: 0, terrainSeed: Number.NaN },
-    plants: { surface: null, width: 0, height: 0, worldWidth: 0, foods: null },
     organisms: {
       surface: null,
       width: 0,
@@ -506,39 +495,6 @@ function renderTerrainLayer(
   }
 }
 
-function renderPlantLayer(
-  ctx: CanvasRenderingContext2D,
-  canvas: HTMLCanvasElement,
-  cache: WorldRenderCache,
-  width: number,
-  height: number,
-  snapshot: WorldSnapshot,
-) {
-  ctx.clearRect(0, 0, width, height);
-  const geometry = getLayoutGeometry(cache, width, height, snapshot.config.world_width);
-  for (const food of snapshot.foods) {
-    const index = cellIndex(geometry.worldWidth, food.q, food.r);
-    drawFood(ctx, food, geometry.centerXs[index], geometry.centerYs[index], geometry.layout.size);
-  }
-}
-
-function drawFood(
-  ctx: CanvasRenderingContext2D,
-  food: WorldSnapshot['foods'][number],
-  centerX: number,
-  centerY: number,
-  hexSize: number,
-) {
-  const radius = Math.max(FOOD_MIN_RADIUS_PX, hexSize * FOOD_RADIUS_SCALE);
-  ctx.beginPath();
-  ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-  ctx.fillStyle = visualToCss(food.visual, FOOD_FILL_ALPHA);
-  ctx.fill();
-  ctx.strokeStyle = FOOD_STROKE_COLOR;
-  ctx.lineWidth = FOOD_STROKE_WIDTH;
-  ctx.stroke();
-}
-
 function renderOrganismLayer(
   ctx: CanvasRenderingContext2D,
   cache: WorldRenderCache,
@@ -587,33 +543,6 @@ function getTerrainLayer(
 
   renderTerrainLayer(context, canvas, cache, width, height, snapshot);
   cache.terrain = { surface, width, height, worldWidth, terrainSeed };
-  return surface;
-}
-
-function getPlantLayer(
-  cache: WorldRenderCache,
-  canvas: HTMLCanvasElement,
-  snapshot: WorldSnapshot,
-) {
-  const { width, height } = getLayerDimensions(canvas);
-  const worldWidth = snapshot.config.world_width;
-  const cached = cache.plants;
-  if (
-    cached.surface != null &&
-    cached.width === width &&
-    cached.height === height &&
-    cached.worldWidth === worldWidth &&
-    cached.foods === snapshot.foods
-  ) {
-    return cached.surface;
-  }
-
-  const surface = ensureLayerSurface(cached.surface, canvas, width, height);
-  const context = surface.getContext('2d');
-  if (!context) return null;
-
-  renderPlantLayer(context, canvas, cache, width, height, snapshot);
-  cache.plants = { surface, width, height, worldWidth, foods: snapshot.foods };
   return surface;
 }
 
@@ -699,34 +628,6 @@ function renderVisibleTerrain(
   }
 }
 
-function renderVisiblePlants(
-  ctx: CanvasRenderingContext2D,
-  cache: WorldRenderCache,
-  snapshot: WorldSnapshot,
-  width: number,
-  height: number,
-  viewport: WorldViewport,
-) {
-  const geometry = getLayoutGeometry(cache, width, height, snapshot.config.world_width);
-  const range = computeVisibleHexRange(geometry.layout, width, height, viewport);
-  const pad = geometry.layout.size;
-
-  for (const food of snapshot.foods) {
-    const index = cellIndex(geometry.worldWidth, food.q, food.r);
-    const centerX = geometry.centerXs[index];
-    const centerY = geometry.centerYs[index];
-    if (
-      centerX < range.minX - pad ||
-      centerX > range.maxX + pad ||
-      centerY < range.minY - pad ||
-      centerY > range.maxY + pad
-    ) {
-      continue;
-    }
-    drawFood(ctx, food, centerX, centerY, geometry.layout.size);
-  }
-}
-
 function renderVisibleOrganisms(
   ctx: CanvasRenderingContext2D,
   cache: WorldRenderCache,
@@ -782,9 +683,6 @@ export function renderWorld(
   ctx.translate(-width / 2, -height / 2);
   if (renderHighDetail) {
     renderVisibleTerrain(ctx, cache, snapshot, width, height, viewport);
-    if (visibility.plants) {
-      renderVisiblePlants(ctx, cache, snapshot, width, height, viewport);
-    }
     if (visibility.organisms) {
       renderVisibleOrganisms(ctx, cache, snapshot, focusedOrganismId, width, height, viewport);
     }
@@ -792,10 +690,6 @@ export function renderWorld(
     const terrainLayer = getTerrainLayer(cache, canvas, snapshot);
     if (terrainLayer) {
       ctx.drawImage(terrainLayer, 0, 0, width, height);
-      if (visibility.plants) {
-        const plantLayer = getPlantLayer(cache, canvas, snapshot);
-        if (plantLayer) ctx.drawImage(plantLayer, 0, 0, width, height);
-      }
       if (visibility.organisms) {
         const organismLayer = getOrganismLayer(cache, canvas, snapshot, focusedOrganismId);
         if (organismLayer) ctx.drawImage(organismLayer, 0, 0, width, height);

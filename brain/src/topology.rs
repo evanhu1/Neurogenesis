@@ -45,7 +45,7 @@ pub fn constrain_weight(weight: f32) -> f32 {
 /// refreshes `synapse_count`. Called at birth and from the runtime prune
 /// path; allocation-free.
 pub fn refresh_action_synapse_starts_and_count(brain: &mut BrainState) {
-    let mut total_synapses = 0usize;
+    let mut total_synapses = brain.recurrent_synapses.len();
     for sensory_neuron in brain.sensory.iter_mut() {
         debug_assert_runtime_synapse_order(&sensory_neuron.synapses);
         sensory_neuron.action_synapse_start = sensory_neuron

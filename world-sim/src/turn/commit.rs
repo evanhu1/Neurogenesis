@@ -5,7 +5,6 @@ struct CommitPhaseContext<'a> {
     intents: &'a [OrganismIntent],
     resolutions: &'a [MoveResolution],
     world_width_usize: usize,
-    removed_food: Vec<bool>,
     dead_organisms: Vec<bool>,
     result: CommitResult,
 }
@@ -29,10 +28,6 @@ impl<'a> CommitPhaseContext<'a> {
         resolutions: &'a [MoveResolution],
     ) -> Self {
         let org_count = sim.organisms.len();
-        let food_count = sim.foods.len();
-        let mut removed_food = std::mem::take(&mut sim.turn_scratch.removed_food);
-        removed_food.clear();
-        removed_food.resize(food_count, false);
         let mut dead_organisms = std::mem::take(&mut sim.turn_scratch.dead_organisms);
         dead_organisms.clear();
         dead_organisms.resize(org_count, false);
@@ -41,7 +36,6 @@ impl<'a> CommitPhaseContext<'a> {
             intents,
             resolutions,
             world_width_usize: world_width as usize,
-            removed_food,
             dead_organisms,
             result: CommitResult::default(),
         }
@@ -66,40 +60,53 @@ impl<'a> CommitPhaseContext<'a> {
                 });
             }
             organism.facing = intent.facing_after_actions;
-            if intent.took_action {
-                self.result.actions_applied += 1;
-            }
+            self.result.actions_applied += u64::from(intent.command_count);
         }
     }
 
     fn apply_moves(&mut self) {
+        // Clear every source first, then fill every destination. This is
+        // observably identical for categorical moves (all targets began empty)
+        // and makes treatment moves into simultaneously vacated cells atomic.
         for resolution in self.resolutions {
             let from_idx =
                 resolution.from.1 as usize * self.world_width_usize + resolution.from.0 as usize;
-            let to_idx =
-                resolution.to.1 as usize * self.world_width_usize + resolution.to.0 as usize;
             debug_assert_eq!(
                 self.sim.occupancy[from_idx],
                 Some(Occupant::Organism(resolution.actor_id))
             );
-            debug_assert_eq!(self.sim.occupancy[to_idx], None);
-
             self.sim.occupancy[from_idx] = None;
+        }
+        for resolution in self.resolutions {
+            let to_idx =
+                resolution.to.1 as usize * self.world_width_usize + resolution.to.0 as usize;
+            debug_assert_eq!(self.sim.occupancy[to_idx], None);
             self.sim.occupancy[to_idx] = Some(Occupant::Organism(resolution.actor_id));
             let organism = &mut self.sim.organisms[resolution.actor_idx];
             organism.q = resolution.to.0;
             organism.r = resolution.to.1;
             #[cfg(feature = "instrumentation")]
-            self.sim.mark_action_succeeded(resolution.actor_idx);
+            self.sim
+                .mark_action_succeeded(resolution.actor_idx, ActionType::Forward);
         }
     }
 
     fn resolve_interactions(&mut self) {
         for (idx, intent) in self.intents.iter().enumerate() {
-            if (!intent.wants_eat && !intent.wants_attack) || self.dead_organisms[idx] {
+            if !intent.wants_attack || self.dead_organisms[idx] {
                 continue;
             }
-            let Some((target_q, target_r)) = intent.interaction_target else {
+            let interaction_target = if intent.interaction_after_move {
+                let organism = &self.sim.organisms[idx];
+                Some(hex_neighbor(
+                    (organism.q, organism.r),
+                    organism.facing,
+                    self.world_width_usize as i32,
+                ))
+            } else {
+                intent.interaction_target
+            };
+            let Some((target_q, target_r)) = interaction_target else {
                 continue;
             };
             let target_idx = target_r as usize * self.world_width_usize + target_q as usize;
@@ -127,30 +134,34 @@ impl<'a> CommitPhaseContext<'a> {
                             target_idx,
                             attacker_energy_cost,
                         ),
-                        None | Some(Occupant::Wall) | Some(Occupant::Food(_)) => AttackEvent {
-                            turn: self.sim.turn.saturating_add(1),
-                            attacker_id: intent.id,
-                            attacker_species_id: self.sim.organisms[idx].species_id,
-                            victim_id: None,
-                            victim_species_id: None,
-                            outcome: AttackOutcome::NoOrganismTarget,
-                            victim_energy_before: 0,
-                            victim_energy_after: 0,
-                            energy_transferred: 0,
-                            attacker_energy_cost,
-                        },
+                        None | Some(Occupant::Wall) => {
+                            let evaded = intent.snapshot_attack_target.and_then(|victim_id| {
+                                organism_index_by_id(&self.sim.organisms, victim_id)
+                                    .filter(|victim_idx| !self.dead_organisms[*victim_idx])
+                                    .map(|victim_idx| {
+                                        (victim_id, self.sim.organisms[victim_idx].species_id)
+                                    })
+                            });
+                            AttackEvent {
+                                turn: self.sim.turn.saturating_add(1),
+                                attacker_id: intent.id,
+                                attacker_species_id: self.sim.organisms[idx].species_id,
+                                victim_id: evaded.map(|value| value.0),
+                                victim_species_id: evaded.map(|value| value.1),
+                                outcome: if evaded.is_some() {
+                                    AttackOutcome::TargetEvaded
+                                } else {
+                                    AttackOutcome::NoOrganismTarget
+                                },
+                                victim_energy_before: 0,
+                                victim_energy_after: 0,
+                                energy_transferred: 0,
+                                attacker_energy_cost,
+                            }
+                        }
                     }
                 };
                 self.result.attack_events.push(event);
-                continue;
-            }
-
-            match self.sim.occupancy[target_idx] {
-                Some(Occupant::Food(food_id)) if intent.wants_eat => {
-                    self.consume_food(idx, target_idx, food_id);
-                }
-                None | Some(Occupant::Wall) => {}
-                Some(Occupant::Food(_)) | Some(Occupant::Organism(_)) => {}
             }
         }
     }
@@ -174,52 +185,6 @@ impl<'a> CommitPhaseContext<'a> {
             self.kill_organism(attacker_idx, attacker_id, cell_idx, position);
         }
         paid
-    }
-
-    fn consume_food(&mut self, predator_idx: usize, target_idx: usize, food_id: types::FoodId) {
-        let Some(food_idx) = food_index_by_id(&self.sim.foods, food_id) else {
-            return;
-        };
-        // A food can never be consumed twice in one tick: it occupies exactly
-        // one cell (occupancy<->foods bijection) and the first consumption
-        // clears that cell's occupancy below, so no later intent can resolve
-        // the same food id.
-        debug_assert!(!self.removed_food[food_idx]);
-
-        let food = self.sim.foods[food_idx].clone();
-        self.removed_food[food_idx] = true;
-        self.sim.occupancy[target_idx] = None;
-        self.sim.schedule_food_regrowth(target_idx);
-        let predator = &mut self.sim.organisms[predator_idx];
-        let energy_before_consumption = predator.energy;
-        predator.energy = predator
-            .energy
-            .checked_add(food.energy)
-            .expect("plant energy gain overflow");
-        predator.energy_flow_last_tick =
-            add_signed_energy_flow(predator.energy_flow_last_tick, food.energy, true);
-        self.result.food_consumption_debit += f64::from(food.energy);
-        self.result.food_consumption_credit +=
-            f64::from(predator.energy) - f64::from(energy_before_consumption);
-        predator.consumptions_count = predator.consumptions_count.saturating_add(1);
-        predator.plant_consumptions_count = predator.plant_consumptions_count.saturating_add(1);
-        self.result.plant_consumptions += 1;
-        #[cfg(feature = "instrumentation")]
-        {
-            let predator = &self.sim.organisms[predator_idx];
-            let total = predator.consumptions_count;
-            let plant = predator.plant_consumptions_count;
-            let prey = predator.prey_consumptions_count;
-            self.sim
-                .record_consumption_counts(predator_idx, total, plant, prey);
-            self.sim.mark_action_succeeded(predator_idx);
-        }
-        self.result.consumptions += 1;
-        self.result.removed_positions.push(RemovedEntityPosition {
-            entity_id: EntityId::Food(food_id),
-            q: food.q,
-            r: food.r,
-        });
     }
 
     fn resolve_attack_transfer(
@@ -286,7 +251,8 @@ impl<'a> CommitPhaseContext<'a> {
         };
 
         #[cfg(feature = "instrumentation")]
-        self.sim.mark_action_succeeded(predator_idx);
+        self.sim
+            .mark_action_succeeded(predator_idx, ActionType::Attack);
 
         if energy_transferred > 0 {
             let predator = &mut self.sim.organisms[predator_idx];
@@ -296,19 +262,14 @@ impl<'a> CommitPhaseContext<'a> {
                 .expect("attack energy credit overflow");
             predator.energy_flow_last_tick =
                 add_signed_energy_flow(predator.energy_flow_last_tick, energy_transferred, true);
-            predator.consumptions_count = predator.consumptions_count.saturating_add(1);
-            predator.prey_consumptions_count = predator.prey_consumptions_count.saturating_add(1);
+            predator.successful_attacks_count = predator.successful_attacks_count.saturating_add(1);
             self.result.predations += 1;
-            self.result.consumptions += 1;
             self.result.attack_transfer_energy += f64::from(energy_transferred);
             #[cfg(feature = "instrumentation")]
             {
                 let predator = &self.sim.organisms[predator_idx];
-                let total = predator.consumptions_count;
-                let plant = predator.plant_consumptions_count;
-                let prey = predator.prey_consumptions_count;
                 self.sim
-                    .record_consumption_counts(predator_idx, total, plant, prey);
+                    .record_successful_attacks(predator_idx, predator.successful_attacks_count);
             }
         }
         if killed {
@@ -340,25 +301,6 @@ impl<'a> CommitPhaseContext<'a> {
     fn finalize(&mut self) {
         self.sim.compact_organism_state(&self.dead_organisms);
 
-        // Mirror compact_organism_state's early-out: skip the per-food scan
-        // entirely on ticks with no consumptions.
-        if self.removed_food.iter().any(|&removed| removed) {
-            let food_count = self.removed_food.len();
-            let mut write = 0_usize;
-            for read in 0..self.sim.foods.len() {
-                if read >= food_count || !self.removed_food[read] {
-                    if write != read {
-                        self.sim.foods.swap(write, read);
-                    }
-                    write += 1;
-                }
-            }
-            self.sim.foods.truncate(write);
-        }
-
-        self.result
-            .food_spawned
-            .extend(self.sim.replenish_food_supply());
         self.result.moves = self
             .resolutions
             .iter()
@@ -370,7 +312,6 @@ impl<'a> CommitPhaseContext<'a> {
             .collect();
 
         // Return the scratch buffers to the simulation for reuse next tick.
-        self.sim.turn_scratch.removed_food = std::mem::take(&mut self.removed_food);
         self.sim.turn_scratch.dead_organisms = std::mem::take(&mut self.dead_organisms);
     }
 }

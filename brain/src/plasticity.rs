@@ -22,7 +22,7 @@ const PRUNE_ELIGIBILITY_MULTIPLIER: f32 = 2.0;
 /// constants add a scalar neuromodulator `m`, read from the organism's
 /// within-tick energy change (`energy - energy_at_last_sensing`, already
 /// persisted in world bytes), that gently scales ONLY the eligibility→weight
-/// term: coactivations that preceded an energy GAIN (ate prey/plant) get
+/// term: coactivations that preceded an energy gain from a successful attack get
 /// consolidated a little harder; those before a LOSS get damped a little.
 ///
 /// This is NOT a value function / TD / actor-critic — `m` is a bounded read of
@@ -33,16 +33,12 @@ const PRUNE_ELIGIBILITY_MULTIPLIER: f32 = 2.0;
 /// `GAIN` is small so the modulator never dominates the covariance signal — it
 /// biases consolidation toward rewarded coactivations rather than overriding
 /// the unsupervised structure. SCALE normalizes the energy delta to roughly
-/// [-1, 1] (a typical food/prey intake is on the order of a few energy units);
+/// [-1, 1] (an attack transfer is on the order of a few energy units);
 /// the inner clamp then caps the contribution of any single large gain/loss.
 ///
-/// GAIN was tuned to 0.04 (down from 0.08) by a plasticity-only cross-seed
-/// screen: a gentler credit signal lets the unsupervised covariance rule build
-/// far richer sensory→action structure (cross-seed mi_sa ~0.13 → ~0.20) without
-/// diluting action precision (action_effectiveness held) and while keeping the
-/// predator niche (prey rate held). With GAIN this small the modulator stays in
-/// [0.96, 1.04], so the MIN/MAX rails are an inert safety bound, not a constraint
-/// that bites — the levers that matter are GAIN (strength) and SCALE (saturation).
+/// GAIN is deliberately small so the modulator stays in [0.96, 1.04]. The
+/// MIN/MAX rails are therefore an inert safety bound; the levers that matter
+/// are GAIN (strength) and SCALE (saturation).
 const NEUROMOD_GAIN: f32 = 0.04;
 const NEUROMOD_SCALE: f32 = 5.0;
 const NEUROMOD_MIN: f32 = 0.85;
@@ -159,19 +155,15 @@ pub fn compute_pending_coactivations(organism: &mut OrganismState, scratch: &mut
         #[cfg(feature = "profiling")]
         let stage_started = Instant::now();
         // The scratch is always prepared by `evaluate_brain` immediately
-        // before this pass: `prepare_inter_buffers` fills `prev_inter` to the
-        // inter layer length, and `inter_activations` was just filled above
-        // from the same layer. Fail fast instead of silently skipping the
-        // inter→inter pass on a misprepared scratch.
-        debug_assert_eq!(scratch.prev_inter.len(), brain.inter.len());
+        // before this pass: `prev_inter` is the frozen recurrent source vector
+        // from t-1, while `inter_activations` is the just-resolved vector at t.
         for (pre_idx, inter) in brain.inter.iter_mut().enumerate() {
-            let pre_prev = scratch.prev_inter[pre_idx];
             let pre_current = scratch.inter_activations[pre_idx];
             let pre_mean = inter_means[pre_idx];
             compute_pending_edge_coactivations(
                 &mut inter.synapses,
                 inter.action_synapse_start,
-                pre_prev,
+                pre_current,
                 pre_mean,
                 pre_current,
                 &scratch.inter_activations,
@@ -179,6 +171,22 @@ pub fn compute_pending_coactivations(organism: &mut OrganismState, scratch: &mut
                 &action_activations,
                 action_means,
             );
+        }
+        debug_assert!(
+            brain.recurrent_synapses.is_empty() || scratch.prev_inter.len() == brain.inter.len()
+        );
+        for edge in &mut brain.recurrent_synapses {
+            let pre_idx = edge
+                .pre_inter_index
+                .expect("expressed recurrent edge has a dense presynaptic index")
+                as usize;
+            let post_idx = edge
+                .post_inter_index
+                .expect("expressed recurrent edge has a dense postsynaptic index")
+                as usize;
+            let pre_previous = scratch.prev_inter[pre_idx];
+            edge.pending_coactivation = (pre_previous - inter_means[pre_idx])
+                * (scratch.inter_activations[post_idx] - inter_means[post_idx]);
         }
         #[cfg(feature = "profiling")]
         profiling::record_brain_stage(BrainStage::PlasticityInterTuning, stage_started.elapsed());
@@ -277,6 +285,7 @@ pub fn apply_runtime_weight_updates(organism: &mut OrganismState) {
     for inter in &mut organism.brain.inter {
         apply_edge_weight_update_and_fold_pending(&mut inter.synapses, &params);
     }
+    apply_edge_weight_update_and_fold_pending(&mut organism.brain.recurrent_synapses, &params);
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::PlasticityInterTuning, stage_started.elapsed());
 
@@ -441,6 +450,7 @@ fn prune_low_weight_synapses(brain: &mut BrainState, threshold: f32) -> bool {
     for inter in &mut brain.inter {
         prune_group(&mut inter.synapses);
     }
+    prune_group(&mut brain.recurrent_synapses);
 
     if pruned_any {
         refresh_action_synapse_starts_and_count(brain);

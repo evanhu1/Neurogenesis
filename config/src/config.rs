@@ -18,11 +18,6 @@ pub struct TerrainGenerationPolicy {
     pub terrain_seed_mix: u64,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq)]
-pub struct FoodEcologyPolicy {
-    pub food_tile_seed_mix: u64,
-}
-
 pub fn seed_genome_config_defaults() -> SeedGenomeConfigDefaults {
     SeedGenomeConfigDefaults {
         juvenile_eta_scale: 2.0,
@@ -36,19 +31,12 @@ pub fn terrain_generation_policy() -> TerrainGenerationPolicy {
     }
 }
 
-pub fn food_ecology_policy() -> FoodEcologyPolicy {
-    FoodEcologyPolicy {
-        food_tile_seed_mix: 0x6A09_E667_F3BC_C909,
-    }
-}
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WorldConfigToml {
     world: WorldGeometryToml,
     population: WorldPopulationToml,
     lifecycle: WorldLifecycleToml,
-    food: WorldFoodToml,
     terrain: WorldTerrainToml,
     flags: WorldFlagsToml,
 }
@@ -78,14 +66,6 @@ struct WorldLifecycleToml {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct WorldFoodToml {
-    food_energy: u32,
-    food_regrowth_interval: u32,
-    food_tile_fraction: f32,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct WorldTerrainToml {
     terrain_noise_scale: f32,
     terrain_threshold: f32,
@@ -98,6 +78,7 @@ struct WorldFlagsToml {
     leaky_neurons_enabled: bool,
     predation_enabled: bool,
     force_random_actions: bool,
+    compositional_actions_enabled: bool,
 }
 
 impl WorldConfigToml {
@@ -109,17 +90,15 @@ impl WorldConfigToml {
             starting_energy: self.lifecycle.starting_energy,
             attack_energy_transfer: self.lifecycle.attack_energy_transfer,
             attack_attempt_cost: self.lifecycle.attack_attempt_cost,
-            food_energy: self.food.food_energy,
             action_temperature: self.lifecycle.action_temperature,
             intent_parallel_threads: self.lifecycle.intent_parallel_threads,
-            food_regrowth_interval: self.food.food_regrowth_interval,
-            food_tile_fraction: self.food.food_tile_fraction,
             terrain_noise_scale: self.terrain.terrain_noise_scale,
             terrain_threshold: self.terrain.terrain_threshold,
             runtime_plasticity_enabled: self.flags.runtime_plasticity_enabled,
             leaky_neurons_enabled: self.flags.leaky_neurons_enabled,
             predation_enabled: self.flags.predation_enabled,
             force_random_actions: self.flags.force_random_actions,
+            compositional_actions_enabled: self.flags.compositional_actions_enabled,
             seed_genome_config,
         }
     }
@@ -190,20 +169,11 @@ pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
     if config.attack_energy_transfer <= config.attack_attempt_cost {
         return Err("attack_energy_transfer must be greater than attack_attempt_cost".to_owned());
     }
-    if config.food_energy == 0 {
-        return Err("food_energy must be greater than zero".to_owned());
-    }
     if !config.action_temperature.is_finite() || config.action_temperature <= 0.0 {
         return Err("action_temperature must be finite and greater than zero".to_owned());
     }
     if config.intent_parallel_threads == 0 {
         return Err("intent_parallel_threads must be greater than zero".to_owned());
-    }
-    if config.food_regrowth_interval == 0 {
-        return Err("food_regrowth_interval must be greater than zero".to_owned());
-    }
-    if !(0.0..=1.0).contains(&config.food_tile_fraction) {
-        return Err("food_tile_fraction must be in [0.0, 1.0]".to_owned());
     }
     if config.terrain_noise_scale <= 0.0 {
         return Err("terrain_noise_scale must be greater than zero".to_owned());

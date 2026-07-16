@@ -79,13 +79,14 @@ fn debug_assert_synapse_genes_well_formed(genome: &OrganismGenome) {
         .windows(2)
         .all(|w| w[0].innovation < w[1].innovation));
     debug_assert!(genome.brain.edges.iter().all(|edge| {
-        is_valid_synapse_pair(genome, edge.pre_node_id, edge.post_node_id)
+        is_valid_synapse_pair(genome, edge.pre_node_id, edge.post_node_id, edge.timing)
             && edge.weight.is_finite()
             && edge.weight == constrain_weight(edge.weight)
     }));
     debug_assert!(genome.brain.edges.iter().enumerate().all(|(index, edge)| {
         !genome.brain.edges[..index].iter().any(|previous| {
-            (previous.pre_node_id, previous.post_node_id) == (edge.pre_node_id, edge.post_node_id)
+            (previous.pre_node_id, previous.post_node_id, previous.timing)
+                == (edge.pre_node_id, edge.post_node_id, edge.timing)
         })
     }));
 }
@@ -94,7 +95,12 @@ pub(super) fn sanitize_synapse_genes(genome: &mut OrganismGenome) {
     let hidden_nodes = &genome.brain.hidden_nodes;
     genome.brain.edges.retain_mut(|edge| {
         if !edge.weight.is_finite()
-            || !is_valid_synapse_pair_for_nodes(hidden_nodes, edge.pre_node_id, edge.post_node_id)
+            || !is_valid_synapse_pair_for_nodes(
+                hidden_nodes,
+                edge.pre_node_id,
+                edge.post_node_id,
+                edge.timing,
+            )
         {
             return false;
         }
@@ -112,13 +118,18 @@ pub(super) fn sanitize_synapse_genes(genome: &mut OrganismGenome) {
     enforce_feed_forward_edges(genome);
 }
 
-/// Disable enabled hidden-to-hidden edges that would close a directed cycle.
+/// Disable enabled current-tick hidden-to-hidden edges that would close an
+/// instantaneous directed cycle. Previous-tick edges are temporal and do not
+/// participate in this graph.
 /// Innovation order is the deterministic admission order, so malformed input
 /// and crossover products resolve to one stable maximal acyclic subgraph.
 pub fn enforce_feed_forward_edges(genome: &mut OrganismGenome) {
     let mut admitted = Vec::<(GeneNodeId, GeneNodeId)>::new();
     for edge in &mut genome.brain.edges {
-        if !edge.enabled || !is_hidden_to_hidden(edge.pre_node_id, edge.post_node_id) {
+        if !edge.enabled
+            || edge.timing != SynapseTiming::CurrentTick
+            || !is_hidden_to_hidden(edge.pre_node_id, edge.post_node_id)
+        {
             continue;
         }
         if edge.pre_node_id == edge.post_node_id
@@ -138,8 +149,9 @@ pub fn connection_would_create_cycle(
     genome: &OrganismGenome,
     pre: GeneNodeId,
     post: GeneNodeId,
+    timing: SynapseTiming,
 ) -> bool {
-    if !is_hidden_to_hidden(pre, post) {
+    if timing == SynapseTiming::PreviousTick || !is_hidden_to_hidden(pre, post) {
         return false;
     }
     if pre == post {
@@ -149,7 +161,11 @@ pub fn connection_would_create_cycle(
         .brain
         .edges
         .iter()
-        .filter(|edge| edge.enabled && is_hidden_to_hidden(edge.pre_node_id, edge.post_node_id))
+        .filter(|edge| {
+            edge.enabled
+                && edge.timing == SynapseTiming::CurrentTick
+                && is_hidden_to_hidden(edge.pre_node_id, edge.post_node_id)
+        })
         .map(|edge| (edge.pre_node_id, edge.post_node_id))
         .collect::<Vec<_>>();
     path_exists(&enabled, post, pre)
@@ -157,12 +173,11 @@ pub fn connection_would_create_cycle(
 
 fn enabled_hidden_graph_is_acyclic(genome: &OrganismGenome) -> bool {
     let mut admitted = Vec::<(GeneNodeId, GeneNodeId)>::new();
-    for edge in genome
-        .brain
-        .edges
-        .iter()
-        .filter(|edge| edge.enabled && is_hidden_to_hidden(edge.pre_node_id, edge.post_node_id))
-    {
+    for edge in genome.brain.edges.iter().filter(|edge| {
+        edge.enabled
+            && edge.timing == SynapseTiming::CurrentTick
+            && is_hidden_to_hidden(edge.pre_node_id, edge.post_node_id)
+    }) {
         if edge.pre_node_id == edge.post_node_id
             || path_exists(&admitted, edge.post_node_id, edge.pre_node_id)
         {
@@ -201,11 +216,12 @@ fn deduplicate_endpoint_pairs(edges: &mut Vec<SynapseGene>) {
         a.pre_node_id
             .cmp(&b.pre_node_id)
             .then_with(|| a.post_node_id.cmp(&b.post_node_id))
+            .then_with(|| a.timing.cmp(&b.timing))
             .then_with(|| a.innovation.cmp(&b.innovation))
             .then_with(|| b.enabled.cmp(&a.enabled))
             .then_with(|| a.weight.total_cmp(&b.weight))
     });
-    edges.dedup_by_key(|edge| (edge.pre_node_id, edge.post_node_id));
+    edges.dedup_by_key(|edge| (edge.pre_node_id, edge.post_node_id, edge.timing));
 }
 
 /// Keep one deterministic representative for exact duplicate markings, but
@@ -217,11 +233,19 @@ pub(super) fn reject_colliding_innovation_groups(edges: &mut Vec<SynapseGene>) {
     let mut write = 0;
     while read < edges.len() {
         let innovation = edges[read].innovation;
-        let first_endpoints = (edges[read].pre_node_id, edges[read].post_node_id);
+        let first_structure = (
+            edges[read].pre_node_id,
+            edges[read].post_node_id,
+            edges[read].timing,
+        );
         let mut end = read + 1;
         let mut collision = false;
         while end < edges.len() && edges[end].innovation == innovation {
-            collision |= (edges[end].pre_node_id, edges[end].post_node_id) != first_endpoints;
+            collision |= (
+                edges[end].pre_node_id,
+                edges[end].post_node_id,
+                edges[end].timing,
+            ) != first_structure;
             end += 1;
         }
 
@@ -240,18 +264,34 @@ pub(super) fn is_valid_synapse_pair(
     genome: &OrganismGenome,
     pre: GeneNodeId,
     post: GeneNodeId,
+    timing: SynapseTiming,
 ) -> bool {
-    is_valid_synapse_pair_for_nodes(&genome.brain.hidden_nodes, pre, post)
+    is_valid_synapse_pair_for_nodes(&genome.brain.hidden_nodes, pre, post, timing)
 }
 
 pub(super) fn is_valid_synapse_pair_for_nodes(
     hidden_nodes: &[HiddenNodeGene],
     pre: GeneNodeId,
     post: GeneNodeId,
+    timing: SynapseTiming,
 ) -> bool {
-    is_valid_pre_id(hidden_nodes, pre)
-        && is_valid_post_id(hidden_nodes, post)
-        && !(pre == post && is_hidden_gene_node_id(pre))
+    match timing {
+        SynapseTiming::CurrentTick => {
+            is_valid_pre_id(hidden_nodes, pre)
+                && is_valid_post_id(hidden_nodes, post)
+                && !(pre == post && is_hidden_gene_node_id(pre))
+        }
+        SynapseTiming::PreviousTick => {
+            is_hidden_gene_node_id(pre)
+                && is_hidden_gene_node_id(post)
+                && hidden_nodes
+                    .binary_search_by_key(&pre, |node| node.id)
+                    .is_ok()
+                && hidden_nodes
+                    .binary_search_by_key(&post, |node| node.id)
+                    .is_ok()
+        }
+    }
 }
 
 fn is_valid_pre_id(hidden_nodes: &[HiddenNodeGene], id: GeneNodeId) -> bool {
@@ -274,6 +314,7 @@ pub(super) fn sort_synapse_genes(edges: &mut [SynapseGene]) {
             .cmp(&b.innovation)
             .then_with(|| a.pre_node_id.cmp(&b.pre_node_id))
             .then_with(|| a.post_node_id.cmp(&b.post_node_id))
+            .then_with(|| a.timing.cmp(&b.timing))
             // Prefer an enabled representative when malformed input contains
             // duplicate genes for one innovation.
             .then_with(|| b.enabled.cmp(&a.enabled))

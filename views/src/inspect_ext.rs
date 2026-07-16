@@ -7,7 +7,7 @@ use crate::{take_format, ReadCtx};
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
 use std::io::Write;
-use types::{ActionType, NeuronId, OrganismState, SensoryReceptor, SynapseEdge};
+use types::{ActionType, NeuronId, OrganismState, SensoryReceptor, SynapseEdge, SynapseTiming};
 
 /// Mirrors `world-sim/src/brain/mod.rs`: the implicit Idle option's logit and the
 /// temperature floor used by the softmax in `evaluation.rs`.
@@ -177,28 +177,42 @@ pub fn decide(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> 
         return Ok(());
     };
 
-    // Reproduce the softmax from world-sim/src/brain/evaluation.rs
-    // `sample_action_from_logits` (lines 141-174): max over the 6 action logits
-    // and the idle bias, then exp((logit - max)/temp) over each action plus the
-    // implicit idle option, normalized by their sum.
+    // Reproduce the active action interface's softmax. Categorical control has
+    // one shared implicit-idle option; compositional control has independent
+    // none probabilities for orientation, locomotion, and interaction.
     let logits: Vec<f32> = o.brain.action.iter().map(|a| a.logit).collect();
     let temp = temperature.max(MIN_ACTION_TEMPERATURE);
-    let max_logit = logits
-        .iter()
-        .copied()
-        .fold(EXPLICIT_IDLE_LOGIT_BIAS, f32::max);
-    let mut weight_sum = 0.0f32;
-    let weights: Vec<f32> = logits
-        .iter()
-        .map(|&l| {
-            let w = ((l - max_logit) / temp).exp();
-            weight_sum += w;
-            w
-        })
-        .collect();
-    let idle_weight = ((EXPLICIT_IDLE_LOGIT_BIAS - max_logit) / temp).exp();
-    weight_sum += idle_weight;
-    let idle_prob = idle_weight / weight_sum;
+    let compositional = sim.config().compositional_actions_enabled;
+    let predation_enabled = sim.config().predation_enabled;
+    let groups: Vec<&[usize]> = if compositional {
+        vec![&[0, 1], &[2], &[3]]
+    } else {
+        vec![&[0, 1, 2, 3]]
+    };
+    let mut action_probabilities = vec![0.0_f32; logits.len()];
+    let mut idle_probabilities = Vec::with_capacity(groups.len());
+    for group in groups {
+        let max_logit = group
+            .iter()
+            .copied()
+            .filter(|idx| ActionType::ALL[*idx].is_enabled(predation_enabled))
+            .map(|idx| logits[idx])
+            .fold(EXPLICIT_IDLE_LOGIT_BIAS, f32::max);
+        let idle_weight = ((EXPLICIT_IDLE_LOGIT_BIAS - max_logit) / temp).exp();
+        let mut weight_sum = idle_weight;
+        for idx in group.iter().copied() {
+            if !ActionType::ALL[idx].is_enabled(predation_enabled) {
+                continue;
+            }
+            let weight = ((logits[idx] - max_logit) / temp).exp();
+            action_probabilities[idx] = weight;
+            weight_sum += weight;
+        }
+        for idx in group.iter().copied() {
+            action_probabilities[idx] /= weight_sum;
+        }
+        idle_probabilities.push(idle_weight / weight_sum);
+    }
 
     let inter_act: Vec<f64> = o
         .brain
@@ -229,7 +243,7 @@ pub fn decide(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> 
                 json!({
                     "action": format!("{:?}", a.action_type),
                     "logit": round3(a.logit),
-                    "prob": round3(weights[k] / weight_sum),
+                    "prob": round3(action_probabilities[k]),
                 })
             })
             .collect();
@@ -239,11 +253,22 @@ pub fn decide(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> 
             "inputs": inputs,
             "inter": inter_stats.map(|s| s.json()),
             "actions": actions,
-            "idle_prob": round3(idle_prob),
+            "action_mode": if compositional { "compositional" } else { "categorical" },
+            "idle_prob": if compositional {
+                json!({
+                    "orientation": round3(idle_probabilities[0]),
+                    "locomotion": round3(idle_probabilities[1]),
+                    "interaction": round3(idle_probabilities[2]),
+                })
+            } else {
+                json!(round3(idle_probabilities[0]))
+            },
             "selected": format!("{:?}", rec.selected_action),
+            "selected_command_mask": rec.selected_action_mask,
+            "selected_commands": ActionType::ALL.iter().filter(|action| rec.selected_action_mask & action.command_bit() != 0).map(|action| format!("{action:?}")).collect::<Vec<_>>(),
+            "failed_command_mask": rec.failed_action_mask,
             "action_failed": rec.action_failed,
-            "food_visible": rec.food_visible,
-            "note": "logits/probs reflect current (post-tick) brain state; selected/food_visible are from the decision tick just executed",
+            "note": "logits/probs reflect current (post-tick) brain state; selected commands are from the decision tick just executed",
         });
         return writeln!(out, "{v}").map_err(Into::into);
     }
@@ -271,19 +296,31 @@ pub fn decide(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> 
             "    {:<10} logit={:>8.3}  p={:.3}",
             format!("{:?}", a.action_type),
             a.logit,
-            weights[k] / weight_sum
+            action_probabilities[k]
         )?;
     }
-    writeln!(out, "    {:<10} (implicit)     p={:.3}", "Idle", idle_prob)?;
+    if compositional {
+        writeln!(
+            out,
+            "    none probabilities: orientation={:.3} locomotion={:.3} interaction={:.3}",
+            idle_probabilities[0], idle_probabilities[1], idle_probabilities[2]
+        )?;
+    } else {
+        writeln!(
+            out,
+            "    {:<10} (implicit)     p={:.3}",
+            "Idle", idle_probabilities[0]
+        )?;
+    }
     writeln!(
         out,
-        "  selected={:?} failed={} food_visible(rays -1/0/+1)={:?}",
-        rec.selected_action, rec.action_failed, rec.food_visible
+        "  primary={:?} command_mask={:#06b} failed_mask={:#06b}",
+        rec.selected_action, rec.selected_action_mask, rec.failed_action_mask
     )?;
     writeln!(
         out,
         "  note: logits/probs reflect the brain's CURRENT (post-tick) state; \
-         `selected`/`food_visible` are from the decision tick just executed, \
+         `selected` is from the decision tick just executed, \
          so they may differ after plasticity/state updates."
     )?;
     Ok(())
@@ -293,12 +330,12 @@ pub fn decide(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> 
 // `find` predicate grammar + field mapping
 // ---------------------------------------------------------------------------
 
-const DEFAULT_FIND_FIELDS: &[&str] = &["id", "energy", "age", "generation", "consumptions"];
+const DEFAULT_FIND_FIELDS: &[&str] = &["id", "energy", "age", "generation", "successful_attacks"];
 
 /// All field names accepted by `find` predicates and `--fields` columns. Shown
 /// in error messages so the command is self-documenting.
 const FIND_FIELDS: &str = "id energy energy_flow age generation species \
-    consumptions plant prey neurons synapses hebb_eta";
+    successful_attacks neurons synapses hebb_eta";
 
 /// Whether `name` is a known numeric field. The same table validates both
 /// predicate fields and `--fields` columns; `org_field` maps each to a value.
@@ -310,9 +347,7 @@ fn is_field(name: &str) -> bool {
             | "age"
             | "generation"
             | "species"
-            | "consumptions"
-            | "plant"
-            | "prey"
+            | "successful_attacks"
             | "neurons"
             | "synapses"
             | "hebb_eta"
@@ -329,9 +364,7 @@ fn org_field(o: &OrganismState, name: &str) -> f64 {
         "age" => o.age_turns as f64,
         "generation" => o.generation as f64,
         "species" => o.species_id.0 as f64,
-        "consumptions" => o.consumptions_count as f64,
-        "plant" => o.plant_consumptions_count as f64,
-        "prey" => o.prey_consumptions_count as f64,
+        "successful_attacks" => o.successful_attacks_count as f64,
         "neurons" => o.genome.hidden_node_count() as f64,
         "synapses" => o.brain.synapse_count as f64,
         "hebb_eta" => o.genome.plasticity.hebb_eta_gain as f64,
@@ -341,8 +374,8 @@ fn org_field(o: &OrganismState, name: &str) -> f64 {
 
 fn field_text(o: &OrganismState, name: &str) -> String {
     match name {
-        "id" | "age" | "generation" | "species" | "consumptions" | "plant" | "prey" | "neurons"
-        | "synapses" | "energy_flow" => {
+        "id" | "age" | "generation" | "species" | "successful_attacks" | "neurons" | "synapses"
+        | "energy_flow" => {
             format!("{}", org_field(o, name) as i64)
         }
         "hebb_eta" => format!("{:.4}", org_field(o, name)),
@@ -352,8 +385,8 @@ fn field_text(o: &OrganismState, name: &str) -> String {
 
 fn field_json(o: &OrganismState, name: &str) -> Value {
     match name {
-        "id" | "age" | "generation" | "species" | "consumptions" | "plant" | "prey" | "neurons"
-        | "synapses" | "vision" => json!(org_field(o, name) as u64),
+        "id" | "age" | "generation" | "species" | "successful_attacks" | "neurons" | "synapses"
+        | "vision" => json!(org_field(o, name) as u64),
         _ => json!(org_field(o, name)),
     }
 }
@@ -557,9 +590,6 @@ fn receptor_label(r: &SensoryReceptor) -> String {
         SensoryReceptor::RayProximity { ray_offset } => {
             format!("{}:proximity", ray_direction(*ray_offset))
         }
-        SensoryReceptor::RayEnergyAffordance { ray_offset } => {
-            format!("{}:affordance", ray_direction(*ray_offset))
-        }
         SensoryReceptor::SelfEnergy => "SelfEnergy".into(),
         SensoryReceptor::EnergyFlowLastTick => "EnergyFlowLastTick".into(),
     }
@@ -590,14 +620,14 @@ fn effective_eta(o: &OrganismState) -> f32 {
     g.plasticity.hebb_eta_gain.max(0.0) * scale
 }
 
-/// Collect every expressed outgoing edge (sensory + inter) into one slice for the
-/// synapse-centric views.
+/// Collect every expressed current-tick and recurrent edge for synapse views.
 fn all_edges(o: &OrganismState) -> Vec<&SynapseEdge> {
     o.brain
         .sensory
         .iter()
         .flat_map(|s| s.synapses.iter())
         .chain(o.brain.inter.iter().flat_map(|n| n.synapses.iter()))
+        .chain(o.brain.recurrent_synapses.iter())
         .collect()
 }
 
@@ -630,6 +660,7 @@ fn brain_summary(
                 json!({
                     "pre": neuron_label(e.pre_neuron_id),
                     "post": neuron_label(e.post_neuron_id),
+                    "timing": e.timing,
                     "w": round3(e.weight),
                     "elig": round3(e.eligibility),
                 })
@@ -673,9 +704,10 @@ fn brain_summary(
     for e in &top {
         writeln!(
             out,
-            "    {:<20} -> {:<14} w={:>7.3} elig={:>7.3}",
+            "    {:<20} -> {:<14} {:<13} w={:>7.3} elig={:>7.3}",
             neuron_label(e.pre_neuron_id),
             neuron_label(e.post_neuron_id),
+            timing_label(e.timing),
             e.weight,
             e.eligibility
         )?;
@@ -719,6 +751,7 @@ fn brain_synapses(
             .0
             .cmp(&b.pre_neuron_id.0)
             .then(a.post_neuron_id.0.cmp(&b.post_neuron_id.0))
+            .then(a.timing.cmp(&b.timing))
     });
 
     if fmt.is_json() {
@@ -728,6 +761,7 @@ fn brain_synapses(
                 json!({
                     "pre": neuron_label(e.pre_neuron_id),
                     "post": neuron_label(e.post_neuron_id),
+                    "timing": e.timing,
                     "weight": round3(e.weight),
                     "eligibility": round3(e.eligibility),
                     "pending": round3(e.pending_coactivation),
@@ -757,9 +791,10 @@ fn brain_synapses(
     for e in &edges {
         writeln!(
             out,
-            "  {:<20} -> {:<14} weight={:>7.3} elig={:>7.3} pending={:>7.3}",
+            "  {:<20} -> {:<14} {:<13} weight={:>7.3} elig={:>7.3} pending={:>7.3}",
             neuron_label(e.pre_neuron_id),
             neuron_label(e.post_neuron_id),
+            timing_label(e.timing),
             e.weight,
             e.eligibility,
             e.pending_coactivation
@@ -837,6 +872,7 @@ fn brain_dot(o: &OrganismState, fmt: Format, out: &mut impl Write) -> Result<()>
             .0
             .cmp(&b.pre_neuron_id.0)
             .then(a.post_neuron_id.0.cmp(&b.post_neuron_id.0))
+            .then(a.timing.cmp(&b.timing))
     });
 
     let mut dot = String::from("digraph brain {\n  rankdir=LR;\n");
@@ -860,10 +896,15 @@ fn brain_dot(o: &OrganismState, fmt: Format, out: &mut impl Write) -> Result<()>
     }
     for e in &edges {
         dot.push_str(&format!(
-            "  \"{}\" -> \"{}\" [label=\"{:.3}\"];\n",
+            "  \"{}\" -> \"{}\" [label=\"{:.3}\"{}];\n",
             neuron_label(e.pre_neuron_id),
             neuron_label(e.post_neuron_id),
-            e.weight
+            e.weight,
+            if e.timing == SynapseTiming::PreviousTick {
+                ", style=dashed, color=purple"
+            } else {
+                ""
+            }
         ));
     }
     dot.push_str("}\n");
@@ -873,6 +914,13 @@ fn brain_dot(o: &OrganismState, fmt: Format, out: &mut impl Write) -> Result<()>
         return writeln!(out, "{v}").map_err(Into::into);
     }
     write!(out, "{dot}").map_err(Into::into)
+}
+
+fn timing_label(timing: SynapseTiming) -> &'static str {
+    match timing {
+        SynapseTiming::CurrentTick => "current",
+        SynapseTiming::PreviousTick => "previous",
+    }
 }
 
 /// Round to 3 decimals for compact, stable output.

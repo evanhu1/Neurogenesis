@@ -10,7 +10,7 @@ impl Simulation {
             let (q, r) = open_positions
                 .pop()
                 .expect("initial population requires at least one unique cell per organism");
-            // Founders draw from the champion pool when one is provided,
+            // Founders draw from the explicit genome pool when one is provided,
             // otherwise from a fresh seed genome. In-world variation no longer
             // exists — genetic diversity is owned by the NEAT outer loop.
             //
@@ -21,14 +21,14 @@ impl Simulation {
             // inherit it, so any organism's source pool entry is
             // `species_id % pool_len` — used by competitive NEAT evaluation. A
             // single-entry pool (the clonal colony) is unchanged.
-            let genome = if self.champion_pool.is_empty() {
+            let genome = if self.founder_genome_pool.is_empty() {
                 generate_seed_genome(
                     &self.config.seed_genome_config,
                     self.config.predation_enabled,
                     &mut self.rng,
                 )
             } else {
-                self.champion_pool[founder_slot % self.champion_pool.len()].clone()
+                self.founder_genome_pool[founder_slot % self.founder_genome_pool.len()].clone()
             };
             let facing = self.random_facing();
             let organism = self.build_organism(
@@ -52,7 +52,7 @@ impl Simulation {
         mut genome: OrganismGenome,
         params: OrganismSpawnParams,
     ) -> OrganismState {
-        restrict_predation_genes(&mut genome, self.config.predation_enabled);
+        restrict_action_genes(&mut genome, self.config.predation_enabled);
         let id = self.alloc_organism_id();
         // Founders (no inherited species) take their own ID as species ID.
         let species_id = params.species_id.unwrap_or(SpeciesId(id.0));
@@ -70,10 +70,9 @@ impl Simulation {
             energy: starting_energy,
             energy_at_last_sensing: starting_energy,
             energy_flow_last_tick: 0,
-            consumptions_count: 0,
-            plant_consumptions_count: 0,
-            prey_consumptions_count: 0,
+            successful_attacks_count: 0,
             last_action_taken: ActionType::Idle,
+            last_action_mask: 0,
             #[cfg(feature = "instrumentation")]
             instrumentation: Default::default(),
             brain: express_genome(&genome, self.config.predation_enabled),

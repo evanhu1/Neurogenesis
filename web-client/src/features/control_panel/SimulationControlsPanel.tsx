@@ -126,11 +126,6 @@ export function SimulationControlsPanel({ world }: SimulationControlsPanelProps)
             className={`min-w-0 flex-1 ${INPUT_CLASSES}`}
           />
           <ControlButton label="New" onClick={() => void world.createWorld(seedInput)} />
-          <ControlButton
-            label="Save"
-            onClick={() => void world.saveChampions()}
-            disabled={!snapshot}
-          />
         </div>
       </div>
     </section>

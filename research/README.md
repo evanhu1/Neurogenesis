@@ -50,41 +50,40 @@ preregister -> plan -> batch -> summarize -> crossplay -> inspect/analyze -> con
    crossplay checkpoints and horizons, metrics, compute budget, and decision
    rule before running. Add the proposal to `INDEX.md` with status `proposed`.
 2. **Plan.** Run `cli plan` with the exact intended NEAT arguments. Record and
-   verify the resolved population, horizon, lineages, memberships, opponent
-   exposures, scored cases, evaluator worlds, world ticks, worker count, world
-   size, founders, seeds, scenarios, and objective. A nontrivial run must not
-   proceed from an invalid or unreviewed plan.
+   verify the resolved population, horizon, lineages, opponents, scored cases,
+   evaluator worlds, world ticks, worker count, world size, founders, seeds,
+   and contextual-score aggregation. A
+   nontrivial run must not proceed from an invalid or unreviewed plan.
 3. **Batch.** Run the evolutionary-seed suite with `cli batch`, writing to
    `artifacts/research/runs/active/<slug>/`. Never write a research run directly
    to `artifacts/runs/` or the research root. Preserve the exact command,
    resolved config, executable commit and checksum, dirty-source identity,
    result schema, progress logs, timings, and artifact checksums in the batch
    manifest.
-4. **Summarize training.** Run `cli summarize <experiment> --tail START:END`
-   before interpreting the run. The explicit inclusive tail interval must come
-   from the preregistered question rather than a post-hoc favorable window.
-   Validate generation completeness and contract equality, then examine
-   champion, population mean, and population median competence; tail slopes;
-   end-survival censoring; behavior; opponent sensitivity; and energy flow.
-   `summarize` describes the evolutionary batch only; it does not consume or
-   summarize crossplay output.
+4. **Summarize training.** Run `cli summarize <experiment>` before interpreting
+   the run. Validate generation completeness and contract equality, then inspect
+   each generation winner in its own contemporary context, along with behavior,
+   opponent sensitivity, energy flow, population structure, and run timing.
+   Training scores rank contemporaries only. Do not compute population-mean
+   competence, all-time champions, score slopes, or deltas across generations.
 5. **Crossplay validation.** Run `cli crossplay` over preregistered frozen
-   checkpoints on held-out world seeds. Use it to measure chronological
+   checkpoints on held-out world seeds. This is the sole longitudinal
+   competence assay. Use it to measure chronological
    progress, historical retention, cycles, strategy forgetting, and transfer to
    unseen layouts. Validation world-seed count must satisfy the CLI contract,
    and validation horizons must extend beyond the training horizon when the
-   training summary finds censoring. Crossplay is always a two-lineage transfer
-   assay, even when training used triads; report it as pairwise validation, not
-   native three-lineage competence. Crossplay writes its own JSON and is
+   training summary finds censoring. Crossplay uses one common pairwise
+   validation contract; for shared-arena training it is a transfer assay, not a
+   reconstruction of the training arena. It writes its own JSON and is
    interpreted alongside, not through, `summary.json`.
-6. **Inspect and analyze.** Combine training and crossplay evidence, then query
-   complete population checkpoints and inspect representative organisms behind
-   important gains, regressions, role changes, or suspicious metrics. Explicitly
-   check seed robustness, tail behavior, evaluation noise, energy accounting,
-   horizon censoring, metric gaming, population distributions, and whether
-   apparent novelty is adaptive rather than drift. Use `cli analyze` or
-   `cli evaluate-panel` for targeted diagnostics when the question requires
-   them; do not add assays merely because they are available.
+6. **Inspect and analyze.** Combine contextual training observations with
+   crossplay evidence, then query periodic complete population checkpoints and
+   inspect representative organisms behind crossplay gains, regressions,
+   cycles, or suspicious metrics. Explicitly check seed robustness, evaluation
+   noise, energy accounting, horizon censoring, metric gaming, population
+   structure, and whether apparent novelty is adaptive rather than drift.
+   `cli analyze` may report structural history and contextual snapshots, but it
+   must not substitute training-score trajectories for crossplay.
 7. **Conclude and archive.** Apply the preregistered decision rule. Fill in the
    result, interpretation, exact remaining uncertainty, and next causal
    experiment in the same record. Move it from `proposed/` to
@@ -106,7 +105,7 @@ not produce interpretable evidence.
 
 - Change one causal lever per matched experiment.
 - Use the smallest horizon that preserves the behavior being selected; extend
-  only to test a tail claim.
+  validation horizons only for a preregistered durability question.
 - Match simulator cases or report the compute difference explicitly.
 - Use release binaries and at most the efficient worker count of the machine.
 - Smoke-test contracts and determinism under `runs/diagnostics/` before paying
@@ -119,21 +118,17 @@ not produce interpretable evidence.
 The canonical world configuration is `config/world.toml`; experiment
 records list only deliberate overrides from it.
 
-## Evolution energy diagnostics
+## Evolution energy and motor diagnostics
 
-NEAT result schema 22 separates external acquisition, conserved predation
-transfer, and dissipative attack-attempt cost. Per-case fields and their
-`Evaluation` aggregates use these exact definitions:
+The result schema separates conserved attack transfer from dissipative attack
+cost. Per-case fields and their `Evaluation` aggregates use these definitions:
 
-- Gross energy acquired = plant energy acquired + attack energy received. It
-  excludes founder starting energy and does not count attack-backed prey
-  consumption a second time.
+- Gross energy acquired = attack energy received. It excludes founder starting
+  energy.
 - Net attack energy balance = attack energy received - attack energy lost -
   attack-attempt energy cost.
-- Total energy accumulated = plant energy acquired + attack energy received.
-- Net energy profit = total energy accumulated - attack energy lost -
-  attack-attempt energy cost. It excludes passive metabolism so that it measures
-  ecological profitability; reciprocal transfers cancel.
+- Net energy profit is the same private balance. It excludes passive metabolism;
+  reciprocal transfers cancel while both attempt costs remain negative.
 - Attack-attempt energy cost is paid for every emitted attack, including misses,
   blocked same-lineage attacks, and insufficient-energy attempts.
 - Distinct attack victims are unique organism IDs successfully hit by the focal
@@ -142,9 +137,16 @@ transfer, and dissipative attack-attempt cost. Per-case fields and their
   the same attacker-victim pair divided by all successful focal hits. It is
   undefined (`null`) when there are no hits; aggregate evaluations pool hits
   across cases before taking the ratio.
+- Commands per tick is the mean number of explicit orientation, locomotion, and
+  interaction commands emitted per organism tick. It is at most one under the
+  categorical controller and can exceed one under compositional control.
+- Multi-command tick fraction is the fraction of organism ticks that emitted
+  at least two commands.
+- Target-evaded attacks had an organism in the intended forward cell at the
+  shared snapshot, but no attackable organism in the resolved forward cell
+  after simultaneous movement.
 
-These fields are observational only. Use gross attack flow to measure activity,
-net attack balance to measure private predatory advantage, and plant energy to
-measure new energy entering the organism population. Successful attack transfer
-is conserved between victim and attacker; attempt cost is the explicit combat
-dissipation.
+These fields are observational only. Use gross attack flow to measure activity
+and net attack balance to measure private competitive advantage. Successful
+attack transfer is conserved between victim and attacker; attempt cost is the
+explicit combat dissipation.

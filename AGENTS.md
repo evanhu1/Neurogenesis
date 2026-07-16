@@ -7,8 +7,8 @@ Workspace crates:
 - `types/`: shared domain types used across all Rust crates.
 - `config/`: world + seed-genome config crate; owns the hidden
   food-ecology policy and parses the canonical TOML configuration.
-- `brain/`: genome encoding, expression, feed-forward neural evaluation, and
-  optional Hebbian plasticity.
+- `brain/`: genome encoding, expression, current-tick DAG plus previous-tick
+  recurrent neural evaluation, and optional Hebbian plasticity.
 - `world-sim/`: deterministic simulation engine: world generation, sensory
   encoding, canonical tick pipeline, energy accounting, and spawning.
 - `evolution/`: the generational NEAT outer loop and competitive evaluator.
@@ -54,13 +54,10 @@ records into ignored artifact directories.
   with `cp`; fan out parallel runs by backgrounding invocations.** Put worlds
   under `artifacts/`, not `/tmp`. See `docs/cli.md` (usage),
   `docs/cli-stateless-spec.md` + `SPEC.md` (design).
-- `cargo run -p sim-server`: start backend on `127.0.0.1:8080`. Flags:
-  - `--champion-pool-path <path>`: override the default `champion_pool.json`
-    location used for read-back and persistence of saved champions.
-  - `--seed-genome-snapshot <path.bin>`: load a single bincode-encoded
-    `OrganismGenome` and use it as a
-    one-entry in-memory champion pool; every initial organism spawns with this
-    genome, and champion-save endpoints no-op (no disk writes) for the session.
+- `cargo run -p sim-server`: start backend on `127.0.0.1:8080`. Pass
+  `--seed-genome-snapshot <path.bin>` to load a single bincode-encoded
+  `OrganismGenome`; every initial organism then spawns with that explicit
+  founder genome. The server does not rank or persist genomes.
 - `cd web-client && npm run dev`: run frontend (Vite).
 - `cd web-client && npm run build && npm run typecheck`: production build + TS.
 

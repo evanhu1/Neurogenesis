@@ -90,14 +90,8 @@ impl Simulation {
                 self.organisms.windows(2).all(|w| w[0].id < w[1].id),
                 "organisms must be sorted by id"
             );
-            debug_assert!(
-                self.foods.windows(2).all(|w| w[0].id < w[1].id),
-                "foods must be sorted by id"
-            );
             debug_assert_eq!(
-                self.organisms.len()
-                    + self.foods.len()
-                    + self.terrain_map.iter().filter(|blocked| **blocked).count(),
+                self.organisms.len() + self.terrain_map.iter().filter(|blocked| **blocked).count(),
                 self.occupancy.iter().flatten().count(),
                 "occupancy vector count should match total entity count",
             );
@@ -113,20 +107,6 @@ impl Simulation {
                     self.occupancy[idx],
                     Some(Occupant::Organism(organism.id)),
                     "occupancy must point at organism occupying that cell",
-                );
-            }
-            for food in &self.foods {
-                let expected = self.wrap_position(food.q, food.r);
-                debug_assert_eq!(
-                    (food.q, food.r),
-                    expected,
-                    "food position must remain canonical",
-                );
-                let idx = self.cell_index(food.q, food.r);
-                debug_assert_eq!(
-                    self.occupancy[idx],
-                    Some(Occupant::Food(food.id)),
-                    "occupancy must point at food occupying that cell",
                 );
             }
             for (idx, blocked) in self.terrain_map.iter().copied().enumerate() {

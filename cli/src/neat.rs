@@ -1,15 +1,16 @@
 use crate::{run_output_path, DEFAULT_CONFIG, REPORT_EVERY};
 use anyhow::{anyhow, bail, Result};
 use evolution::{
-    evaluate_frozen_pair, evaluate_frozen_panel, run_neat, FitnessObjective, NeatConfig, RunResult,
-    ScenarioManifest, ScenarioPreset, SelectionStrategy,
+    evaluate_frozen_pair, evaluate_frozen_panel, run_neat, EvaluationTopology, NeatConfig,
+    RunResult, ScenarioManifest, OBJECTIVE_NAME,
 };
 use ring::digest::{digest, SHA256};
 use serde::Deserialize;
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::fs::File;
-use std::io::Write;
+use std::io::{BufReader, Read, Write};
+use std::time::Instant;
 use types::OrganismGenome;
 use views::{
     atomic_write, save_sidecar, save_world, sibling_metrics_path, start_recording,
@@ -20,13 +21,11 @@ use world_sim::Simulation;
 const PARAMS: &str = "compatibility_threshold excess_coefficient disjoint_coefficient \
 target_species compatibility_threshold_adjustment weight_coefficient survival_fraction \
 crossover_probability interspecies_mate_probability \
-curriculum_enabled curriculum_promotion_threshold curriculum_promotion_patience \
 training_seed_rotation_period survival_window_weights \
-selection_strategy novelty_k novelty_archive_additions_per_generation \
 mutate_weight_probability replace_weight_probability weight_perturb_stddev \
 per_connection_weight_mutation_probability mutate_bias_probability bias_perturb_stddev \
 mutate_time_constant_probability time_constant_perturb_stddev add_connection_probability \
-add_node_probability disabled_inheritance_probability stagnation_generations \
+add_node_probability disabled_inheritance_probability \
 young_species_grace_generations min_young_species_offspring \
 elitism_min_species_size cross_pool_predation_only";
 
@@ -64,6 +63,9 @@ pub(crate) fn run_neat_cli(args: &[&str], out_dir: &str, out: &mut impl Write) -
     if args.first() == Some(&"crossplay") {
         return run_neat_crossplay(&args[1..], out);
     }
+    if args.first() == Some(&"materialize") {
+        return run_neat_materialize(&args[1..], out);
+    }
     let Some(request) = parse_neat_run(args, out)? else {
         return Ok(());
     };
@@ -77,14 +79,12 @@ fn parse_neat_run(args: &[&str], out: &mut impl Write) -> Result<Option<NeatRunR
     let mut world_width = None;
     let mut sets = Vec::new();
     // Research runs use one deliberately short baseline evaluator unless the
-    // caller explicitly changes it. Multi-horizon curricula remain an engine
-    // capability, not part of the core CLI contract.
+    // caller explicitly changes it.
     let mut neat = NeatConfig {
         episode_horizons: vec![500],
-        scenarios: vec![ScenarioPreset::Baseline],
         ..NeatConfig::default()
     };
-    let mut memberships_per_genome = None::<usize>;
+    let mut opponents_per_genome = None::<usize>;
     let mut cases_per_genome = None::<usize>;
     let mut i = 0;
     while i < args.len() {
@@ -105,16 +105,22 @@ fn parse_neat_run(args: &[&str], out: &mut impl Write) -> Result<Option<NeatRunR
                 neat.generations = value(args, i, "--generations")?.parse()?;
                 i += 2;
             }
+            "--population-checkpoint-interval" => {
+                neat.population_checkpoint_interval =
+                    value(args, i, "--population-checkpoint-interval")?.parse()?;
+                i += 2;
+            }
             "--horizon" => {
                 neat.episode_horizons = vec![value(args, i, "--horizon")?.parse()?];
                 i += 2;
             }
-            "--lineages-per-world" => {
-                neat.eval_lineages_per_world = value(args, i, "--lineages-per-world")?.parse()?;
+            "--evaluator" => {
+                neat.evaluation_topology =
+                    EvaluationTopology::parse(value(args, i, "--evaluator")?)?;
                 i += 2;
             }
-            "--memberships-per-genome" => {
-                memberships_per_genome = Some(value(args, i, "--memberships-per-genome")?.parse()?);
+            "--opponents-per-genome" => {
+                opponents_per_genome = Some(value(args, i, "--opponents-per-genome")?.parse()?);
                 i += 2;
             }
             "--cases-per-genome" => {
@@ -124,10 +130,6 @@ fn parse_neat_run(args: &[&str], out: &mut impl Write) -> Result<Option<NeatRunR
             "--world-seeds" => {
                 neat.world_seeds =
                     parse_u64_list(value(args, i, "--world-seeds")?, "--world-seeds")?;
-                i += 2;
-            }
-            "--scenarios" => {
-                neat.scenarios = parse_scenarios(value(args, i, "--scenarios")?)?;
                 i += 2;
             }
             "--workers" => {
@@ -140,10 +142,6 @@ fn parse_neat_run(args: &[&str], out: &mut impl Write) -> Result<Option<NeatRunR
             }
             "--world-width" => {
                 world_width = Some(value(args, i, "--world-width")?.parse()?);
-                i += 2;
-            }
-            "--objective" => {
-                neat.fitness_objective = FitnessObjective::parse(value(args, i, "--objective")?)?;
                 i += 2;
             }
             "--cvar" => {
@@ -176,22 +174,24 @@ fn parse_neat_run(args: &[&str], out: &mut impl Write) -> Result<Option<NeatRunR
                      --seed N                    evolutionary run seed\n\
                      --population N              genomes per generation\n\
                      --generations N             generations to evaluate\n\
+                     --population-checkpoint-interval N\n\
+                                                 persist every Nth full population (default 10)\n\
                      --horizon N                 evaluator ticks (default 500)\n\
-                     --lineages-per-world N      simultaneous lineages (2 or 3)\n\
-                     --memberships-per-genome N  ecosystem worlds joined per genome\n\
+                     --evaluator pairwise|shared_population\n\
+                                                 evaluator topology (default shared_population)\n\
+                     --opponents-per-genome N    contemporary opponents per genome\n\
                      --cases-per-genome N        alternative exact scored-case budget\n\
                      --world-seeds N,N           deterministic training layouts\n\
-                     --scenarios baseline[,scarcity,sparse_search]\n\
-                     --objective survival|survival_times_relative_advantage\n\
-                     --cvar F                    worst-case fraction aggregated into fitness\n\
+                     --cvar F                    worst-case fraction aggregated into the contextual score\n\
                      --workers N                 parallel evaluator groups\n\
-                     --founders N                organisms divided equally among lineages\n\
+                     --founders N                founders (shared arenas require one per genome)\n\
                      --world-width N             hex-world width\n\
-                     --set world_key=value       explicit ecology override\n\
+                     --set world_key=value       explicit world override\n\
                      --config PATH               canonical world TOML\n\
                      \n\
-                     Exactly one of --memberships-per-genome and --cases-per-genome may be used.\n\
-                     `plan` resolves both to memberships, opponent exposures, cases, and worlds.\n\
+                     Pairwise accepts exactly one of --opponents-per-genome and\n\
+                     --cases-per-genome. Shared population includes every genome\n\
+                     and derives its opponent count from --population.\n\
                      Advanced algorithm overrides: --param key=value (valid: {PARAMS})"
                 )?;
                 return Ok(None);
@@ -199,42 +199,46 @@ fn parse_neat_run(args: &[&str], out: &mut impl Write) -> Result<Option<NeatRunR
             other => bail!("unknown NEAT argument `{other}` (use `cli --help`)"),
         }
     }
-    if memberships_per_genome.is_some() && cases_per_genome.is_some() {
-        bail!("use either --memberships-per-genome or --cases-per-genome, not both");
+    if opponents_per_genome.is_some() && cases_per_genome.is_some() {
+        bail!("use either --opponents-per-genome or --cases-per-genome, not both");
     }
-    let opponents_per_membership = neat
-        .eval_lineages_per_world
-        .checked_sub(1)
-        .ok_or_else(|| anyhow!("--lineages-per-world must be 2 or 3"))?;
-    if opponents_per_membership == 0 {
-        bail!("--lineages-per-world must be 2 or 3");
-    }
-    let cases_per_membership = neat
+    let cases_per_opponent = neat
         .world_seeds
         .len()
-        .saturating_mul(neat.scenarios.len())
         .saturating_mul(neat.episode_horizons.len());
-    let memberships = if let Some(cases) = cases_per_genome {
-        if cases == 0 || cases_per_membership == 0 || !cases.is_multiple_of(cases_per_membership) {
-            bail!(
-                "--cases-per-genome {cases} is not an exact multiple of {cases_per_membership} cases per membership ({} world seeds × {} scenarios × {} horizons)",
-                neat.world_seeds.len(),
-                neat.scenarios.len(),
-                neat.episode_horizons.len()
-            );
+    neat.eval_opponents = match neat.evaluation_topology {
+        EvaluationTopology::SharedPopulation => {
+            if opponents_per_genome.is_some() || cases_per_genome.is_some() {
+                bail!(
+                    "shared-population evaluation includes every other genome; omit --opponents-per-genome and --cases-per-genome"
+                );
+            }
+            neat.population_size.saturating_sub(1)
         }
-        cases / cases_per_membership
-    } else if let Some(memberships) = memberships_per_genome {
-        memberships
-    } else {
-        // Preserve the engine's default evaluation budget while expressing it
-        // in the unambiguous world-membership unit.
-        neat.eval_opponents / opponents_per_membership
+        EvaluationTopology::Pairwise => {
+            let opponents = if let Some(cases) = cases_per_genome {
+                if cases == 0
+                    || cases_per_opponent == 0
+                    || !cases.is_multiple_of(cases_per_opponent)
+                {
+                    bail!(
+                        "--cases-per-genome {cases} is not an exact multiple of {cases_per_opponent} cases per opponent ({} world seeds × {} horizons)",
+                        neat.world_seeds.len(),
+                        neat.episode_horizons.len()
+                    );
+                }
+                cases / cases_per_opponent
+            } else if let Some(opponents) = opponents_per_genome {
+                opponents
+            } else {
+                neat.eval_opponents
+            };
+            if opponents == 0 {
+                bail!("--opponents-per-genome must be at least 1");
+            }
+            opponents
+        }
     };
-    if memberships == 0 {
-        bail!("--memberships-per-genome must be at least 1");
-    }
-    neat.eval_opponents = memberships.saturating_mul(opponents_per_membership);
     neat.validate()?;
     Ok(Some(NeatRunRequest {
         config_path,
@@ -253,15 +257,33 @@ fn resolve_neat_world(request: &NeatRunRequest) -> Result<types::WorldConfig> {
     }
     if let Some(founders) = request.founders {
         world.num_organisms = founders;
+    } else if request.neat.evaluation_topology == EvaluationTopology::SharedPopulation {
+        world.num_organisms =
+            request.neat.population_size.try_into().map_err(|_| {
+                anyhow!("shared-population size does not fit the world founder count")
+            })?;
     }
     if world.world_width == 0 || world.num_organisms == 0 {
         bail!("world width and founder count must both be at least 1");
     }
-    if !(world.num_organisms as usize).is_multiple_of(request.neat.eval_lineages_per_world) {
+    if request.neat.evaluation_topology == EvaluationTopology::SharedPopulation
+        && world.num_organisms as usize != request.neat.population_size
+    {
         bail!(
-            "founder count {} must be divisible by {} lineages per world; use --founders with an exact multiple",
+            "shared-population evaluation requires exactly one founder per genome: founders={}, population={}",
             world.num_organisms,
-            request.neat.eval_lineages_per_world
+            request.neat.population_size
+        );
+    }
+    let lineage_count = match request.neat.evaluation_topology {
+        EvaluationTopology::Pairwise => 2,
+        EvaluationTopology::SharedPopulation => request.neat.population_size,
+    };
+    if !(world.num_organisms as usize).is_multiple_of(lineage_count) {
+        bail!(
+            "founder count {} must be divisible by {lineage_count} for {:?} evaluation",
+            world.num_organisms,
+            request.neat.evaluation_topology,
         );
     }
     Ok(world)
@@ -272,15 +294,24 @@ fn run_neat_plan(args: &[&str], out: &mut impl Write) -> Result<()> {
         return Ok(());
     };
     let world = resolve_neat_world(&request)?;
-    let lineages = request.neat.eval_lineages_per_world;
-    let opponent_exposures = request.neat.eval_opponents;
-    let memberships = opponent_exposures / (lineages - 1);
-    let cases_per_membership = request.neat.world_seeds.len()
-        * request.neat.scenarios.len()
-        * request.neat.episode_horizons.len();
-    let cases_per_genome = memberships * cases_per_membership;
-    let ecosystem_groups = request.neat.population_size * memberships / lineages;
-    let worlds_per_generation = ecosystem_groups * cases_per_membership;
+    let lineages = match request.neat.evaluation_topology {
+        EvaluationTopology::Pairwise => 2,
+        EvaluationTopology::SharedPopulation => request.neat.population_size,
+    };
+    let opponents = request.neat.eval_opponents;
+    let cases_per_opponent = request.neat.world_seeds.len() * request.neat.episode_horizons.len();
+    let (cases_per_genome, pairings, worlds_per_generation) = match request.neat.evaluation_topology
+    {
+        EvaluationTopology::Pairwise => {
+            let pairings = request.neat.population_size * opponents / lineages;
+            (
+                opponents * cases_per_opponent,
+                pairings,
+                pairings * cases_per_opponent,
+            )
+        }
+        EvaluationTopology::SharedPopulation => (cases_per_opponent, 0, cases_per_opponent),
+    };
     let total_worlds = worlds_per_generation * request.neat.generations as usize;
     let scored_cases_per_generation = request.neat.population_size * cases_per_genome;
     let horizon = request.neat.episode_horizons[0];
@@ -296,19 +327,20 @@ fn run_neat_plan(args: &[&str], out: &mut impl Write) -> Result<()> {
             "run_seed": request.run_seed,
             "population": request.neat.population_size,
             "generations": request.neat.generations,
+            "population_checkpoint_interval": request.neat.population_checkpoint_interval,
             "horizon": horizon,
-            "fitness_objective": request.neat.fitness_objective,
-            "objective_score_name": request.neat.fitness_objective.name(),
+            "score_semantics": "contextual_within_generation_only",
+            "objective_score_name": OBJECTIVE_NAME,
             "objective_cvar_fraction": request.neat.objective_cvar_fraction,
+            "evaluation_topology": request.neat.evaluation_topology,
             "lineages_per_world": lineages,
-            "opponents_per_membership": lineages - 1,
-            "memberships_per_genome": memberships,
-            "opponent_exposures_per_genome": opponent_exposures,
+            "opponents_per_genome": opponents,
             "world_seeds": request.neat.world_seeds,
-            "scenarios": request.neat.scenarios,
-            "cases_per_membership": cases_per_membership,
+            "scenario": "combat_baseline",
+            "cases_per_opponent": cases_per_opponent,
             "scored_cases_per_genome": cases_per_genome,
-            "ecosystem_groups_per_generation": ecosystem_groups,
+            "opponent_exposures_per_genome": opponents * cases_per_opponent,
+            "pairings_per_generation": pairings,
             "evaluation_worlds_per_generation": worlds_per_generation,
             "scored_lineage_cases_per_generation": scored_cases_per_generation,
             "total_evaluation_worlds": total_worlds,
@@ -318,10 +350,15 @@ fn run_neat_plan(args: &[&str], out: &mut impl Write) -> Result<()> {
                 "width": world.world_width,
                 "founders": world.num_organisms,
                 "founders_per_lineage": world.num_organisms as usize / lineages,
+                "attack_attempt_cost": world.attack_attempt_cost,
+                "attack_energy_transfer": world.attack_energy_transfer,
+                "compositional_actions_enabled": world.compositional_actions_enabled,
             },
             "workers": {
                 "requested_evaluator_workers": request.neat.evaluator_workers,
-                "effective_group_workers": request.neat.evaluator_workers.min(ecosystem_groups).max(1),
+                "effective_evaluator_workers": request.neat.evaluator_workers
+                    .min(worlds_per_generation)
+                    .max(1),
                 "available_parallelism": available_workers,
                 "intent_threads_per_world": 1,
             },
@@ -343,87 +380,103 @@ fn execute_neat_run(request: NeatRunRequest, out_dir: &str, out: &mut impl Write
             "event": "neat_started",
             "population": neat.population_size,
             "generations": neat.generations,
+            "population_checkpoint_interval": neat.population_checkpoint_interval,
             "episode_horizons": neat.episode_horizons,
             "survival_window_weights": neat.survival_window_weights,
             "world_seeds": neat.world_seeds,
             "workers": neat.evaluator_workers,
             "world_width": world.world_width,
             "founder_cohort_size": world.num_organisms,
-            "objective": neat.fitness_objective.name(),
+            "objective": OBJECTIVE_NAME,
             "fully_connected_initial_topology": true,
-            "feed_forward_hidden_graph": true,
-            "balanced_pairwise_evaluation": neat.eval_opponents > 0 && neat.eval_lineages_per_world == 2,
-            "symmetric_founder_slot_rotation": neat.eval_opponents > 0,
+            "current_tick_hidden_graph_acyclic": true,
+            "previous_tick_hidden_recurrence_enabled": true,
+            "evaluation_topology": neat.evaluation_topology,
+            "balanced_pairwise_evaluation": neat.evaluation_topology
+                == EvaluationTopology::Pairwise,
+            "symmetric_founder_slot_rotation": true,
             "eval_opponents": neat.eval_opponents,
-            "eval_lineages_per_world": neat.eval_lineages_per_world,
+            "lineages_per_world": match neat.evaluation_topology {
+                EvaluationTopology::Pairwise => 2,
+                EvaluationTopology::SharedPopulation => neat.population_size,
+            },
             "cross_pool_predation_only": neat.cross_pool_predation_only,
-            "scenarios": neat.scenarios,
+            "scenario": "combat_baseline",
         })
     );
-    // Keep the base world config so the champion can be materialized into a
-    // real, inspectable world once the run finishes.
-    let champion_world_config = world.clone();
+    // Keep the base world config so the final generation's contextual winner
+    // can be materialized into a real, inspectable world.
+    let final_winner_world_config = world.clone();
+    let total_generations = neat.generations;
+    let progress_started = Instant::now();
+    let mut previous_generation_finished = progress_started;
     let result = run_neat(neat, world, run_seed, |generation| {
-        let behavior = json!({
-            "best_trophic_role": generation.best_trophic_role,
-            "best_action_effectiveness": generation.best_action_effectiveness,
-            "best_plant_consumption_rate": generation.best_plant_consumption_rate,
-            "best_prey_consumption_rate": generation.best_prey_consumption_rate,
-            "best_plant_intake_fraction": generation.best_plant_intake_fraction,
-            "best_prey_intake_fraction": generation.best_prey_intake_fraction,
-            "best_mean_attack_kills": generation.best_mean_attack_kills,
-            "champion_total_energy_accumulated": generation.champion_plant_energy_acquired
-                + generation.champion_attack_energy_received,
-            "champion_net_energy_profit": generation.champion_plant_energy_acquired
-                + generation.champion_attack_energy_received
-                - generation.champion_attack_energy_lost
-                - generation.champion_attack_attempt_energy_cost,
-            "mean_total_energy_accumulated": generation.mean_gross_energy_acquired,
-            "mean_net_energy_profit": generation.mean_plant_energy_acquired
-                + generation.mean_attack_energy_received
-                - generation.mean_attack_energy_lost
-                - generation.mean_attack_attempt_energy_cost,
-            "mean_action_effectiveness": generation.mean_action_effectiveness,
-            "mean_plant_consumption_rate": generation.mean_plant_consumption_rate,
-            "mean_prey_consumption_rate": generation.mean_prey_consumption_rate,
-            "population_trophic_roles": generation.population_trophic_roles,
+        let now = Instant::now();
+        let generation_seconds = now
+            .duration_since(previous_generation_finished)
+            .as_secs_f64();
+        previous_generation_finished = now;
+        let elapsed_seconds = now.duration_since(progress_started).as_secs_f64();
+        let completed_generations = generation.generation.saturating_add(1);
+        let mean_seconds_per_generation = elapsed_seconds / f64::from(completed_generations);
+        let remaining_generations = total_generations.saturating_sub(completed_generations);
+        let eta_seconds = mean_seconds_per_generation * f64::from(remaining_generations);
+        let progress = json!({
+            "completed_generations": completed_generations,
+            "total_generations": total_generations,
+            "generation_seconds": generation_seconds,
+            "elapsed_seconds": elapsed_seconds,
+            "mean_seconds_per_generation": mean_seconds_per_generation,
+            "eta_seconds": eta_seconds,
         });
         eprintln!(
             "{}",
             json!({
                 "event": "neat_generation",
+                "run_seed": run_seed,
                 "generation": generation.generation,
-                "curriculum_level": generation.curriculum_level,
+                "progress": progress,
                 "training_seed_epoch": generation.training_seed_epoch,
                 "effective_training_seeds": generation.effective_training_seeds,
                 "eval_opponents": generation.eval_opponents,
                 "evaluation_cases_per_genome": generation.evaluation_cases_per_genome,
                 "evaluation_worlds": generation.evaluation_worlds,
-                "best_fitness": generation.best_fitness,
-                "mean_fitness": generation.mean_fitness,
-                "best_absolute_survival": generation.best_absolute_survival_fraction,
-                "best_candidate_alive_ticks": generation.best_candidate_alive_ticks,
-                "best_late_weighted_survival": generation.best_late_weighted_survival_fraction,
-                "best_relative_advantage": generation.best_relative_survival_advantage,
-                "mean_absolute_survival": generation.mean_absolute_survival_fraction,
-                "mean_candidate_alive_ticks": generation.mean_candidate_alive_ticks,
-                "mean_late_weighted_survival": generation.mean_late_weighted_survival_fraction,
-                "mean_relative_advantage": generation.mean_relative_survival_advantage,
-                "best_mean_prey_consumptions": generation.best_mean_prey_consumptions,
-                "behavior": behavior,
-                "checkpoint_genome_persisted": generation.checkpoint_champion_genome.is_some(),
-                "selection_strategy": generation.selection_strategy,
-                "best_novelty": generation.best_novelty,
-                "mean_novelty": generation.mean_novelty,
-                "best_local_competition": generation.best_local_competition,
-                "mean_local_competition": generation.mean_local_competition,
-                "novelty_archive_size": generation.novelty_archive_size,
+                "winner_contextual_score": generation.winner_contextual_score,
+                "winner_case_score_stddev": generation.winner_case_score_stddev,
+                "winner_observations": {
+                    "absolute_survival_fraction": generation.winner_absolute_survival_fraction,
+                    "candidate_alive_ticks": generation.winner_candidate_alive_ticks,
+                    "late_weighted_survival_fraction": generation.winner_late_weighted_survival_fraction,
+                    "relative_survival_advantage": generation.winner_relative_survival_advantage,
+                    "action_effectiveness": generation.winner_action_effectiveness,
+                    "successful_attack_rate": generation.winner_successful_attack_rate,
+                    "mean_attack_kills": generation.winner_mean_attack_kills,
+                    "gross_energy_acquired": generation.winner_gross_energy_acquired,
+                    "net_energy_profit": generation.winner_net_energy_profit,
+                    "commands_per_tick": generation.winner_commands_per_tick,
+                    "multi_command_tick_fraction": generation.winner_multi_command_tick_fraction,
+                    "attack_target_evaded": generation.winner_attack_target_evaded,
+                },
+                "population_observations": {
+                    "absolute_survival_fraction": generation.mean_absolute_survival_fraction,
+                    "candidate_alive_ticks": generation.mean_candidate_alive_ticks,
+                    "late_weighted_survival_fraction": generation.mean_late_weighted_survival_fraction,
+                    "relative_survival_advantage": generation.mean_relative_survival_advantage,
+                    "case_score_stddev_mean": generation.mean_case_score_stddev,
+                    "case_score_stddev_max": generation.max_case_score_stddev,
+                    "gross_energy_acquired_mean": generation.mean_gross_energy_acquired,
+                    "net_energy_profit_mean": generation.mean_net_energy_profit,
+                    "action_effectiveness_mean": generation.mean_action_effectiveness,
+                    "successful_attack_rate_mean": generation.mean_successful_attack_rate,
+                },
+                "crossplay_checkpoint_persisted": generation.crossplay_checkpoint_genome.is_some(),
+                "population_checkpoint_persisted": !generation.population_checkpoint.is_empty(),
                 "species": generation.species.len(),
                 "compatibility_threshold": generation.compatibility_threshold,
-                "hidden_nodes": generation.best_hidden_nodes,
-                "enabled_connections": generation.best_enabled_connections,
-                "expressed_hidden_nodes": generation.best_expressed_hidden_nodes,
-                "expressed_connections": generation.best_expressed_connections,
+                "hidden_nodes": generation.winner_hidden_nodes,
+                "enabled_connections": generation.winner_enabled_connections,
+                "expressed_hidden_nodes": generation.winner_expressed_hidden_nodes,
+                "expressed_connections": generation.winner_expressed_connections,
                 "new_connection_innovations": generation.new_connection_innovations,
                 "new_node_innovations": generation.new_node_innovations,
                 "new_origin_offspring_rate": generation.new_origin_offspring_rate,
@@ -433,27 +486,36 @@ fn execute_neat_run(request: NeatRunRequest, out_dir: &str, out: &mut impl Write
         );
     })?;
 
-    let result_path = run_output_path(out_dir, "neat")?;
+    let mut result_path = run_output_path(out_dir, "neat")?;
+    result_path.set_extension("json.zst");
     let result_path_string = result_path.to_string_lossy().into_owned();
     atomic_write(&result_path_string, |writer| {
-        serde_json::to_writer_pretty(writer, &result).map_err(Into::into)
+        let mut encoder = zstd::stream::write::Encoder::new(writer, 3)?;
+        serde_json::to_writer(&mut encoder, &result)?;
+        encoder.finish()?;
+        Ok(())
     })?;
 
-    // Materialize the champion as a real world.bin (+ minted metric sidecar)
-    // seeded as a clonal colony from the champion genome. It is then a first-
-    // class world — `run-to`/`pillars`/`inspect`/`brain` all work directly, so
-    // there is no separate champion serialization format to re-inject.
+    let final_winner = result
+        .final_population
+        .iter()
+        .max_by(|left, right| left.contextual_score.total_cmp(&right.contextual_score))
+        .ok_or_else(|| anyhow!("NEAT result has no final population"))?;
+
+    // Materialize the final contextual winner as a real world.bin (+ sidecar)
+    // seeded as a clonal colony from its genome. It is then a first-
+    // class world — `run-to`/`pillars`/`inspect`/`brain` all work directly.
     let mut world_path = result_path.clone();
     world_path.set_extension("world.bin");
     let world_path_string = world_path.to_string_lossy().into_owned();
-    let champion_world = Simulation::new_with_champion_pool(
-        champion_world_config,
+    let final_winner_world = Simulation::new_with_founder_genome_pool(
+        final_winner_world_config,
         run_seed,
-        vec![result.champion_genome.clone()],
+        vec![final_winner.genome.clone()],
     )
-    .map_err(|error| anyhow!("building champion world: {error}"))?;
-    save_world(&champion_world, &world_path_string)?;
-    let recorder = start_recording(&champion_world, REPORT_EVERY);
+    .map_err(|error| anyhow!("building final winner world: {error}"))?;
+    save_world(&final_winner_world, &world_path_string)?;
+    let recorder = start_recording(&final_winner_world, REPORT_EVERY);
     let sidecar_path = sibling_metrics_path(&world_path_string);
     save_sidecar(REPORT_EVERY, &recorder, &sidecar_path)?;
 
@@ -462,16 +524,13 @@ fn execute_neat_run(request: NeatRunRequest, out_dir: &str, out: &mut impl Write
         "{}",
         json!({
             "wrote": result_path_string,
-            "champion_world": world_path_string,
+            "final_winner_world": world_path_string,
             "objective": result.objective,
-            "champion_fitness": result.champion_fitness,
-            "champion_generation": result.champion_generation,
-            "champion_curriculum_level": result.champion_curriculum_level,
-            "champion_training_seed_epoch": result.champion_training_seed_epoch,
-            "champion_trophic_role": result.champion_evaluation.trophic_role,
-            "champion_action_effectiveness": result.champion_evaluation.mean_action_effectiveness,
-            "champion_plant_consumption_rate": result.champion_evaluation.mean_plant_consumption_rate,
-            "champion_prey_consumption_rate": result.champion_evaluation.mean_prey_consumption_rate,
+            "final_generation": final_winner.generation,
+            "final_winner_population_index": final_winner.population_index,
+            "final_winner_contextual_score": final_winner.contextual_score,
+            "final_winner_action_effectiveness": final_winner.evaluation.mean_action_effectiveness,
+            "final_winner_successful_attack_rate": final_winner.evaluation.mean_successful_attack_rate,
             "generations": result.generations.len(),
         })
     )
@@ -483,8 +542,6 @@ fn run_neat_panel_evaluation(args: &[&str], out: &mut impl Write) -> Result<()> 
     let mut opponent_paths = Vec::<String>::new();
     let mut horizons = vec![500_u64, 1_000, 2_000, 4_000];
     let mut world_seeds = None::<Vec<u64>>;
-    let mut levels = None::<Vec<u32>>;
-    let mut objective = FitnessObjective::SurvivalTimesRelativeAdvantage;
     let mut objective_cvar_fraction = 0.5_f64;
     let mut survival_window_weights = vec![1.0_f64];
     let mut cross_pool_predation_only = false;
@@ -515,14 +572,6 @@ fn run_neat_panel_evaluation(args: &[&str], out: &mut impl Write) -> Result<()> 
                 )?);
                 i += 2;
             }
-            "--levels" => {
-                levels = Some(parse_u32_list(value(args, i, "--levels")?, "--levels")?);
-                i += 2;
-            }
-            "--objective" => {
-                objective = FitnessObjective::parse(value(args, i, "--objective")?)?;
-                i += 2;
-            }
             "--cvar" => {
                 objective_cvar_fraction = value(args, i, "--cvar")?.parse()?;
                 i += 2;
@@ -543,7 +592,7 @@ fn run_neat_panel_evaluation(args: &[&str], out: &mut impl Write) -> Result<()> 
             "--help" | "-h" => {
                 writeln!(
                     out,
-                    "cli evaluate-panel --focal RESULT.json --opponents RESULT.json[,RESULT.json...] [--horizons N,N] [--window-weights W,W] [--world-seeds N,N] [--levels N,N] [--objective survival_fraction|late_weighted_survival|survival_times_relative_advantage] [--cvar F] [--cross-pool-only] [--focal-slot 0|1|2]"
+                    "cli evaluate-panel --focal RESULT.json.zst --opponents RESULT.json.zst[,RESULT.json.zst...] [--horizons N,N] [--window-weights W,W] [--world-seeds N,N] [--cvar F] [--cross-pool-only] [--focal-slot N]"
                 )?;
                 return Ok(());
             }
@@ -570,34 +619,21 @@ fn run_neat_panel_evaluation(args: &[&str], out: &mut impl Write) -> Result<()> 
         .collect::<Result<Vec<_>>>()?;
     let opponent_genomes = opponents
         .iter()
-        .map(|result| result.champion_genome.clone())
-        .collect::<Vec<_>>();
+        .map(|result| final_winner(result).map(|winner| winner.genome.clone()))
+        .collect::<Result<Vec<_>>>()?;
     let world_seeds = world_seeds.unwrap_or_else(|| focal.neat_config.world_seeds.clone());
-    let scenarios = focal
-        .final_training_scenarios
-        .iter()
-        .filter(|scenario| {
-            levels
-                .as_ref()
-                .is_none_or(|levels| levels.contains(&scenario.curriculum_level))
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    if scenarios.is_empty() {
-        bail!("evaluate-panel selected no scenarios");
-    }
+    let focal_winner = final_winner(&focal)?;
 
     let mut evaluations = Vec::with_capacity(horizons.len());
     for horizon in horizons {
         let evaluation = evaluate_frozen_panel(
-            &focal.champion_genome,
+            &focal_winner.genome,
             &opponent_genomes,
-            &scenarios,
+            &focal.evaluation_scenarios,
             horizon,
             &survival_window_weights,
             &world_seeds,
             objective_cvar_fraction,
-            objective,
             cross_pool_predation_only,
             focal_pool_index,
         )?;
@@ -611,18 +647,18 @@ fn run_neat_panel_evaluation(args: &[&str], out: &mut impl Write) -> Result<()> 
         out,
         "{}",
         json!({
-            "schema_version": 2,
+            "schema_version": 3,
             "focal": focal_path,
             "focal_run_seed": focal.seed,
+            "focal_final_winner_population_index": focal_winner.population_index,
             "opponents": opponent_paths,
             "opponent_run_seeds": opponents.iter().map(|result| result.seed).collect::<Vec<_>>(),
-            "objective": objective,
+            "objective": OBJECTIVE_NAME,
             "objective_cvar_fraction": objective_cvar_fraction,
             "survival_window_weights": survival_window_weights,
             "cross_pool_predation_only": cross_pool_predation_only,
             "focal_pool_index": focal_pool_index,
             "world_seeds": world_seeds,
-            "curriculum_levels": levels,
             "evaluations": evaluations,
         })
     )
@@ -634,11 +670,9 @@ fn run_neat_crossplay(args: &[&str], out: &mut impl Write) -> Result<()> {
     let mut selected_generations = None::<Vec<u32>>;
     let mut horizons = None::<Vec<u64>>;
     let mut world_seeds = None::<Vec<u64>>;
-    let mut levels = None::<Vec<u32>>;
-    let mut scenario_names = None::<Vec<String>>;
-    let mut objective = None::<FitnessObjective>;
     let mut objective_cvar_fraction = None::<f64>;
     let mut cross_pool_predation_only = None::<bool>;
+    let mut output_path = None::<String>;
     let mut i = 0usize;
     while i < args.len() {
         match args[i] {
@@ -662,24 +696,6 @@ fn run_neat_crossplay(args: &[&str], out: &mut impl Write) -> Result<()> {
                 )?);
                 i += 2;
             }
-            "--levels" => {
-                levels = Some(parse_u32_list(value(args, i, "--levels")?, "--levels")?);
-                i += 2;
-            }
-            "--scenarios" => {
-                scenario_names = Some(
-                    value(args, i, "--scenarios")?
-                        .split(',')
-                        .filter(|value| !value.trim().is_empty())
-                        .map(|value| value.trim().to_string())
-                        .collect(),
-                );
-                i += 2;
-            }
-            "--objective" => {
-                objective = Some(FitnessObjective::parse(value(args, i, "--objective")?)?);
-                i += 2;
-            }
             "--cvar" => {
                 objective_cvar_fraction = Some(value(args, i, "--cvar")?.parse()?);
                 i += 2;
@@ -692,10 +708,14 @@ fn run_neat_crossplay(args: &[&str], out: &mut impl Write) -> Result<()> {
                 cross_pool_predation_only = Some(false);
                 i += 1;
             }
+            "--out" => {
+                output_path = Some(value(args, i, "--out")?.to_string());
+                i += 2;
+            }
             "--help" | "-h" => {
                 writeln!(
                     out,
-                    "cli crossplay RESULT.json [--checkpoints all|G,G] [--horizons N,N] [--world-seeds N,N] [--levels N,N] [--scenarios baseline,scarcity,sparse_search] [--objective survival_fraction|late_weighted_survival|survival_times_relative_advantage] [--cvar F] [--cross-pool-only|--allow-same-pool]\nThis is explicitly a two-lineage transfer assay, even when the source run trained with three lineages. Every distinct-genome matchup is evaluated in both founder slots; clone-versus-clone comparisons are omitted. It does not measure native three-lineage competence. World seeds must be a multiple of four. Other settings default to the source run contract."
+                    "cli crossplay RESULT.json.zst [--checkpoints all|G,G] [--horizons N,N] [--world-seeds N,N] [--cvar F] [--cross-pool-only|--allow-same-pool] [--out FILE]\nEvery distinct-genome matchup is evaluated in both founder slots; clone-versus-clone comparisons are omitted. World seeds must be a multiple of four. Scores are comparable only within this frozen crossplay contract. `--out` persists the full JSON atomically and prints only a completion record."
                 )?;
                 return Ok(());
             }
@@ -706,10 +726,9 @@ fn run_neat_crossplay(args: &[&str], out: &mut impl Write) -> Result<()> {
             other => bail!("unknown crossplay argument `{other}`"),
         }
     }
-    let result_path = result_path.ok_or_else(|| anyhow!("crossplay needs RESULT.json"))?;
+    let result_path = result_path.ok_or_else(|| anyhow!("crossplay needs RESULT.json.zst"))?;
     let source = read_neat_result(&result_path)?;
     let horizons = horizons.unwrap_or_else(|| source.neat_config.episode_horizons.clone());
-    let objective = objective.unwrap_or(source.neat_config.fitness_objective);
     let objective_cvar_fraction =
         objective_cvar_fraction.unwrap_or(source.neat_config.objective_cvar_fraction);
     let cross_pool_predation_only =
@@ -721,29 +740,12 @@ fn run_neat_crossplay(args: &[&str], out: &mut impl Write) -> Result<()> {
         bail!("crossplay --cvar must be in (0,1]");
     }
     let world_seeds = world_seeds.unwrap_or_else(|| source.neat_config.world_seeds.clone());
-    let scenarios = source
-        .final_training_scenarios
-        .iter()
-        .filter(|scenario| {
-            levels
-                .as_ref()
-                .is_none_or(|levels| levels.contains(&scenario.curriculum_level))
-                && scenario_names
-                    .as_ref()
-                    .is_none_or(|names| names.contains(&scenario.name))
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    if scenarios.is_empty() {
-        bail!("crossplay selected no scenarios");
-    }
-
     let mut checkpoints = source
         .generations
         .iter()
         .filter_map(|generation| {
             generation
-                .checkpoint_champion_genome
+                .crossplay_checkpoint_genome
                 .as_ref()
                 .map(|genome| (generation.generation, genome.clone()))
         })
@@ -775,6 +777,18 @@ fn run_neat_crossplay(args: &[&str], out: &mut impl Write) -> Result<()> {
     if first_generation_by_hash.len() < 2 {
         bail!("crossplay needs at least two distinct persisted checkpoint genomes");
     }
+    let crossplay_scenarios = source
+        .evaluation_scenarios
+        .iter()
+        .map(|scenario| {
+            let mut scenario = scenario.clone();
+            let source_cells = u64::from(scenario.world.world_width).pow(2).max(1);
+            let source_density = f64::from(scenario.world.num_organisms) / source_cells as f64;
+            scenario.world.num_organisms = 2;
+            scenario.world.world_width = ((2.0 / source_density).sqrt().round() as u32).max(3);
+            scenario
+        })
+        .collect::<Vec<_>>();
 
     let mut cells = Vec::with_capacity(
         checkpoints
@@ -785,9 +799,8 @@ fn run_neat_crossplay(args: &[&str], out: &mut impl Write) -> Result<()> {
     for focal in &checkpoints {
         for opponent in &checkpoints {
             // Clone-versus-clone play is not a general competence measurement:
-            // carnivorous strategies either prey on their own clone or lose the
-            // distinct lineage their ecology depends on. Compare only genuinely
-            // distinct genomes, including across different checkpoint numbers.
+            // identical strategies can simply exchange attacks. Compare only
+            // genuinely distinct genomes, including across checkpoint numbers.
             if focal.genome_hash == opponent.genome_hash {
                 continue;
             }
@@ -795,12 +808,11 @@ fn run_neat_crossplay(args: &[&str], out: &mut impl Write) -> Result<()> {
                 let evaluation = evaluate_frozen_pair(
                     &focal.genome,
                     &opponent.genome,
-                    &scenarios,
+                    &crossplay_scenarios,
                     &[horizon],
                     &source.neat_config.survival_window_weights,
                     &world_seeds,
                     objective_cvar_fraction,
-                    objective,
                     cross_pool_predation_only,
                 )?;
                 cells.push(json!({
@@ -817,34 +829,52 @@ fn run_neat_crossplay(args: &[&str], out: &mut impl Write) -> Result<()> {
             }
         }
     }
-    writeln!(
-        out,
-        "{}",
-        json!({
-            "schema_version": 3,
-            "source": result_path,
-            "source_run_seed": source.seed,
-            "checkpoints": checkpoints.iter().map(|checkpoint| json!({
-                "generation": checkpoint.generation,
-                "genome_hash_sha256": checkpoint.genome_hash,
-                "duplicate_of_generation": checkpoint.duplicate_of_generation,
+    let payload = json!({
+        "schema_version": 5,
+        "source": result_path,
+        "source_run_seed": source.seed,
+        "checkpoints": checkpoints.iter().map(|checkpoint| json!({
+            "generation": checkpoint.generation,
+            "genome_hash_sha256": checkpoint.genome_hash,
+            "duplicate_of_generation": checkpoint.duplicate_of_generation,
+        })).collect::<Vec<_>>(),
+        "contract": {
+            "horizons": horizons,
+            "world_seeds": world_seeds,
+            "scenario_names": source.evaluation_scenarios.iter().map(|scenario| &scenario.name).collect::<Vec<_>>(),
+            "founder_pool_size": 2,
+            "one_founder_per_genome": true,
+            "density_matched_worlds": crossplay_scenarios.iter().map(|scenario| json!({
+                "name": scenario.name,
+                "world_width": scenario.world.world_width,
+                "founders": scenario.world.num_organisms,
             })).collect::<Vec<_>>(),
-            "contract": {
-                "horizons": horizons,
-                "world_seeds": world_seeds,
-                "curriculum_levels": levels,
-                "scenario_names": scenario_names,
-                "founder_pool_size": 2,
-                "balanced_slot_rotation": true,
-                "distinct_genomes_only": true,
-                "objective": objective,
-                "objective_cvar_fraction": objective_cvar_fraction,
-                "cross_pool_predation_only": cross_pool_predation_only,
-            },
-            "cells": cells,
-        })
-    )
-    .map_err(Into::into)
+            "balanced_slot_rotation": true,
+            "distinct_genomes_only": true,
+            "objective": OBJECTIVE_NAME,
+            "objective_cvar_fraction": objective_cvar_fraction,
+            "cross_pool_predation_only": cross_pool_predation_only,
+        },
+        "cells": cells,
+    });
+    if let Some(output_path) = output_path {
+        atomic_write(&output_path, |writer| {
+            serde_json::to_writer_pretty(writer, &payload).map_err(Into::into)
+        })?;
+        writeln!(
+            out,
+            "{}",
+            json!({
+                "wrote": output_path,
+                "schema_version": 5,
+                "checkpoints": checkpoints.len(),
+                "cells": payload["cells"].as_array().map_or(0, Vec::len),
+            })
+        )
+        .map_err(Into::into)
+    } else {
+        writeln!(out, "{payload}").map_err(Into::into)
+    }
 }
 
 struct CrossplayCheckpoint {
@@ -866,17 +896,24 @@ fn genome_sha256(genome: &OrganismGenome) -> String {
 #[derive(Deserialize)]
 struct PanelResultSource {
     seed: u64,
-    champion_genome: OrganismGenome,
-    final_training_scenarios: Vec<ScenarioManifest>,
+    evaluation_scenarios: Vec<ScenarioManifest>,
     neat_config: PanelSeedConfig,
     generations: Vec<PanelGenerationSource>,
+    final_population: Vec<PanelPopulationSource>,
 }
 
 #[derive(Deserialize)]
 struct PanelGenerationSource {
     generation: u32,
     #[serde(default)]
-    checkpoint_champion_genome: Option<OrganismGenome>,
+    crossplay_checkpoint_genome: Option<OrganismGenome>,
+}
+
+#[derive(Deserialize)]
+struct PanelPopulationSource {
+    population_index: usize,
+    contextual_score: f64,
+    genome: OrganismGenome,
 }
 
 #[derive(Deserialize)]
@@ -885,24 +922,96 @@ struct PanelSeedConfig {
     episode_horizons: Vec<u64>,
     survival_window_weights: Vec<f64>,
     objective_cvar_fraction: f64,
-    fitness_objective: FitnessObjective,
     cross_pool_predation_only: bool,
 }
 
 fn read_neat_result(path: &str) -> Result<PanelResultSource> {
-    let reader = File::open(path).map_err(|error| anyhow!("cannot open `{path}`: {error}"))?;
-    serde_json::from_reader(reader)
+    serde_json::from_reader(result_reader(path)?)
         .map_err(|error| anyhow!("cannot parse NEAT result `{path}`: {error}"))
+}
+
+fn final_winner(source: &PanelResultSource) -> Result<&PanelPopulationSource> {
+    source
+        .final_population
+        .iter()
+        .max_by(|left, right| left.contextual_score.total_cmp(&right.contextual_score))
+        .ok_or_else(|| anyhow!("NEAT result has no final population"))
+}
+
+fn run_neat_materialize(args: &[&str], out: &mut impl Write) -> Result<()> {
+    if args.iter().any(|arg| matches!(*arg, "--help" | "-h")) {
+        writeln!(
+            out,
+            "cli materialize RESULT.json.zst --generation N [--seed N] --out WORLD.bin"
+        )?;
+        return Ok(());
+    }
+    let result_path = args
+        .first()
+        .ok_or_else(|| anyhow!("materialize needs a result path"))?;
+    let mut generation = None;
+    let mut world_seed = None;
+    let mut output_path = None;
+    let mut i = 1usize;
+    while i < args.len() {
+        match args[i] {
+            "--generation" => {
+                generation = Some(value(args, i, "--generation")?.parse::<u32>()?);
+                i += 2;
+            }
+            "--seed" => {
+                world_seed = Some(value(args, i, "--seed")?.parse::<u64>()?);
+                i += 2;
+            }
+            "--out" => {
+                output_path = Some(value(args, i, "--out")?.to_string());
+                i += 2;
+            }
+            other => bail!("unknown materialize argument `{other}`"),
+        }
+    }
+    let generation = generation.ok_or_else(|| anyhow!("materialize needs --generation N"))?;
+    let output_path = output_path.ok_or_else(|| anyhow!("materialize needs --out WORLD.bin"))?;
+    let source = read_neat_result(result_path)?;
+    let genome = source
+        .generations
+        .iter()
+        .find(|checkpoint| checkpoint.generation == generation)
+        .and_then(|checkpoint| checkpoint.crossplay_checkpoint_genome.clone())
+        .ok_or_else(|| anyhow!("result has no crossplay checkpoint for generation {generation}"))?;
+    let scenario = source
+        .evaluation_scenarios
+        .first()
+        .ok_or_else(|| anyhow!("result has no evaluation scenario"))?;
+    let world_seed = world_seed.unwrap_or(source.seed);
+    let simulation =
+        Simulation::new_with_founder_genome_pool(scenario.world.clone(), world_seed, vec![genome])
+            .map_err(|error| anyhow!("materializing checkpoint world: {error}"))?;
+    save_world(&simulation, &output_path)?;
+    let recorder = start_recording(&simulation, REPORT_EVERY);
+    let metrics_path = sibling_metrics_path(&output_path);
+    save_sidecar(REPORT_EVERY, &recorder, &metrics_path)?;
+    writeln!(
+        out,
+        "{}",
+        json!({
+            "source": result_path,
+            "generation": generation,
+            "world_seed": world_seed,
+            "world": output_path,
+            "metrics": metrics_path,
+        })
+    )
+    .map_err(Into::into)
 }
 
 fn run_neat_analysis(args: &[&str], out: &mut impl Write) -> Result<()> {
     if args.is_empty() {
-        bail!("neat analyze needs at least one result.json path");
+        bail!("neat analyze needs at least one result.json.zst path");
     }
     let mut analyses = Vec::with_capacity(args.len());
     for path in args {
-        let reader = File::open(path).map_err(|error| anyhow!("cannot open `{path}`: {error}"))?;
-        let result: RunResult = serde_json::from_reader(reader)
+        let result: RunResult = serde_json::from_reader(result_reader(path)?)
             .map_err(|error| anyhow!("cannot parse NEAT result `{path}`: {error}"))?;
         analyses.push(analyze_result(path, &result));
     }
@@ -914,197 +1023,104 @@ fn run_neat_analysis(args: &[&str], out: &mut impl Write) -> Result<()> {
     writeln!(out, "{value}").map_err(Into::into)
 }
 
+fn result_reader(path: &str) -> Result<Box<dyn Read>> {
+    let file = File::open(path).map_err(|error| anyhow!("cannot open `{path}`: {error}"))?;
+    if path.ends_with(".zst") {
+        Ok(Box::new(zstd::stream::read::Decoder::new(file)?))
+    } else {
+        Ok(Box::new(BufReader::new(file)))
+    }
+}
+
 fn analyze_result(path: &str, result: &RunResult) -> serde_json::Value {
     let generations = &result.generations;
-    let split = generations.len().saturating_mul(2) / 3;
-    let late = &generations[split..];
-    let all_generation = generations
+    let final_winner = result
+        .final_population
         .iter()
-        .map(|generation| generation.generation as f64)
-        .collect::<Vec<_>>();
-    let late_generation = late
-        .iter()
-        .map(|generation| generation.generation as f64)
-        .collect::<Vec<_>>();
-    let late_start_generation = late
-        .first()
-        .map(|generation| generation.generation)
-        .unwrap_or(0);
-    let late_new_connection_origins = result
-        .connection_innovation_history
-        .iter()
-        .filter(|record| {
-            record
-                .origin_generation
-                .is_some_and(|g| g >= late_start_generation)
+        .max_by(|left, right| left.contextual_score.total_cmp(&right.contextual_score));
+    let final_winner = final_winner.map(|winner| {
+        let evaluation = &winner.evaluation;
+        let attack_attempts = evaluation.mean_attack_no_organism_targets
+            + evaluation.mean_attack_target_evaded
+            + evaluation.mean_attack_same_pool_blocked
+            + evaluation.mean_attack_insufficient_energy
+            + evaluation.mean_attack_eligible_attempts;
+        json!({
+            "generation": winner.generation,
+            "population_index": winner.population_index,
+            "contextual_score": winner.contextual_score,
+            "case_score_stddev": evaluation.case_score_stddev,
+            "case_score_range": [evaluation.min_case_score, evaluation.max_case_score],
+            "opponent_score_profile": winner.opponent_scores,
+            "survival": {
+                "absolute_fraction": evaluation.mean_absolute_survival_fraction,
+                "alive_ticks": evaluation.mean_candidate_alive_ticks,
+                "late_weighted_fraction": evaluation.mean_late_weighted_survival_fraction,
+                "relative_advantage": evaluation.mean_relative_survival_advantage,
+                "end_survivor_fraction": evaluation.mean_candidate_end_survival_fraction,
+            },
+            "behavior": {
+                "action_effectiveness": evaluation.mean_action_effectiveness,
+                "successful_attack_rate": evaluation.mean_successful_attack_rate,
+                "action_fractions": evaluation.mean_action_fractions,
+                "commands_per_tick": evaluation.mean_commands_per_tick,
+                "multi_command_tick_fraction": evaluation.mean_multi_command_tick_fraction,
+                "spatial_coverage": evaluation.mean_spatial_coverage,
+            },
+            "attack_funnel": {
+                "no_organism_targets": evaluation.mean_attack_no_organism_targets,
+                "target_evaded": evaluation.mean_attack_target_evaded,
+                "same_pool_blocked": evaluation.mean_attack_same_pool_blocked,
+                "insufficient_energy": evaluation.mean_attack_insufficient_energy,
+                "eligible_attempts": evaluation.mean_attack_eligible_attempts,
+                "hits": evaluation.mean_attack_hits,
+                "nonlethal_hits": evaluation.mean_attack_nonlethal_hits,
+                "kills": evaluation.mean_attack_kills,
+                "same_pair_followups": evaluation.mean_attack_same_pair_followups,
+                "distinct_victims": evaluation.mean_distinct_attack_victims,
+                "precision": (attack_attempts > 0.0).then(|| evaluation.mean_attack_hits / attack_attempts),
+                "repeat_hit_fraction": evaluation.attack_repeat_hit_fraction,
+            },
+            "energy_flow": {
+                "gross_acquired": evaluation.mean_gross_energy_acquired,
+                "attack_received": evaluation.mean_attack_energy_received,
+                "attack_lost": evaluation.mean_attack_energy_lost,
+                "attack_attempt_cost": evaluation.mean_attack_attempt_energy_cost,
+                "net_attack_balance": evaluation.mean_net_attack_energy_balance,
+            },
         })
-        .count();
-    let late_new_node_origins = result
-        .node_innovation_history
-        .iter()
-        .filter(|record| record.origin_generation >= late_start_generation)
-        .count();
-    let adaptive_connections = result
-        .connection_innovation_history
-        .iter()
-        .filter(|record| record.origin_generation.is_some())
-        .filter(|record| record.max_expressed_frequency >= 0.10)
-        .count();
-    let adaptive_nodes = result
-        .node_innovation_history
-        .iter()
-        .filter(|record| record.max_expressed_frequency >= 0.10)
-        .count();
-    let champion_attack_attempts = result.champion_evaluation.mean_attack_no_organism_targets
-        + result.champion_evaluation.mean_attack_same_pool_blocked
-        + result.champion_evaluation.mean_attack_insufficient_energy
-        + result.champion_evaluation.mean_attack_eligible_attempts;
-    let champion_attack_precision = (champion_attack_attempts > 0.0)
-        .then(|| result.champion_evaluation.mean_attack_hits / champion_attack_attempts);
-    let champion_total_energy_accumulated = result.champion_evaluation.mean_gross_energy_acquired;
-    let champion_net_energy_profit = result.champion_evaluation.mean_plant_energy_acquired
-        + result.champion_evaluation.mean_attack_energy_received
-        - result.champion_evaluation.mean_attack_energy_lost
-        - result.champion_evaluation.mean_attack_attempt_energy_cost;
+    });
 
     json!({
         "path": path,
         "run_seed": result.seed,
         "generations": generations.len(),
+        "score_semantics": "contextual_within_generation_only",
+        "longitudinal_validation": "use_crossplay",
         "complexification_enabled": result.neat_config.add_connection_probability > 0.0
             || result.neat_config.add_node_probability > 0.0,
-        "champion": {
-            "generation": result.champion_generation,
-            "curriculum_level": result.champion_curriculum_level,
-            "training_fitness": result.champion_fitness,
-            "training_absolute_survival": result.champion_evaluation.mean_absolute_survival_fraction,
-            "training_late_weighted_survival": result.champion_evaluation.mean_late_weighted_survival_fraction,
-            "training_relative_advantage": result.champion_evaluation.mean_relative_survival_advantage,
-            "training_cvar_absolute_survival": result.champion_evaluation.objective_cvar_absolute_survival_fraction,
-            "training_cvar_late_weighted_survival": result.champion_evaluation.objective_cvar_late_weighted_survival_fraction,
-            "training_cvar_relative_advantage": result.champion_evaluation.objective_cvar_relative_survival_advantage,
-            "pair_seed_cases": result.champion_evaluation.pair_seed_cases,
-            "unique_opponents": result.champion_evaluation.unique_opponents,
-            "trophic_role": result.champion_evaluation.trophic_role,
-            "action_effectiveness": result.champion_evaluation.mean_action_effectiveness,
-            "plant_consumption_rate": result.champion_evaluation.mean_plant_consumption_rate,
-            "prey_consumption_rate": result.champion_evaluation.mean_prey_consumption_rate,
-            "plant_intake_fraction": result.champion_evaluation.plant_intake_fraction,
-            "prey_intake_fraction": result.champion_evaluation.prey_intake_fraction,
-            "training_attack_funnel": {
-                "no_organism_targets": result.champion_evaluation.mean_attack_no_organism_targets,
-                "same_pool_blocked": result.champion_evaluation.mean_attack_same_pool_blocked,
-                "eligible_attempts": result.champion_evaluation.mean_attack_eligible_attempts,
-                "hits": result.champion_evaluation.mean_attack_hits,
-                "nonlethal_hits": result.champion_evaluation.mean_attack_nonlethal_hits,
-                "kills": result.champion_evaluation.mean_attack_kills,
-                "same_pair_followups": result.champion_evaluation.mean_attack_same_pair_followups,
-                "distinct_victims": result.champion_evaluation.mean_distinct_attack_victims,
-                "precision": champion_attack_precision,
-                "energy_received": result.champion_evaluation.mean_attack_energy_received,
-                "energy_lost": result.champion_evaluation.mean_attack_energy_lost,
-                "attempt_energy_cost": result.champion_evaluation.mean_attack_attempt_energy_cost,
-                "net_energy_balance": result.champion_evaluation.mean_net_attack_energy_balance,
-            },
-            "training_energy_flow": {
-                "total_energy_accumulated": champion_total_energy_accumulated,
-                "net_energy_profit": champion_net_energy_profit,
-                "plant_energy_acquired": result.champion_evaluation.mean_plant_energy_acquired,
-            },
-        },
-        "trends": {
-            "all_best_fitness_slope": linear_slope(
-                &all_generation,
-                &generations.iter().map(|generation| generation.best_fitness).collect::<Vec<_>>(),
-            ),
-            "all_best_absolute_survival_slope": linear_slope(
-                &all_generation,
-                &generations.iter().map(|generation| generation.best_absolute_survival_fraction).collect::<Vec<_>>(),
-            ),
-            "all_best_late_weighted_survival_slope": linear_slope(
-                &all_generation,
-                &generations.iter().map(|generation| generation.best_late_weighted_survival_fraction).collect::<Vec<_>>(),
-            ),
-            "all_best_relative_advantage_slope": linear_slope(
-                &all_generation,
-                &generations.iter().map(|generation| generation.best_relative_survival_advantage).collect::<Vec<_>>(),
-            ),
-            "all_best_path_connected_hidden_slope": linear_slope(
-                &all_generation,
-                &generations.iter().map(|generation| generation.best_expressed_hidden_nodes as f64).collect::<Vec<_>>(),
-            ),
-            "all_best_path_connected_connections_slope": linear_slope(
-                &all_generation,
-                &generations.iter().map(|generation| generation.best_expressed_connections as f64).collect::<Vec<_>>(),
-            ),
-            "late_best_fitness_slope": linear_slope(
-                &late_generation,
-                &late.iter().map(|generation| generation.best_fitness).collect::<Vec<_>>(),
-            ),
-            "late_best_absolute_survival_slope": linear_slope(
-                &late_generation,
-                &late.iter().map(|generation| generation.best_absolute_survival_fraction).collect::<Vec<_>>(),
-            ),
-            "late_best_late_weighted_survival_slope": linear_slope(
-                &late_generation,
-                &late.iter().map(|generation| generation.best_late_weighted_survival_fraction).collect::<Vec<_>>(),
-            ),
-            "late_best_relative_advantage_slope": linear_slope(
-                &late_generation,
-                &late.iter().map(|generation| generation.best_relative_survival_advantage).collect::<Vec<_>>(),
-            ),
-            "late_best_path_connected_hidden_slope": linear_slope(
-                &late_generation,
-                &late.iter().map(|generation| generation.best_expressed_hidden_nodes as f64).collect::<Vec<_>>(),
-            ),
-            "late_best_path_connected_connections_slope": linear_slope(
-                &late_generation,
-                &late.iter().map(|generation| generation.best_expressed_connections as f64).collect::<Vec<_>>(),
-            ),
-        },
+        "final_generation_winner": final_winner,
+        "generation_contexts": generations.iter().map(|generation| json!({
+            "generation": generation.generation,
+            "winner_contextual_score": generation.winner_contextual_score,
+            "winner_case_score_stddev": generation.winner_case_score_stddev,
+            "evaluation_cases_per_genome": generation.evaluation_cases_per_genome,
+            "evaluation_worlds": generation.evaluation_worlds,
+            "species": generation.species.len(),
+            "winner_expressed_hidden_nodes": generation.winner_expressed_hidden_nodes,
+            "winner_expressed_connections": generation.winner_expressed_connections,
+            "new_connection_innovations": generation.new_connection_innovations,
+            "new_node_innovations": generation.new_node_innovations,
+        })).collect::<Vec<_>>(),
         "innovation": {
-            "late_start_generation": late_start_generation,
-            "late_new_connection_origins": late_new_connection_origins,
-            "late_new_node_origins": late_new_node_origins,
-            "late_longest_zero_origin_streak": longest_zero_origin_streak(late),
-            "expressed_connections_reaching_ten_percent": adaptive_connections,
-            "expressed_nodes_reaching_ten_percent": adaptive_nodes,
+            "connection_records": result.connection_innovation_history.len(),
+            "node_records": result.node_innovation_history.len(),
         },
-        "historical_checkpoints": {
-            "count": generations.iter().filter(|generation| generation.checkpoint_champion_genome.is_some()).count(),
-            "generations": generations.iter().filter(|generation| generation.checkpoint_champion_genome.is_some()).map(|generation| generation.generation).collect::<Vec<_>>(),
+        "crossplay_checkpoints": {
+            "count": generations.iter().filter(|generation| generation.crossplay_checkpoint_genome.is_some()).count(),
+            "generations": generations.iter().filter(|generation| generation.crossplay_checkpoint_genome.is_some()).map(|generation| generation.generation).collect::<Vec<_>>(),
         },
     })
-}
-
-fn linear_slope(x: &[f64], y: &[f64]) -> Option<f64> {
-    if x.len() != y.len() || x.len() < 2 {
-        return None;
-    }
-    let n = x.len() as f64;
-    let mean_x = x.iter().sum::<f64>() / n;
-    let mean_y = y.iter().sum::<f64>() / n;
-    let covariance = x
-        .iter()
-        .zip(y)
-        .map(|(x, y)| (x - mean_x) * (y - mean_y))
-        .sum::<f64>();
-    let variance = x.iter().map(|x| (x - mean_x).powi(2)).sum::<f64>();
-    (variance > 0.0).then(|| covariance / variance)
-}
-
-fn longest_zero_origin_streak(generations: &[evolution::GenerationSummary]) -> usize {
-    let mut longest = 0usize;
-    let mut current = 0usize;
-    for generation in generations {
-        if generation.new_connection_innovations + generation.new_node_innovations == 0 {
-            current += 1;
-            longest = longest.max(current);
-        } else {
-            current = 0;
-        }
-    }
-    longest
 }
 
 fn value<'a>(args: &[&'a str], i: usize, flag: &str) -> Result<&'a str> {
@@ -1149,24 +1165,6 @@ fn parse_f64_list(raw: &str, flag: &str) -> Result<Vec<f64>> {
     Ok(values)
 }
 
-fn parse_scenarios(raw: &str) -> Result<Vec<ScenarioPreset>> {
-    let scenarios: Vec<_> = raw
-        .split(',')
-        .filter(|part| !part.trim().is_empty())
-        .map(|part| ScenarioPreset::parse(part.trim()))
-        .collect::<Result<_>>()?;
-    if scenarios.is_empty() {
-        bail!("--scenarios needs at least one scenario");
-    }
-    let mut deduped = Vec::with_capacity(scenarios.len());
-    for scenario in scenarios {
-        if !deduped.contains(&scenario) {
-            deduped.push(scenario);
-        }
-    }
-    Ok(deduped)
-}
-
 fn parse_assignment(raw: &str) -> Result<(String, String)> {
     let (key, value) = raw
         .split_once('=')
@@ -1192,19 +1190,9 @@ fn apply_neat_param(config: &mut NeatConfig, key: &str, value: &str) -> Result<(
         "survival_fraction" => config.survival_fraction = value.parse()?,
         "crossover_probability" => config.crossover_probability = value.parse()?,
         "interspecies_mate_probability" => config.interspecies_mate_probability = value.parse()?,
-        "curriculum_enabled" => config.curriculum_enabled = value.parse()?,
-        "curriculum_promotion_threshold" => {
-            config.curriculum_promotion_threshold = value.parse()?
-        }
-        "curriculum_promotion_patience" => config.curriculum_promotion_patience = value.parse()?,
         "training_seed_rotation_period" => config.training_seed_rotation_period = value.parse()?,
         "survival_window_weights" => {
             config.survival_window_weights = parse_f64_list(value, "survival_window_weights")?
-        }
-        "selection_strategy" => config.selection_strategy = SelectionStrategy::parse(value)?,
-        "novelty_k" => config.novelty_k = value.parse()?,
-        "novelty_archive_additions_per_generation" => {
-            config.novelty_archive_additions_per_generation = value.parse()?
         }
         "mutate_weight_probability" => config.mutate_weight_probability = value.parse()?,
         "per_connection_weight_mutation_probability" => {
@@ -1223,7 +1211,6 @@ fn apply_neat_param(config: &mut NeatConfig, key: &str, value: &str) -> Result<(
         "disabled_inheritance_probability" => {
             config.disabled_inheritance_probability = value.parse()?
         }
-        "stagnation_generations" => config.stagnation_generations = value.parse()?,
         "young_species_grace_generations" => {
             config.young_species_grace_generations = value.parse()?
         }

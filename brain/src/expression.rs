@@ -3,7 +3,8 @@ use super::*;
 pub fn express_genome(genome: &OrganismGenome, predation_enabled: bool) -> BrainState {
     // Heritable node IDs are stable structural hashes. The runtime remains a
     // dense array machine: canonical gene order is remapped once at birth into
-    // deterministic topological order for a same-tick feed-forward pass.
+    // deterministic topological order for the instantaneous current-tick DAG.
+    // Temporal recurrent edges are compiled separately below.
     let num_inter = genome.brain.hidden_nodes.len();
     let topological_order = hidden_topological_order(genome);
     let mut runtime_index_by_gene_index = vec![0usize; num_inter];
@@ -43,18 +44,15 @@ pub fn express_genome(genome: &OrganismGenome, predation_enabled: bool) -> Brain
         sensory,
         inter,
         action,
+        recurrent_synapses: Vec::new(),
+        previous_inter_activations: vec![0.0; num_inter],
         synapse_count: 0,
         sensory_mean_activation: vec![0.0; num_sensory],
         inter_mean_activation: vec![0.0; num_inter],
         action_mean_activation: vec![0.0; ACTION_COUNT],
         means_initialized: false,
     };
-    wire_birth_synapses_from_genome(
-        genome,
-        &runtime_index_by_gene_index,
-        &mut brain.sensory,
-        &mut brain.inter,
-    );
+    wire_birth_synapses_from_genome(genome, &runtime_index_by_gene_index, &mut brain);
     refresh_action_synapse_starts_and_count(&mut brain);
     brain
 }
@@ -89,8 +87,7 @@ fn sensory_receptors_in_order(
 fn wire_birth_synapses_from_genome(
     genome: &OrganismGenome,
     runtime_index_by_gene_index: &[usize],
-    sensory: &mut [SensoryNeuronState],
-    inter: &mut [InterNeuronState],
+    brain: &mut BrainState,
 ) {
     for edge in &genome.brain.edges {
         if !edge.enabled {
@@ -107,8 +104,22 @@ fn wire_birth_synapses_from_genome(
             continue;
         };
 
+        if edge.timing == SynapseTiming::PreviousTick {
+            let mut runtime_edge = runtime_edge_from_gene(edge, pre_runtime_id, post_runtime_id);
+            runtime_edge.pre_inter_index =
+                crate::topology::inter_index(pre_runtime_id, brain.inter.len())
+                    .and_then(|index| u32::try_from(index).ok());
+            runtime_edge.post_inter_index =
+                crate::topology::inter_index(post_runtime_id, brain.inter.len())
+                    .and_then(|index| u32::try_from(index).ok());
+            if runtime_edge.pre_inter_index.is_some() && runtime_edge.post_inter_index.is_some() {
+                brain.recurrent_synapses.push(runtime_edge);
+            }
+            continue;
+        }
+
         if pre_runtime_id.0 < SENSORY_COUNT {
-            let Some(pre) = sensory.get_mut(pre_runtime_id.0 as usize) else {
+            let Some(pre) = brain.sensory.get_mut(pre_runtime_id.0 as usize) else {
                 continue;
             };
             pre.synapses.push(runtime_edge_from_gene(
@@ -119,10 +130,11 @@ fn wire_birth_synapses_from_genome(
             continue;
         }
 
-        let Some(pre_index) = crate::topology::inter_index(pre_runtime_id, inter.len()) else {
+        let Some(pre_index) = crate::topology::inter_index(pre_runtime_id, brain.inter.len())
+        else {
             continue;
         };
-        let Some(pre) = inter.get_mut(pre_index) else {
+        let Some(pre) = brain.inter.get_mut(pre_index) else {
             continue;
         };
         pre.synapses.push(runtime_edge_from_gene(
@@ -136,27 +148,34 @@ fn wire_birth_synapses_from_genome(
     // inter-target/action-target partition required by routing. Post IDs remain
     // ordered inside each group, but hidden IDs above the stable action-ID
     // island are intentionally numerically greater than action IDs.
-    for neuron in sensory.iter_mut() {
+    for neuron in brain.sensory.iter_mut() {
         crate::topology::sort_runtime_synapses(&mut neuron.synapses);
     }
-    for neuron in inter.iter_mut() {
+    for neuron in brain.inter.iter_mut() {
         crate::topology::sort_runtime_synapses(&mut neuron.synapses);
     }
     if cfg!(debug_assertions) {
-        for sensory_neuron in sensory.iter() {
+        for sensory_neuron in brain.sensory.iter() {
             crate::topology::debug_assert_runtime_synapse_order(&sensory_neuron.synapses);
         }
-        for inter_neuron in inter.iter() {
+        for inter_neuron in brain.inter.iter() {
             crate::topology::debug_assert_runtime_synapse_order(&inter_neuron.synapses);
         }
-        for (pre_index, inter_neuron) in inter.iter().enumerate() {
+        for (pre_index, inter_neuron) in brain.inter.iter().enumerate() {
             debug_assert!(inter_neuron.synapses[..inter_neuron.action_synapse_start]
                 .iter()
                 .all(
-                    |edge| crate::topology::inter_index(edge.post_neuron_id, inter.len())
+                    |edge| crate::topology::inter_index(edge.post_neuron_id, brain.inter.len())
                         .is_some_and(|post_index| post_index > pre_index)
                 ));
         }
+        debug_assert!(brain.recurrent_synapses.iter().all(|edge| {
+            edge.timing == SynapseTiming::PreviousTick
+                && edge.pre_inter_index.is_some()
+                && edge.post_inter_index.is_some()
+                && crate::topology::inter_index(edge.pre_neuron_id, brain.inter.len()).is_some()
+                && crate::topology::inter_index(edge.post_neuron_id, brain.inter.len()).is_some()
+        }));
     }
 }
 
@@ -185,7 +204,12 @@ fn hidden_topological_order(genome: &OrganismGenome) -> Vec<usize> {
     let count = genome.brain.hidden_nodes.len();
     let mut indegree = vec![0usize; count];
     let mut outgoing = vec![Vec::<usize>::new(); count];
-    for edge in genome.brain.edges.iter().filter(|edge| edge.enabled) {
+    for edge in genome
+        .brain
+        .edges
+        .iter()
+        .filter(|edge| edge.enabled && edge.timing == SynapseTiming::CurrentTick)
+    {
         let Ok(pre) = genome
             .brain
             .hidden_nodes
@@ -220,7 +244,11 @@ fn hidden_topological_order(genome: &OrganismGenome) -> Vec<usize> {
             }
         }
     }
-    assert_eq!(order.len(), count, "expressed hidden graph must be acyclic");
+    assert_eq!(
+        order.len(),
+        count,
+        "expressed current-tick hidden graph must be acyclic"
+    );
     order
 }
 
@@ -236,6 +264,9 @@ fn runtime_edge_from_gene(
     SynapseEdge {
         pre_neuron_id,
         post_neuron_id,
+        timing: gene.timing,
+        pre_inter_index: None,
+        post_inter_index: None,
         weight: gene.weight,
         eligibility: 0.0,
         pending_coactivation: 0.0,

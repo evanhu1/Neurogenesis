@@ -17,7 +17,6 @@ export function WorldCanvas({ onRenderer, onOrganismSelect }: WorldCanvasProps) 
   const onOrganismSelectRef = useRef(onOrganismSelect);
   onOrganismSelectRef.current = onOrganismSelect;
   const [showOrganisms, setShowOrganisms] = useState(true);
-  const [showPlants, setShowPlants] = useState(true);
 
   // The renderer owns all stateful rendering (in-memory world, RAF loop,
   // viewport, input); this component creates it, exposes it to the owner, and
@@ -41,8 +40,8 @@ export function WorldCanvas({ onRenderer, onOrganismSelect }: WorldCanvasProps) 
   }, []);
 
   useEffect(() => {
-    rendererRef.current?.setVisibility({ organisms: showOrganisms, plants: showPlants });
-  }, [showOrganisms, showPlants]);
+    rendererRef.current?.setVisibility({ organisms: showOrganisms });
+  }, [showOrganisms]);
 
   return (
     <div className="relative h-full w-full">
@@ -56,7 +55,6 @@ export function WorldCanvas({ onRenderer, onOrganismSelect }: WorldCanvasProps) 
 
       <div className="absolute bottom-3 left-3 z-10 flex gap-1 rounded-full border border-line bg-panel/80 p-1 backdrop-blur-sm">
         <LayerToggle label="Organisms" checked={showOrganisms} onChange={setShowOrganisms} />
-        <LayerToggle label="Plants" checked={showPlants} onChange={setShowPlants} />
       </div>
 
       <div className="pointer-events-none absolute bottom-3 right-3 z-10 hidden rounded-full border border-line bg-panel/60 px-3 py-1 text-[10px] text-ink/40 backdrop-blur-sm md:block">

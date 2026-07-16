@@ -1,19 +1,14 @@
-use crate::grid::world_capacity;
 use crate::Simulation;
 use brain::express_genome;
-use brain::genome::{generate_seed_genome, restrict_predation_genes};
+use brain::genome::{generate_seed_genome, restrict_action_genes};
 use rand::seq::SliceRandom;
 use rand::Rng;
 use types::{
-    ActionType, FacingDirection, FoodId, FoodState, Occupant, OrganismGenome, OrganismId,
-    OrganismState, SpeciesId,
+    ActionType, FacingDirection, Occupant, OrganismGenome, OrganismId, OrganismState, SpeciesId,
 };
 
-mod food;
 mod organisms;
 pub(crate) mod world;
-
-pub(crate) const NO_REGROWTH_SCHEDULED: u64 = u64::MAX;
 
 struct OrganismSpawnParams {
     /// Inherited species ID; `None` marks a founder, whose species ID is

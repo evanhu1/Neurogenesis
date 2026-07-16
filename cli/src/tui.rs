@@ -20,8 +20,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 use views::output::Format;
 use views::{
-    food_summary, load_sidecar, load_world, resolve_metrics_path, save_sidecar, save_world,
-    sibling_metrics_path,
+    load_sidecar, load_world, resolve_metrics_path, save_sidecar, save_world, sibling_metrics_path,
 };
 use world_sim::Simulation;
 
@@ -52,7 +51,7 @@ enum Submit {
     /// Advance the world this many ticks (chunked + cancellable in the UI).
     Advance(u64),
     /// Run a NEAT search (the given args), then replace the resident world with
-    /// a colony seeded from the champion. Driven from the event loop so it can
+    /// a colony seeded from the final generation winner. Driven from the event loop so it can
     /// paint per-generation progress.
     Neat(Vec<String>),
     /// Exit the session.
@@ -84,7 +83,6 @@ struct StatusLine {
     turn: u64,
     world_width: u32,
     population: usize,
-    plants: u64,
 }
 
 impl Session {
@@ -221,12 +219,10 @@ impl Session {
         let Some(sim) = self.app.sim.as_ref() else {
             return;
         };
-        let (plants, _food_energy) = food_summary(sim);
         self.status = StatusLine {
             turn: sim.turn(),
             world_width: sim.config().world_width,
             population: sim.organisms().len(),
-            plants,
         };
     }
 
@@ -392,7 +388,7 @@ impl Session {
     fn push_help(&mut self) {
         let help = "\
 commands (same vocabulary as the one-shot CLI):
-  reads       turn state pillars eco lineage genome timeseries food
+  reads       turn state pillars eco lineage genome timeseries
               inspect ID  top FIELD [N]  hist FIELD  find EXPR  brain ID  decide ID
   advance     step [N]   run-to T        (Esc cancels a long run)
   other       watch T [--every E]        bench [N]
@@ -532,8 +528,8 @@ keys          Up/Down scroll output · PageUp/PageDown page · Home/End top/bott
     }
 
     /// Run a NEAT search over the resident world's config, painting each
-    /// generation's fitness into the scrollback, then reseed the resident world
-    /// with a colony grown from the champion so it can be run/inspected in place.
+    /// generation's contextual winner into the scrollback, then reseed the
+    /// resident world with the final winner for inspection.
     /// Blocks the UI for the run's duration (sized small by default).
     fn run_neat_command(
         &mut self,
@@ -544,8 +540,8 @@ keys          Up/Down scroll output · PageUp/PageDown page · Home/End top/bott
             self.push_error("neat: no world loaded");
             return Ok(());
         };
-        // Evolve for the resident world's config (its food/scarcity/predation
-        // settings carry through). `--scale` overrides size for the eval worlds.
+        // Evolve for the resident world's config. `--scale` overrides size for
+        // the evaluation worlds.
         let mut world = sim.config().clone();
         // Interactive defaults: small so a run finishes quickly. Override with
         // flags. eval_opponents keeps H1's competitive survival objective on.
@@ -583,7 +579,7 @@ keys          Up/Down scroll output · PageUp/PageDown page · Home/End top/bott
                 }
                 "--help" | "-h" => {
                     self.push_info(
-                        "neat [-g gens] [-p pop] [-t horizon[,horizon...]] [-o opponents] [-s seed] [--scale W,POP]\n  evolves survival champions for this world's config, then reseeds the resident world with the champion colony.",
+                        "neat [-g gens] [-p pop] [-t horizon[,horizon...]] [-o opponents] [-s seed] [--scale W,POP]\n  evolves a population for this world's config, then reseeds the resident world with the final generation winner.",
                     );
                     return Ok(());
                 }
@@ -612,10 +608,9 @@ keys          Up/Down scroll output · PageUp/PageDown page · Home/End top/bott
         let outcome = run_neat(config, world, seed, |gen| {
             self.push_line(Line::from(Span::styled(
                 format!(
-                    "  gen {:>3}: best {:.3} · mean {:.3} · species {}",
+                    "  gen {:>3}: contextual winner {:.3} · species {}",
                     gen.generation,
-                    gen.best_fitness,
-                    gen.mean_fitness,
+                    gen.winner_contextual_score,
                     gen.species.len()
                 ),
                 Style::default().fg(COL_INFO),
@@ -634,18 +629,26 @@ keys          Up/Down scroll output · PageUp/PageDown page · Home/End top/bott
         };
         let secs = started.elapsed().as_secs_f64();
 
-        match Simulation::new_with_champion_pool(seed_world, seed, vec![result.champion_genome]) {
-            Ok(champion_sim) => {
-                self.app.sim = Some(champion_sim);
+        let Some(last) = result.generations.last() else {
+            self.push_error("neat: run returned no generations");
+            return Ok(());
+        };
+        let Some(winner_genome) = last.crossplay_checkpoint_genome.clone() else {
+            self.push_error("neat: final generation did not retain a crossplay checkpoint genome");
+            return Ok(());
+        };
+        match Simulation::new_with_founder_genome_pool(seed_world, seed, vec![winner_genome]) {
+            Ok(winner_sim) => {
+                self.app.sim = Some(winner_sim);
                 self.app.start_recording()?;
                 self.dirty = true;
                 self.refresh_status();
                 self.push_info(&format!(
-                    "neat done ({secs:.1}s): champion survival {:.3} (gen {}). Resident world reseeded with the champion colony — run-to / inspect / brain it.",
-                    result.champion_fitness, result.champion_generation
+                    "neat done ({secs:.1}s): final contextual winner {:.3} (gen {}). Resident world reseeded with that frozen genome — run-to / inspect / brain it.",
+                    last.winner_contextual_score, last.generation
                 ));
             }
-            Err(e) => self.push_error(&format!("neat: seeding champion world failed: {e}")),
+            Err(e) => self.push_error(&format!("neat: seeding winner world failed: {e}")),
         }
         Ok(())
     }
@@ -695,10 +698,9 @@ keys          Up/Down scroll output · PageUp/PageDown page · Home/End top/bott
             None => String::new(),
         };
         let text = format!(
-            " {w}×{w} · t={} · pop {} · plants {}{dirty}{running}",
+            " {w}×{w} · t={} · pop {}{dirty}{running}",
             self.status.turn,
             self.status.population,
-            self.status.plants,
             w = self.status.world_width,
         );
         let bar = Paragraph::new(text).style(

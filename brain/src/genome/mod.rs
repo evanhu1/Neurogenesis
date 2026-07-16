@@ -13,8 +13,8 @@ use std::f32::consts::LN_10;
 use types::{
     action_gene_node_id, action_gene_node_index, connection_innovation_id, is_hidden_gene_node_id,
     seed_hidden_gene_node_id, sensory_gene_node_id, sensory_gene_node_index, ActionType,
-    BrainTopology, GeneNodeId, HiddenNodeGene, InnovationId, LifecycleGenes, NeuronId,
-    OrganismGenome, PlasticityGenes, SeedGenomeConfig, SensoryReceptor, SynapseGene,
+    BrainTopology, GeneNodeId, HiddenNodeGene, InnovationId, LifecycleGenes, OrganismGenome,
+    PlasticityGenes, SeedGenomeConfig, SensoryReceptor, SynapseGene, SynapseTiming,
 };
 
 mod sanitization;
@@ -92,31 +92,25 @@ fn max_possible_synapses(num_neurons: usize, predation_enabled: bool) -> usize {
         .saturating_mul(num_neurons.saturating_add(actions))
         .saturating_add(num_neurons.saturating_mul(actions))
         .saturating_add(num_neurons.saturating_mul(num_neurons.saturating_sub(1)) / 2)
+        .saturating_add(num_neurons.saturating_mul(num_neurons))
 }
 
-pub fn restrict_predation_genes(genome: &mut OrganismGenome, predation_enabled: bool) {
-    if predation_enabled {
-        return;
-    }
+pub fn restrict_action_genes(genome: &mut OrganismGenome, predation_enabled: bool) {
     genome.brain.edges.retain(|edge| {
-        !gene_node_is_predation_only(edge.pre_node_id)
-            && !gene_node_is_predation_only(edge.post_node_id)
+        !gene_node_is_disabled_action(edge.pre_node_id, predation_enabled)
+            && !gene_node_is_disabled_action(edge.post_node_id, predation_enabled)
     });
-    let attack_index = ActionType::ALL
-        .iter()
-        .position(|action| *action == ActionType::Attack)
-        .expect("Attack is a canonical action");
-    if let Some(bias) = genome.brain.action_biases.get_mut(attack_index) {
-        *bias = 0.0;
+    for (index, action) in ActionType::ALL.iter().copied().enumerate() {
+        if !action.is_enabled(predation_enabled) {
+            if let Some(bias) = genome.brain.action_biases.get_mut(index) {
+                *bias = 0.0;
+            }
+        }
     }
 }
 
-fn gene_node_is_predation_only(node_id: GeneNodeId) -> bool {
-    if let Some(index) = sensory_gene_node_index(node_id) {
-        return SensoryReceptor::from_neuron_id(NeuronId(index))
-            .is_some_and(SensoryReceptor::is_predation_only);
-    }
+fn gene_node_is_disabled_action(node_id: GeneNodeId, predation_enabled: bool) -> bool {
     action_gene_node_index(node_id)
         .and_then(|index| ActionType::ALL.get(index).copied())
-        .is_some_and(|action| action == ActionType::Attack)
+        .is_some_and(|action| !action.is_enabled(predation_enabled))
 }

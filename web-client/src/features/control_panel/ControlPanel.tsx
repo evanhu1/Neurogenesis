@@ -1,6 +1,5 @@
 import { useCallback, useRef } from 'react';
 import type { WorldController } from '../sim/hooks/useWorld';
-import { ChampionPoolPanel } from './ChampionPoolPanel';
 import { SessionOverviewPanel } from './SessionOverviewPanel';
 import { SimulationControlsPanel } from './SimulationControlsPanel';
 import { SpeciesPopulationChart } from './SpeciesPopulationChart';
@@ -55,12 +54,6 @@ export function ControlPanel({ world }: ControlPanelProps) {
           {world.errorText}
         </div>
       ) : null}
-
-      <ChampionPoolPanel
-        entries={world.championPool}
-        onDeleteEntry={(index) => void world.deleteChampionPoolEntry(index)}
-        onClearAll={() => void world.clearChampionPool()}
-      />
     </aside>
   );
 }

@@ -2,9 +2,9 @@
 //! on the card. Reads a derived `&[IntervalMetrics]` (no dataset dependency) so
 //! it can be run on any analysis output, batch or live.
 //!
-//! These are the **raw** windowed means of each signal (foraging/predation
-//! consumption rates, action effectiveness, MI(S;A), within-life learning
-//! slope). There is deliberately no [0,1] saturation/normalisation or composite
+//! These are the **raw** windowed means of each signal (successful-attack rate,
+//! action effectiveness, within-life learning slope). There is deliberately no
+//! [0,1] saturation/normalisation or composite
 //! scoring layer — consumers report the raw values and apply their own
 //! thresholds if they want them.
 
@@ -17,10 +17,9 @@ const SCORING_WINDOW_FRACTION: f64 = 0.10;
 
 /// Per-axis behavioural readout over the scoring window. Each field is the raw
 /// windowed mean of its signal — no interpretation. Every signal is chosen to
-/// be hard to game: foraging/predation are real consumption per action,
-/// action-effectiveness and MI(S;A) capture successful and sensing-conditioned
-/// behaviour, and the learning slope captures within-life improvement (≈0 under
-/// the random-action control).
+/// be hard to game: attack rate records real transfers per action,
+/// action-effectiveness captures successful contingent behavior, and the
+/// learning slope captures within-life improvement.
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct PillarScores {
     pub window_start_tick: u64,
@@ -31,12 +30,8 @@ pub struct PillarScores {
     pub coverage: PillarCoverage,
     /// Successful contingent actions / total actions.
     pub mean_action_effectiveness: Option<f64>,
-    /// Miller-Madow MI between food-visibility context and selected action.
-    pub mean_mi_sa: Option<f64>,
-    /// Plant consumptions / total actions (foraging).
-    pub mean_plant_consumption_rate: Option<f64>,
-    /// Successful attack-energy transfers / total actions (predation).
-    pub mean_prey_consumption_rate: Option<f64>,
+    /// Successful attack-energy transfers / total actions.
+    pub mean_successful_attack_rate: Option<f64>,
     /// Action-time success-vs-age slope (observational learning diagnostic).
     pub mean_learning_slope: Option<f64>,
 }
@@ -45,9 +40,7 @@ pub struct PillarScores {
 pub struct PillarCoverage {
     pub runs_total: usize,
     pub action_effectiveness: usize,
-    pub mi_sa: usize,
-    pub plant_consumption_rate: usize,
-    pub prey_consumption_rate: usize,
+    pub successful_attack_rate: usize,
     pub learning_slope: usize,
 }
 
@@ -99,9 +92,7 @@ pub fn compute_pillar_scores(timeseries: &[IntervalMetrics]) -> PillarScores {
         };
 
     let mean_action_effectiveness = weighted_mean(|row| row.action_effectiveness);
-    let mean_mi_sa = weighted_mean(|row| row.mi_sa);
-    let mean_plant_consumption_rate = weighted_mean(|row| row.plant_consumption_rate);
-    let mean_prey_consumption_rate = weighted_mean(|row| row.prey_consumption_rate);
+    let mean_successful_attack_rate = weighted_mean(|row| row.successful_attack_rate);
     let mean_learning_slope = weighted_mean(|row| row.learning_slope);
 
     PillarScores {
@@ -110,15 +101,11 @@ pub fn compute_pillar_scores(timeseries: &[IntervalMetrics]) -> PillarScores {
         coverage: PillarCoverage {
             runs_total: 1,
             action_effectiveness: usize::from(mean_action_effectiveness.is_some()),
-            mi_sa: usize::from(mean_mi_sa.is_some()),
-            plant_consumption_rate: usize::from(mean_plant_consumption_rate.is_some()),
-            prey_consumption_rate: usize::from(mean_prey_consumption_rate.is_some()),
+            successful_attack_rate: usize::from(mean_successful_attack_rate.is_some()),
             learning_slope: usize::from(mean_learning_slope.is_some()),
         },
         mean_action_effectiveness,
-        mean_mi_sa,
-        mean_plant_consumption_rate,
-        mean_prey_consumption_rate,
+        mean_successful_attack_rate,
         mean_learning_slope,
     }
 }

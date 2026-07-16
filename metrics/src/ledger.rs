@@ -4,14 +4,13 @@
 //! analysis layer ([`crate::intervals`], [`crate::pillars`]) which reads pooled
 //! lifetime rows.
 //!
-//! The sidecar also tracks lifetime consumptions per organism so genome
-//! snapshots can pick the top forager at each flush boundary.
+//! The sidecar also tracks lifetime successful attacks per organism.
 
-use crate::schema::{BehaviorIntervalRow, OrganismLifetimeRow, ACTION_COUNT, JOINT_LEN};
+use crate::schema::{BehaviorIntervalRow, OrganismLifetimeRow};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{BuildHasherDefault, Hasher};
-use types::{ActionRecord, OrganismId};
+use types::{ActionRecord, ActionType, OrganismId};
 
 /// Minimum number of contingent actions an organism must take before we trust a
 /// within-life learning slope; below this the regression is too noisy to mean
@@ -49,51 +48,35 @@ struct LearningAccumulator {
     sum_age_succ: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct BehaviorAccumulator {
     total_actions: u64,
     contingent_actions: u64,
     failed_actions: u64,
-    plant_consumptions: u64,
-    prey_consumptions: u64,
-    joint_sensory_action: Vec<u64>,
+    successful_attacks: u64,
     learning_by_organism: BTreeMap<OrganismId, LearningAccumulator>,
 }
 
-impl Default for BehaviorAccumulator {
-    fn default() -> Self {
-        Self {
-            total_actions: 0,
-            contingent_actions: 0,
-            failed_actions: 0,
-            plant_consumptions: 0,
-            prey_consumptions: 0,
-            joint_sensory_action: vec![0; JOINT_LEN],
-            learning_by_organism: BTreeMap::new(),
-        }
-    }
-}
-
 impl BehaviorAccumulator {
-    fn observe(&mut self, record: &ActionRecord, plant_delta: u64, prey_delta: u64) {
+    fn observe(&mut self, record: &ActionRecord, successful_attack_delta: u64) {
         self.total_actions = self.total_actions.saturating_add(1);
-        let joint_idx = sensory_bin(record) * ACTION_COUNT + record.selected_action.index();
-        self.joint_sensory_action[joint_idx] =
-            self.joint_sensory_action[joint_idx].saturating_add(1);
-        self.plant_consumptions = self.plant_consumptions.saturating_add(plant_delta);
-        self.prey_consumptions = self.prey_consumptions.saturating_add(prey_delta);
+        self.successful_attacks = self
+            .successful_attacks
+            .saturating_add(successful_attack_delta);
 
-        if record.selected_action.can_fail() {
-            self.contingent_actions = self.contingent_actions.saturating_add(1);
-            if record.action_failed {
-                self.failed_actions = self.failed_actions.saturating_add(1);
-            }
+        let contingent_mask = record.selected_action_mask
+            & (ActionType::Forward.command_bit() | ActionType::Attack.command_bit());
+        let contingent_count = u64::from(contingent_mask.count_ones());
+        let failed_count = u64::from(record.failed_action_mask.count_ones());
+        if contingent_count > 0 {
+            self.contingent_actions = self.contingent_actions.saturating_add(contingent_count);
+            self.failed_actions = self.failed_actions.saturating_add(failed_count);
             self.learning_by_organism
                 .entry(record.organism_id)
                 .or_default()
                 .observe(
                     record.age_turns as f64,
-                    if record.action_failed { 0.0 } else { 1.0 },
+                    (contingent_count - failed_count) as f64 / contingent_count as f64,
                 );
         }
     }
@@ -117,9 +100,7 @@ impl BehaviorAccumulator {
             total_actions: self.total_actions,
             contingent_actions: self.contingent_actions,
             failed_actions: self.failed_actions,
-            plant_consumptions: self.plant_consumptions,
-            prey_consumptions: self.prey_consumptions,
-            joint_sensory_action: self.joint_sensory_action,
+            successful_attacks: self.successful_attacks,
             learning_samples,
             learning_within_numerator,
             learning_within_denominator,
@@ -168,15 +149,10 @@ pub struct OrganismEntry {
     total_actions: u64,
     contingent_actions: u64,
     failed_actions: u64,
-    plant_consumptions: u64,
-    prey_consumptions: u64,
-    /// Last cumulative engine counters observed; kept separate from the
-    /// recorder-local totals above so mid-run recording starts at zero.
-    last_seen_plant_consumptions: u64,
-    last_seen_prey_consumptions: u64,
-    /// Row-major `[SENSORY_BIN_COUNT][ACTION_COUNT]` flattened across the whole
-    /// lifetime.
-    joint_sensory_action: Vec<u64>,
+    successful_attacks: u64,
+    /// Last cumulative engine counter observed; kept separate from the
+    /// recorder-local total above so mid-run recording starts at zero.
+    last_seen_successful_attacks: u64,
     learning: LearningAccumulator,
 }
 
@@ -187,20 +163,14 @@ impl OrganismEntry {
             total_actions: 0,
             contingent_actions: 0,
             failed_actions: 0,
-            plant_consumptions: 0,
-            prey_consumptions: 0,
-            last_seen_plant_consumptions: 0,
-            last_seen_prey_consumptions: 0,
-            joint_sensory_action: vec![0; JOINT_LEN],
+            successful_attacks: 0,
+            last_seen_successful_attacks: 0,
             learning: LearningAccumulator::default(),
         }
     }
 
-    /// Total lifetime consumptions (foraging + predation) — the survival-arena
-    /// analog of reproductive success, used to pick a representative genome.
-    pub fn total_consumptions(&self) -> u64 {
-        self.plant_consumptions
-            .saturating_add(self.prey_consumptions)
+    pub fn successful_attacks(&self) -> u64 {
+        self.successful_attacks
     }
 
     fn into_lifetime_row(self, death_tick: Option<u64>) -> OrganismLifetimeRow {
@@ -210,9 +180,7 @@ impl OrganismEntry {
             total_actions: self.total_actions,
             contingent_actions: self.contingent_actions,
             failed_actions: self.failed_actions,
-            plant_consumptions: self.plant_consumptions,
-            prey_consumptions: self.prey_consumptions,
-            joint_sensory_action: self.joint_sensory_action,
+            successful_attacks: self.successful_attacks,
             learning_slope: self.learning.slope(),
         }
     }
@@ -306,10 +274,9 @@ impl Ledger {
     pub fn register_existing(&mut self, organism: &types::OrganismState) {
         self.population = self.population.saturating_add(1);
         let mut entry = OrganismEntry::new(organism.id.0);
-        // Establish cumulative-counter baselines so the first recorded action
-        // cannot attribute pre-recording consumptions to the new interval.
-        entry.last_seen_plant_consumptions = organism.plant_consumptions_count;
-        entry.last_seen_prey_consumptions = organism.prey_consumptions_count;
+        // Establish a cumulative-counter baseline so the first recorded action
+        // cannot attribute pre-recording attacks to the new interval.
+        entry.last_seen_successful_attacks = organism.successful_attacks_count;
         self.sidecar.insert(organism.id, entry);
     }
 
@@ -320,31 +287,27 @@ impl Ledger {
             return;
         };
 
-        let plant_delta = record
-            .plant_consumptions_count
-            .saturating_sub(entry.last_seen_plant_consumptions);
-        let prey_delta = record
-            .prey_consumptions_count
-            .saturating_sub(entry.last_seen_prey_consumptions);
-        self.behavior.observe(record, plant_delta, prey_delta);
+        let successful_attack_delta = record
+            .successful_attacks_count
+            .saturating_sub(entry.last_seen_successful_attacks);
+        self.behavior.observe(record, successful_attack_delta);
 
         entry.total_actions = entry.total_actions.saturating_add(1);
-        let joint_idx = sensory_bin(record) * ACTION_COUNT + record.selected_action.index();
-        entry.joint_sensory_action[joint_idx] =
-            entry.joint_sensory_action[joint_idx].saturating_add(1);
-        entry.plant_consumptions = entry.plant_consumptions.saturating_add(plant_delta);
-        entry.prey_consumptions = entry.prey_consumptions.saturating_add(prey_delta);
-        entry.last_seen_plant_consumptions = record.plant_consumptions_count;
-        entry.last_seen_prey_consumptions = record.prey_consumptions_count;
+        entry.successful_attacks = entry
+            .successful_attacks
+            .saturating_add(successful_attack_delta);
+        entry.last_seen_successful_attacks = record.successful_attacks_count;
 
-        if record.selected_action.can_fail() {
-            entry.contingent_actions = entry.contingent_actions.saturating_add(1);
-            if record.action_failed {
-                entry.failed_actions = entry.failed_actions.saturating_add(1);
-            }
+        let contingent_mask = record.selected_action_mask
+            & (ActionType::Forward.command_bit() | ActionType::Attack.command_bit());
+        let contingent_count = u64::from(contingent_mask.count_ones());
+        let failed_count = u64::from(record.failed_action_mask.count_ones());
+        if contingent_count > 0 {
+            entry.contingent_actions = entry.contingent_actions.saturating_add(contingent_count);
+            entry.failed_actions = entry.failed_actions.saturating_add(failed_count);
             // In-life learning is measured on contingent-action competence
-            // (Forward/Eat/Attack success vs age).
-            let success = if record.action_failed { 0.0 } else { 1.0 };
+            // (Forward/Attack success vs age).
+            let success = (contingent_count - failed_count) as f64 / contingent_count as f64;
             entry.learning.observe(record.age_turns as f64, success);
         }
     }
@@ -389,22 +352,19 @@ impl Ledger {
             .into_row(self.behavior_interval_start_tick, end_tick, self.population)
     }
 
-    /// Select the living organism with the most lifetime consumptions — the
-    /// survival-arena analog of the top reproducer, used to pick a
-    /// representative genome. Ties are broken by lowest id to keep snapshot
-    /// selection deterministic. Returns `None` when no living organism has
-    /// consumed anything yet.
-    pub fn top_forager(&self) -> Option<&OrganismEntry> {
+    /// Select the living organism with the most successful attacks. Ties are
+    /// broken by lowest id to keep snapshot selection deterministic.
+    pub fn top_attacker(&self) -> Option<&OrganismEntry> {
         let mut best: Option<&OrganismEntry> = None;
         for entry in self.sidecar.values() {
-            if entry.total_consumptions() == 0 {
+            if entry.successful_attacks() == 0 {
                 continue;
             }
             match best {
                 None => best = Some(entry),
                 Some(current)
-                    if entry.total_consumptions() > current.total_consumptions()
-                        || (entry.total_consumptions() == current.total_consumptions()
+                    if entry.successful_attacks() > current.successful_attacks()
+                        || (entry.successful_attacks() == current.successful_attacks()
                             && entry.id < current.id) =>
                 {
                     best = Some(entry)
@@ -422,50 +382,40 @@ impl Default for Ledger {
     }
 }
 
-fn sensory_bin(record: &ActionRecord) -> usize {
-    for (idx, visible) in record.food_visible.iter().copied().enumerate() {
-        if visible {
-            return idx + 1;
-        }
-    }
-    0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use types::{ActionType, OrganismId, SensoryReceptor};
+    use types::{ActionType, OrganismId};
 
     fn record(action: ActionType, failed: bool, age: u64) -> ActionRecord {
         ActionRecord {
             organism_id: OrganismId(1),
             selected_action: action,
+            selected_action_mask: action.command_bit(),
+            failed_action_mask: if failed { action.command_bit() } else { 0 },
             action_failed: failed,
-            food_visible: [false; SensoryReceptor::RAY_OFFSETS.len()],
             age_turns: age,
             utilization: 0.0,
-            consumptions_count: 0,
-            plant_consumptions_count: 0,
-            prey_consumptions_count: 0,
+            successful_attacks_count: 0,
         }
     }
 
     #[test]
-    fn lifetime_row_counts_contingent_failures_and_consumptions() {
+    fn lifetime_row_counts_contingent_failures_and_attacks() {
         let mut ledger = Ledger::new();
         ledger.birth(OrganismId(1));
         ledger.record_action(&record(ActionType::TurnLeft, true, 0));
-        ledger.record_action(&record(ActionType::Eat, true, 0));
-        let mut ate = record(ActionType::Eat, false, 1);
-        ate.plant_consumptions_count = 1;
-        ledger.record_action(&ate);
+        ledger.record_action(&record(ActionType::Attack, true, 0));
+        let mut attacked = record(ActionType::Attack, false, 1);
+        attacked.successful_attacks_count = 1;
+        ledger.record_action(&attacked);
 
         let row = ledger.death(OrganismId(1), 10).unwrap();
         assert_eq!(row.total_actions, 3);
-        // Turns never fail; both Eats are contingent, one failed.
+        // Turns never fail; both attacks are contingent, one failed.
         assert_eq!(row.contingent_actions, 2);
         assert_eq!(row.failed_actions, 1);
-        assert_eq!(row.plant_consumptions, 1);
+        assert_eq!(row.successful_attacks, 1);
     }
 
     #[test]

@@ -5,14 +5,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
-use std::io::{BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use views::{atomic_write, sibling_metrics_path};
 
 const MANIFEST_SCHEMA: u32 = 1;
-const SUMMARY_SCHEMA: u32 = 2;
+const SUMMARY_SCHEMA: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct BatchManifest {
@@ -46,13 +46,13 @@ struct SeedRun {
     status: SeedStatus,
     elapsed_ms: Option<u128>,
     result: String,
-    champion_world: String,
-    champion_metrics: String,
+    final_winner_world: String,
+    final_winner_metrics: String,
     stdout_log: String,
     progress_log: String,
     result_sha256: Option<String>,
-    champion_world_sha256: Option<String>,
-    champion_metrics_sha256: Option<String>,
+    final_winner_world_sha256: Option<String>,
+    final_winner_metrics_sha256: Option<String>,
     error: Option<String>,
 }
 
@@ -86,8 +86,8 @@ pub(crate) fn run_batch_cli(args: &[&str], out_dir: &str, out: &mut impl Write) 
             "cli batch --experiment SLUG --seeds N,N --total-workers N [--replace] -- [RUN OPTIONS]\n\
              Runs independent evolutionary seeds concurrently under one exact contract.\n\
              The total worker budget is divided deterministically in seed order.\n\
-             Canonical run options include --horizon, --lineages-per-world,\n\
-             --memberships-per-genome or --cases-per-genome, and --objective.\n\
+             Canonical run options include --horizon, --opponents-per-genome,\n\
+             --cases-per-genome, and --cvar.\n\
              Batch owns --seed, --workers, and --out-dir."
         )?;
         return Ok(());
@@ -151,8 +151,8 @@ pub(crate) fn run_batch_cli(args: &[&str], out_dir: &str, out: &mut impl Write) 
         };
         if let Some((result, world, metrics)) = outcome.hashes {
             run.result_sha256 = Some(result);
-            run.champion_world_sha256 = Some(world);
-            run.champion_metrics_sha256 = Some(metrics);
+            run.final_winner_world_sha256 = Some(world);
+            run.final_winner_metrics_sha256 = Some(metrics);
         }
     }
 
@@ -351,14 +351,14 @@ fn seed_run(seed: u64, workers: usize) -> SeedRun {
         workers,
         status: SeedStatus::Pending,
         elapsed_ms: None,
-        result: format!("seed-{seed}.result.json"),
-        champion_world: format!("seed-{seed}.champion.world.bin"),
-        champion_metrics: format!("seed-{seed}.champion.world.metrics"),
+        result: format!("seed-{seed}.result.json.zst"),
+        final_winner_world: format!("seed-{seed}.final-winner.world.bin"),
+        final_winner_metrics: format!("seed-{seed}.final-winner.world.metrics"),
         stdout_log: format!("seed-{seed}.stdout.jsonl"),
         progress_log: format!("seed-{seed}.progress.jsonl"),
         result_sha256: None,
-        champion_world_sha256: None,
-        champion_metrics_sha256: None,
+        final_winner_world_sha256: None,
+        final_winner_metrics_sha256: None,
         error: None,
     }
 }
@@ -397,7 +397,7 @@ fn run_seed_job_inner(
     let temporary_dir = experiment_dir.join(format!(".seed-{seed}.partial"));
     fs::create_dir(&temporary_dir)
         .with_context(|| format!("creating `{}`", temporary_dir.display()))?;
-    let output = Command::new(executable)
+    let mut child = Command::new(executable)
         .arg("run")
         .args(shared_args)
         .args([
@@ -408,12 +408,34 @@ fn run_seed_job_inner(
             "--out-dir",
             &temporary_dir.to_string_lossy(),
         ])
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .with_context(|| format!("launching NEAT seed {seed}"))?;
     let stdout_path = experiment_dir.join(format!("seed-{seed}.stdout.jsonl"));
     let progress_path = experiment_dir.join(format!("seed-{seed}.progress.jsonl"));
+    let child_stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("NEAT seed {seed} has no stderr pipe"))?;
+    let streamed_progress_path = progress_path.clone();
+    let progress_thread = std::thread::spawn(move || -> std::io::Result<()> {
+        let mut progress_log = File::create(streamed_progress_path)?;
+        for line in BufReader::new(child_stderr).lines() {
+            let line = line?;
+            writeln!(progress_log, "{line}")?;
+            eprintln!("{line}");
+        }
+        progress_log.flush()
+    });
+    let output = child
+        .wait_with_output()
+        .with_context(|| format!("waiting for NEAT seed {seed}"))?;
+    progress_thread
+        .join()
+        .map_err(|_| anyhow!("progress reader for seed {seed} panicked"))?
+        .with_context(|| format!("streaming progress for seed {seed}"))?;
     fs::write(&stdout_path, &output.stdout)?;
-    fs::write(&progress_path, &output.stderr)?;
     if !output.status.success() {
         bail!(
             "seed {seed} exited with {}; progress is in `{}`",
@@ -434,14 +456,14 @@ fn run_seed_job_inner(
         .map(PathBuf::from)
         .ok_or_else(|| anyhow!("seed {seed} completion record has no `wrote` path"))?;
     let source_world = completion
-        .get("champion_world")
+        .get("final_winner_world")
         .and_then(Value::as_str)
         .map(PathBuf::from)
-        .ok_or_else(|| anyhow!("seed {seed} completion record has no `champion_world` path"))?;
+        .ok_or_else(|| anyhow!("seed {seed} completion record has no `final_winner_world` path"))?;
     let source_metrics = PathBuf::from(sibling_metrics_path(&source_world.to_string_lossy()));
-    let result_path = experiment_dir.join(format!("seed-{seed}.result.json"));
-    let world_path = experiment_dir.join(format!("seed-{seed}.champion.world.bin"));
-    let metrics_path = experiment_dir.join(format!("seed-{seed}.champion.world.metrics"));
+    let result_path = experiment_dir.join(format!("seed-{seed}.result.json.zst"));
+    let world_path = experiment_dir.join(format!("seed-{seed}.final-winner.world.bin"));
+    let metrics_path = experiment_dir.join(format!("seed-{seed}.final-winner.world.metrics"));
     fs::rename(&source_result, &result_path)?;
     fs::rename(&source_world, &world_path)?;
     fs::rename(&source_metrics, &metrics_path)?;
@@ -640,10 +662,13 @@ fn checked_result_path(experiment_dir: &Path, seed_run: &SeedRun) -> Result<Path
 }
 
 fn read_result(path: &Path) -> Result<RunResult> {
-    serde_json::from_reader(BufReader::new(
-        File::open(path).with_context(|| format!("opening `{}`", path.display()))?,
-    ))
-    .with_context(|| {
+    let file = File::open(path).with_context(|| format!("opening `{}`", path.display()))?;
+    let reader: Box<dyn Read> = if path.extension().is_some_and(|extension| extension == "zst") {
+        Box::new(zstd::stream::read::Decoder::new(file)?)
+    } else {
+        Box::new(BufReader::new(file))
+    };
+    serde_json::from_reader(reader).with_context(|| {
         format!(
             "parsing current NEAT result/metric schema from `{}`",
             path.display()
@@ -667,8 +692,8 @@ fn parse_tail(raw: &str) -> Result<(u32, u32)> {
 struct CompactRun {
     result: String,
     seed: u64,
-    champion_generation: u32,
-    champion_fitness: f64,
+    final_generation: u32,
+    final_winner_contextual_score: f64,
     trajectory: Vec<CompactGeneration>,
     tail: Value,
 }
@@ -676,56 +701,55 @@ struct CompactRun {
 #[derive(Debug, Serialize)]
 struct CompactGeneration {
     generation: u32,
-    best_fitness: f64,
-    mean_fitness: f64,
-    median_fitness: f64,
-    best_absolute_survival: f64,
+    winner_contextual_score: f64,
+    winner_case_score_stddev: f64,
+    mean_case_score_stddev: f64,
+    max_case_score_stddev: f64,
+    winner_absolute_survival: f64,
     mean_absolute_survival: f64,
-    best_alive_ticks: f64,
+    winner_alive_ticks: f64,
     mean_alive_ticks: f64,
-    champion_relative_advantage: f64,
-    champion_total_energy_accumulated: f64,
+    winner_relative_advantage: f64,
+    winner_total_energy_accumulated: f64,
     mean_total_energy_accumulated: f64,
     median_total_energy_accumulated: f64,
-    champion_net_energy_profit: f64,
+    winner_net_energy_profit: f64,
     mean_net_energy_profit: f64,
     median_net_energy_profit: f64,
-    champion_plant_energy: f64,
-    mean_plant_energy: f64,
-    champion_attack_energy_received: f64,
-    champion_attack_energy_lost: f64,
-    champion_attack_attempt_energy_cost: f64,
-    champion_net_attack_energy: f64,
+    winner_attack_energy_received: f64,
+    winner_attack_energy_lost: f64,
+    winner_attack_attempt_energy_cost: f64,
+    winner_net_attack_energy: f64,
     mean_attack_energy_received: f64,
     mean_attack_energy_lost: f64,
     mean_attack_attempt_energy_cost: f64,
     mean_net_attack_energy: f64,
-    champion_action_effectiveness: Option<f64>,
+    winner_action_effectiveness: Option<f64>,
     mean_action_effectiveness: Option<f64>,
-    champion_attack_precision: Option<f64>,
+    winner_successful_attack_rate: Option<f64>,
+    mean_successful_attack_rate: Option<f64>,
+    winner_attack_precision: Option<f64>,
     population_attack_precision: Option<f64>,
-    champion_mean_attack_kills: f64,
-    champion_distinct_attack_victims: f64,
+    winner_mean_attack_kills: f64,
+    winner_distinct_attack_victims: f64,
     mean_distinct_attack_victims: f64,
-    champion_action_fractions: [f64; 6],
-    mean_action_fractions: [f64; 6],
-    champion_plant_rate: Option<f64>,
-    champion_prey_rate: Option<f64>,
-    mean_plant_rate: Option<f64>,
-    mean_prey_rate: Option<f64>,
-    champion_plant_capture_fraction: Option<f64>,
-    mean_plant_capture_fraction: Option<f64>,
-    champion_standing_plant_fraction: f64,
-    mean_standing_plant_fraction: f64,
-    champion_spatial_coverage: f64,
+    winner_attack_target_evaded: f64,
+    mean_attack_target_evaded: f64,
+    winner_action_fractions: [f64; 5],
+    mean_action_fractions: [f64; 5],
+    winner_commands_per_tick: f64,
+    mean_commands_per_tick: f64,
+    winner_multi_command_tick_fraction: f64,
+    mean_multi_command_tick_fraction: f64,
+    winner_spatial_coverage: f64,
     mean_spatial_coverage: f64,
-    champion_end_survival_fraction: f64,
+    winner_end_survival_fraction: f64,
     mean_end_survival_fraction: f64,
     mean_opponent_score_stddev: Option<f64>,
     max_opponent_score_stddev: Option<f64>,
     species: usize,
-    champion_expressed_hidden_nodes: usize,
-    champion_expressed_connections: usize,
+    winner_expressed_hidden_nodes: usize,
+    winner_expressed_connections: usize,
     mean_expressed_hidden_nodes: f64,
     mean_expressed_connections: f64,
     new_connection_innovations: usize,
@@ -734,118 +758,62 @@ struct CompactGeneration {
 
 impl CompactGeneration {
     fn from_summary(g: &GenerationSummary) -> Self {
-        let champion = g
-            .population_checkpoint
-            .iter()
-            .max_by(|left, right| left.fitness.total_cmp(&right.fitness))
-            .expect("a generation summary has a nonempty population checkpoint");
-        let champion_evaluation = &champion.evaluation;
-        let champion_total_energy_accumulated = champion_evaluation.mean_gross_energy_acquired;
-        let champion_net_energy_profit = net_energy_profit(champion_evaluation);
-        let mut population_net_energy_profit = g
-            .population_checkpoint
-            .iter()
-            .map(|member| net_energy_profit(&member.evaluation))
-            .collect::<Vec<_>>();
-        population_net_energy_profit.sort_by(f64::total_cmp);
-        let mean_net_energy_profit = population_net_energy_profit.iter().sum::<f64>()
-            / population_net_energy_profit.len() as f64;
-        let median_net_energy_profit = median_sorted(&population_net_energy_profit);
-        let population_attack_hits = g
-            .population_checkpoint
-            .iter()
-            .map(|member| member.evaluation.mean_attack_hits)
-            .sum::<f64>();
-        let population_attack_attempts = g
-            .population_checkpoint
-            .iter()
-            .map(|member| attack_attempts(&member.evaluation))
-            .sum::<f64>();
         Self {
             generation: g.generation,
-            best_fitness: g.best_fitness,
-            mean_fitness: g.mean_fitness,
-            median_fitness: g.median_fitness,
-            best_absolute_survival: g.best_absolute_survival_fraction,
+            winner_contextual_score: g.winner_contextual_score,
+            winner_case_score_stddev: g.winner_case_score_stddev,
+            mean_case_score_stddev: g.mean_case_score_stddev,
+            max_case_score_stddev: g.max_case_score_stddev,
+            winner_absolute_survival: g.winner_absolute_survival_fraction,
             mean_absolute_survival: g.mean_absolute_survival_fraction,
-            best_alive_ticks: g.best_candidate_alive_ticks,
+            winner_alive_ticks: g.winner_candidate_alive_ticks,
             mean_alive_ticks: g.mean_candidate_alive_ticks,
-            champion_relative_advantage: g.best_relative_survival_advantage,
-            champion_total_energy_accumulated,
+            winner_relative_advantage: g.winner_relative_survival_advantage,
+            winner_total_energy_accumulated: g.winner_gross_energy_acquired,
             mean_total_energy_accumulated: g.mean_gross_energy_acquired,
             median_total_energy_accumulated: g.median_gross_energy_acquired,
-            champion_net_energy_profit,
-            mean_net_energy_profit,
-            median_net_energy_profit,
-            champion_plant_energy: g.champion_plant_energy_acquired,
-            mean_plant_energy: g.mean_plant_energy_acquired,
-            champion_attack_energy_received: g.champion_attack_energy_received,
-            champion_attack_energy_lost: g.champion_attack_energy_lost,
-            champion_attack_attempt_energy_cost: g.champion_attack_attempt_energy_cost,
-            champion_net_attack_energy: g.champion_net_attack_energy_balance,
+            winner_net_energy_profit: g.winner_net_energy_profit,
+            mean_net_energy_profit: g.mean_net_energy_profit,
+            median_net_energy_profit: g.median_net_energy_profit,
+            winner_attack_energy_received: g.winner_attack_energy_received,
+            winner_attack_energy_lost: g.winner_attack_energy_lost,
+            winner_attack_attempt_energy_cost: g.winner_attack_attempt_energy_cost,
+            winner_net_attack_energy: g.winner_net_attack_energy_balance,
             mean_attack_energy_received: g.mean_attack_energy_received,
             mean_attack_energy_lost: g.mean_attack_energy_lost,
             mean_attack_attempt_energy_cost: g.mean_attack_attempt_energy_cost,
             mean_net_attack_energy: g.mean_net_attack_energy_balance,
-            champion_action_effectiveness: g.best_action_effectiveness,
+            winner_action_effectiveness: g.winner_action_effectiveness,
             mean_action_effectiveness: g.mean_action_effectiveness,
-            champion_attack_precision: attack_precision(champion_evaluation),
-            population_attack_precision: (population_attack_attempts > 0.0)
-                .then(|| population_attack_hits / population_attack_attempts),
-            champion_mean_attack_kills: g.best_mean_attack_kills,
-            champion_distinct_attack_victims: g.champion_distinct_attack_victims,
+            winner_successful_attack_rate: g.winner_successful_attack_rate,
+            mean_successful_attack_rate: g.mean_successful_attack_rate,
+            winner_attack_precision: g.winner_attack_precision,
+            population_attack_precision: g.population_attack_precision,
+            winner_mean_attack_kills: g.winner_mean_attack_kills,
+            winner_distinct_attack_victims: g.winner_distinct_attack_victims,
             mean_distinct_attack_victims: g.mean_distinct_attack_victims,
-            champion_action_fractions: g.champion_action_fractions,
+            winner_attack_target_evaded: g.winner_attack_target_evaded,
+            mean_attack_target_evaded: g.mean_attack_target_evaded,
+            winner_action_fractions: g.winner_action_fractions,
             mean_action_fractions: g.mean_action_fractions,
-            champion_plant_rate: g.best_plant_consumption_rate,
-            champion_prey_rate: g.best_prey_consumption_rate,
-            mean_plant_rate: g.mean_plant_consumption_rate,
-            mean_prey_rate: g.mean_prey_consumption_rate,
-            champion_plant_capture_fraction: g.champion_plant_capture_fraction,
-            mean_plant_capture_fraction: g.mean_plant_capture_fraction,
-            champion_standing_plant_fraction: g.champion_standing_plant_fraction,
-            mean_standing_plant_fraction: g.mean_standing_plant_fraction,
-            champion_spatial_coverage: g.champion_spatial_coverage,
+            winner_commands_per_tick: g.winner_commands_per_tick,
+            mean_commands_per_tick: g.mean_commands_per_tick,
+            winner_multi_command_tick_fraction: g.winner_multi_command_tick_fraction,
+            mean_multi_command_tick_fraction: g.mean_multi_command_tick_fraction,
+            winner_spatial_coverage: g.winner_spatial_coverage,
             mean_spatial_coverage: g.mean_spatial_coverage,
-            champion_end_survival_fraction: g.best_end_survival_fraction,
+            winner_end_survival_fraction: g.winner_end_survival_fraction,
             mean_end_survival_fraction: g.mean_end_survival_fraction,
             mean_opponent_score_stddev: g.mean_opponent_score_stddev,
             max_opponent_score_stddev: g.max_opponent_score_stddev,
             species: g.species.len(),
-            champion_expressed_hidden_nodes: g.best_expressed_hidden_nodes,
-            champion_expressed_connections: g.best_expressed_connections,
+            winner_expressed_hidden_nodes: g.winner_expressed_hidden_nodes,
+            winner_expressed_connections: g.winner_expressed_connections,
             mean_expressed_hidden_nodes: g.mean_expressed_hidden_nodes,
             mean_expressed_connections: g.mean_expressed_connections,
             new_connection_innovations: g.new_connection_innovations,
             new_node_innovations: g.new_node_innovations,
         }
-    }
-}
-
-fn attack_attempts(evaluation: &evolution::Evaluation) -> f64 {
-    evaluation.mean_attack_no_organism_targets
-        + evaluation.mean_attack_same_pool_blocked
-        + evaluation.mean_attack_insufficient_energy
-        + evaluation.mean_attack_eligible_attempts
-}
-
-fn attack_precision(evaluation: &evolution::Evaluation) -> Option<f64> {
-    let attempts = attack_attempts(evaluation);
-    (attempts > 0.0).then(|| evaluation.mean_attack_hits / attempts)
-}
-
-fn net_energy_profit(evaluation: &evolution::Evaluation) -> f64 {
-    evaluation.mean_plant_energy_acquired + evaluation.mean_attack_energy_received
-        - evaluation.mean_attack_energy_lost
-        - evaluation.mean_attack_attempt_energy_cost
-}
-
-fn median_sorted(values: &[f64]) -> f64 {
-    if values.len().is_multiple_of(2) {
-        let high = values.len() / 2;
-        (values[high - 1] + values[high]) / 2.0
-    } else {
-        values[values.len() / 2]
     }
 }
 
@@ -878,8 +846,12 @@ fn compact_run(path: &Path, result: &RunResult, tail_start: u32, tail_end: u32) 
     CompactRun {
         result: path.to_string_lossy().into_owned(),
         seed: result.seed,
-        champion_generation: result.champion_generation,
-        champion_fitness: result.champion_fitness,
+        final_generation: trajectory
+            .last()
+            .map_or(0, |generation| generation.generation),
+        final_winner_contextual_score: trajectory
+            .last()
+            .map_or(0.0, |generation| generation.winner_contextual_score),
         trajectory,
         tail,
     }
@@ -922,17 +894,18 @@ fn cohort_trajectory(runs: &[CompactRun]) -> Result<Vec<CohortGeneration>> {
                 }
             };
         }
-        metric!("best_fitness", best_fitness);
-        metric!("mean_fitness", mean_fitness);
-        metric!("median_fitness", median_fitness);
-        metric!("best_absolute_survival", best_absolute_survival);
+        metric!("winner_contextual_score", winner_contextual_score);
+        metric!("winner_case_score_stddev", winner_case_score_stddev);
+        metric!("mean_case_score_stddev", mean_case_score_stddev);
+        metric!("max_case_score_stddev", max_case_score_stddev);
+        metric!("winner_absolute_survival", winner_absolute_survival);
         metric!("mean_absolute_survival", mean_absolute_survival);
-        metric!("best_alive_ticks", best_alive_ticks);
+        metric!("winner_alive_ticks", winner_alive_ticks);
         metric!("mean_alive_ticks", mean_alive_ticks);
-        metric!("champion_relative_advantage", champion_relative_advantage);
+        metric!("winner_relative_advantage", winner_relative_advantage);
         metric!(
-            "champion_total_energy_accumulated",
-            champion_total_energy_accumulated
+            "winner_total_energy_accumulated",
+            winner_total_energy_accumulated
         );
         metric!(
             "mean_total_energy_accumulated",
@@ -942,61 +915,57 @@ fn cohort_trajectory(runs: &[CompactRun]) -> Result<Vec<CohortGeneration>> {
             "median_total_energy_accumulated",
             median_total_energy_accumulated
         );
-        metric!("champion_net_energy_profit", champion_net_energy_profit);
+        metric!("winner_net_energy_profit", winner_net_energy_profit);
         metric!("mean_net_energy_profit", mean_net_energy_profit);
         metric!("median_net_energy_profit", median_net_energy_profit);
-        metric!("champion_plant_energy", champion_plant_energy);
         metric!(
-            "champion_attack_energy_received",
-            champion_attack_energy_received
+            "winner_attack_energy_received",
+            winner_attack_energy_received
         );
-        metric!("champion_attack_energy_lost", champion_attack_energy_lost);
+        metric!("winner_attack_energy_lost", winner_attack_energy_lost);
         metric!(
-            "champion_attack_attempt_energy_cost",
-            champion_attack_attempt_energy_cost
+            "winner_attack_attempt_energy_cost",
+            winner_attack_attempt_energy_cost
         );
-        metric!("champion_net_attack_energy", champion_net_attack_energy);
-        optional_metric!(
-            "champion_action_effectiveness",
-            champion_action_effectiveness
-        );
+        metric!("winner_net_attack_energy", winner_net_attack_energy);
+        optional_metric!("winner_action_effectiveness", winner_action_effectiveness);
         optional_metric!("mean_action_effectiveness", mean_action_effectiveness);
-        optional_metric!("champion_attack_precision", champion_attack_precision);
-        optional_metric!("population_attack_precision", population_attack_precision);
-        optional_metric!("champion_plant_rate", champion_plant_rate);
-        optional_metric!("champion_prey_rate", champion_prey_rate);
-        optional_metric!("mean_plant_rate", mean_plant_rate);
-        optional_metric!("mean_prey_rate", mean_prey_rate);
         optional_metric!(
-            "champion_plant_capture_fraction",
-            champion_plant_capture_fraction
+            "winner_successful_attack_rate",
+            winner_successful_attack_rate
         );
-        optional_metric!("mean_plant_capture_fraction", mean_plant_capture_fraction);
-        metric!("champion_spatial_coverage", champion_spatial_coverage);
+        optional_metric!("mean_successful_attack_rate", mean_successful_attack_rate);
+        optional_metric!("winner_attack_precision", winner_attack_precision);
+        optional_metric!("population_attack_precision", population_attack_precision);
+        metric!("winner_spatial_coverage", winner_spatial_coverage);
         metric!("mean_spatial_coverage", mean_spatial_coverage);
-        metric!(
-            "champion_end_survival_fraction",
-            champion_end_survival_fraction
-        );
+        metric!("winner_end_survival_fraction", winner_end_survival_fraction);
         metric!("mean_end_survival_fraction", mean_end_survival_fraction);
+        metric!("winner_commands_per_tick", winner_commands_per_tick);
+        metric!("mean_commands_per_tick", mean_commands_per_tick);
         metric!(
-            "champion_standing_plant_fraction",
-            champion_standing_plant_fraction
+            "winner_multi_command_tick_fraction",
+            winner_multi_command_tick_fraction
         );
+        metric!(
+            "mean_multi_command_tick_fraction",
+            mean_multi_command_tick_fraction
+        );
+        metric!("winner_attack_target_evaded", winner_attack_target_evaded);
+        metric!("mean_attack_target_evaded", mean_attack_target_evaded);
         for (name, action_index) in [
-            ("champion_action_idle_fraction", 0),
-            ("champion_action_turn_left_fraction", 1),
-            ("champion_action_turn_right_fraction", 2),
-            ("champion_action_forward_fraction", 3),
-            ("champion_action_eat_fraction", 4),
-            ("champion_action_attack_fraction", 5),
+            ("winner_action_idle_fraction", 0),
+            ("winner_action_turn_left_fraction", 1),
+            ("winner_action_turn_right_fraction", 2),
+            ("winner_action_forward_fraction", 3),
+            ("winner_action_attack_fraction", 4),
         ] {
             metrics.insert(
                 name,
                 distribution(
                     generations
                         .iter()
-                        .map(|row| row.champion_action_fractions[action_index]),
+                        .map(|row| row.winner_action_fractions[action_index]),
                 ),
             );
         }
@@ -1020,64 +989,21 @@ fn distribution(values: impl Iterator<Item = f64>) -> Distribution {
 fn tail_summary(tail: &[&CompactGeneration]) -> Value {
     let first = tail.first().expect("validated nonempty tail");
     let last = tail.last().expect("validated nonempty tail");
-    let x = tail
-        .iter()
-        .map(|generation| generation.generation as f64)
-        .collect::<Vec<_>>();
-    let champion_action_effectiveness = tail
-        .iter()
-        .filter_map(|generation| generation.champion_action_effectiveness)
-        .collect::<Vec<_>>();
-    let mean_action_effectiveness = tail
-        .iter()
-        .filter_map(|generation| generation.mean_action_effectiveness)
-        .collect::<Vec<_>>();
     json!({
         "start_generation": first.generation,
         "end_generation": last.generation,
         "samples": tail.len(),
-        "best_fitness_delta": last.best_fitness - first.best_fitness,
-        "mean_fitness_delta": last.mean_fitness - first.mean_fitness,
-        "best_absolute_survival_delta": last.best_absolute_survival - first.best_absolute_survival,
-        "mean_absolute_survival_delta": last.mean_absolute_survival - first.mean_absolute_survival,
-        "best_alive_ticks_delta": last.best_alive_ticks - first.best_alive_ticks,
-        "mean_alive_ticks_delta": last.mean_alive_ticks - first.mean_alive_ticks,
-        "champion_total_energy_accumulated_delta": last.champion_total_energy_accumulated - first.champion_total_energy_accumulated,
-        "mean_total_energy_accumulated_delta": last.mean_total_energy_accumulated - first.mean_total_energy_accumulated,
-        "champion_net_energy_profit_delta": last.champion_net_energy_profit - first.champion_net_energy_profit,
-        "mean_net_energy_profit_delta": last.mean_net_energy_profit - first.mean_net_energy_profit,
-        "champion_action_effectiveness_delta": optional_delta(first.champion_action_effectiveness, last.champion_action_effectiveness),
-        "mean_action_effectiveness_delta": optional_delta(first.mean_action_effectiveness, last.mean_action_effectiveness),
-        "best_fitness_slope": slope(&x, &tail.iter().map(|g| g.best_fitness).collect::<Vec<_>>()),
-        "mean_fitness_slope": slope(&x, &tail.iter().map(|g| g.mean_fitness).collect::<Vec<_>>()),
-        "best_absolute_survival_slope": slope(&x, &tail.iter().map(|g| g.best_absolute_survival).collect::<Vec<_>>()),
-        "mean_absolute_survival_slope": slope(&x, &tail.iter().map(|g| g.mean_absolute_survival).collect::<Vec<_>>()),
-        "champion_net_energy_profit_slope": slope(&x, &tail.iter().map(|g| g.champion_net_energy_profit).collect::<Vec<_>>()),
-        "mean_net_energy_profit_slope": slope(&x, &tail.iter().map(|g| g.mean_net_energy_profit).collect::<Vec<_>>()),
-        "champion_action_effectiveness_slope": (champion_action_effectiveness.len() == x.len())
-            .then(|| slope(&x, &champion_action_effectiveness)).flatten(),
-        "mean_action_effectiveness_slope": (mean_action_effectiveness.len() == x.len())
-            .then(|| slope(&x, &mean_action_effectiveness)).flatten(),
+        "score_semantics": "contextual_within_generation_only",
+        "longitudinal_validation": "use_crossplay",
+        "generation_contexts": tail.iter().map(|generation| json!({
+            "generation": generation.generation,
+            "winner_contextual_score": generation.winner_contextual_score,
+            "winner_case_score_stddev": generation.winner_case_score_stddev,
+            "winner_action_effectiveness": generation.winner_action_effectiveness,
+            "winner_successful_attack_rate": generation.winner_successful_attack_rate,
+            "winner_net_energy_profit": generation.winner_net_energy_profit,
+        })).collect::<Vec<_>>(),
     })
-}
-
-fn optional_delta(first: Option<f64>, last: Option<f64>) -> Option<f64> {
-    Some(last? - first?)
-}
-
-fn slope(x: &[f64], y: &[f64]) -> Option<f64> {
-    if x.len() != y.len() || x.len() < 2 {
-        return None;
-    }
-    let mean_x = x.iter().sum::<f64>() / x.len() as f64;
-    let mean_y = y.iter().sum::<f64>() / y.len() as f64;
-    let covariance = x
-        .iter()
-        .zip(y)
-        .map(|(x, y)| (x - mean_x) * (y - mean_y))
-        .sum::<f64>();
-    let variance = x.iter().map(|x| (x - mean_x).powi(2)).sum::<f64>();
-    (variance > 0.0).then_some(covariance / variance)
 }
 
 fn generation_ids(result: &RunResult) -> Vec<u32> {
@@ -1118,9 +1044,7 @@ fn comparable_contract(result: &RunResult) -> Value {
         "frozen_outer_loop_contract": result.frozen_outer_loop_contract,
         "world_width": result.world_width,
         "founder_cohort_size": result.founder_cohort_size,
-        "food_energy": result.food_energy,
-        "replay_anchor_scenarios": result.replay_anchor_scenarios,
-        "final_training_scenarios": result.final_training_scenarios,
+        "evaluation_scenarios": result.evaluation_scenarios,
     })
 }
 

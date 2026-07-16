@@ -7,7 +7,6 @@ export type ApiScalarId = number | { 0: number };
 
 export type OrganismId = number;
 export type SpeciesId = number;
-export type FoodId = number;
 export type NeuronId = number;
 export type StableGeneId = string;
 
@@ -24,12 +23,12 @@ export type ActionType =
   | 'TurnLeft'
   | 'TurnRight'
   | 'Forward'
-  | 'Eat'
   | 'Attack';
 
 export type TerrainType = 'Mountain';
 
 export type NeuronType = 'Sensory' | 'Inter' | 'Action';
+export type SynapseTiming = 'current_tick' | 'previous_tick';
 
 export type FacingDirection =
   | 'East'
@@ -70,25 +69,27 @@ export type WorldConfig = {
   starting_energy: number;
   attack_energy_transfer: number;
   attack_attempt_cost: number;
-  food_energy: number;
   action_temperature: number;
   intent_parallel_threads: number;
-  food_regrowth_interval: number;
-  food_tile_fraction: number;
   terrain_noise_scale: number;
   terrain_threshold: number;
   runtime_plasticity_enabled: boolean;
   leaky_neurons_enabled: boolean;
   predation_enabled: boolean;
   force_random_actions: boolean;
+  compositional_actions_enabled: boolean;
   seed_genome_config: SeedGenomeConfig;
 };
 
 type SynapseEdgeOf<Id> = {
   pre_neuron_id: Id;
   post_neuron_id: Id;
+  timing: SynapseTiming;
+  pre_inter_index: number | null;
+  post_inter_index: number | null;
   weight: number;
   eligibility: number;
+  pending_coactivation: number;
 };
 
 export type ApiSynapseEdge = SynapseEdgeOf<ApiScalarId>;
@@ -106,6 +107,7 @@ export type SynapseGene = {
   innovation: StableGeneId;
   pre_node_id: StableGeneId;
   post_node_id: StableGeneId;
+  timing: SynapseTiming;
   weight: number;
   enabled: boolean;
 };
@@ -145,6 +147,7 @@ export type SensoryReceptor =
 type SensoryNeuronStateOf<Id> = {
   neuron: NeuronStateOf<Id>;
   synapses: SynapseEdgeOf<Id>[];
+  action_synapse_start: number;
 } & SensoryReceptor;
 
 export type ApiSensoryNeuronState = SensoryNeuronStateOf<ApiScalarId>;
@@ -152,8 +155,10 @@ export type SensoryNeuronState = SensoryNeuronStateOf<NeuronId>;
 
 type InterNeuronStateOf<Id> = {
   neuron: NeuronStateOf<Id>;
+  state: number;
   alpha: number;
   synapses: SynapseEdgeOf<Id>[];
+  action_synapse_start: number;
 };
 
 export type ApiInterNeuronState = InterNeuronStateOf<ApiScalarId>;
@@ -172,7 +177,13 @@ type BrainStateOf<Id> = {
   sensory: SensoryNeuronStateOf<Id>[];
   inter: InterNeuronStateOf<Id>[];
   action: ActionNeuronStateOf<Id>[];
+  recurrent_synapses: SynapseEdgeOf<Id>[];
+  previous_inter_activations: number[];
   synapse_count: number;
+  sensory_mean_activation: number[];
+  inter_mean_activation: number[];
+  action_mean_activation: number[];
+  means_initialized: boolean;
 };
 
 export type ApiBrainState = BrainStateOf<ApiScalarId>;
@@ -189,10 +200,9 @@ type OrganismStateOf<Id> = {
   energy: number;
   energy_at_last_sensing: number;
   energy_flow_last_tick: number;
-  consumptions_count: number;
-  plant_consumptions_count: number;
-  prey_consumptions_count: number;
+  successful_attacks_count: number;
   last_action_taken: ActionType;
+  last_action_mask: number;
   brain: BrainStateOf<Id>;
   genome: OrganismGenome;
 };
@@ -210,43 +220,22 @@ type WorldOrganismStateOf<Id> = {
   facing: FacingDirection;
   energy: number;
   energy_flow_last_tick: number;
-  consumptions_count: number;
-  plant_consumptions_count: number;
-  prey_consumptions_count: number;
+  successful_attacks_count: number;
   visual: VisualProperties;
 };
 
 export type ApiWorldOrganismState = WorldOrganismStateOf<ApiScalarId>;
 export type WorldOrganismState = WorldOrganismStateOf<OrganismId>;
 
-type FoodStateOf<Id> = {
-  id: Id;
-  q: number;
-  r: number;
-  energy: number;
-  visual: VisualProperties;
-};
-
-export type ApiFoodState = FoodStateOf<ApiScalarId>;
-export type FoodState = FoodStateOf<FoodId>;
-
 export type EnergyLedgerRow = {
   turn: number;
   organism_energy_before: number;
   organism_energy_after: number;
-  food_energy_before: number;
-  food_energy_after: number;
-  plant_spawn_energy: number;
   tick_drain_energy: number;
-  food_consumption_debit: number;
-  food_consumption_credit: number;
   attack_transfer_energy: number;
   attack_attempt_cost: number;
   organism_residual: number;
-  food_residual: number;
   total_residual: number;
-  food_transfer_residual: number;
-  transfer_residual: number;
   residual_tolerance: number;
 };
 
@@ -255,11 +244,7 @@ export type ApiMetricsSnapshot = {
   organisms: number;
   synapse_ops_last_turn: number;
   actions_applied_last_turn: number;
-  consumptions_last_turn: number;
-  plant_consumptions_last_turn: number;
   predations_last_turn: number;
-  total_consumptions: number;
-  total_plant_consumptions: number;
   starvations_last_turn: number;
   age_deaths_last_turn: number;
   energy_ledger_last_turn: EnergyLedgerRow;
@@ -284,7 +269,6 @@ export type ApiWorldSnapshot = {
   rng_seed: number;
   config: WorldConfig;
   organisms: ApiWorldOrganismState[];
-  foods: ApiFoodState[];
   terrain: ApiTerrainCell[];
   metrics: ApiMetricsSnapshot;
 };
@@ -294,7 +278,6 @@ export type WorldSnapshot = {
   rng_seed: number;
   config: WorldConfig;
   organisms: WorldOrganismState[];
-  foods: FoodState[];
   terrain: TerrainCell[];
   metrics: MetricsSnapshot;
 };
@@ -311,29 +294,7 @@ export type WorldResponse = {
   snapshot: WorldSnapshot;
 };
 
-export type ChampionPoolEntry = {
-  genome: OrganismGenome;
-  source_turn: number;
-  source_created_at_unix_ms: number;
-  generation: number;
-  age_turns: number;
-  consumptions_count: number;
-  energy: number;
-};
-
-export type ApiChampionPoolEntry = ChampionPoolEntry;
-
-export type ApiChampionPoolResponse = {
-  entries: ApiChampionPoolEntry[];
-};
-
-export type ChampionPoolResponse = {
-  entries: ChampionPoolEntry[];
-};
-
-type EntityIdOf<Id> =
-  | { entity_type: 'Organism'; id: Id }
-  | { entity_type: 'Food'; id: Id };
+type EntityIdOf<Id> = { entity_type: 'Organism'; id: Id };
 
 export type ApiEntityId = EntityIdOf<ApiScalarId>;
 export type EntityId = EntityIdOf<number>;
@@ -361,7 +322,6 @@ export type ApiTickDelta = {
   facing_updates: ApiOrganismFacing[];
   removed_positions: ApiRemovedEntityPosition[];
   spawned: ApiWorldOrganismState[];
-  food_spawned: ApiFoodState[];
   metrics: ApiMetricsSnapshot;
 };
 
@@ -373,7 +333,6 @@ export type TickDelta = {
   facing_updates: OrganismFacing[];
   removed_positions: RemovedEntityPosition[];
   spawned: WorldOrganismState[];
-  food_spawned: FoodState[];
   metrics: ApiMetricsSnapshot;
 };
 
@@ -422,9 +381,7 @@ export type StatsSummary = {
 export type PillarIntervalMetric = {
   tick: number;
   action_effectiveness: number | null;
-  plant_consumption_rate: number | null;
-  prey_consumption_rate: number | null;
-  mi_sa: number | null;
+  successful_attack_rate: number | null;
   learning_slope: number | null;
   pop: number;
 };
@@ -435,10 +392,8 @@ export type PillarsView = {
   intervals: number;
   partial: boolean;
   scaled: boolean;
-  plant_consumption_rate: number | null;
-  prey_consumption_rate: number | null;
   action_effectiveness: number | null;
-  mi_sa: number | null;
+  successful_attack_rate: number | null;
   learning_slope: number | null;
   granular: {
     report_every: number;
@@ -451,8 +406,6 @@ export type PillarsView = {
 export type EcoTrajectory = {
   ticks: number;
   population_series: number[];
-  food_series: number[];
-  births_per_tick: number;
   deaths_per_tick: number;
   deaths_by_cause: {
     total: number;
@@ -461,16 +414,13 @@ export type EcoTrajectory = {
     predation: number;
     other: number;
   };
-  consumptions_per_tick: number;
   predations_per_tick: number;
-  carrying_capacity_est: number;
 };
 
 export type EcoView = {
   turn: number;
   population: number;
-  descendants: number;
-  food: { plants: number; total_energy: number };
+  organism_energy: number;
   trajectory: EcoTrajectory | null;
   note?: string;
 };

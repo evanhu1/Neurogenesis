@@ -22,17 +22,18 @@ pub struct WorldConfig {
     pub starting_energy: u32,
     pub attack_energy_transfer: u32,
     pub attack_attempt_cost: u32,
-    pub food_energy: u32,
     pub action_temperature: f32,
     pub intent_parallel_threads: u32,
-    pub food_regrowth_interval: u32,
-    pub food_tile_fraction: f32,
     pub terrain_noise_scale: f32,
     pub terrain_threshold: f32,
     pub runtime_plasticity_enabled: bool,
     pub leaky_neurons_enabled: bool,
     pub predation_enabled: bool,
     pub force_random_actions: bool,
+    /// Interpret the five action logits as independent orientation,
+    /// locomotion, and interaction command groups instead of one categorical
+    /// action. The genome encoding and action neurons are unchanged.
+    pub compositional_actions_enabled: bool,
     pub seed_genome_config: SeedGenomeConfig,
 }
 
@@ -46,17 +47,15 @@ impl WorldConfig {
             starting_energy: 250,
             attack_energy_transfer: 40,
             attack_attempt_cost: 10,
-            food_energy: 20,
             action_temperature: 0.5,
             intent_parallel_threads: 8,
-            food_regrowth_interval: 200,
-            food_tile_fraction: 0.2,
             terrain_noise_scale: 0.02,
             terrain_threshold: 1.0,
             runtime_plasticity_enabled: true,
             leaky_neurons_enabled: false,
             predation_enabled: true,
             force_random_actions: false,
+            compositional_actions_enabled: false,
             seed_genome_config: SeedGenomeConfig {
                 num_neurons: 20,
                 num_synapses: 80,
@@ -79,17 +78,15 @@ impl WorldConfig {
             starting_energy: 250,
             attack_energy_transfer: 40,
             attack_attempt_cost: 10,
-            food_energy: 20,
             action_temperature: 0.5,
             intent_parallel_threads: 8,
-            food_regrowth_interval: 200,
-            food_tile_fraction: 0.2,
             terrain_noise_scale: 0.02,
             terrain_threshold: 1.0,
             runtime_plasticity_enabled: true,
             leaky_neurons_enabled: false,
             predation_enabled: false,
             force_random_actions: false,
+            compositional_actions_enabled: false,
             seed_genome_config: SeedGenomeConfig {
                 num_neurons: 1,
                 num_synapses: 0,
@@ -116,7 +113,6 @@ macro_rules! id_newtype {
 id_newtype!(OrganismId, u64);
 id_newtype!(SpeciesId, u64);
 id_newtype!(NeuronId, u32);
-id_newtype!(FoodId, u64);
 
 /// Stable identity of a node in the heritable graph.
 ///
@@ -130,6 +126,20 @@ pub struct GeneNodeId(pub u64);
 /// Stable historical identity of a heritable connection gene.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct InnovationId(pub u64);
+
+/// When a synapse reads its presynaptic activation.
+///
+/// Current-tick hidden connections form the instantaneous feed-forward DAG.
+/// Previous-tick connections read a frozen hidden-state snapshot, so they may
+/// form cycles in the temporal graph without creating algebraic cycles inside
+/// one brain evaluation.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+#[repr(u8)]
+pub enum SynapseTiming {
+    CurrentTick = 0,
+    PreviousTick = 1,
+}
 
 macro_rules! impl_stable_u64_id_serde {
     ($name:ident) => {
@@ -228,11 +238,11 @@ pub const fn split_hidden_gene_node_id(parent_innovation: InnovationId) -> GeneN
 pub const fn connection_innovation_id(
     pre_node_id: GeneNodeId,
     post_node_id: GeneNodeId,
+    timing: SynapseTiming,
 ) -> InnovationId {
     let with_pre = mix_u64(CONNECTION_INNOVATION_DOMAIN ^ pre_node_id.0);
-    InnovationId(mix_u64(
-        with_pre ^ post_node_id.0.wrapping_add(0x9e37_79b9_7f4a_7c15),
-    ))
+    let with_post = mix_u64(with_pre ^ post_node_id.0.wrapping_add(0x9e37_79b9_7f4a_7c15));
+    InnovationId(mix_u64(with_post ^ timing as u8 as u64))
 }
 
 pub const fn gene_node_domain(id: GeneNodeId) -> u64 {
@@ -269,7 +279,6 @@ pub const fn is_hidden_gene_node_id(id: GeneNodeId) -> bool {
 pub const INTER_NEURON_ID_BASE: u32 = 1000;
 pub const ACTION_NEURON_ID_BASE: u32 = 2000;
 pub const ORGANISM_VISUAL_OPACITY: f32 = 0.8;
-pub const FOOD_VISUAL_OPACITY: f32 = 0.8;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, VariantArray, Default)]
 pub enum ActionType {
@@ -278,7 +287,6 @@ pub enum ActionType {
     TurnLeft,
     TurnRight,
     Forward,
-    Eat,
     Attack,
 }
 impl ActionType {
@@ -286,7 +294,6 @@ impl ActionType {
         ActionType::TurnLeft,
         ActionType::TurnRight,
         ActionType::Forward,
-        ActionType::Eat,
         ActionType::Attack,
     ];
 
@@ -307,14 +314,21 @@ impl ActionType {
         self as usize
     }
 
+    /// Stable bit in an organism's per-tick motor-command mask. Idle has no
+    /// command bit; the four explicit actions occupy bits 0 through 3 in the
+    /// same order as [`Self::ALL`].
+    pub const fn command_bit(self) -> u8 {
+        match self {
+            Self::Idle => 0,
+            _ => 1 << (self as u8 - 1),
+        }
+    }
+
     /// Whether this action is contingent on world state and can therefore
     /// fail. Single source of truth for both the sim's `ActionRecord`
     /// initialization and evaluation failure counting.
     pub const fn can_fail(self) -> bool {
-        matches!(
-            self,
-            ActionType::Forward | ActionType::Eat | ActionType::Attack
-        )
+        matches!(self, ActionType::Forward | ActionType::Attack)
     }
 
     pub fn neuron_id(self) -> Option<NeuronId> {
@@ -332,30 +346,18 @@ impl ActionType {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ActionRecord {
     pub organism_id: OrganismId,
+    /// Compatibility/observer projection: the highest-logit emitted command,
+    /// or Idle when no command was emitted.
     pub selected_action: ActionType,
+    /// Bitset of every explicit command emitted this tick.
+    pub selected_action_mask: u8,
+    /// Selected contingent commands (Forward/Attack) that did not succeed.
+    pub failed_action_mask: u8,
     pub action_failed: bool,
-    pub food_visible: [bool; SensoryReceptor::RAY_OFFSETS.len()],
     pub age_turns: u64,
     pub utilization: f32,
-    pub consumptions_count: u64,
-    /// Cumulative plant (foraging) consumptions, split out so the evaluation
-    /// layer can score foraging and predation competence separately.
-    pub plant_consumptions_count: u64,
-    /// Cumulative successful predation energy transfers.
-    pub prey_consumptions_count: u64,
-}
-
-#[cfg(feature = "instrumentation")]
-impl ActionRecord {
-    pub fn food_visible_at_offset(&self, ray_offset: i8) -> bool {
-        let Some(ray_idx) = SensoryReceptor::RAY_OFFSETS
-            .iter()
-            .position(|candidate| *candidate == ray_offset)
-        else {
-            return false;
-        };
-        self.food_visible[ray_idx]
-    }
+    /// Cumulative successful attack energy transfers.
+    pub successful_attacks_count: u64,
 }
 
 #[cfg(feature = "instrumentation")]
@@ -409,7 +411,6 @@ impl VisualProperties {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum EntityType {
-    Food,
     Organism,
     Wall,
 }
@@ -423,14 +424,12 @@ pub enum TerrainType {
 #[serde(tag = "entity_type", content = "id")]
 pub enum EntityId {
     Organism(OrganismId),
-    Food(FoodId),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "receptor_type")]
 pub enum SensoryReceptor {
     RayProximity { ray_offset: i8 },
-    RayEnergyAffordance { ray_offset: i8 },
     SelfEnergy,
     EnergyFlowLastTick,
 }
@@ -439,18 +438,13 @@ impl SensoryReceptor {
     /// Egocentric clockwise order: forward, front-left, back-left, back,
     /// back-right, front-right.
     pub const RAY_OFFSETS: [i8; 6] = [0, -1, -2, 3, 2, 1];
-    pub const BASELINE_NEURON_COUNT: u32 = 14;
-    pub const TOTAL_NEURON_COUNT: u32 = 14;
+    pub const BASELINE_NEURON_COUNT: u32 = 8;
+    pub const TOTAL_NEURON_COUNT: u32 = 8;
 
     pub fn ordered() -> impl Iterator<Item = Self> {
         Self::RAY_OFFSETS
             .into_iter()
-            .flat_map(|ray_offset| {
-                [
-                    Self::RayProximity { ray_offset },
-                    Self::RayEnergyAffordance { ray_offset },
-                ]
-            })
+            .map(|ray_offset| Self::RayProximity { ray_offset })
             .chain([Self::SelfEnergy, Self::EnergyFlowLastTick])
     }
 
@@ -480,30 +474,24 @@ mod tests {
     use super::SensoryReceptor;
 
     #[test]
-    fn sensory_receptors_have_fixed_fourteen_input_order() {
+    fn sensory_receptors_have_fixed_eight_input_order() {
         let receptors = SensoryReceptor::ordered().collect::<Vec<_>>();
-        assert_eq!(receptors.len(), 14);
+        assert_eq!(receptors.len(), 8);
         assert_eq!(
             receptors,
             vec![
                 SensoryReceptor::RayProximity { ray_offset: 0 },
-                SensoryReceptor::RayEnergyAffordance { ray_offset: 0 },
                 SensoryReceptor::RayProximity { ray_offset: -1 },
-                SensoryReceptor::RayEnergyAffordance { ray_offset: -1 },
                 SensoryReceptor::RayProximity { ray_offset: -2 },
-                SensoryReceptor::RayEnergyAffordance { ray_offset: -2 },
                 SensoryReceptor::RayProximity { ray_offset: 3 },
-                SensoryReceptor::RayEnergyAffordance { ray_offset: 3 },
                 SensoryReceptor::RayProximity { ray_offset: 2 },
-                SensoryReceptor::RayEnergyAffordance { ray_offset: 2 },
                 SensoryReceptor::RayProximity { ray_offset: 1 },
-                SensoryReceptor::RayEnergyAffordance { ray_offset: 1 },
                 SensoryReceptor::SelfEnergy,
                 SensoryReceptor::EnergyFlowLastTick,
             ]
         );
-        assert_eq!(SensoryReceptor::active(false).count(), 14);
-        assert_eq!(SensoryReceptor::active(true).count(), 14);
+        assert_eq!(SensoryReceptor::active(false).count(), 8);
+        assert_eq!(SensoryReceptor::active(true).count(), 8);
     }
 }
 
@@ -633,6 +621,7 @@ pub struct SynapseGene {
     pub innovation: InnovationId,
     pub pre_node_id: GeneNodeId,
     pub post_node_id: GeneNodeId,
+    pub timing: SynapseTiming,
     pub weight: f32,
     pub enabled: bool,
 }
@@ -641,6 +630,11 @@ pub struct SynapseGene {
 pub struct SynapseEdge {
     pub pre_neuron_id: NeuronId,
     pub post_neuron_id: NeuronId,
+    pub timing: SynapseTiming,
+    /// Zero-based hidden-layer indices compiled at expression time for the
+    /// recurrent hot path. Both are `Some` exactly for PreviousTick edges.
+    pub pre_inter_index: Option<u32>,
+    pub post_inter_index: Option<u32>,
     pub weight: f32,
     #[serde(default)]
     pub eligibility: f32,
@@ -713,6 +707,13 @@ pub struct BrainState {
     pub sensory: Vec<SensoryNeuronState>,
     pub inter: Vec<InterNeuronState>,
     pub action: Vec<ActionNeuronState>,
+    /// Dense hidden-to-hidden previous-tick connections. These are separate
+    /// from the per-neuron outgoing arrays only in the compiled runtime; the
+    /// genome retains one unified connection-gene collection.
+    pub recurrent_synapses: Vec<SynapseEdge>,
+    /// Frozen hidden activations read by every recurrent synapse on the next
+    /// evaluation tick. Persisted as live world state for exact snapshot replay.
+    pub previous_inter_activations: Vec<f32>,
     pub synapse_count: u32,
     /// Per-sensory-neuron EMA of activation used to center pending
     /// coactivations (covariance rule). Length tracks `sensory.len()`.
@@ -754,17 +755,17 @@ pub struct OrganismState {
     /// reward signal, rolled forward at the start of every tick's sensing pass.
     #[serde(default)]
     pub energy_at_last_sensing: u32,
-    /// Signed plant/predation energy flow committed during the preceding tick,
+    /// Signed predation energy flow committed during the preceding tick,
     /// excluding the universal one-energy lifetime drain.
     pub energy_flow_last_tick: i32,
     #[serde(default)]
-    pub consumptions_count: u64,
-    #[serde(default)]
-    pub plant_consumptions_count: u64,
-    #[serde(default)]
-    pub prey_consumptions_count: u64,
+    pub successful_attacks_count: u64,
     #[serde(default)]
     pub last_action_taken: ActionType,
+    /// Every explicit motor command emitted on the most recent tick. This is a
+    /// bitset built from [`ActionType::command_bit`].
+    #[serde(default)]
+    pub last_action_mask: u8,
     #[cfg(feature = "instrumentation")]
     #[serde(default, skip)]
     pub instrumentation: OrganismInstrumentationState,
@@ -783,9 +784,7 @@ impl OrganismState {
         age_turns: u64,
         facing: FacingDirection,
         energy: u32,
-        consumptions_count: u64,
-        plant_consumptions_count: u64,
-        prey_consumptions_count: u64,
+        successful_attacks_count: u64,
         last_action_taken: ActionType,
         brain: BrainState,
         genome: OrganismGenome,
@@ -801,10 +800,9 @@ impl OrganismState {
             energy,
             energy_at_last_sensing: energy,
             energy_flow_last_tick: 0,
-            consumptions_count,
-            plant_consumptions_count,
-            prey_consumptions_count,
+            successful_attacks_count,
             last_action_taken,
+            last_action_mask: last_action_taken.command_bit(),
             #[cfg(feature = "instrumentation")]
             instrumentation: Default::default(),
             brain,
@@ -813,28 +811,13 @@ impl OrganismState {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct FoodState {
-    pub id: FoodId,
-    pub q: i32,
-    pub r: i32,
-    pub energy: u32,
-    pub visual: VisualProperties,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct MetricsSnapshot {
     pub turns: u64,
     pub organisms: u32,
     pub synapse_ops_last_turn: u64,
     pub actions_applied_last_turn: u64,
-    pub consumptions_last_turn: u64,
-    /// Plant consumptions only; direct predation is a separate conserved transfer.
-    pub plant_consumptions_last_turn: u64,
     pub predations_last_turn: u64,
-    pub total_consumptions: u64,
-    /// Cumulative plant-food consumptions since the world was reset.
-    pub total_plant_consumptions: u64,
     pub starvations_last_turn: u64,
     pub age_deaths_last_turn: u64,
     /// Fail-closed physical energy accounting for the most recently completed
@@ -843,33 +826,19 @@ pub struct MetricsSnapshot {
     pub energy_ledger_last_turn: EnergyLedgerRow,
 }
 
-/// Per-tick energy accounting over organism and food energy. All values are
-/// simulation energy units.
-///
-/// Plant consumption and successful predation are internal transfers. Every
-/// emitted attack has a separate dissipative attempt cost, including misses.
+/// Per-tick energy accounting over organism energy. All values are simulation
+/// energy units. Successful attacks are internal transfers; every emitted
+/// Attack command has a separate dissipative attempt cost, including misses.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 pub struct EnergyLedgerRow {
     pub turn: u64,
     pub organism_energy_before: f64,
     pub organism_energy_after: f64,
-    pub food_energy_before: f64,
-    pub food_energy_after: f64,
-    pub plant_spawn_energy: f64,
     pub tick_drain_energy: f64,
-    pub food_consumption_debit: f64,
-    pub food_consumption_credit: f64,
     pub attack_transfer_energy: f64,
     pub attack_attempt_cost: f64,
     pub organism_residual: f64,
-    pub food_residual: f64,
-    /// Total-compartment residual, deliberately excluding internal transfer
-    /// mismatches so a non-closing transfer cannot hide as an allowed source.
     pub total_residual: f64,
-    pub food_transfer_residual: f64,
-    /// Plant-transfer residual retained as a compact transfer diagnostic.
-    /// Attack transfers are applied as one conserved amount.
-    pub transfer_residual: f64,
     pub residual_tolerance: f64,
 }
 
@@ -879,7 +848,6 @@ pub struct WorldSnapshot {
     pub rng_seed: u64,
     pub config: WorldConfig,
     pub organisms: Vec<OrganismState>,
-    pub foods: Vec<FoodState>,
     pub terrain: Vec<TerrainCell>,
     pub metrics: MetricsSnapshot,
 }
@@ -888,7 +856,6 @@ pub struct WorldSnapshot {
 #[serde(tag = "type", content = "id")]
 pub enum Occupant {
     Organism(OrganismId),
-    Food(FoodId),
     Wall,
 }
 
@@ -927,12 +894,10 @@ pub struct TickDelta {
     pub facing_updates: Vec<OrganismFacing>,
     pub removed_positions: Vec<RemovedEntityPosition>,
     pub spawned: Vec<OrganismState>,
-    pub food_spawned: Vec<FoodState>,
     pub metrics: MetricsSnapshot,
 }
 
 pub const ORGANISM_SHAPE: f32 = 0.2;
-pub const PLANT_SHAPE: f32 = 0.4;
 pub const MOUNTAIN_SHAPE: f32 = 1.0;
 
 pub fn organism_visual() -> VisualProperties {
@@ -944,16 +909,6 @@ pub fn organism_visual() -> VisualProperties {
         shape: ORGANISM_SHAPE,
     }
     .clamped()
-}
-
-pub fn plant_visual() -> VisualProperties {
-    VisualProperties {
-        r: 0.0,
-        g: 1.0,
-        b: 0.0,
-        opacity: FOOD_VISUAL_OPACITY,
-        shape: PLANT_SHAPE,
-    }
 }
 
 pub fn terrain_visual(terrain_type: TerrainType) -> VisualProperties {

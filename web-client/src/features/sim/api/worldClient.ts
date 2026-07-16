@@ -3,7 +3,6 @@
 // live-animation WebSocket.
 
 import type {
-  ApiChampionPoolResponse,
   ApiOrganismDetail,
   ApiStreamFrame,
   ApiWorldResponse,
@@ -102,12 +101,6 @@ export const worldClient = {
       'GET',
     );
   },
-  getChampions: () => request<ApiChampionPoolResponse>('/champions', 'GET'),
-  saveChampions: (name: string) =>
-    request<ApiChampionPoolResponse>(`/worlds/${encodeURIComponent(name)}/champions`, 'POST'),
-  deleteChampion: (index: number) =>
-    request<ApiChampionPoolResponse>(`/champions/${index}`, 'DELETE'),
-  clearChampions: () => request<ApiChampionPoolResponse>('/champions', 'DELETE'),
 };
 
 export type StreamHandlers = {

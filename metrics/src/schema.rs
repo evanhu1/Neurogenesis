@@ -7,20 +7,6 @@
 //! analysis consumes.
 
 use serde::{Deserialize, Serialize};
-use types::{ActionType, SensoryReceptor};
-
-/// Number of action variants in the joint histograms: Idle plus every
-/// contingent action. The analysis layer reshapes flat `Vec<u64>` histograms
-/// with this constant.
-pub const ACTION_COUNT: usize = ActionType::ALL.len() + 1;
-
-/// Number of sensory context bins used by the joint histograms. One bin for
-/// "no food visible" plus one bin per vision ray.
-pub const SENSORY_BIN_COUNT: usize = 1 + SensoryReceptor::RAY_OFFSETS.len();
-
-/// Length of the flattened joint-sensory-action histogram.
-pub const JOINT_LEN: usize = SENSORY_BIN_COUNT * ACTION_COUNT;
-
 /// One row per tick. The only per-tick fact still consumed is the living
 /// population, used for the `pop` viability-context line in the timeseries.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -43,11 +29,7 @@ pub struct BehaviorIntervalRow {
     pub total_actions: u64,
     pub contingent_actions: u64,
     pub failed_actions: u64,
-    pub plant_consumptions: u64,
-    pub prey_consumptions: u64,
-    /// Row-major flattened `[SENSORY_BIN_COUNT][ACTION_COUNT]` for actions
-    /// taken during this interval only.
-    pub joint_sensory_action: Vec<u64>,
+    pub successful_attacks: u64,
     /// Organism-fixed-effect OLS sufficient statistics for contingent-action
     /// success vs age. Centering within each organism prevents mixed-age cohort
     /// composition from masquerading as lifetime improvement.
@@ -65,19 +47,14 @@ pub struct OrganismLifetimeRow {
     pub death_tick: Option<u64>,
     /// Every action taken over the lifetime (includes Idle and Turns).
     pub total_actions: u64,
-    /// Contingent actions taken (Forward/Eat/Attack — those that can fail).
+    /// Contingent actions taken (Forward/Attack — those that can fail).
     /// `contingent_actions - failed_actions` is the successful count.
     pub contingent_actions: u64,
     pub failed_actions: u64,
-    /// Lifetime plant (foraging) consumptions.
-    pub plant_consumptions: u64,
-    /// Lifetime successful predation energy transfers.
-    pub prey_consumptions: u64,
-    /// Row-major flattened `[SENSORY_BIN_COUNT][ACTION_COUNT]` across the whole
-    /// lifetime — feeds MI(S;A).
-    pub joint_sensory_action: Vec<u64>,
+    /// Lifetime successful attack energy transfers.
+    pub successful_attacks: u64,
     /// Within-life regression slope of success (0/1) vs age over contingent
-    /// actions (Forward/Eat/Attack). Positive ⇒ the organism got
+    /// actions (Forward/Attack). Positive ⇒ the organism got
     /// better at acting over its life — the in-life-learning signal. `None`
     /// when the organism took too few such actions to estimate a slope.
     pub learning_slope: Option<f32>,

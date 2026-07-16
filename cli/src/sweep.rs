@@ -18,20 +18,16 @@ use std::sync::Mutex;
 use world_sim::Simulation;
 
 /// The raw windowed metrics a sweep ranks on (no [0,1] interpretation).
-const METRIC_KEYS: [&str; 5] = [
-    "plant_consumption_rate",
-    "prey_consumption_rate",
+const METRIC_KEYS: [&str; 3] = [
+    "successful_attack_rate",
     "action_effectiveness",
-    "mi_sa",
     "learning_slope",
 ];
 
 fn metric(p: &PillarScores, key: &str) -> f64 {
     let value = match key {
-        "plant_consumption_rate" => p.mean_plant_consumption_rate,
-        "prey_consumption_rate" => p.mean_prey_consumption_rate,
+        "successful_attack_rate" => p.mean_successful_attack_rate,
         "action_effectiveness" => p.mean_action_effectiveness,
-        "mi_sa" => p.mean_mi_sa,
         "learning_slope" => p.mean_learning_slope,
         other => unreachable!("metric() called with key outside METRIC_KEYS: {other}"),
     };
@@ -430,8 +426,8 @@ fn print_table(out: &mut impl Write, result: &Value) -> Result<()> {
     let cells = result["cells"].as_array().cloned().unwrap_or_default();
     writeln!(
         out,
-        "{:<32} {:>9} {:>9} {:>9} {:>9} {:>11} {:>12}",
-        "cell", "plant", "prey", "act_eff", "mi_sa", "learn_slope", "Δplant_rate"
+        "{:<32} {:>11} {:>9} {:>11} {:>12}",
+        "cell", "attack_rate", "act_eff", "learn_slope", "Δattack"
     )?;
     for c in &cells {
         let label = c["overrides"]
@@ -447,7 +443,7 @@ fn print_table(out: &mut impl Write, result: &Value) -> Result<()> {
         let fmt = |v: Option<f64>| v.map(|x| format!("{x:.4}")).unwrap_or_else(|| "NA".into());
         let fmt_slope =
             |v: Option<f64>| v.map(|x| format!("{x:.6}")).unwrap_or_else(|| "NA".into());
-        let dplant = c["delta_vs_baseline"]["plant_consumption_rate"].as_f64();
+        let dattack = c["delta_vs_baseline"]["successful_attack_rate"].as_f64();
         let star = if c["is_baseline"].as_bool().unwrap_or(false) {
             "*"
         } else {
@@ -455,14 +451,12 @@ fn print_table(out: &mut impl Write, result: &Value) -> Result<()> {
         };
         writeln!(
             out,
-            "{star}{:<31} {:>9} {:>9} {:>9} {:>9} {:>11} {:>12}",
+            "{star}{:<31} {:>11} {:>9} {:>11} {:>12}",
             label,
-            fmt(m("plant_consumption_rate")),
-            fmt(m("prey_consumption_rate")),
+            fmt(m("successful_attack_rate")),
             fmt(m("action_effectiveness")),
-            fmt(m("mi_sa")),
             fmt_slope(m("learning_slope")),
-            dplant
+            dattack
                 .map(|x| format!("{x:+.4}"))
                 .unwrap_or_else(|| "—".into()),
         )?;

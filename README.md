@@ -14,7 +14,7 @@ optimizing one fixed behavior.
 ```
 config/       canonical world.toml and seed_genome.toml
 types/        shared wire/domain types
-brain/        genomes, expression, feed-forward evaluation, plasticity
+brain/        genomes, expression, recurrent evaluation, plasticity
 world-sim/    deterministic world, sensing, metabolism, tick pipeline
 evolution/    NEAT population management and competitive evaluation
 metrics/      raw observation facts and derived behavioral metrics
@@ -30,24 +30,28 @@ configuration files. Generated worlds and experiment outputs belong under
 
 ## Model
 
-An organism observes six egocentric rays. Each ray supplies a proximity signal
-and a signed energy-affordance signal; it also sees its own normalized energy
-and the energy gained or lost on the previous tick. Its controller is a
-feed-forward neural network by default: activations do not carry through time.
+An organism observes six egocentric proximity rays, its own normalized energy,
+and the predation energy gained or lost on the previous tick. Its controller is a
+recurrent neural network: current-tick edges form a feed-forward DAG, while
+evolvable previous-tick hidden edges carry explicit temporal state.
 The optional leaky-neuron and Hebbian-plasticity flags add explicitly configured
 within-lifetime state and learning.
 
-The world uses a simple energy economy:
+The world uses a deliberately small competitive energy economy:
 
 - Every organism loses one energy per tick and dies at zero.
-- Eating a plant transfers the plant's full energy to the eater.
 - Every attack action pays `attack_attempt_cost`, including misses. A successful
   adjacent attack then conserves up to `attack_energy_transfer` from victim to
   attacker.
-- Food tiles regrow deterministically after their configured interval.
+- No external energy enters an episode. Every founder starts with the same
+  configured energy.
 
 There is no reproduction inside a world. A finite simulation episode is an
 evaluator. The `evolution` crate owns all genetic change between generations.
+
+Successful attacks transfer existing energy; passive metabolism and attack
+attempts dissipate it. There are no plants, food tiles, or Eat action in either
+the evaluator or the ordinary simulator.
 
 ## Research workflow
 
@@ -58,8 +62,7 @@ cargo build -p cli --release
 
 ./target/release/cli plan \
   --population 48 --generations 40 --horizon 500 \
-  --lineages-per-world 3 --memberships-per-genome 12 \
-  --world-seeds 11,29,47 --scenarios baseline --founders 102
+  --world-seeds 11,29,47,61 --founders 96
 ```
 
 NEAT is the default mode, so the same options without `plan` execute the run:
@@ -67,16 +70,17 @@ NEAT is the default mode, so the same options without `plan` execute the run:
 ```bash
 cargo run -p cli --release -- \
   --seed 17 --population 48 --generations 40 --horizon 500 \
-  --lineages-per-world 3 --memberships-per-genome 12 \
-  --world-seeds 11,29,47 --scenarios baseline --founders 102 \
+  --world-seeds 11,29,47,61 --founders 96 \
   --out-dir artifacts/research/runs
 ```
 
-The result JSON contains each generation's population evaluations, champion,
-species statistics, behavioral diagnostics, and the complete frozen world/NEAT
-contract. `cli analyze RESULT.json` derives trajectory diagnostics. `cli
-crossplay RESULT.json` is explicitly a pairwise transfer assay over frozen
-champions; it does not recreate a three-lineage training ecosystem.
+The result JSON contains each generation's contextual winner, population
+checkpoints, species statistics, behavioral diagnostics, and the complete
+frozen world/NEAT contract. Training scores rank contemporaries only; they are
+not a monotone learning curve and are never compared across generations.
+`cli crossplay RESULT.json.zst` is the sole longitudinal competence assay: it
+re-evaluates frozen generation winners against one another under a common
+pairwise contract.
 
 The ordinary simulator remains available as an explicit special mode:
 

@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { normalizeChampionPoolResponse, normalizeOrganismDetail, normalizeTickDelta, normalizeWorldSnapshot } from '../../../protocol';
+import { normalizeOrganismDetail, normalizeTickDelta, normalizeWorldSnapshot } from '../../../protocol';
 import { WorldRenderer } from '../../../rendering/WorldRenderer';
 import type {
-  ChampionPoolEntry,
   LiveMetricsData,
   OrganismState,
   WorldOrganismState,
@@ -16,7 +15,6 @@ import { captureError } from './captureError';
 const DEFAULT_SPEED_LEVEL_INDEX = 1;
 const MAX_SPECIES_HISTORY_POINTS = 2048;
 const OVERVIEW_SAMPLE_INTERVAL_MS = 200;
-const CHAMPION_POOL_REFRESH_MS = 5_000;
 
 export type SpeciesPopulationPoint = {
   turn: number;
@@ -63,7 +61,6 @@ export type WorldController = {
   worldName: string | null;
   snapshot: WorldSnapshot | null;
   liveMetrics: LiveMetricsData | null;
-  championPool: ChampionPoolEntry[];
   speciesPopulationHistory: SpeciesPopulationPoint[];
   focusedOrganismId: number | null;
   focusedOrganism: OrganismState | null;
@@ -79,21 +76,17 @@ export type WorldController = {
   errorText: string | null;
   registerRenderer: (renderer: WorldRenderer | null) => void;
   createWorld: (seedInput?: string) => Promise<void>;
-  saveChampions: () => Promise<void>;
   toggleRun: () => void;
   setSpeedLevelIndex: (levelIndex: number) => void;
   step: (count: number) => void;
   focusOrganism: (organism: WorldOrganismState) => void;
   focusOrganismById: (id: number) => void;
   defocusOrganism: () => void;
-  deleteChampionPoolEntry: (index: number) => Promise<void>;
-  clearChampionPool: () => Promise<void>;
 };
 
 export function useWorld(): WorldController {
   const [snapshot, setSnapshot] = useState<WorldSnapshot | null>(null);
   const [liveMetrics, setLiveMetrics] = useState<LiveMetricsData | null>(null);
-  const [championPool, setChampionPool] = useState<ChampionPoolEntry[]>([]);
   const [speciesPopulationHistory, setSpeciesPopulationHistory] = useState<SpeciesPopulationPoint[]>(
     [],
   );
@@ -202,15 +195,6 @@ export function useWorld(): WorldController {
     }
   }, []);
 
-  const refreshChampionPool = useCallback(async () => {
-    try {
-      const pool = normalizeChampionPoolResponse(await worldClient.getChampions());
-      setChampionPool(pool.entries);
-    } catch (err) {
-      setError(err, 'Failed to load champion pool');
-    }
-  }, [setError]);
-
   const registerRenderer = useCallback((renderer: WorldRenderer | null) => {
     rendererRef.current = renderer;
     if (renderer && latestSnapshotRef.current) {
@@ -310,12 +294,11 @@ export function useWorld(): WorldController {
           seed: seed ?? Math.floor(Date.now() / 1000),
         });
         adoptWorld(resp.name, normalizeWorldSnapshot(resp.snapshot));
-        await refreshChampionPool();
       } catch (err) {
         setError(err, 'Failed to create world');
       }
     },
-    [adoptWorld, refreshChampionPool, setError],
+    [adoptWorld, setError],
   );
 
   const step = useCallback(
@@ -371,41 +354,6 @@ export function useWorld(): WorldController {
     setActiveActionNeuronId(null);
   }, []);
 
-  // --- Champions ------------------------------------------------------------
-
-  const saveChampions = useCallback(async () => {
-    const name = worldNameRef.current;
-    if (!name) return;
-    try {
-      setErrorText(null);
-      const pool = normalizeChampionPoolResponse(await worldClient.saveChampions(name));
-      setChampionPool(pool.entries);
-    } catch (err) {
-      setError(err, 'Failed to save champions');
-    }
-  }, [setError]);
-
-  const deleteChampionPoolEntry = useCallback(
-    async (index: number) => {
-      try {
-        const pool = normalizeChampionPoolResponse(await worldClient.deleteChampion(index));
-        setChampionPool(pool.entries);
-      } catch (err) {
-        setError(err, 'Failed to delete champion');
-      }
-    },
-    [setError],
-  );
-
-  const clearChampionPool = useCallback(async () => {
-    try {
-      const pool = normalizeChampionPoolResponse(await worldClient.clearChampions());
-      setChampionPool(pool.entries);
-    } catch (err) {
-      setError(err, 'Failed to clear champion pool');
-    }
-  }, [setError]);
-
   // --- Effects --------------------------------------------------------------
 
   // Load a persisted world (or create a fresh one) on mount.
@@ -415,12 +363,12 @@ export function useWorld(): WorldController {
     if (initStartedRef.current) return;
     initStartedRef.current = true;
     void (async () => {
-      const persisted = loadPersistedWorldName();
-      if (persisted) {
+      const requested = new URLSearchParams(window.location.search).get('world')?.trim();
+      const initialWorld = requested || loadPersistedWorldName();
+      if (initialWorld) {
         try {
-          const view = await worldClient.getSnapshot(persisted);
-          adoptWorld(persisted, normalizeWorldSnapshot(view));
-          await refreshChampionPool();
+          const view = await worldClient.getSnapshot(initialWorld);
+          adoptWorld(initialWorld, normalizeWorldSnapshot(view));
           return;
         } catch {
           clearPersistedWorldName();
@@ -441,18 +389,11 @@ export function useWorld(): WorldController {
     return () => window.clearInterval(id);
   }, [isRunning, syncFromRenderer]);
 
-  // Periodic champion-pool refresh.
-  useEffect(() => {
-    const id = window.setInterval(() => void refreshChampionPool(), CHAMPION_POOL_REFRESH_MS);
-    return () => window.clearInterval(id);
-  }, [refreshChampionPool]);
-
   return useMemo(
     () => ({
       worldName,
       snapshot,
       liveMetrics,
-      championPool,
       speciesPopulationHistory,
       focusedOrganismId,
       focusedOrganism,
@@ -466,21 +407,17 @@ export function useWorld(): WorldController {
       errorText,
       registerRenderer,
       createWorld,
-      saveChampions,
       toggleRun,
       setSpeedLevelIndex,
       step,
       focusOrganism,
       focusOrganismById,
       defocusOrganism,
-      deleteChampionPoolEntry,
-      clearChampionPool,
     }),
     [
       worldName,
       snapshot,
       liveMetrics,
-      championPool,
       speciesPopulationHistory,
       focusedOrganismId,
       focusedOrganism,
@@ -493,15 +430,12 @@ export function useWorld(): WorldController {
       errorText,
       registerRenderer,
       createWorld,
-      saveChampions,
       toggleRun,
       setSpeedLevelIndex,
       step,
       focusOrganism,
       focusOrganismById,
       defocusOrganism,
-      deleteChampionPoolEntry,
-      clearChampionPool,
     ],
   );
 }

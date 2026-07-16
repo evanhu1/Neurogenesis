@@ -62,12 +62,10 @@ pub struct Recorder {
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct EcoSample {
     pub population: u32,
-    pub food: u32,
     pub deaths: u32,
     pub starvations: u32,
     pub age_deaths: u32,
     pub predations: u32,
-    pub consumptions: u32,
 }
 
 /// A borrowed, read-only view of a loaded world plus its optional metric
@@ -262,7 +260,7 @@ pub fn world_config_from_raw_overrides(
 
 /// Patch a world-config TOML document with `key=value` overrides before parsing.
 /// Keys are matched against any `[section]` table first (the eval config keys are
-/// section-unique, e.g. `food_energy` under `[food]`), then the top level.
+/// section-unique, e.g. `initial_energy` under `[energy]`), then the top level.
 /// Values are coerced to int/float/bool, falling back to string.
 fn apply_config_overrides(world_raw: &str, sets: &[(String, String)]) -> Result<String> {
     if sets.is_empty() {
@@ -323,8 +321,8 @@ pub struct NewWorldParams {
     pub threads: Option<u32>,
     pub scale: Option<(u32, u32)>,
     pub sets: Vec<(String, String)>,
-    /// Optional exact founder genomes (e.g. a NEAT champion snapshot).
-    pub champion_pool: Vec<OrganismGenome>,
+    /// Optional exact founder genomes (e.g. a frozen generation winner).
+    pub founder_genome_pool: Vec<OrganismGenome>,
 }
 
 /// A freshly constructed world plus the derived flags a caller reports/persists.
@@ -346,9 +344,12 @@ pub fn build_world(params: &NewWorldParams) -> Result<BuiltWorld> {
         config.world_width = w;
         config.num_organisms = p;
     }
-    let mut sim =
-        Simulation::new_with_champion_pool(config, params.seed, params.champion_pool.clone())
-            .map_err(|e| anyhow!("{e}"))?;
+    let mut sim = Simulation::new_with_founder_genome_pool(
+        config,
+        params.seed,
+        params.founder_genome_pool.clone(),
+    )
+    .map_err(|e| anyhow!("{e}"))?;
     sim.set_experiment_scaled(params.scale.is_some());
     Ok(BuiltWorld {
         sim,
@@ -417,12 +418,10 @@ pub fn tick_recording(sim: &mut Simulation, recorder: Option<&mut Recorder>) -> 
             .count() as u32;
         rec.samples.push(EcoSample {
             population: delta.metrics.organisms,
-            food: sim.foods().len() as u32,
             deaths: org_deaths,
             starvations: delta.metrics.starvations_last_turn as u32,
             age_deaths: delta.metrics.age_deaths_last_turn as u32,
             predations: delta.metrics.predations_last_turn as u32,
-            consumptions: delta.metrics.consumptions_last_turn as u32,
         });
     }
     delta
@@ -475,19 +474,13 @@ pub fn pillars(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()>
     )?;
     writeln!(
         out,
-        "  foraging      plant_consumption_rate {}",
-        opt(p.mean_plant_consumption_rate, 4)
+        "  combat        successful_attack_rate {}",
+        opt(p.mean_successful_attack_rate, 4)
     )?;
     writeln!(
         out,
-        "  predation     prey_consumption_rate  {}",
-        opt(p.mean_prey_consumption_rate, 4)
-    )?;
-    writeln!(
-        out,
-        "  intelligence  action_effectiveness {}  mi_sa {}",
+        "  control       action_effectiveness {}",
         opt(p.mean_action_effectiveness, 4),
-        opt(p.mean_mi_sa, 4),
     )?;
     writeln!(
         out,
@@ -495,18 +488,16 @@ pub fn pillars(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()>
         opt(p.mean_learning_slope, 6),
     )?;
     // Granular per-interval series behind the scores (the window marked *).
-    writeln!(out, "  granular intervals (tick: eff plant prey mi slope):")?;
+    writeln!(out, "  granular intervals (tick: eff attack slope):")?;
     for m in &intervals {
         let in_window = m.tick > p.window_start_tick && m.tick <= p.window_end_tick;
         writeln!(
             out,
-            "  {}{:>7}: {} {} {} {} {}",
+            "  {}{:>7}: {} {} {}",
             if in_window { "*" } else { " " },
             m.tick,
             opt(m.action_effectiveness, 3),
-            opt(m.plant_consumption_rate, 4),
-            opt(m.prey_consumption_rate, 4),
-            opt(m.mi_sa, 3),
+            opt(m.successful_attack_rate, 4),
             opt(m.learning_slope, 6),
         )?;
     }
@@ -528,15 +519,6 @@ pub fn state(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
     let age = Stats::of(&orgs.iter().map(|o| o.age_turns as f64).collect::<Vec<_>>());
     let gen = Stats::of(&orgs.iter().map(|o| o.generation as f64).collect::<Vec<_>>());
 
-    let (plants, food_energy) = food_summary(sim);
-    let food_tiles = sim.food_tile_count();
-    let habitable_cells = sim.habitable_cell_count();
-    let realized_food_tile_fraction = if habitable_cells == 0 {
-        0.0
-    } else {
-        food_tiles as f64 / habitable_cells as f64
-    };
-
     if fmt.is_json() {
         let mut v = json!({
             "turn": turn,
@@ -546,13 +528,6 @@ pub fn state(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
             "energy": energy.map(|s| s.json()),
             "age_turns": age.map(|s| s.json()),
             "generation": gen.map(|s| s.json()),
-            "food": { "plants": plants, "total_energy": food_energy },
-            "food_tiles": {
-                "selected": food_tiles,
-                "habitable_cells": habitable_cells,
-                "realized_fraction": realized_food_tile_fraction,
-                "configured_fraction": sim.config().food_tile_fraction,
-            },
             "brain_dynamics": {
                 "leaky_neurons_enabled": sim.config().leaky_neurons_enabled,
                 "runtime_plasticity_enabled": sim.config().runtime_plasticity_enabled,
@@ -561,16 +536,10 @@ pub fn state(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
                 "active_actions_excluding_idle": types::ActionType::active(sim.config().predation_enabled).count(),
             },
             "last_turn": {
-                "consumptions": m.consumptions_last_turn,
-                "plant_consumptions": m.plant_consumptions_last_turn,
                 "predations": m.predations_last_turn,
                 "starvations": m.starvations_last_turn,
                 "age_deaths": m.age_deaths_last_turn,
                 "energy_ledger": m.energy_ledger_last_turn,
-            },
-            "totals": {
-                "consumptions": m.total_consumptions,
-                "plant_consumptions": m.total_plant_consumptions,
             },
             "scaled": scaled,
         });
@@ -598,79 +567,34 @@ pub fn state(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
     writeln!(out, "  energy:     {}", fmt_stats(energy))?;
     writeln!(out, "  age_turns:  {}", fmt_stats(age))?;
     writeln!(out, "  generation: {}", fmt_stats(gen))?;
-    writeln!(out, "food: plants={plants} total_energy={food_energy:.0}")?;
     writeln!(
         out,
-        "last-turn: consumptions={} (plant={}) predations={} starvations={} age_deaths={}",
-        m.consumptions_last_turn,
-        m.plant_consumptions_last_turn,
-        m.predations_last_turn,
-        m.starvations_last_turn,
-        m.age_deaths_last_turn,
+        "last-turn: predations={} starvations={} age_deaths={}",
+        m.predations_last_turn, m.starvations_last_turn, m.age_deaths_last_turn,
     )?;
     let ledger = m.energy_ledger_last_turn;
     writeln!(
         out,
-        "  energy-ledger: org={:.0}->{:.0} food={:.0}->{:.0} plant_spawn={:.0} tick_drain={:.0} attack_transfer={:.0} attack_cost={:.0} food_residual={:.3e} total_residual={:.3e} tol={:.1e}",
+        "  energy-ledger: org={:.0}->{:.0} tick_drain={:.0} attack_transfer={:.0} attack_cost={:.0} total_residual={:.3e} tol={:.1e}",
         ledger.organism_energy_before,
         ledger.organism_energy_after,
-        ledger.food_energy_before,
-        ledger.food_energy_after,
-        ledger.plant_spawn_energy,
         ledger.tick_drain_energy,
         ledger.attack_transfer_energy,
         ledger.attack_attempt_cost,
-        ledger.food_transfer_residual,
         ledger.total_residual,
         ledger.residual_tolerance,
-    )?;
-    writeln!(
-        out,
-        "cumulative: consumptions={} (plant={})",
-        m.total_consumptions, m.total_plant_consumptions,
     )?;
     if let Some((p, _, partial)) = pillars {
         writeln!(
             out,
-            "metrics: plant_rate {} | prey_rate {} | action_eff {} | mi_sa {} | learn_slope {}{}",
-            opt(p.mean_plant_consumption_rate, 4),
-            opt(p.mean_prey_consumption_rate, 4),
+            "metrics: attack_rate {} | action_eff {} | learn_slope {}{}",
+            opt(p.mean_successful_attack_rate, 4),
             opt(p.mean_action_effectiveness, 4),
-            opt(p.mean_mi_sa, 4),
             opt(p.mean_learning_slope, 6),
             if partial { "  [PARTIAL]" } else { "" },
         )?;
     }
     Ok(())
-}
-
-pub fn food(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
-    let (fmt, _) = take_format(ctx.format, args);
-    let sim = ctx.sim;
-    let (plants, energy) = food_summary(sim);
-    let total = plants;
-    let cells = (sim.config().world_width as u64).pow(2);
-    let coverage = total as f64 / cells as f64 * 100.0;
-    if fmt.is_json() {
-        return writeln!(
-            out,
-            "{}",
-            json!({
-                "plants": plants,
-                "total": total,
-                "total_energy": energy,
-                "coverage_pct": coverage,
-                "cells": cells,
-            })
-        )
-        .map_err(Into::into);
-    }
-    writeln!(
-        out,
-        "food: plants={plants} total={total} total_energy={energy:.0} \
-         coverage={coverage:.3}% of {cells} cells"
-    )
-    .map_err(Into::into)
 }
 
 pub fn inspect(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
@@ -707,11 +631,7 @@ pub fn inspect(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()>
             "generation": o.generation,
             "species": o.species_id.0,
             "last_action": o.last_action_taken,
-            "consumptions": {
-                "total": o.consumptions_count,
-                "plant": o.plant_consumptions_count,
-                "prey": o.prey_consumptions_count,
-            },
+            "successful_attacks": o.successful_attacks_count,
             "genome": {
                 "hidden_nodes": o.genome.hidden_node_count(),
                 "synapses": o.brain.synapse_count,
@@ -743,11 +663,8 @@ pub fn inspect(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()>
     )?;
     writeln!(
         out,
-        "  last_action={:?} consumptions={} (plant={}, prey={})",
-        o.last_action_taken,
-        o.consumptions_count,
-        o.plant_consumptions_count,
-        o.prey_consumptions_count,
+        "  last_action={:?} successful_attacks={}",
+        o.last_action_taken, o.successful_attacks_count,
     )?;
     let g = &o.genome;
     writeln!(
@@ -771,8 +688,8 @@ pub fn inspect(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()>
     if let Some(rec) = rec {
         writeln!(
             out,
-            "  this-tick: selected={:?} failed={} food_visible(rays -1/0/+1)={:?} utilization={:.3}",
-            rec.selected_action, rec.action_failed, rec.food_visible, rec.utilization
+            "  this-tick: primary={:?} command_mask={:#06b} failed_mask={:#06b} utilization={:.3}",
+            rec.selected_action, rec.selected_action_mask, rec.failed_action_mask, rec.utilization
         )?;
     }
     Ok(())
@@ -783,9 +700,11 @@ pub fn top(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
     let field = *rest.first().ok_or_else(|| anyhow!("top needs a field"))?;
     if !matches!(
         field,
-        "energy" | "energy_flow" | "age" | "generation" | "consumptions"
+        "energy" | "energy_flow" | "age" | "generation" | "successful_attacks"
     ) {
-        anyhow::bail!("unknown field `{field}` (energy|energy_flow|age|generation|consumptions)");
+        anyhow::bail!(
+            "unknown field `{field}` (energy|energy_flow|age|generation|successful_attacks)"
+        );
     }
     let n: usize = rest.get(1).map(|s| s.parse()).transpose()?.unwrap_or(10);
     if let Some(arg) = rest.get(2) {
@@ -799,7 +718,7 @@ pub fn top(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
             "energy_flow" => o.energy_flow_last_tick as f64,
             "age" => o.age_turns as f64,
             "generation" => o.generation as f64,
-            "consumptions" => o.consumptions_count as f64,
+            "successful_attacks" => o.successful_attacks_count as f64,
             _ => f64::NAN,
         }
     };
@@ -821,7 +740,7 @@ pub fn top(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
                     "energy": o.energy,
                     "age": o.age_turns,
                     "generation": o.generation,
-                    "consumptions": o.consumptions_count,
+                    "successful_attacks": o.successful_attacks_count,
                     "last_action": o.last_action_taken,
                 })
             })
@@ -838,13 +757,13 @@ pub fn top(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
         let o = &orgs[i];
         writeln!(
             out,
-            "  id={:<6} {field}={:<12.3} energy={:.1} age={} gen={} consum={} last={:?}",
+            "  id={:<6} {field}={:<12.3} energy={:.1} age={} gen={} attacks={} last={:?}",
             o.id.0,
             key(o),
             o.energy,
             o.age_turns,
             o.generation,
-            o.consumptions_count,
+            o.successful_attacks_count,
             o.last_action_taken
         )?;
     }
@@ -952,17 +871,8 @@ pub(crate) fn pillars_value(
         "window_end_tick": p.window_end_tick,
         "intervals": n_intervals,
         "partial": partial,
-        "plant_consumption_rate": opt_json(p.mean_plant_consumption_rate),
-        "prey_consumption_rate": opt_json(p.mean_prey_consumption_rate),
+        "successful_attack_rate": opt_json(p.mean_successful_attack_rate),
         "action_effectiveness": opt_json(p.mean_action_effectiveness),
-        "mi_sa": opt_json(p.mean_mi_sa),
         "learning_slope": opt_json(p.mean_learning_slope),
     })
-}
-
-/// Plant count and total standing plant energy across the world.
-pub fn food_summary(sim: &Simulation) -> (u64, f64) {
-    let plants = sim.foods().len() as u64;
-    let energy = sim.foods().iter().map(|food| food.energy as f64).sum();
-    (plants, energy)
 }

@@ -18,8 +18,8 @@ use std::time::Instant;
 #[cfg(feature = "instrumentation")]
 use types::ActionRecord;
 use types::{
-    ActionType, EnergyLedgerRow, EntityId, FacingDirection, FoodState, Occupant, OrganismFacing,
-    OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId, TickDelta,
+    ActionType, EnergyLedgerRow, EntityId, FacingDirection, Occupant, OrganismFacing, OrganismId,
+    OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId, TickDelta,
 };
 
 const RNG_TURN_MIX: u64 = 0x9E37_79B9_7F4A_7C15;
@@ -38,12 +38,13 @@ struct OrganismIntent {
     from: (i32, i32),
     facing_after_actions: FacingDirection,
     wants_move: bool,
-    wants_eat: bool,
     wants_attack: bool,
     move_target: Option<(i32, i32)>,
     interaction_target: Option<(i32, i32)>,
+    interaction_after_move: bool,
+    snapshot_attack_target: Option<OrganismId>,
     move_confidence: f32,
-    took_action: bool,
+    command_count: u8,
     synapse_ops: u64,
 }
 
@@ -74,6 +75,7 @@ struct MoveResolution {
 pub enum AttackOutcome {
     InsufficientEnergy,
     NoOrganismTarget,
+    TargetEvaded,
     SamePoolBlocked,
     NonlethalHit,
     Killed,
@@ -99,10 +101,12 @@ pub struct AttackEvent {
 /// returns it when done, so contents never leak across ticks.
 #[derive(Debug, Default)]
 pub(crate) struct TurnScratch {
-    removed_food: Vec<bool>,
     dead_organisms: Vec<bool>,
     move_candidates: Vec<(usize, MoveCandidate)>,
     move_resolutions: Vec<MoveResolution>,
+    move_actor_by_cell: Vec<usize>,
+    move_winner_by_actor: Vec<usize>,
+    move_dependency_status: Vec<u8>,
     intents: Vec<OrganismIntent>,
 }
 
@@ -111,14 +115,9 @@ struct CommitResult {
     moves: Vec<OrganismMove>,
     facing_updates: Vec<OrganismFacing>,
     removed_positions: Vec<RemovedEntityPosition>,
-    food_spawned: Vec<FoodState>,
-    consumptions: u64,
-    plant_consumptions: u64,
     predations: u64,
     actions_applied: u64,
     attack_events: Vec<AttackEvent>,
-    food_consumption_debit: f64,
-    food_consumption_credit: f64,
     attack_transfer_energy: f64,
     attack_attempt_cost: f64,
 }
@@ -131,14 +130,12 @@ struct LifecycleEnergyFlow {
 #[derive(Debug, Clone, Copy)]
 struct PhysicalEnergyTotals {
     organism: f64,
-    food: f64,
 }
 
 struct EnergyLedgerInputs<'a> {
     turn: u64,
     before: PhysicalEnergyTotals,
     organisms: &'a [OrganismState],
-    foods: &'a [FoodState],
     commit: &'a CommitResult,
     lifecycle: &'a LifecycleEnergyFlow,
 }
@@ -179,10 +176,6 @@ impl Simulation {
         let organism_energy_before = checked_energy_total(
             "organism energy before tick",
             self.organisms.iter().map(|organism| organism.energy as f64),
-        );
-        let food_energy_before = checked_energy_total(
-            "food energy before tick",
-            self.foods.iter().map(|food| food.energy as f64),
         );
         #[cfg(feature = "profiling")]
         let tick_started = Instant::now();
@@ -229,10 +222,8 @@ impl Simulation {
             turn: self.turn.saturating_add(1),
             before: PhysicalEnergyTotals {
                 organism: organism_energy_before,
-                food: food_energy_before,
             },
             organisms: &self.organisms,
-            foods: &self.foods,
             commit: &commit,
             lifecycle: &lifecycle_energy,
         });
@@ -242,11 +233,7 @@ impl Simulation {
             self.metrics.turns = self.turn;
             self.metrics.synapse_ops_last_turn = synapse_ops;
             self.metrics.actions_applied_last_turn = commit.actions_applied;
-            self.metrics.consumptions_last_turn = commit.consumptions;
-            self.metrics.plant_consumptions_last_turn = commit.plant_consumptions;
             self.metrics.predations_last_turn = commit.predations;
-            self.metrics.total_consumptions += commit.consumptions;
-            self.metrics.total_plant_consumptions += commit.plant_consumptions;
             self.metrics.starvations_last_turn = starvations;
             self.metrics.age_deaths_last_turn = age_deaths;
             self.metrics.energy_ledger_last_turn = energy_ledger;
@@ -266,7 +253,6 @@ impl Simulation {
             facing_updates: commit.facing_updates,
             removed_positions,
             spawned,
-            food_spawned: commit.food_spawned,
             metrics: self.metrics.clone(),
         }
     }
@@ -341,42 +327,22 @@ fn build_energy_ledger_row(inputs: EnergyLedgerInputs<'_>) -> EnergyLedgerRow {
         turn,
         before,
         organisms,
-        foods,
         commit,
         lifecycle,
     } = inputs;
     let organism_energy_before = before.organism;
-    let food_energy_before = before.food;
     let organism_energy_after = checked_energy_total(
         "organism energy after tick",
         organisms.iter().map(|organism| organism.energy as f64),
     );
-    let food_energy_after = checked_energy_total(
-        "food energy after tick",
-        foods.iter().map(|food| food.energy as f64),
-    );
-    let plant_spawn_energy = checked_energy_total(
-        "plant spawn energy",
-        commit.food_spawned.iter().map(|food| food.energy as f64),
-    );
-
-    let organism_expected = organism_energy_before - lifecycle.tick_drain_energy
-        + commit.food_consumption_credit
-        - commit.attack_attempt_cost;
-    let food_expected = food_energy_before - commit.food_consumption_debit + plant_spawn_energy;
+    let organism_expected =
+        organism_energy_before - lifecycle.tick_drain_energy - commit.attack_attempt_cost;
     let organism_residual = organism_energy_after - organism_expected;
-    let food_residual = food_energy_after - food_expected;
-    let food_transfer_residual = commit.food_consumption_credit - commit.food_consumption_debit;
-    let transfer_residual = food_transfer_residual;
-    let total_expected = organism_energy_before + food_energy_before + plant_spawn_energy
-        - lifecycle.tick_drain_energy
-        - commit.attack_attempt_cost;
-    let total_residual = organism_energy_after + food_energy_after - total_expected;
-    let flow_scale = (organism_energy_before + food_energy_before).abs()
-        + plant_spawn_energy.abs()
+    let total_expected =
+        organism_energy_before - lifecycle.tick_drain_energy - commit.attack_attempt_cost;
+    let total_residual = organism_energy_after - total_expected;
+    let flow_scale = organism_energy_before.abs()
         + lifecycle.tick_drain_energy.abs()
-        + commit.food_consumption_debit.abs()
-        + commit.food_consumption_credit.abs()
         + commit.attack_transfer_energy.abs()
         + commit.attack_attempt_cost.abs();
     let residual_tolerance =
@@ -386,19 +352,11 @@ fn build_energy_ledger_row(inputs: EnergyLedgerInputs<'_>) -> EnergyLedgerRow {
         turn,
         organism_energy_before,
         organism_energy_after,
-        food_energy_before,
-        food_energy_after,
-        plant_spawn_energy,
         tick_drain_energy: lifecycle.tick_drain_energy,
-        food_consumption_debit: commit.food_consumption_debit,
-        food_consumption_credit: commit.food_consumption_credit,
         attack_transfer_energy: commit.attack_transfer_energy,
         attack_attempt_cost: commit.attack_attempt_cost,
         organism_residual,
-        food_residual,
         total_residual,
-        food_transfer_residual,
-        transfer_residual,
         residual_tolerance,
     };
     assert_energy_ledger_closes(&row);
@@ -409,19 +367,11 @@ fn assert_energy_ledger_closes(row: &EnergyLedgerRow) {
     let finite_values = [
         row.organism_energy_before,
         row.organism_energy_after,
-        row.food_energy_before,
-        row.food_energy_after,
-        row.plant_spawn_energy,
         row.tick_drain_energy,
-        row.food_consumption_debit,
-        row.food_consumption_credit,
         row.attack_transfer_energy,
         row.attack_attempt_cost,
         row.organism_residual,
-        row.food_residual,
         row.total_residual,
-        row.food_transfer_residual,
-        row.transfer_residual,
         row.residual_tolerance,
     ];
     assert!(
@@ -431,9 +381,6 @@ fn assert_energy_ledger_closes(row: &EnergyLedgerRow) {
     );
     for (label, residual) in [
         ("organism compartment", row.organism_residual),
-        ("food compartment", row.food_residual),
-        ("plant-to-organism transfer", row.food_transfer_residual),
-        ("combined physical transfers", row.transfer_residual),
         ("total compartments", row.total_residual),
     ] {
         assert!(
@@ -452,10 +399,6 @@ fn organism_index_by_id(organisms: &[OrganismState], id: OrganismId) -> Option<u
         .ok()
 }
 
-fn food_index_by_id(foods: &[FoodState], id: types::FoodId) -> Option<usize> {
-    foods.binary_search_by_key(&id, |food| food.id).ok()
-}
-
 fn action_rng_seed(sim_seed: u64, tick: u64, organism_id: OrganismId) -> u64 {
     let mixed =
         sim_seed ^ tick.wrapping_mul(RNG_TURN_MIX) ^ organism_id.0.wrapping_mul(RNG_ORGANISM_MIX);
@@ -468,6 +411,24 @@ pub(crate) fn deterministic_action_sample(
     organism_id: OrganismId,
 ) -> f32 {
     let sample = (action_rng_seed(sim_seed, tick, organism_id) >> 40) as u32;
+    sample as f32 / ((1_u32 << 24) - 1) as f32
+}
+
+pub(crate) fn deterministic_action_samples(
+    sim_seed: u64,
+    tick: u64,
+    organism_id: OrganismId,
+) -> [f32; 3] {
+    let base = action_rng_seed(sim_seed, tick, organism_id);
+    [
+        deterministic_action_sample(sim_seed, tick, organism_id),
+        deterministic_sample_from_seed(base ^ 0xD1B5_4A32_D192_ED03),
+        deterministic_sample_from_seed(base ^ 0xABC9_8388_FB8F_AC03),
+    ]
+}
+
+fn deterministic_sample_from_seed(seed: u64) -> f32 {
+    let sample = (mix_u64(seed) >> 40) as u32;
     sample as f32 / ((1_u32 << 24) - 1) as f32
 }
 

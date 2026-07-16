@@ -17,7 +17,7 @@ use std::time::Instant;
 use types::{
     action_gene_node_index, sensory_gene_node_index, ActionNeuronState, ActionType, BrainState,
     GeneNodeId, InterNeuronState, NeuronId, NeuronState, NeuronType, OrganismGenome,
-    SensoryNeuronState, SensoryReceptor, SynapseEdge, SynapseGene,
+    SensoryNeuronState, SensoryReceptor, SynapseEdge, SynapseGene, SynapseTiming,
 };
 
 pub use crate::topology::{action_index, ACTION_COUNT, ACTION_ID_BASE, SENSORY_COUNT};
@@ -54,6 +54,7 @@ pub fn fast_tanh(x: f32) -> f32 {
 #[derive(Default)]
 pub struct BrainEvaluation {
     pub selected_action: ActionType,
+    pub selected_action_mask: u8,
     pub action_logits: [f32; ACTION_COUNT],
     pub synapse_ops: u64,
 }
@@ -82,8 +83,10 @@ impl BrainScratch {
         self.inter_inputs
             .extend(brain.inter.iter().map(|inter| inter.neuron.bias));
         self.prev_inter.clear();
-        self.prev_inter
-            .extend(brain.inter.iter().map(|inter| inter.neuron.activation));
+        if !brain.recurrent_synapses.is_empty() {
+            self.prev_inter
+                .extend_from_slice(&brain.previous_inter_activations);
+        }
     }
 }
 

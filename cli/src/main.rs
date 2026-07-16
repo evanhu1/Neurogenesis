@@ -61,7 +61,6 @@ fn is_read_only(cmd: &str) -> bool {
             | "lineage"
             | "genome"
             | "timeseries"
-            | "food"
             | "inspect"
             | "top"
             | "hist"
@@ -82,12 +81,12 @@ fn print_help(out: &mut impl Write) -> Result<()> {
          \x20 cli batch ...                 run a reproducible multi-seed experiment suite\n\
          \x20 cli summarize ...             summarize persisted experiment results\n\
          \x20 cli analyze RESULT...         derive trajectories and diagnostics\n\
-         \x20 cli crossplay RESULT ...      pairwise transfer assay over frozen champions\n\
+         \x20 cli crossplay RESULT ...      pairwise transfer assay over frozen generation winners\n\
          \x20 cli evaluate-panel ...        evaluate a frozen focal/opponent panel\n\
          \n\
          RUN OPTIONS\n\
-         \x20 --seed N --population N --generations N --horizon N\n\
-         \x20 --lineages-per-world N --memberships-per-genome N --world-seeds N,N\n\
+         \x20 --seed N --population N --generations N --horizon N --task NAME\n\
+         \x20 --opponents-per-genome N --world-seeds N,N\n\
          \x20 --scenarios baseline[,scarcity,sparse_search] --workers N\n\
          \x20 --founders N [--world-width N] [--set world_key=value]\n\
          \n\
@@ -120,7 +119,7 @@ fn print_world_help(out: &mut impl Write) -> Result<()> {
          \x20 sweep --grid k=v,v... --seeds N,N --to T [--out-dir D]\n\
          \n\
          READ-ONLY\n\
-         \x20 turn | state | pillars | eco | lineage | genome | food --in WORLD\n\
+         \x20 turn | state | pillars | eco | lineage | genome --in WORLD\n\
          \x20 timeseries | inspect | top | hist | find | brain | decide --in WORLD\n\
          \x20 query --in WORLD\n\
          \n\
@@ -135,7 +134,7 @@ fn print_world_help(out: &mut impl Write) -> Result<()> {
 fn main() {
     if let Err(e) = run() {
         // Structured, single-line error for the agent driving us over the shell.
-        eprintln!("{}", json!({ "error": e.to_string() }));
+        eprintln!("{}", json!({ "error": format!("{e:#}") }));
         std::process::exit(1);
     }
 }
@@ -169,7 +168,6 @@ fn run() -> Result<()> {
             | "eco"
             | "lineage"
             | "genome"
-            | "food"
             | "timeseries"
             | "inspect"
             | "top"
@@ -472,7 +470,6 @@ impl App {
             "lineage" => views::lineage(&ctx, args, out),
             "genome" => views::genome(&ctx, args, out),
             "timeseries" => views::timeseries(&ctx, args, out),
-            "food" => views::food(&ctx, args, out),
             "inspect" => views::inspect(&ctx, args, out),
             "top" => views::top(&ctx, args, out),
             "hist" => views::hist(&ctx, args, out),
@@ -687,7 +684,7 @@ pub(crate) fn build_world_cli(app: &mut App, args: &[&str], out: &mut impl Write
                     .ok_or_else(|| anyhow!("--set needs key=value"))?;
                 let (k, v) = kv
                     .split_once('=')
-                    .ok_or_else(|| anyhow!("--set wants key=value (e.g. food_energy=12)"))?;
+                    .ok_or_else(|| anyhow!("--set wants key=value (e.g. initial_energy=250)"))?;
                 sets.push((k.trim().to_string(), v.trim().to_string()));
                 i += 2;
             }
@@ -695,7 +692,7 @@ pub(crate) fn build_world_cli(app: &mut App, args: &[&str], out: &mut impl Write
         }
     }
 
-    let champion_pool = if let Some(path) = seed_genome_snapshot.as_deref() {
+    let founder_genome_pool = if let Some(path) = seed_genome_snapshot.as_deref() {
         let file = std::fs::File::open(path)
             .map_err(|e| anyhow!("cannot open seed genome snapshot `{path}`: {e}"))?;
         let genome = bincode::deserialize_from(file)
@@ -711,7 +708,7 @@ pub(crate) fn build_world_cli(app: &mut App, args: &[&str], out: &mut impl Write
         threads,
         scale,
         sets: sets.clone(),
-        champion_pool,
+        founder_genome_pool,
     })?;
     let sim = built.sim;
     let scaled = built.scaled;
@@ -726,7 +723,6 @@ pub(crate) fn build_world_cli(app: &mut App, args: &[&str], out: &mut impl Write
                 "threads": sim.config().intent_parallel_threads,
                 "world_width": sim.config().world_width,
                 "num_organisms": sim.config().num_organisms,
-                "food_energy": sim.config().food_energy,
                 "overrides": sets.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>(),
                 "turn": 0,
                 "population": sim.organisms().len(),
@@ -741,11 +737,10 @@ pub(crate) fn build_world_cli(app: &mut App, args: &[&str], out: &mut impl Write
         };
         writeln!(
             out,
-            "created config={config_path} seed={seed} report_every={report_every} threads={}: world_width={} num_organisms={} food_energy={} turn=0 population={}{scaled_tag}",
+            "created config={config_path} seed={seed} report_every={report_every} threads={}: world_width={} num_organisms={} turn=0 population={}{scaled_tag}",
             sim.config().intent_parallel_threads,
             sim.config().world_width,
             sim.config().num_organisms,
-            sim.config().food_energy,
             sim.organisms().len(),
         )?;
     }

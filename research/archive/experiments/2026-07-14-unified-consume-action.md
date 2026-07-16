@@ -1,6 +1,8 @@
 # 2026-07-14-unified-consume-action: split versus unified energy acquisition
 
-Status: proposed
+Status: aborted; superseded by the decisive removal of plants and the `Eat`
+action. The split-versus-unified ecological action question no longer exists in
+the combat-only substrate.
 
 ## Question
 

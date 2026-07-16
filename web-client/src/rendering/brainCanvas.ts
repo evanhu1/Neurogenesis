@@ -422,6 +422,26 @@ export function renderBrain(
       }
     }
   }
+  // Previous-tick edges are compiled separately from the instantaneous DAG.
+  // Render them dashed and purple so temporal feedback is never mistaken for
+  // a same-tick feed-forward connection.
+  ctx.setLineDash([6, 4]);
+  for (const synapse of focusedBrain.recurrent_synapses) {
+    const pre = positions.get(synapse.pre_neuron_id);
+    const post = positions.get(synapse.post_neuron_id);
+    if (!pre || !post) continue;
+    const strokeColor = synapse.weight >= 0 ? 'rgba(109, 40, 217, 0.7)' : 'rgba(190, 24, 93, 0.7)';
+    const strokeWidth = Math.max(0.5, (Math.abs(synapse.weight) / 8) * 2);
+    if (pre.id === post.id) {
+      drawSelfSynapse(pre, strokeColor, strokeWidth);
+      if (showWeightLabels) drawSelfSynapseWeightLabel(pre, synapse.weight, synapse.eligibility);
+    } else {
+      drawDirectedSynapse(pre, post, strokeColor, strokeWidth);
+      if (showWeightLabels)
+        drawSynapseWeightLabel(pre, post, synapse.weight, synapse.eligibility);
+    }
+  }
+  ctx.setLineDash([]);
 
   // Draw nodes
   for (const [, node] of positions) {

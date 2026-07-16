@@ -9,7 +9,7 @@ use anyhow::{anyhow, Result};
 use serde_json::json;
 use std::io::Write;
 use views::output::{opt, Format};
-use views::{food_summary, take_format};
+use views::take_format;
 
 impl App {
     pub(crate) fn watch(&mut self, args: &[&str], out: &mut impl Write) -> Result<()> {
@@ -65,20 +65,16 @@ impl App {
         let sim = ctx.sim;
         let turn = sim.turn();
         let pop = sim.organisms().len() as u64;
-        let (plants, food_energy) = food_summary(sim);
 
         if fmt.is_json() {
             let mut v = json!({
                 "turn": turn,
                 "population": pop,
-                "food": { "plants": plants, "total_energy": food_energy },
             });
             if let Some((p, _, partial)) = pillars {
                 v["metrics"] = json!({
-                    "plant_consumption_rate": p.mean_plant_consumption_rate,
-                    "prey_consumption_rate": p.mean_prey_consumption_rate,
                     "action_effectiveness": p.mean_action_effectiveness,
-                    "mi_sa": p.mean_mi_sa,
+                    "successful_attack_rate": p.mean_successful_attack_rate,
                     "learning_slope": p.mean_learning_slope,
                     "partial": partial,
                 });
@@ -86,26 +82,18 @@ impl App {
             return writeln!(out, "{v}").map_err(Into::into);
         }
 
-        let food = plants;
         if let Some((p, _, partial)) = pillars {
             writeln!(
                 out,
-                "t={turn:<8} pop={pop:<6} food={food:<6} \
-                 plant={} prey={} eff={} mi={} slope={}{}",
-                opt(p.mean_plant_consumption_rate, 4),
-                opt(p.mean_prey_consumption_rate, 4),
+                "t={turn:<8} pop={pop:<6} attack={} eff={} slope={}{}",
+                opt(p.mean_successful_attack_rate, 4),
                 opt(p.mean_action_effectiveness, 4),
-                opt(p.mean_mi_sa, 4),
                 opt(p.mean_learning_slope, 6),
                 if partial { " [PARTIAL]" } else { "" },
             )
             .map_err(Into::into)
         } else {
-            writeln!(
-                out,
-                "t={turn:<8} pop={pop:<6} food={food:<6} energy={food_energy:.0}"
-            )
-            .map_err(Into::into)
+            writeln!(out, "t={turn:<8} pop={pop:<6}").map_err(Into::into)
         }
     }
 }

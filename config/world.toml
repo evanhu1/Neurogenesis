@@ -1,21 +1,16 @@
 [world]
-world_width = 50 # Toroidal world width used for both axial dimensions of the hex grid.
+world_width = 42 # Preserves the established arena density with one founder per genome.
 vision_range = 5 # Fixed number of cells scanned along each of the six egocentric vision rays.
 
 [population]
-num_organisms = 100 # Target number of organisms to place when seeding the initial population.
+num_organisms = 64 # Shared-arena baseline: exactly one founder for each genome in the NEAT pool.
 
 [lifecycle]
-starting_energy = 250 # Remaining lifetime ticks assigned to every founder.
-attack_energy_transfer = 40 # Maximum energy conserved from victim to attacker per successful adjacent attack.
-attack_attempt_cost = 10 # Energy dissipated by every attack action, including misses and blocked friendly-fire attempts.
+starting_energy = 250 # Initial energy budget assigned to every founder.
+attack_energy_transfer = 20 # Maximum energy conserved from victim to attacker per successful adjacent attack.
+attack_attempt_cost = 1 # One metabolism-tick of energy dissipated by every attack action, including misses and blocked friendly-fire attempts.
 action_temperature = 0.08 # Softmax temperature for action sampling; lower values make choices more deterministic.
 intent_parallel_threads = 8 # Worker threads used during the intent-evaluation phase.
-
-[food]
-food_energy = 20 # Energy a plant yields when eaten (transferred in full; no digestion multiplier).
-food_regrowth_interval = 200 # Exact turns between consumption and deterministic regrowth eligibility.
-food_tile_fraction = 0.20 # Exact fraction of non-wall cells selected as persistent plant tiles by a deterministic random ranking.
 
 [terrain]
 terrain_noise_scale = 0.01 # Perlin noise input scale for terrain-wall generation.
@@ -25,5 +20,6 @@ terrain_threshold = 0.70 # Noise cutoff for turning a cell into impassable wall 
 [flags]
 runtime_plasticity_enabled = false # Whether runtime Hebbian plasticity updates are applied after each tick.
 leaky_neurons_enabled = false # Whether feed-forward hidden units also retain explicit leaky state across ticks.
-predation_enabled = true # Gives organism ray hits a -1 affordance and enables dissipative adjacent energy theft.
+predation_enabled = true # Enables dissipative adjacent energy theft.
 force_random_actions = false # Debug toggle that ignores policy logits and forces random actions.
+compositional_actions_enabled = true # Independently emit orientation, locomotion, and attack so pursuit does not require prey to remain still.

@@ -1,7 +1,5 @@
 import type {
-  ApiChampionPoolResponse,
   ApiEntityId,
-  ApiFoodState,
   ApiMetricsSnapshot,
   ApiOrganismDetail,
   ApiOrganismGenome,
@@ -11,9 +9,7 @@ import type {
   ApiWorldOrganismState,
   ApiWorldSnapshot,
   BrainState,
-  ChampionPoolResponse,
   EntityId,
-  FoodState,
   MetricsSnapshot,
   NeuronState,
   OrganismDetail,
@@ -58,6 +54,12 @@ function normalizeBrainState(brain: ApiOrganismState['brain']): BrainState {
 
   return {
     synapse_count: brain.synapse_count,
+    recurrent_synapses: normalizeSynapses(brain.recurrent_synapses),
+    previous_inter_activations: [...brain.previous_inter_activations],
+    sensory_mean_activation: [...brain.sensory_mean_activation],
+    inter_mean_activation: [...brain.inter_mean_activation],
+    action_mean_activation: [...brain.action_mean_activation],
+    means_initialized: brain.means_initialized,
     sensory: brain.sensory.map((sensory) => ({
       ...sensory,
       neuron: normalizeNeuronState(sensory.neuron),
@@ -73,10 +75,6 @@ function normalizeBrainState(brain: ApiOrganismState['brain']): BrainState {
       neuron_id: unwrapId(action.neuron_id),
     })),
   };
-}
-
-function normalizeFoodState(food: ApiFoodState): FoodState {
-  return { ...food, id: unwrapId(food.id) };
 }
 
 function normalizeWorldOrganismState(organism: ApiWorldOrganismState): WorldOrganismState {
@@ -126,17 +124,6 @@ function normalizeMetrics(
   };
 }
 
-export function normalizeChampionPoolResponse(
-  response: ApiChampionPoolResponse,
-): ChampionPoolResponse {
-  return {
-    entries: response.entries.map((entry) => ({
-      ...entry,
-      genome: normalizeOrganismGenome(entry.genome),
-    })),
-  };
-}
-
 export function normalizeWorldSnapshot(
   snapshot: ApiWorldSnapshot,
   previousTotalSpeciesCreated = 0,
@@ -147,7 +134,6 @@ export function normalizeWorldSnapshot(
     rng_seed: snapshot.rng_seed,
     config: snapshot.config,
     organisms,
-    foods: snapshot.foods.map(normalizeFoodState),
     terrain: snapshot.terrain,
     metrics: normalizeMetrics(snapshot.metrics, organisms, previousTotalSpeciesCreated),
   };
@@ -166,7 +152,6 @@ export function normalizeTickDelta(delta: ApiTickDelta): TickDelta {
       entity_id: normalizeEntityId(entry.entity_id),
     })),
     spawned: delta.spawned.map(normalizeWorldOrganismState),
-    food_spawned: delta.food_spawned.map(normalizeFoodState),
     metrics: delta.metrics,
   };
 }

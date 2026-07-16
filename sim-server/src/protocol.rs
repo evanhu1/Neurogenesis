@@ -1,14 +1,14 @@
 //! Wire schema for the thin file-server. A world is a file on disk; these are
 //! the client-facing views the server serializes over HTTP + the WebSocket
-//! animation stream. Render-shaped organism/food/terrain data only — the
+//! animation stream. Render-shaped organism/terrain data only — the
 //! CLI-parity research reads (state/pillars/inspect/brain/…) are produced by
 //! `views` and forwarded as raw JSON, so they have no structs here.
 
 use serde::{Deserialize, Serialize};
 use types::{
-    organism_visual, FacingDirection, FoodState, MetricsSnapshot, OrganismFacing, OrganismGenome,
-    OrganismId, OrganismMove, OrganismState, RemovedEntityPosition, SpeciesId, TerrainCell,
-    TickDelta, VisualProperties, WorldSnapshot,
+    organism_visual, FacingDirection, MetricsSnapshot, OrganismFacing, OrganismId, OrganismMove,
+    OrganismState, RemovedEntityPosition, SpeciesId, TerrainCell, TickDelta, VisualProperties,
+    WorldSnapshot,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -30,9 +30,7 @@ pub struct WorldOrganismState {
     pub facing: FacingDirection,
     pub energy: u32,
     pub energy_flow_last_tick: i32,
-    pub consumptions_count: u64,
-    pub plant_consumptions_count: u64,
-    pub prey_consumptions_count: u64,
+    pub successful_attacks_count: u64,
     pub visual: VisualProperties,
 }
 
@@ -48,15 +46,13 @@ impl From<&OrganismState> for WorldOrganismState {
             facing: organism.facing,
             energy: organism.energy,
             energy_flow_last_tick: organism.energy_flow_last_tick,
-            consumptions_count: organism.consumptions_count,
-            plant_consumptions_count: organism.plant_consumptions_count,
-            prey_consumptions_count: organism.prey_consumptions_count,
+            successful_attacks_count: organism.successful_attacks_count,
             visual: organism_visual(),
         }
     }
 }
 
-/// Full render snapshot of a world (the canvas feed): every organism, food, and
+/// Full render snapshot of a world (the canvas feed): every organism and
 /// terrain cell plus the current metrics. Produced from `Simulation::snapshot`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorldSnapshotView {
@@ -64,7 +60,6 @@ pub struct WorldSnapshotView {
     pub rng_seed: u64,
     pub config: types::WorldConfig,
     pub organisms: Vec<WorldOrganismState>,
-    pub foods: Vec<FoodState>,
     pub terrain: Vec<TerrainCell>,
     pub metrics: MetricsSnapshot,
 }
@@ -80,7 +75,6 @@ impl From<WorldSnapshot> for WorldSnapshotView {
                 .iter()
                 .map(WorldOrganismState::from)
                 .collect(),
-            foods: snapshot.foods,
             terrain: snapshot.terrain,
             metrics: snapshot.metrics,
         }
@@ -96,7 +90,6 @@ pub struct TickDeltaView {
     pub facing_updates: Vec<OrganismFacing>,
     pub removed_positions: Vec<RemovedEntityPosition>,
     pub spawned: Vec<WorldOrganismState>,
-    pub food_spawned: Vec<FoodState>,
     pub metrics: MetricsSnapshot,
 }
 
@@ -108,7 +101,6 @@ impl From<TickDelta> for TickDeltaView {
             facing_updates: delta.facing_updates,
             removed_positions: delta.removed_positions,
             spawned: delta.spawned.iter().map(WorldOrganismState::from).collect(),
-            food_spawned: delta.food_spawned,
             metrics: delta.metrics,
         }
     }
@@ -132,20 +124,4 @@ pub struct OrganismDetail {
     pub turn: u64,
     pub organism: OrganismState,
     pub active_action_neuron_id: Option<types::NeuronId>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ChampionPoolEntry {
-    pub genome: OrganismGenome,
-    pub source_turn: u64,
-    pub source_created_at_unix_ms: u128,
-    pub generation: u64,
-    pub age_turns: u64,
-    pub consumptions_count: u64,
-    pub energy: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ChampionPoolResponse {
-    pub entries: Vec<ChampionPoolEntry>,
 }

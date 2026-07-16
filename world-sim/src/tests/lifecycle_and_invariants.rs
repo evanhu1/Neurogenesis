@@ -2,10 +2,12 @@ use super::support::*;
 use super::*;
 
 #[test]
-fn state_invariants_hold_across_multi_turn_mixed_ecology_and_spawn_flow() {
+fn state_invariants_hold_across_multi_turn_movement_and_attack_flow() {
     let mut cfg = test_config(8, 5);
     cfg.predation_enabled = true;
-    cfg.food_regrowth_interval = 2;
+    cfg.attack_attempt_cost = 1;
+    cfg.attack_energy_transfer = 20;
+    cfg.runtime_plasticity_enabled = false;
 
     let mut sim = Simulation::new(cfg, 20).expect("simulation should initialize");
     let wall_idx = sim.cell_index(3, 1);
@@ -15,90 +17,61 @@ fn state_invariants_hold_across_multi_turn_mixed_ecology_and_spawn_flow() {
     configure_sim(
         &mut sim,
         vec![
-            make_single_action_organism(
+            make_compositional_organism(
                 0,
                 1,
                 1,
                 FacingDirection::East,
-                ActionType::Forward,
-                0.9,
+                &[ActionType::Forward],
                 100.0,
             ),
-            make_single_action_organism(
+            make_compositional_organism(
                 1,
                 5,
                 3,
                 FacingDirection::East,
-                ActionType::Attack,
-                0.9,
+                &[ActionType::Attack],
                 100.0,
             ),
             {
-                let mut prey = make_single_action_organism(
-                    2,
-                    6,
-                    3,
-                    FacingDirection::West,
-                    ActionType::Idle,
-                    0.1,
-                    100.0,
-                );
+                let mut prey =
+                    make_compositional_organism(2, 6, 3, FacingDirection::West, &[], 100.0);
                 prey.energy = 20;
                 prey.energy_at_last_sensing = 20;
                 prey
             },
-            make_single_action_organism(
+            make_compositional_organism(
                 3,
                 1,
                 4,
                 FacingDirection::East,
-                ActionType::Eat,
-                0.9,
+                &[ActionType::Forward],
                 100.0,
             ),
-            make_single_action_organism(
+            make_compositional_organism(
                 4,
                 4,
                 5,
                 FacingDirection::East,
-                ActionType::Eat,
-                0.9,
+                &[ActionType::TurnLeft, ActionType::Forward],
                 900.0,
             ),
         ],
     );
 
-    let food_idx = sim.cell_index(2, 4);
-    sim.food_tiles = vec![false; sim.occupancy.len()];
-    sim.food_tiles[food_idx] = true;
-    sim.food_regrowth_due_turn = vec![u64::MAX; sim.occupancy.len()];
-    sim.food_regrowth_schedule.clear();
-    sim.foods.push(types::FoodState {
-        id: FoodId(0),
-        q: 2,
-        r: 4,
-        energy: sim.config().food_energy,
-        visual: types::plant_visual(),
-    });
-    sim.occupancy[food_idx] = Some(Occupant::Food(FoodId(0)));
-    sim.next_food_id = 1;
-
     sim.validate_state()
-        .expect("mixed scenario should start from a valid state");
+        .expect("competitive scenario should start from a valid state");
 
     let mut saw_predation = false;
-    let mut saw_consumption = false;
     for _ in 0..10 {
         let delta = tick_once(&mut sim);
         saw_predation |= delta.metrics.predations_last_turn > 0;
-        saw_consumption |= delta.metrics.consumptions_last_turn > 0;
         sim.validate_state()
-            .expect("mixed scenario should preserve simulation invariants");
+            .expect("competitive scenario should preserve simulation invariants");
         assert_no_overlap(&sim);
     }
 
     assert!(saw_predation, "scenario should exercise predation");
-    assert!(saw_consumption, "scenario should exercise food consumption");
 }
 
 #[test]

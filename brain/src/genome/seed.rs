@@ -42,7 +42,7 @@ pub fn generate_seed_genome<R: Rng + ?Sized>(
         predation_enabled,
         rng,
     );
-    super::restrict_predation_genes(&mut genome, predation_enabled);
+    super::restrict_action_genes(&mut genome, predation_enabled);
     super::sanitization::sort_synapse_genes(&mut genome.brain.edges);
     debug_assert_genome_well_formed(&genome);
     genome

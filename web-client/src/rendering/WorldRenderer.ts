@@ -85,7 +85,7 @@ export class WorldRenderer {
   private readonly cache: WorldRenderCache = createWorldRenderCache();
   private snapshot: WorldSnapshot | null = null;
   private focusedOrganismId: number | null = null;
-  private visibility: RenderVisibility = { organisms: true, plants: true };
+  private visibility: RenderVisibility = { organisms: true };
   private viewport: WorldViewport = { zoom: 1, panX: 0, panY: 0 };
 
   private frameRequest: number | null = null;

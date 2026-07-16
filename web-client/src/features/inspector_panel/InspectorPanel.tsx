@@ -95,8 +95,7 @@ export function InspectorContent({
         { label: 'Energy', value: String(focusedOrganism.energy) },
         { label: 'Last Flow', value: String(focusedOrganism.energy_flow_last_tick) },
         { label: 'Action', value: focusedOrganism.last_action_taken },
-        { label: 'Plants', value: String(focusedOrganism.plant_consumptions_count) },
-        { label: 'Prey', value: String(focusedOrganism.prey_consumptions_count) },
+        { label: 'Hits', value: String(focusedOrganism.successful_attacks_count) },
         {
           label: 'Neurons',
           value: `${brain.sensory.length}s · ${brain.inter.length}i · ${brain.action.length}a`,

@@ -85,7 +85,7 @@ export function PillarsTab({ worldName, revision, active }: TabProps) {
       {p && (
         <>
           <div className="flex items-center justify-between">
-            <SectionLabel>Competence pillars</SectionLabel>
+          <SectionLabel>Behavior diagnostics</SectionLabel>
             <span className="font-mono text-[10px] text-ink/30">
               ({p.window_start_tick.toLocaleString()}, {p.window_end_tick.toLocaleString()}]
             </span>
@@ -105,11 +105,9 @@ export function PillarsTab({ worldName, revision, active }: TabProps) {
             </div>
           )}
           <div className="space-y-3.5">
-            <PillarMetric label="Foraging · plant rate" value={p.plant_consumption_rate} digits={4} intervals={intervals} metricKey="plant_consumption_rate" highlightFrom={highlightFrom} />
-            <PillarMetric label="Predation · prey rate" value={p.prey_consumption_rate} digits={4} intervals={intervals} metricKey="prey_consumption_rate" highlightFrom={highlightFrom} />
-            <PillarMetric label="Intelligence · action eff." value={p.action_effectiveness} digits={4} intervals={intervals} metricKey="action_effectiveness" highlightFrom={highlightFrom} />
-            <PillarMetric label="Intelligence · MI(s;a)" value={p.mi_sa} digits={4} intervals={intervals} metricKey="mi_sa" highlightFrom={highlightFrom} />
-            <PillarMetric label="Learning · slope" value={p.learning_slope} digits={6} intervals={intervals} metricKey="learning_slope" highlightFrom={highlightFrom} />
+            <PillarMetric label="Successful attacks / action" value={p.successful_attack_rate} digits={4} intervals={intervals} metricKey="successful_attack_rate" highlightFrom={highlightFrom} />
+            <PillarMetric label="Effective actions / action" value={p.action_effectiveness} digits={4} intervals={intervals} metricKey="action_effectiveness" highlightFrom={highlightFrom} />
+            <PillarMetric label="Age-success slope" value={p.learning_slope} digits={6} intervals={intervals} metricKey="learning_slope" highlightFrom={highlightFrom} />
           </div>
           <p className="text-[10px] leading-4 text-ink/30">
             Shaded region is the scoring window. Values are windowed means over {p.granular.report_every.toLocaleString()}-tick intervals.
@@ -138,9 +136,7 @@ export function EcologyTab({ worldName, revision, active }: TabProps) {
         <>
           <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
             <Stat label="Population" value={fmtInt(e.population)} />
-            <Stat label="Descendants" value={fmtInt(e.descendants)} />
-            <Stat label="Plants" value={fmtInt(e.food.plants)} />
-            <Stat label="Plant Energy" value={fmtInt(e.food.total_energy)} />
+            <Stat label="Organism Energy" value={fmtInt(e.organism_energy)} />
           </div>
           {!e.trajectory ? (
             <p className="text-[11px] text-ink/35">{e.note ?? 'Advance the world to record a trajectory.'}</p>
@@ -151,10 +147,6 @@ export function EcologyTab({ worldName, revision, active }: TabProps) {
                 <div className="text-accent">
                   <Sparkline values={e.trajectory.population_series} className="text-accent/70" />
                 </div>
-              </div>
-              <div className="space-y-1">
-                <SectionLabel>Food</SectionLabel>
-                <Sparkline values={e.trajectory.food_series} className="text-[#7d8a5a]" />
               </div>
               <div className="space-y-1.5">
                 <SectionLabel>Deaths by cause · {fmtInt(e.trajectory.deaths_by_cause.total)} total</SectionLabel>
@@ -173,11 +165,8 @@ export function EcologyTab({ worldName, revision, active }: TabProps) {
                 })}
               </div>
               <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
-                <Stat label="Births/tick" value={fmt(e.trajectory.births_per_tick, 4)} />
                 <Stat label="Deaths/tick" value={fmt(e.trajectory.deaths_per_tick, 4)} />
-                <Stat label="Consum/tick" value={fmt(e.trajectory.consumptions_per_tick, 4)} />
                 <Stat label="Predat/tick" value={fmt(e.trajectory.predations_per_tick, 4)} />
-                <Stat label="Carrying cap." value={fmt(e.trajectory.carrying_capacity_est, 1)} />
               </div>
             </>
           )}
@@ -289,19 +278,15 @@ export function GenomeTab({ worldName, revision, active }: TabProps) {
 
 const SERIES_COLUMNS = [
   'population',
-  'food',
   'deaths',
-  'consumptions',
   'predations',
   'action_effectiveness',
-  'plant_consumption_rate',
-  'prey_consumption_rate',
-  'mi_sa',
+  'successful_attack_rate',
   'learning_slope',
   'pop',
 ] as const;
 
-const DEFAULT_SERIES = ['population', 'food', 'plant_consumption_rate', 'mi_sa'];
+const DEFAULT_SERIES = ['population', 'predations', 'successful_attack_rate'];
 
 export function SeriesTab({ worldName, revision, active }: TabProps) {
   const [cols, setCols] = useState<string[]>(DEFAULT_SERIES);
@@ -414,7 +399,7 @@ export function FindTab({
           </button>
         </div>
         <p className="text-[10px] leading-4 text-ink/30">
-          Fields: id energy energy_flow age generation species consumptions plant prey
+          Fields: id energy energy_flow age generation species attacks
           neurons synapses vision hebb_eta. Operators: &lt; &lt;= &gt; &gt;= == != · join
           with and/or.
         </p>

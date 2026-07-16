@@ -80,6 +80,9 @@ fn forced_brain_with_action(preferred_action: ActionType, confidence: f32) -> Br
         .map(|(idx, action_type)| SynapseEdge {
             pre_neuron_id: inter_id,
             post_neuron_id: NeuronId(2000 + idx as u32),
+            timing: types::SynapseTiming::CurrentTick,
+            pre_inter_index: None,
+            post_inter_index: None,
             weight: if action_type == preferred_action {
                 8.0
             } else {
@@ -114,6 +117,8 @@ fn forced_brain_with_action(preferred_action: ActionType, confidence: f32) -> Br
         sensory,
         inter,
         action,
+        recurrent_synapses: Vec::new(),
+        previous_inter_activations: vec![0.0],
         synapse_count,
         sensory_mean_activation: vec![0.0],
         inter_mean_activation: vec![0.0],
@@ -144,15 +149,52 @@ pub(super) fn make_single_action_organism(
         energy: initial_energy,
         energy_at_last_sensing: initial_energy,
         energy_flow_last_tick: 0,
-        consumptions_count: 0,
-        plant_consumptions_count: 0,
-        prey_consumptions_count: 0,
+        successful_attacks_count: 0,
         last_action_taken: ActionType::Idle,
+        last_action_mask: 0,
         #[cfg(feature = "instrumentation")]
         instrumentation: Default::default(),
         brain: forced_brain_with_action(preferred_action, confidence),
         genome: test_genome(),
     })
+}
+
+/// Build an organism whose action biases deterministically emit exactly the
+/// requested compositional commands. Extreme finite biases keep these tests
+/// independent of the deterministic sampling draw while still exercising the
+/// real brain-evaluation and intent-building pipeline.
+pub(super) fn make_compositional_organism(
+    id: u64,
+    q: i32,
+    r: i32,
+    facing: FacingDirection,
+    commands: &[ActionType],
+    energy: impl IntoEnergy,
+) -> OrganismState {
+    make_compositional_organism_with_bias(id, q, r, facing, commands, 100.0, energy)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn make_compositional_organism_with_bias(
+    id: u64,
+    q: i32,
+    r: i32,
+    facing: FacingDirection,
+    commands: &[ActionType],
+    command_bias: f32,
+    energy: impl IntoEnergy,
+) -> OrganismState {
+    let mut organism = make_single_action_organism(id, q, r, facing, ActionType::Idle, 0.0, energy);
+    organism.genome.brain.action_biases.fill(-100.0);
+    for command in commands {
+        assert_ne!(
+            *command,
+            ActionType::Idle,
+            "Idle is the absence of a command"
+        );
+        organism.genome.brain.action_biases[brain::action_index(*command)] = command_bias;
+    }
+    organism
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -180,10 +222,9 @@ pub(super) fn make_organism(
         energy: initial_energy,
         energy_at_last_sensing: initial_energy,
         energy_flow_last_tick: 0,
-        consumptions_count: 0,
-        plant_consumptions_count: 0,
-        prey_consumptions_count: 0,
+        successful_attacks_count: 0,
         last_action_taken: ActionType::Idle,
+        last_action_mask: 0,
         #[cfg(feature = "instrumentation")]
         instrumentation: Default::default(),
         brain: forced_brain(wants_move, turn_left, turn_right, confidence),
@@ -194,8 +235,6 @@ pub(super) fn make_organism(
 pub(super) fn configure_sim(sim: &mut Simulation, mut organisms: Vec<OrganismState>) {
     organisms.sort_by_key(|organism| organism.id);
     sim.organisms = organisms;
-    sim.foods.clear();
-    sim.next_food_id = 0;
     sim.next_organism_id = sim
         .organisms
         .iter()
@@ -217,7 +256,6 @@ pub(super) fn configure_sim(sim: &mut Simulation, mut organisms: Vec<OrganismSta
         sim.occupancy[idx] = Some(Occupant::Organism(organism.id));
     }
     sim.turn = 0;
-    sim.initialize_food_ecology();
     sim.metrics = MetricsSnapshot::default();
     sim.refresh_population_metrics();
 }
@@ -245,15 +283,8 @@ pub(super) fn assert_no_overlap(sim: &Simulation) {
         let idx = sim.cell_index(organism.q, organism.r);
         assert_eq!(sim.occupancy[idx], Some(Occupant::Organism(organism.id)));
     }
-    for food in &sim.foods {
-        assert!(seen.insert((food.q, food.r)), "entities should not overlap",);
-        let idx = sim.cell_index(food.q, food.r);
-        assert_eq!(sim.occupancy[idx], Some(Occupant::Food(food.id)));
-    }
     assert_eq!(
-        sim.organisms.len()
-            + sim.foods.len()
-            + sim.terrain_map.iter().filter(|blocked| **blocked).count(),
+        sim.organisms.len() + sim.terrain_map.iter().filter(|blocked| **blocked).count(),
         sim.occupancy.iter().flatten().count()
     );
 }

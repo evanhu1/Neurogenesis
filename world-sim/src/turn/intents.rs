@@ -15,8 +15,9 @@ struct IntentBuildContext<'a> {
     leaky_neurons_enabled: bool,
     predation_enabled: bool,
     starting_energy: u32,
-    plant_energy: u32,
+    energy_flow_scale: u32,
     force_random_actions: bool,
+    compositional_actions_enabled: bool,
     sim_seed: u64,
     tick: u64,
 }
@@ -24,10 +25,9 @@ struct IntentBuildContext<'a> {
 #[derive(Clone, Copy)]
 struct SelectedActionState {
     selected_action: ActionType,
-    selected_action_logit: f32,
+    selected_action_mask: u8,
+    forward_logit: f32,
     synapse_ops: u64,
-    #[cfg(feature = "instrumentation")]
-    food_visible: [bool; brain::VISION_RAY_COUNT],
 }
 
 impl Simulation {
@@ -41,8 +41,9 @@ impl Simulation {
             leaky_neurons_enabled: self.config.leaky_neurons_enabled,
             predation_enabled: self.config.predation_enabled,
             starting_energy: self.config.starting_energy,
-            plant_energy: self.config.food_energy,
+            energy_flow_scale: self.config.attack_energy_transfer,
             force_random_actions: self.config.force_random_actions,
+            compositional_actions_enabled: self.config.compositional_actions_enabled,
             sim_seed: self.seed,
             tick: self.turn,
         };
@@ -99,14 +100,8 @@ fn build_intent_for_organism(
     let selected_action_state = select_action_for_organism(organism, context, scratch);
 
     organism.last_action_taken = selected_action_state.selected_action;
-    let intent = intent_from_selected_action(
-        idx,
-        organism,
-        selected_action_state.selected_action,
-        selected_action_state.selected_action_logit,
-        selected_action_state.synapse_ops,
-        context.world_width,
-    );
+    organism.last_action_mask = selected_action_state.selected_action_mask;
+    let intent = intent_from_selected_action(idx, organism, selected_action_state, context);
 
     BuiltIntent {
         intent,
@@ -120,28 +115,25 @@ fn select_action_for_organism(
     context: IntentBuildContext<'_>,
     scratch: &mut BrainScratch,
 ) -> SelectedActionState {
-    let action_sample = deterministic_action_sample(context.sim_seed, context.tick, organism.id);
+    let action_samples = deterministic_action_samples(context.sim_seed, context.tick, organism.id);
 
     if context.force_random_actions {
-        #[cfg(feature = "instrumentation")]
-        let food_visible = {
-            let ray_scans = crate::sensing::scan_rays(
-                (organism.q, organism.r),
-                organism.facing,
-                organism.id,
-                context.vision_ray_table,
-                context.occupancy,
-                context.predation_enabled,
-            );
-            ray_scans.map(|scan| scan.food_visible)
-        };
-
         return SelectedActionState {
-            selected_action: uniform_random_action(action_sample, context.predation_enabled),
-            selected_action_logit: 0.0,
+            selected_action: if context.compositional_actions_enabled {
+                primary_action_from_mask(uniform_random_compositional_mask(
+                    action_samples,
+                    context.predation_enabled,
+                ))
+            } else {
+                uniform_random_action(action_samples[0], context.predation_enabled)
+            },
+            selected_action_mask: if context.compositional_actions_enabled {
+                uniform_random_compositional_mask(action_samples, context.predation_enabled)
+            } else {
+                uniform_random_action(action_samples[0], context.predation_enabled).command_bit()
+            },
+            forward_logit: 0.0,
             synapse_ops: 0,
-            #[cfg(feature = "instrumentation")]
-            food_visible,
         };
     }
 
@@ -150,10 +142,9 @@ fn select_action_for_organism(
         context.vision_ray_table,
         context.occupancy,
         context.starting_energy,
-        context.plant_energy,
+        context.energy_flow_scale,
         context.predation_enabled,
     );
-    #[cfg(not(feature = "instrumentation"))]
     let _ = ray_scans;
     let evaluation = evaluate_brain(
         organism,
@@ -161,7 +152,8 @@ fn select_action_for_organism(
             leaky_neurons_enabled: context.leaky_neurons_enabled,
             predation_enabled: context.predation_enabled,
             action_temperature: context.action_temperature,
-            action_sample,
+            action_samples,
+            compositional_actions_enabled: context.compositional_actions_enabled,
         },
         scratch,
     );
@@ -170,29 +162,23 @@ fn select_action_for_organism(
     }
 
     let selected_action = evaluation.selected_action;
-    let selected_action_logit = if selected_action == ActionType::Idle {
-        0.0
-    } else {
-        evaluation.action_logits[action_index(selected_action)]
-    };
-
     SelectedActionState {
         selected_action,
-        selected_action_logit,
+        selected_action_mask: evaluation.selected_action_mask,
+        forward_logit: evaluation.action_logits[action_index(ActionType::Forward)],
         synapse_ops: evaluation.synapse_ops,
-        #[cfg(feature = "instrumentation")]
-        food_visible: ray_scans.map(|scan| scan.food_visible),
     }
 }
 
 fn intent_from_selected_action(
     idx: usize,
     organism: &OrganismState,
-    selected_action: ActionType,
-    selected_action_logit: f32,
-    synapse_ops: u64,
-    world_width: i32,
+    selected: SelectedActionState,
+    context: IntentBuildContext<'_>,
 ) -> OrganismIntent {
+    let selected_action_mask = selected.selected_action_mask;
+    let world_width = context.world_width;
+    let compositional_actions_enabled = context.compositional_actions_enabled;
     let from = (organism.q, organism.r);
     let current_facing = organism.facing;
     let forward_cell = || hex_neighbor(from, current_facing, world_width);
@@ -203,32 +189,44 @@ fn intent_from_selected_action(
         from,
         facing_after_actions: current_facing,
         wants_move: false,
-        wants_eat: false,
         wants_attack: false,
         move_target: None,
         interaction_target: None,
+        interaction_after_move: compositional_actions_enabled,
+        snapshot_attack_target: None,
         move_confidence: 0.0,
-        took_action: selected_action != ActionType::Idle,
-        synapse_ops,
+        command_count: selected_action_mask.count_ones() as u8,
+        synapse_ops: selected.synapse_ops,
     };
 
-    match selected_action {
-        ActionType::Idle => {}
-        ActionType::TurnLeft => intent.facing_after_actions = rotate_left(current_facing),
-        ActionType::TurnRight => intent.facing_after_actions = rotate_right(current_facing),
-        ActionType::Forward => {
-            intent.wants_move = true;
-            intent.move_target = Some(forward_cell());
-            intent.move_confidence = selected_action_logit;
-        }
-        ActionType::Eat => {
-            intent.wants_eat = true;
-            intent.interaction_target = Some(forward_cell());
-        }
-        ActionType::Attack => {
-            intent.wants_attack = true;
-            intent.interaction_target = Some(forward_cell());
-        }
+    if selected_action_mask & ActionType::TurnLeft.command_bit() != 0 {
+        intent.facing_after_actions = rotate_left(current_facing);
+    } else if selected_action_mask & ActionType::TurnRight.command_bit() != 0 {
+        intent.facing_after_actions = rotate_right(current_facing);
+    }
+    let command_forward_cell = || hex_neighbor(from, intent.facing_after_actions, world_width);
+    if selected_action_mask & ActionType::Forward.command_bit() != 0 {
+        intent.wants_move = true;
+        intent.move_target = Some(if compositional_actions_enabled {
+            command_forward_cell()
+        } else {
+            forward_cell()
+        });
+        intent.move_confidence = selected.forward_logit;
+    }
+    if selected_action_mask & ActionType::Attack.command_bit() != 0 {
+        intent.wants_attack = true;
+        let target = if compositional_actions_enabled {
+            command_forward_cell()
+        } else {
+            forward_cell()
+        };
+        intent.interaction_target = Some(target);
+        let target_idx = target.1 as usize * world_width as usize + target.0 as usize;
+        intent.snapshot_attack_target = match context.occupancy[target_idx] {
+            Some(Occupant::Organism(id)) => Some(id),
+            _ => None,
+        };
     }
 
     intent
@@ -242,14 +240,45 @@ fn instrument_action_record(
     ActionRecord {
         organism_id: organism.id,
         selected_action: selected_action_state.selected_action,
-        action_failed: selected_action_state.selected_action.can_fail(),
-        food_visible: selected_action_state.food_visible,
+        selected_action_mask: selected_action_state.selected_action_mask,
+        failed_action_mask: selected_action_state.selected_action_mask
+            & (ActionType::Forward.command_bit() | ActionType::Attack.command_bit()),
+        action_failed: selected_action_state.selected_action_mask
+            & (ActionType::Forward.command_bit() | ActionType::Attack.command_bit())
+            != 0,
         age_turns: organism.age_turns,
         utilization: update_instrumentation_utilization(organism),
-        consumptions_count: organism.consumptions_count,
-        plant_consumptions_count: organism.plant_consumptions_count,
-        prey_consumptions_count: organism.prey_consumptions_count,
+        successful_attacks_count: organism.successful_attacks_count,
     }
+}
+
+fn uniform_random_compositional_mask(samples: [f32; 3], predation_enabled: bool) -> u8 {
+    let orientation = match (samples[0].clamp(0.0, 1.0 - f32::EPSILON) * 3.0) as usize {
+        0 => ActionType::TurnLeft,
+        1 => ActionType::TurnRight,
+        _ => ActionType::Idle,
+    };
+    let locomotion = if samples[1] < 0.5 {
+        ActionType::Forward
+    } else {
+        ActionType::Idle
+    };
+    let mut interactions = [ActionType::Attack]
+        .into_iter()
+        .filter(|action| action.is_enabled(predation_enabled));
+    let interaction_count = interactions.clone().count();
+    let bucket =
+        (samples[2].clamp(0.0, 1.0 - f32::EPSILON) * (interaction_count + 1) as f32) as usize;
+    let interaction = interactions.nth(bucket).unwrap_or(ActionType::Idle);
+    orientation.command_bit() | locomotion.command_bit() | interaction.command_bit()
+}
+
+fn primary_action_from_mask(mask: u8) -> ActionType {
+    ActionType::ALL
+        .iter()
+        .copied()
+        .find(|action| mask & action.command_bit() != 0)
+        .unwrap_or(ActionType::Idle)
 }
 
 #[cfg(feature = "instrumentation")]

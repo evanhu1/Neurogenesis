@@ -51,16 +51,6 @@ pub fn eco(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
     let sim = ctx.sim;
     let turn = sim.turn();
     let pop = sim.organisms().len() as u64;
-    let (plants, food_energy) = crate::food_summary(sim);
-    let food_tiles = sim.food_tile_count();
-    let habitable_cells = sim.habitable_cell_count();
-    let realized_food_tile_fraction = if habitable_cells == 0 {
-        0.0
-    } else {
-        food_tiles as f64 / habitable_cells as f64
-    };
-
-    // Point-in-time block (always present).
     let recorder = ctx.recorder;
     let have_traj = recorder.map(|r| !r.samples.is_empty()).unwrap_or(false);
 
@@ -68,32 +58,19 @@ pub fn eco(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
         let mut v = json!({
             "turn": turn,
             "population": pop,
-            "food": { "plants": plants, "total_energy": food_energy },
-            "food_tiles": {
-                "selected": food_tiles,
-                "habitable_cells": habitable_cells,
-                "realized_fraction": realized_food_tile_fraction,
-                "configured_fraction": sim.config().food_tile_fraction,
-            },
         });
         if let Some(rec) = recorder.filter(|_| have_traj) {
             let s = &rec.samples;
             let pops: Vec<f64> = s.iter().map(|x| x.population as f64).collect();
-            let foods: Vec<f64> = s.iter().map(|x| x.food as f64).collect();
             let deaths = s.iter().map(|x| x.deaths as u64).sum::<u64>();
             let starv = s.iter().map(|x| x.starvations as u64).sum::<u64>();
             let aged = s.iter().map(|x| x.age_deaths as u64).sum::<u64>();
             let preyed = s.iter().map(|x| x.predations as u64).sum::<u64>();
             let n = s.len() as f64;
-            let cons: Vec<f64> = s.iter().map(|x| x.consumptions as f64).collect();
             let preds: Vec<f64> = s.iter().map(|x| x.predations as f64).collect();
-            // Start of the last ~20% of samples (at least one sample).
-            let tail = (s.len() - s.len() / 5).min(s.len() - 1);
-            let cc: Vec<f64> = s[tail..].iter().map(|x| x.population as f64).collect();
             v["trajectory"] = json!({
                 "ticks": s.len(),
                 "population_series": downsample(&pops),
-                "food_series": downsample(&foods),
                 "deaths_per_tick": deaths as f64 / n,
                 "deaths_by_cause": {
                     "total": deaths,
@@ -103,9 +80,7 @@ pub fn eco(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
                     // total - itemized deaths, if any future cause is not separately counted
                     "other": deaths.saturating_sub(starv + aged + preyed),
                 },
-                "consumptions_per_tick": mean(&cons),
                 "predations_per_tick": mean(&preds),
-                "carrying_capacity_est": mean(&cc),
             });
         } else {
             v["trajectory"] = Value::Null;
@@ -114,39 +89,23 @@ pub fn eco(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
         return writeln!(out, "{v}").map_err(Into::into);
     }
 
-    writeln!(
-        out,
-        "eco @ turn {turn}: population={pop} \
-         food: plants={plants} energy={food_energy:.0}"
-    )?;
+    writeln!(out, "combat ecology @ turn {turn}: population={pop}")?;
     if let Some(rec) = recorder.filter(|_| have_traj) {
         let s = &rec.samples;
         let pops: Vec<f64> = s.iter().map(|x| x.population as f64).collect();
-        let foods: Vec<f64> = s.iter().map(|x| x.food as f64).collect();
         let deaths = s.iter().map(|x| x.deaths as u64).sum::<u64>();
         let starv = s.iter().map(|x| x.starvations as u64).sum::<u64>();
         let aged = s.iter().map(|x| x.age_deaths as u64).sum::<u64>();
         let preyed = s.iter().map(|x| x.predations as u64).sum::<u64>();
         let n = s.len() as f64;
-        let cons: Vec<f64> = s.iter().map(|x| x.consumptions as f64).collect();
         let preds: Vec<f64> = s.iter().map(|x| x.predations as f64).collect();
-        let tail = (s.len() - s.len() / 5).min(s.len() - 1);
-        let cc = mean(
-            &s[tail..]
-                .iter()
-                .map(|x| x.population as f64)
-                .collect::<Vec<_>>(),
-        );
         let plast = pops.last().copied().unwrap_or(0.0);
-        let flast = foods.last().copied().unwrap_or(0.0);
         writeln!(out, "trajectory over {} recorded ticks:", s.len())?;
         writeln!(out, "  population {} (now {plast:.0})", spark(&pops))?;
-        writeln!(out, "  food       {} (now {flast:.0})", spark(&foods))?;
         writeln!(
             out,
-            "  rates/tick: deaths={:.4} consumptions={:.4} predations={:.4}",
+            "  rates/tick: deaths={:.4} predations={:.4}",
             deaths as f64 / n,
-            mean(&cons),
             mean(&preds),
         )?;
         writeln!(
@@ -154,7 +113,6 @@ pub fn eco(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
             "  deaths-by-cause (window sum, total={deaths}): starvation={starv} age={aged} predation={preyed} other={}",
             deaths.saturating_sub(starv + aged + preyed)
         )?;
-        writeln!(out, "  carrying_capacity_est (last ~20%) = {cc:.1}")?;
     } else {
         writeln!(
             out,
@@ -410,7 +368,7 @@ pub fn timeseries(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<
         }
     }
     if cols.is_empty() {
-        cols = ["population", "food", "plant_consumption_rate", "mi_sa"]
+        cols = ["population", "predations", "successful_attack_rate"]
             .iter()
             .map(|s| s.to_string())
             .collect();
@@ -427,9 +385,7 @@ pub fn timeseries(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<
     let sample_col = |name: &str| -> Option<Vec<f64>> {
         let f: fn(&EcoSample) -> f64 = match name {
             "population" => |x| x.population as f64,
-            "food" => |x| x.food as f64,
             "deaths" => |x| x.deaths as f64,
-            "consumptions" => |x| x.consumptions as f64,
             "predations" => |x| x.predations as f64,
             _ => return None,
         };
@@ -441,9 +397,7 @@ pub fn timeseries(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<
     let interval_col = |name: &str| -> Option<Vec<f64>> {
         let f: fn(&metrics::IntervalMetrics) -> f64 = match name {
             "action_effectiveness" => |m| m.action_effectiveness.unwrap_or(f64::NAN),
-            "plant_consumption_rate" => |m| m.plant_consumption_rate.unwrap_or(f64::NAN),
-            "prey_consumption_rate" => |m| m.prey_consumption_rate.unwrap_or(f64::NAN),
-            "mi_sa" => |m| m.mi_sa.unwrap_or(f64::NAN),
+            "successful_attack_rate" => |m| m.successful_attack_rate.unwrap_or(f64::NAN),
             "learning_slope" => |m| m.learning_slope.unwrap_or(f64::NAN),
             "interval_population" => |m| m.pop as f64,
             _ => return None,
@@ -457,9 +411,8 @@ pub fn timeseries(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<
         let series = sample_col(name).or_else(|| interval_col(name));
         let mut series = series.ok_or_else(|| {
             anyhow!(
-                "unknown column `{name}`; valid: population food \
-                 deaths consumptions predations action_effectiveness \
-                 plant_consumption_rate prey_consumption_rate mi_sa learning_slope \
+                "unknown column `{name}`; valid: population deaths predations \
+                 action_effectiveness successful_attack_rate learning_slope \
                  interval_population"
             )
         })?;

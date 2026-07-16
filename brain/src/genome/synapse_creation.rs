@@ -7,6 +7,7 @@ struct Candidate {
     innovation: InnovationId,
     pre: GeneNodeId,
     post: GeneNodeId,
+    timing: SynapseTiming,
 }
 
 pub(super) fn add_synapse_genes<R: Rng + ?Sized>(
@@ -64,7 +65,8 @@ fn insert_or_reenable<R: Rng + ?Sized>(
     candidate: Candidate,
     rng: &mut R,
 ) {
-    if super::connection_would_create_cycle(genome, candidate.pre, candidate.post) {
+    if super::connection_would_create_cycle(genome, candidate.pre, candidate.post, candidate.timing)
+    {
         return;
     }
     match genome
@@ -74,7 +76,9 @@ fn insert_or_reenable<R: Rng + ?Sized>(
     {
         Ok(index) => {
             let edge = &mut genome.brain.edges[index];
-            if (edge.pre_node_id, edge.post_node_id) != (candidate.pre, candidate.post) {
+            if (edge.pre_node_id, edge.post_node_id, edge.timing)
+                != (candidate.pre, candidate.post, candidate.timing)
+            {
                 // A true innovation collision is not an existing copy of this
                 // connection. Reject it in release rather than re-enabling an
                 // unrelated structural locus.
@@ -88,6 +92,7 @@ fn insert_or_reenable<R: Rng + ?Sized>(
                 innovation: candidate.innovation,
                 pre_node_id: candidate.pre,
                 post_node_id: candidate.post,
+                timing: candidate.timing,
                 weight: sample_synapse_weight(INITIAL_SYNAPSE_EXCITATORY_PROBABILITY, rng),
                 enabled: true,
             },
@@ -101,6 +106,7 @@ fn candidate_cmp(a: &Candidate, b: &Candidate) -> Ordering {
         .then_with(|| a.innovation.cmp(&b.innovation))
         .then_with(|| a.pre.cmp(&b.pre))
         .then_with(|| a.post.cmp(&b.post))
+        .then_with(|| a.timing.cmp(&b.timing))
 }
 
 /// Enumerate every valid missing or disabled structural connection. Disabled
@@ -119,32 +125,63 @@ fn for_each_candidate<R: Rng + ?Sized>(
 
     for pre in all_presynaptic {
         for post in post_ids(genome, predation_enabled) {
-            if super::connection_would_create_cycle(genome, pre, post) {
-                continue;
-            }
-            debug_assert!(is_valid_synapse_pair(genome, pre, post));
-            let innovation = connection_innovation_id(pre, post);
-            let existing = genome
-                .brain
-                .edges
-                .binary_search_by_key(&innovation, |edge| edge.innovation)
-                .ok()
-                .map(|index| &genome.brain.edges[index]);
-            if let Some(edge) = existing {
-                // Same identity but different endpoints is a structural-hash
-                // collision. It is neither missing nor a re-enable candidate.
-                if (edge.pre_node_id, edge.post_node_id) != (pre, post) || edge.enabled {
-                    continue;
-                }
-            }
-            visit(Candidate {
-                priority: uniform_priority(rng),
-                innovation,
+            consider_candidate(
+                genome,
                 pre,
                 post,
-            });
+                SynapseTiming::CurrentTick,
+                rng,
+                &mut visit,
+            );
         }
     }
+    for pre in genome.brain.hidden_nodes.iter().map(|node| node.id) {
+        for post in genome.brain.hidden_nodes.iter().map(|node| node.id) {
+            consider_candidate(
+                genome,
+                pre,
+                post,
+                SynapseTiming::PreviousTick,
+                rng,
+                &mut visit,
+            );
+        }
+    }
+}
+
+fn consider_candidate<R: Rng + ?Sized>(
+    genome: &OrganismGenome,
+    pre: GeneNodeId,
+    post: GeneNodeId,
+    timing: SynapseTiming,
+    rng: &mut R,
+    visit: &mut impl FnMut(Candidate),
+) {
+    if super::connection_would_create_cycle(genome, pre, post, timing) {
+        return;
+    }
+    debug_assert!(is_valid_synapse_pair(genome, pre, post, timing));
+    let innovation = connection_innovation_id(pre, post, timing);
+    let existing = genome
+        .brain
+        .edges
+        .binary_search_by_key(&innovation, |edge| edge.innovation)
+        .ok()
+        .map(|index| &genome.brain.edges[index]);
+    if let Some(edge) = existing {
+        // Same identity but different structural triple is a hash collision.
+        if (edge.pre_node_id, edge.post_node_id, edge.timing) != (pre, post, timing) || edge.enabled
+        {
+            return;
+        }
+    }
+    visit(Candidate {
+        priority: uniform_priority(rng),
+        innovation,
+        pre,
+        post,
+        timing,
+    });
 }
 
 fn post_ids(

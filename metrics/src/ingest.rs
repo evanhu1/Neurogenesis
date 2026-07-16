@@ -42,10 +42,9 @@ pub fn ingest_tick(
     }
     let mut deaths = Vec::new();
     for removed in &delta.removed_positions {
-        if let EntityId::Organism(id) = removed.entity_id {
-            if let Some(row) = ledger.death(id, tick) {
-                deaths.push(row);
-            }
+        let EntityId::Organism(id) = removed.entity_id;
+        if let Some(row) = ledger.death(id, tick) {
+            deaths.push(row);
         }
     }
     deaths
