@@ -152,10 +152,9 @@ fn print_report(
     println!("warmup_turns: {}", args.warmup_turns);
     println!("seed: {}", args.seed);
     println!(
-        "config_summary: world_width={} num_organisms={} vision_range={} neurons={} synapses={} runtime_plasticity_enabled={} intent_parallel_threads={}",
+        "config_summary: world_width={} num_organisms={} neurons={} synapses={} runtime_plasticity_enabled={} intent_parallel_threads={}",
         config.world_width,
         config.num_organisms,
-        config.vision_range,
         config.seed_genome_config.num_neurons,
         config.seed_genome_config.num_synapses,
         config.runtime_plasticity_enabled,

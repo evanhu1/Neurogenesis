@@ -8,7 +8,7 @@
 
 use crate::{build_world_cli, App, REPORT_EVERY};
 use anyhow::{anyhow, bail, Result};
-use evolution::{run_neat, NeatConfig};
+use evolution::{run_neat, tasks::symbol_copy::SymbolCopyTask, NeatConfig};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -540,17 +540,15 @@ keys          Up/Down scroll output · PageUp/PageDown page · Home/End top/bott
             self.push_error("neat: no world loaded");
             return Ok(());
         };
-        // Evolve for the resident world's config. `--scale` overrides size for
-        // the evaluation worlds.
-        let mut world = sim.config().clone();
-        // Interactive defaults: small so a run finishes quickly. Override with
-        // flags. eval_opponents keeps H1's competitive survival objective on.
+        let world = sim.config().clone();
+        // Interactive defaults are intentionally small so the symbol-copy run
+        // finishes quickly while preserving the same NEAT mechanics.
         let mut config = NeatConfig {
             generations: 8,
             population_size: 20,
-            episode_horizons: vec![300],
             ..NeatConfig::default()
         };
+        let task = SymbolCopyTask::default();
         let mut seed = 0u64;
         let mut i = 0;
         while i < args.len() {
@@ -562,24 +560,14 @@ keys          Up/Down scroll output · PageUp/PageDown page · Home/End top/bott
             match args[i].as_str() {
                 "--generations" | "-g" => config.generations = val(i)?.parse()?,
                 "--population" | "-p" => config.population_size = val(i)?.parse()?,
-                "--horizons" | "-t" => {
-                    config.episode_horizons = val(i)?
-                        .split(',')
-                        .map(str::parse)
-                        .collect::<std::result::Result<Vec<_>, _>>()?
+                "--stream" | "-t" => {
+                    self.push_error("neat: use the headless CLI for custom streams");
+                    return Ok(());
                 }
-                "--opponents" | "-o" => config.eval_opponents = val(i)?.parse()?,
                 "--seed" | "-s" => seed = val(i)?.parse()?,
-                "--scale" => {
-                    let (w, p) = val(i)?
-                        .split_once(',')
-                        .ok_or_else(|| anyhow!("--scale needs W,POP"))?;
-                    world.world_width = w.parse()?;
-                    world.num_organisms = p.parse()?;
-                }
                 "--help" | "-h" => {
                     self.push_info(
-                        "neat [-g gens] [-p pop] [-t horizon[,horizon...]] [-o opponents] [-s seed] [--scale W,POP]\n  evolves a population for this world's config, then reseeds the resident world with the final generation winner.",
+                        "neat [-g gens] [-p pop] [-s seed]\n  evolves a single-agent symbol-copy controller, then reseeds the resident world with the final winner for brain inspection.",
                     );
                     return Ok(());
                 }
@@ -594,10 +582,14 @@ keys          Up/Down scroll output · PageUp/PageDown page · Home/End top/bott
             self.push_error(&format!("neat: invalid config: {e}"));
             return Ok(());
         }
+        if let Err(e) = task.config.validate() {
+            self.push_error(&format!("neat: invalid symbol-copy task: {e}"));
+            return Ok(());
+        }
 
         self.push_info(&format!(
-            "neat: pop {} · {} generations · horizons {:?} · {} opponents · seed {} — running (UI blocks)…",
-            config.population_size, config.generations, config.episode_horizons, config.eval_opponents, seed
+            "neat: pop {} · {} generations · 32 training + 32 holdout streams · seed {} — running (UI blocks)…",
+            config.population_size, config.generations, seed
         ));
         if let Some(t) = terminal.as_deref_mut() {
             let _ = t.draw(|f| self.render(f, None));
@@ -605,20 +597,31 @@ keys          Up/Down scroll output · PageUp/PageDown page · Home/End top/bott
 
         let seed_world = world.clone();
         let started = Instant::now();
-        let outcome = run_neat(config, world, seed, |gen| {
-            self.push_line(Line::from(Span::styled(
-                format!(
-                    "  gen {:>3}: contextual winner {:.3} · species {}",
-                    gen.generation,
-                    gen.winner_contextual_score,
-                    gen.species.len()
-                ),
-                Style::default().fg(COL_INFO),
-            )));
-            if let Some(t) = terminal.as_deref_mut() {
-                let _ = t.draw(|f| self.render(f, None));
-            }
-        });
+        let outcome = run_neat(
+            &task,
+            config,
+            world.seed_genome_config.clone(),
+            seed,
+            |gen| {
+                let holdout_accuracy = gen
+                    .winner_validation
+                    .as_ref()
+                    .map_or(0.0, |evaluation| evaluation.accuracy);
+                self.push_line(Line::from(Span::styled(
+                    format!(
+                        "  gen {:>3}: train {}/544 · holdout {:.1}% · species {}",
+                        gen.generation,
+                        gen.winner_fitness,
+                        holdout_accuracy * 100.0,
+                        gen.species.len()
+                    ),
+                    Style::default().fg(COL_INFO),
+                )));
+                if let Some(t) = terminal.as_deref_mut() {
+                    let _ = t.draw(|f| self.render(f, None));
+                }
+            },
+        );
 
         let result = match outcome {
             Ok(result) => result,
@@ -633,10 +636,11 @@ keys          Up/Down scroll output · PageUp/PageDown page · Home/End top/bott
             self.push_error("neat: run returned no generations");
             return Ok(());
         };
-        let Some(winner_genome) = last.crossplay_checkpoint_genome.clone() else {
-            self.push_error("neat: final generation did not retain a crossplay checkpoint genome");
-            return Ok(());
-        };
+        let final_holdout = last
+            .winner_validation
+            .as_ref()
+            .expect("symbol-copy task always supplies holdout evaluation");
+        let winner_genome = last.winner_genome.clone();
         match Simulation::new_with_founder_genome_pool(seed_world, seed, vec![winner_genome]) {
             Ok(winner_sim) => {
                 self.app.sim = Some(winner_sim);
@@ -644,8 +648,11 @@ keys          Up/Down scroll output · PageUp/PageDown page · Home/End top/bott
                 self.dirty = true;
                 self.refresh_status();
                 self.push_info(&format!(
-                    "neat done ({secs:.1}s): final contextual winner {:.3} (gen {}). Resident world reseeded with that frozen genome — run-to / inspect / brain it.",
-                    last.winner_contextual_score, last.generation
+                    "neat done ({secs:.1}s): train {}/544 · holdout {}/{} (gen {}). Resident world reseeded with that genome for brain inspection.",
+                    last.winner_fitness,
+                    final_holdout.correct,
+                    final_holdout.total,
+                    last.generation
                 ));
             }
             Err(e) => self.push_error(&format!("neat: seeding winner world failed: {e}")),

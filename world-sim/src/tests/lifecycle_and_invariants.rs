@@ -17,7 +17,7 @@ fn state_invariants_hold_across_multi_turn_movement_and_attack_flow() {
     configure_sim(
         &mut sim,
         vec![
-            make_compositional_organism(
+            make_categorical_organism(
                 0,
                 1,
                 1,
@@ -25,22 +25,15 @@ fn state_invariants_hold_across_multi_turn_movement_and_attack_flow() {
                 &[ActionType::Forward],
                 100.0,
             ),
-            make_compositional_organism(
-                1,
-                5,
-                3,
-                FacingDirection::East,
-                &[ActionType::Attack],
-                100.0,
-            ),
+            make_categorical_organism(1, 5, 3, FacingDirection::East, &[ActionType::Attack], 100.0),
             {
                 let mut prey =
-                    make_compositional_organism(2, 6, 3, FacingDirection::West, &[], 100.0);
+                    make_categorical_organism(2, 6, 3, FacingDirection::West, &[], 100.0);
                 prey.energy = 20;
                 prey.energy_at_last_sensing = 20;
                 prey
             },
-            make_compositional_organism(
+            make_categorical_organism(
                 3,
                 1,
                 4,
@@ -48,7 +41,7 @@ fn state_invariants_hold_across_multi_turn_movement_and_attack_flow() {
                 &[ActionType::Forward],
                 100.0,
             ),
-            make_compositional_organism(
+            make_categorical_organism(
                 4,
                 4,
                 5,

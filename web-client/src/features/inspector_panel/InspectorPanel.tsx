@@ -106,7 +106,7 @@ export function InspectorContent({
         { label: 'Neurons', value: String(genome.brain.hidden_nodes.length) },
         { label: 'Synapses', value: String(genome.brain.edges.filter((edge) => edge.enabled).length) },
         { label: 'Plasticity Maturity', value: String(genome.lifecycle.plasticity_maturity_ticks) },
-        { label: 'Hebb Gain', value: formatFloat(genome.plasticity.hebb_eta_gain, 3) },
+        { label: 'Initial Learning Rate', value: formatFloat(genome.plasticity.initial_learning_rate, 3) },
         { label: 'Juvenile Eta', value: formatFloat(genome.plasticity.juvenile_eta_scale, 3) },
         { label: 'Elig Ret', value: formatFloat(genome.plasticity.eligibility_retention, 3) },
         { label: 'Prune Thr', value: formatFloat(genome.plasticity.synapse_prune_threshold, 3) },

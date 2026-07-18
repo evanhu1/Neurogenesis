@@ -69,21 +69,27 @@ fn forced_brain(
 fn forced_brain_with_action(preferred_action: ActionType, confidence: f32) -> BrainState {
     let sensory = vec![make_sensory_neuron(
         0,
-        SensoryReceptor::RayProximity { ray_offset: 0 },
+        SensoryReceptor::Symbol { symbol: Symbol::A },
     )];
     let inter_id = NeuronId(1000);
     let inter_bias = confidence;
-    let inter_synapses: Vec<SynapseEdge> = ActionType::ALL
-        .iter()
-        .copied()
+    let preferred_symbol = match preferred_action {
+        ActionType::Idle => Symbol::A,
+        ActionType::TurnLeft => Symbol::B,
+        ActionType::TurnRight => Symbol::C,
+        ActionType::Forward => Symbol::D,
+        ActionType::Attack => Symbol::End,
+    };
+    let inter_synapses: Vec<SynapseEdge> = Symbol::ALL
+        .into_iter()
         .enumerate()
-        .map(|(idx, action_type)| SynapseEdge {
+        .map(|(idx, symbol)| SynapseEdge {
             pre_neuron_id: inter_id,
             post_neuron_id: NeuronId(2000 + idx as u32),
             timing: types::SynapseTiming::CurrentTick,
             pre_inter_index: None,
             post_inter_index: None,
-            weight: if action_type == preferred_action {
+            weight: if symbol == preferred_symbol {
                 8.0
             } else {
                 -8.0
@@ -104,15 +110,13 @@ fn forced_brain_with_action(preferred_action: ActionType, confidence: f32) -> Br
         state: inter_state,
         alpha: 1.0,
         synapses: inter_synapses,
-        action_synapse_start: 0,
+        output_synapse_start: 0,
     }];
-    let action: Vec<_> = ActionType::ALL
-        .iter()
-        .copied()
+    let action: Vec<_> = Symbol::ALL
+        .into_iter()
         .enumerate()
-        .map(|(idx, action_type)| make_action_neuron(2000 + idx as u32, action_type))
+        .map(|(idx, symbol)| make_action_neuron(2000 + idx as u32, symbol))
         .collect();
-
     BrainState {
         sensory,
         inter,
@@ -122,7 +126,7 @@ fn forced_brain_with_action(preferred_action: ActionType, confidence: f32) -> Br
         synapse_count,
         sensory_mean_activation: vec![0.0],
         inter_mean_activation: vec![0.0],
-        action_mean_activation: vec![0.0; ActionType::ALL.len()],
+        action_mean_activation: vec![0.0; Symbol::COUNT],
         means_initialized: false,
     }
 }
@@ -151,6 +155,7 @@ pub(super) fn make_single_action_organism(
         energy_flow_last_tick: 0,
         successful_attacks_count: 0,
         last_action_taken: ActionType::Idle,
+        last_action_symbol: Symbol::A,
         last_action_mask: 0,
         #[cfg(feature = "instrumentation")]
         instrumentation: Default::default(),
@@ -160,10 +165,10 @@ pub(super) fn make_single_action_organism(
 }
 
 /// Build an organism whose action biases deterministically emit exactly the
-/// requested compositional commands. Extreme finite biases keep these tests
+/// requested categorical action. Extreme finite biases keep these tests
 /// independent of the deterministic sampling draw while still exercising the
 /// real brain-evaluation and intent-building pipeline.
-pub(super) fn make_compositional_organism(
+pub(super) fn make_categorical_organism(
     id: u64,
     q: i32,
     r: i32,
@@ -171,11 +176,11 @@ pub(super) fn make_compositional_organism(
     commands: &[ActionType],
     energy: impl IntoEnergy,
 ) -> OrganismState {
-    make_compositional_organism_with_bias(id, q, r, facing, commands, 100.0, energy)
+    make_categorical_organism_with_bias(id, q, r, facing, commands, 100.0, energy)
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn make_compositional_organism_with_bias(
+pub(super) fn make_categorical_organism_with_bias(
     id: u64,
     q: i32,
     r: i32,
@@ -186,13 +191,17 @@ pub(super) fn make_compositional_organism_with_bias(
 ) -> OrganismState {
     let mut organism = make_single_action_organism(id, q, r, facing, ActionType::Idle, 0.0, energy);
     organism.genome.brain.action_biases.fill(-100.0);
-    for command in commands {
-        assert_ne!(
-            *command,
-            ActionType::Idle,
-            "Idle is the absence of a command"
-        );
-        organism.genome.brain.action_biases[brain::action_index(*command)] = command_bias;
+    if let Some(command) = commands.first() {
+        let symbol = match command {
+            ActionType::Idle => Symbol::A,
+            ActionType::TurnLeft => Symbol::B,
+            ActionType::TurnRight => Symbol::C,
+            ActionType::Forward => Symbol::D,
+            ActionType::Attack => Symbol::End,
+        };
+        organism.genome.brain.action_biases[brain::action_index(symbol)] = command_bias;
+    } else {
+        organism.genome.brain.action_biases[brain::action_index(Symbol::A)] = command_bias;
     }
     organism
 }
@@ -224,6 +233,7 @@ pub(super) fn make_organism(
         energy_flow_last_tick: 0,
         successful_attacks_count: 0,
         last_action_taken: ActionType::Idle,
+        last_action_symbol: Symbol::A,
         last_action_mask: 0,
         #[cfg(feature = "instrumentation")]
         instrumentation: Default::default(),

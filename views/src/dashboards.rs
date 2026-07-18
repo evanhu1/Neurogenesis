@@ -243,8 +243,8 @@ pub fn genome(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> 
         ("plasticity_maturity_ticks", "plasticity", |o| {
             o.genome.lifecycle.plasticity_maturity_ticks as f64
         }),
-        ("hebb_eta_gain", "plasticity", |o| {
-            o.genome.plasticity.hebb_eta_gain as f64
+        ("initial_learning_rate", "plasticity", |o| {
+            o.genome.plasticity.initial_learning_rate as f64
         }),
         ("juvenile_eta_scale", "plasticity", |o| {
             o.genome.plasticity.juvenile_eta_scale as f64

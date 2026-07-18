@@ -7,11 +7,10 @@ use crate::{take_format, ReadCtx};
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
 use std::io::Write;
-use types::{ActionType, NeuronId, OrganismState, SensoryReceptor, SynapseEdge, SynapseTiming};
+use types::{
+    ActionType, NeuronId, OrganismState, SensoryReceptor, Symbol, SynapseEdge, SynapseTiming,
+};
 
-/// Mirrors `world-sim/src/brain/mod.rs`: the implicit Idle option's logit and the
-/// temperature floor used by the softmax in `evaluation.rs`.
-const EXPLICIT_IDLE_LOGIT_BIAS: f32 = -0.01;
 const MIN_ACTION_TEMPERATURE: f32 = 1.0e-6;
 
 pub fn find(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
@@ -177,41 +176,26 @@ pub fn decide(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> 
         return Ok(());
     };
 
-    // Reproduce the active action interface's softmax. Categorical control has
-    // one shared implicit-idle option; compositional control has independent
-    // none probabilities for orientation, locomotion, and interaction.
+    // Reproduce the six-character action head's categorical softmax.
     let logits: Vec<f32> = o.brain.action.iter().map(|a| a.logit).collect();
     let temp = temperature.max(MIN_ACTION_TEMPERATURE);
-    let compositional = sim.config().compositional_actions_enabled;
     let predation_enabled = sim.config().predation_enabled;
-    let groups: Vec<&[usize]> = if compositional {
-        vec![&[0, 1], &[2], &[3]]
-    } else {
-        vec![&[0, 1, 2, 3]]
-    };
     let mut action_probabilities = vec![0.0_f32; logits.len()];
-    let mut idle_probabilities = Vec::with_capacity(groups.len());
-    for group in groups {
-        let max_logit = group
-            .iter()
-            .copied()
-            .filter(|idx| ActionType::ALL[*idx].is_enabled(predation_enabled))
-            .map(|idx| logits[idx])
-            .fold(EXPLICIT_IDLE_LOGIT_BIAS, f32::max);
-        let idle_weight = ((EXPLICIT_IDLE_LOGIT_BIAS - max_logit) / temp).exp();
-        let mut weight_sum = idle_weight;
-        for idx in group.iter().copied() {
-            if !ActionType::ALL[idx].is_enabled(predation_enabled) {
-                continue;
-            }
-            let weight = ((logits[idx] - max_logit) / temp).exp();
-            action_probabilities[idx] = weight;
-            weight_sum += weight;
+    let max_logit = Symbol::ALL
+        .into_iter()
+        .filter(|symbol| symbol.is_action_enabled(predation_enabled))
+        .map(|symbol| logits[symbol.index()])
+        .fold(f32::NEG_INFINITY, f32::max);
+    let mut weight_sum = 0.0;
+    for symbol in Symbol::ALL {
+        if symbol.is_action_enabled(predation_enabled) {
+            action_probabilities[symbol.index()] =
+                ((logits[symbol.index()] - max_logit) / temp).exp();
+            weight_sum += action_probabilities[symbol.index()];
         }
-        for idx in group.iter().copied() {
-            action_probabilities[idx] /= weight_sum;
-        }
-        idle_probabilities.push(idle_weight / weight_sum);
+    }
+    for probability in &mut action_probabilities {
+        *probability /= weight_sum;
     }
 
     let inter_act: Vec<f64> = o
@@ -241,7 +225,7 @@ pub fn decide(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> 
             .enumerate()
             .map(|(k, a)| {
                 json!({
-                    "action": format!("{:?}", a.action_type),
+                    "symbol": a.symbol,
                     "logit": round3(a.logit),
                     "prob": round3(action_probabilities[k]),
                 })
@@ -253,17 +237,9 @@ pub fn decide(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> 
             "inputs": inputs,
             "inter": inter_stats.map(|s| s.json()),
             "actions": actions,
-            "action_mode": if compositional { "compositional" } else { "categorical" },
-            "idle_prob": if compositional {
-                json!({
-                    "orientation": round3(idle_probabilities[0]),
-                    "locomotion": round3(idle_probabilities[1]),
-                    "interaction": round3(idle_probabilities[2]),
-                })
-            } else {
-                json!(round3(idle_probabilities[0]))
-            },
+            "action_mode": "symbolic_categorical",
             "selected": format!("{:?}", rec.selected_action),
+            "selected_symbol": o.last_action_symbol,
             "selected_command_mask": rec.selected_action_mask,
             "selected_commands": ActionType::ALL.iter().filter(|action| rec.selected_action_mask & action.command_bit() != 0).map(|action| format!("{action:?}")).collect::<Vec<_>>(),
             "failed_command_mask": rec.failed_action_mask,
@@ -294,22 +270,9 @@ pub fn decide(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> 
         writeln!(
             out,
             "    {:<10} logit={:>8.3}  p={:.3}",
-            format!("{:?}", a.action_type),
+            format!("{}", a.symbol),
             a.logit,
             action_probabilities[k]
-        )?;
-    }
-    if compositional {
-        writeln!(
-            out,
-            "    none probabilities: orientation={:.3} locomotion={:.3} interaction={:.3}",
-            idle_probabilities[0], idle_probabilities[1], idle_probabilities[2]
-        )?;
-    } else {
-        writeln!(
-            out,
-            "    {:<10} (implicit)     p={:.3}",
-            "Idle", idle_probabilities[0]
         )?;
     }
     writeln!(
@@ -367,7 +330,7 @@ fn org_field(o: &OrganismState, name: &str) -> f64 {
         "successful_attacks" => o.successful_attacks_count as f64,
         "neurons" => o.genome.hidden_node_count() as f64,
         "synapses" => o.brain.synapse_count as f64,
-        "hebb_eta" => o.genome.plasticity.hebb_eta_gain as f64,
+        "initial_learning_rate" => o.genome.plasticity.initial_learning_rate as f64,
         _ => f64::NAN,
     }
 }
@@ -573,8 +536,8 @@ const TOP_SYNAPSES: usize = 12;
 /// Human-readable label for any neuron id: sensory receptors by name, action
 /// neurons by action type, inter neurons by `i<index>`.
 fn neuron_label(id: NeuronId) -> String {
-    if let Some(a) = ActionType::from_neuron_id(id) {
-        return format!("act:{a:?}");
+    if let Some(symbol) = Symbol::from_action_neuron_id(id) {
+        return format!("act:{symbol:?}");
     }
     if let Some(index) = types::inter_neuron_index(id, u32::MAX) {
         return format!("i{index}");
@@ -587,23 +550,7 @@ fn neuron_label(id: NeuronId) -> String {
 
 fn receptor_label(r: &SensoryReceptor) -> String {
     match r {
-        SensoryReceptor::RayProximity { ray_offset } => {
-            format!("{}:proximity", ray_direction(*ray_offset))
-        }
-        SensoryReceptor::SelfEnergy => "SelfEnergy".into(),
-        SensoryReceptor::EnergyFlowLastTick => "EnergyFlowLastTick".into(),
-    }
-}
-
-fn ray_direction(offset: i8) -> &'static str {
-    match offset {
-        0 => "forward",
-        -1 => "front-left",
-        -2 => "back-left",
-        3 => "back",
-        2 => "back-right",
-        1 => "front-right",
-        _ => "unknown",
+        SensoryReceptor::Symbol { symbol } => format!("symbol:{symbol:?}"),
     }
 }
 
@@ -617,7 +564,7 @@ fn effective_eta(o: &OrganismState) -> f32 {
     } else {
         g.plasticity.juvenile_eta_scale.max(0.0)
     };
-    g.plasticity.hebb_eta_gain.max(0.0) * scale
+    g.plasticity.initial_learning_rate.max(0.0) * scale
 }
 
 /// Collect every expressed current-tick and recurrent edge for synapse views.
@@ -674,7 +621,7 @@ fn brain_summary(
             "alpha": if b.inter.is_empty() { Value::Null } else { json!({ "min": alpha_min, "max": alpha_max }) },
             "plasticity": {
                 "runtime_plasticity_enabled": plasticity_enabled,
-                "hebb_eta_gain": g.hebb_eta_gain,
+                "initial_learning_rate": g.initial_learning_rate,
                 "juvenile_eta_scale": g.juvenile_eta_scale,
                 "eligibility_retention": g.eligibility_retention,
                 "max_weight_delta_per_tick": g.max_weight_delta_per_tick,
@@ -725,7 +672,7 @@ fn brain_summary(
     writeln!(
         out,
         "  plasticity: hebb_eta={:.4} juv_scale={:.3} elig_ret={:.3} max_dw={:.4} prune={:.4} -> effective_eta={:.5}{plasticity_tag}",
-        g.hebb_eta_gain,
+        g.initial_learning_rate,
         g.juvenile_eta_scale,
         g.eligibility_retention,
         g.max_weight_delta_per_tick,
@@ -822,7 +769,7 @@ fn brain_activations(o: &OrganismState, fmt: Format, out: &mut impl Write) -> Re
         let actions: Vec<Value> = b
             .action
             .iter()
-            .map(|a| json!({ "action": format!("{:?}", a.action_type), "logit": round3(a.logit) }))
+            .map(|a| json!({ "symbol": a.symbol, "logit": round3(a.logit) }))
             .collect();
         let v = json!({
             "id": o.id.0,
@@ -855,12 +802,7 @@ fn brain_activations(o: &OrganismState, fmt: Format, out: &mut impl Write) -> Re
     }
     writeln!(out, "  action logits:")?;
     for a in &b.action {
-        writeln!(
-            out,
-            "    {:<10} {:>8.3}",
-            format!("{:?}", a.action_type),
-            a.logit
-        )?;
+        writeln!(out, "    {:<10} {:>8.3}", format!("{}", a.symbol), a.logit)?;
     }
     Ok(())
 }

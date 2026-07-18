@@ -497,7 +497,7 @@ async fn get_organism(
             .sim
             .focused_organism(types::OrganismId(id))
             .ok_or_else(|| AppError::NotFound(format!("no live organism with id {id}")))?;
-        let active_action_neuron_id = organism.last_action_taken.neuron_id();
+        let active_action_neuron_id = Some(organism.last_action_symbol.action_neuron_id());
         Ok(OrganismDetail {
             turn: loaded.sim.turn(),
             organism,

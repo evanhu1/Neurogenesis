@@ -10,9 +10,9 @@ serde.workspace = true
 serde_json.workspace = true
 ciborium.workspace = true
 toml.workspace = true
-ring = "0.17.14"
 bincode.workspace = true
 zstd.workspace = true
+signal-hook.workspace = true
 ratatui = "0.30"
 config = { path = "../config" }
 evolution = { path = "../evolution" }

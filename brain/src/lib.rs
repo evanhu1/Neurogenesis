@@ -1,6 +1,7 @@
 mod evaluation;
 mod expression;
 pub mod genome;
+mod learning;
 #[cfg(feature = "profiling")]
 mod profiling;
 mod topology;
@@ -10,27 +11,28 @@ use crate::genome::inter_alpha_from_log_time_constant;
 use crate::profiling::BrainStage;
 use crate::topology::{
     action_neuron_id, constrain_weight, inter_index, inter_neuron_id,
-    refresh_action_synapse_starts_and_count,
+    refresh_output_synapse_starts_and_count,
 };
 #[cfg(feature = "profiling")]
 use std::time::Instant;
 use types::{
-    action_gene_node_index, sensory_gene_node_index, ActionNeuronState, ActionType, BrainState,
-    GeneNodeId, InterNeuronState, NeuronId, NeuronState, NeuronType, OrganismGenome,
-    SensoryNeuronState, SensoryReceptor, SynapseEdge, SynapseGene, SynapseTiming,
+    action_gene_node_index, sensory_gene_node_index, ActionNeuronState, BrainState, GeneNodeId,
+    InterNeuronState, NeuronId, NeuronState, NeuronType, OrganismGenome, SensoryNeuronState,
+    SensoryReceptor, Symbol, SynapseEdge, SynapseGene, SynapseTiming,
 };
 
 pub use crate::topology::{action_index, ACTION_COUNT, ACTION_ID_BASE, SENSORY_COUNT};
-pub use evaluation::{evaluate_brain, BrainEvalContext};
+pub use evaluation::{evaluate_brain, evaluate_brain_state, BrainEvalContext};
 #[cfg_attr(not(test), allow(unused_imports))]
 pub use expression::{express_genome, make_action_neuron, make_sensory_neuron};
+pub use learning::{
+    apply_immediate_action_reward, reset_dynamics_preserving_weights, ImmediateLearningReport,
+};
 pub use plasticity::{apply_runtime_weight_updates, compute_pending_coactivations};
 
 mod plasticity;
 
 const MIN_ACTION_TEMPERATURE: f32 = 1.0e-6;
-pub const EXPLICIT_IDLE_LOGIT_BIAS: f32 = -0.01;
-pub const VISION_RAY_COUNT: usize = SensoryReceptor::RAY_OFFSETS.len();
 
 /// Fast tanh approximation using a Padé rational polynomial.
 /// Accurate to ~1e-5 for |x| ≲ 4.2; worst-case absolute error grows to ~1e-4
@@ -53,8 +55,7 @@ pub fn fast_tanh(x: f32) -> f32 {
 
 #[derive(Default)]
 pub struct BrainEvaluation {
-    pub selected_action: ActionType,
-    pub selected_action_mask: u8,
+    pub selected_symbol: Symbol,
     pub action_logits: [f32; ACTION_COUNT],
     pub synapse_ops: u64,
 }
@@ -64,7 +65,6 @@ pub struct BrainScratch {
     pub prev_inter: Vec<f32>,
     pub inter_activations: Vec<f32>,
     pub action_probabilities: [f32; ACTION_COUNT],
-    pub selected_action_index: Option<usize>,
 }
 
 impl BrainScratch {
@@ -74,7 +74,6 @@ impl BrainScratch {
             prev_inter: Vec::with_capacity(32),
             inter_activations: Vec::with_capacity(32),
             action_probabilities: [0.0; ACTION_COUNT],
-            selected_action_index: None,
         }
     }
 

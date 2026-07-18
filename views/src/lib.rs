@@ -619,7 +619,7 @@ pub fn inspect(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()>
             .brain
             .action
             .iter()
-            .map(|a| json!({ "action": a.action_type, "logit": a.logit }))
+            .map(|a| json!({ "symbol": a.symbol, "logit": a.logit }))
             .collect();
         let value = json!({
             "id": o.id.0,
@@ -635,8 +635,7 @@ pub fn inspect(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()>
             "genome": {
                 "hidden_nodes": o.genome.hidden_node_count(),
                 "synapses": o.brain.synapse_count,
-                "vision_range": sim.config().vision_range,
-                "hebb_eta": o.genome.plasticity.hebb_eta_gain,
+                "initial_learning_rate": o.genome.plasticity.initial_learning_rate,
                 "juvenile_eta_scale": o.genome.plasticity.juvenile_eta_scale,
                 "eligibility_retention": o.genome.plasticity.eligibility_retention,
                 "max_weight_delta_per_tick": o.genome.plasticity.max_weight_delta_per_tick,
@@ -669,11 +668,10 @@ pub fn inspect(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()>
     let g = &o.genome;
     writeln!(
         out,
-        "  genome: num_neurons={} synapses={} vision_range={} | hebb_eta={:.4} juv_scale={:.3} elig_ret={:.3} max_dw={:.4} prune={:.4} | plasticity_maturity={}",
+        "  genome: num_neurons={} synapses={} | hebb_eta={:.4} juv_scale={:.3} elig_ret={:.3} max_dw={:.4} prune={:.4} | plasticity_maturity={}",
         g.hidden_node_count(),
         o.brain.synapse_count,
-        sim.config().vision_range,
-        g.plasticity.hebb_eta_gain,
+        g.plasticity.initial_learning_rate,
         g.plasticity.juvenile_eta_scale,
         g.plasticity.eligibility_retention,
         g.plasticity.max_weight_delta_per_tick,
@@ -682,7 +680,7 @@ pub fn inspect(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()>
     )?;
     write!(out, "  action logits:")?;
     for a in &o.brain.action {
-        write!(out, " {:?}={:.3}", a.action_type, a.logit)?;
+        write!(out, " {}={:.3}", a.symbol, a.logit)?;
     }
     writeln!(out)?;
     if let Some(rec) = rec {

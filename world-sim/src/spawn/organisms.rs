@@ -22,11 +22,7 @@ impl Simulation {
             // `species_id % pool_len` — used by competitive NEAT evaluation. A
             // single-entry pool (the clonal colony) is unchanged.
             let genome = if self.founder_genome_pool.is_empty() {
-                generate_seed_genome(
-                    &self.config.seed_genome_config,
-                    self.config.predation_enabled,
-                    &mut self.rng,
-                )
+                generate_seed_genome(&self.config.seed_genome_config, &mut self.rng)
             } else {
                 self.founder_genome_pool[founder_slot % self.founder_genome_pool.len()].clone()
             };
@@ -49,10 +45,9 @@ impl Simulation {
 
     fn build_organism(
         &mut self,
-        mut genome: OrganismGenome,
+        genome: OrganismGenome,
         params: OrganismSpawnParams,
     ) -> OrganismState {
-        restrict_action_genes(&mut genome, self.config.predation_enabled);
         let id = self.alloc_organism_id();
         // Founders (no inherited species) take their own ID as species ID.
         let species_id = params.species_id.unwrap_or(SpeciesId(id.0));
@@ -72,10 +67,11 @@ impl Simulation {
             energy_flow_last_tick: 0,
             successful_attacks_count: 0,
             last_action_taken: ActionType::Idle,
+            last_action_symbol: Symbol::A,
             last_action_mask: 0,
             #[cfg(feature = "instrumentation")]
             instrumentation: Default::default(),
-            brain: express_genome(&genome, self.config.predation_enabled),
+            brain: express_genome(&genome),
             genome,
         }
     }

@@ -8,8 +8,8 @@ use crate::grid::{hex_neighbor, rotate_left, rotate_right};
 use crate::Simulation;
 #[cfg(feature = "profiling")]
 use crate::{profiling, profiling::TurnPhase};
-use brain::{action_index, evaluate_brain, BrainEvalContext, BrainScratch};
 use brain::{apply_runtime_weight_updates, compute_pending_coactivations};
+use brain::{evaluate_brain, BrainEvalContext, BrainScratch};
 use rayon::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use std::sync::Arc;
@@ -41,7 +41,6 @@ struct OrganismIntent {
     wants_attack: bool,
     move_target: Option<(i32, i32)>,
     interaction_target: Option<(i32, i32)>,
-    interaction_after_move: bool,
     snapshot_attack_target: Option<OrganismId>,
     move_confidence: f32,
     command_count: u8,
@@ -104,9 +103,6 @@ pub(crate) struct TurnScratch {
     dead_organisms: Vec<bool>,
     move_candidates: Vec<(usize, MoveCandidate)>,
     move_resolutions: Vec<MoveResolution>,
-    move_actor_by_cell: Vec<usize>,
-    move_winner_by_actor: Vec<usize>,
-    move_dependency_status: Vec<u8>,
     intents: Vec<OrganismIntent>,
 }
 
@@ -268,7 +264,7 @@ impl Simulation {
         let any_learners = self
             .organisms
             .iter()
-            .any(|o| o.genome.plasticity.hebb_eta_gain > 0.0);
+            .any(|o| o.genome.plasticity.initial_learning_rate > 0.0);
 
         #[cfg(feature = "profiling")]
         let plasticity_started = Instant::now();
@@ -412,34 +408,6 @@ pub(crate) fn deterministic_action_sample(
 ) -> f32 {
     let sample = (action_rng_seed(sim_seed, tick, organism_id) >> 40) as u32;
     sample as f32 / ((1_u32 << 24) - 1) as f32
-}
-
-pub(crate) fn deterministic_action_samples(
-    sim_seed: u64,
-    tick: u64,
-    organism_id: OrganismId,
-) -> [f32; 3] {
-    let base = action_rng_seed(sim_seed, tick, organism_id);
-    [
-        deterministic_action_sample(sim_seed, tick, organism_id),
-        deterministic_sample_from_seed(base ^ 0xD1B5_4A32_D192_ED03),
-        deterministic_sample_from_seed(base ^ 0xABC9_8388_FB8F_AC03),
-    ]
-}
-
-fn deterministic_sample_from_seed(seed: u64) -> f32 {
-    let sample = (mix_u64(seed) >> 40) as u32;
-    sample as f32 / ((1_u32 << 24) - 1) as f32
-}
-
-fn uniform_random_action(action_sample: f32, predation_enabled: bool) -> ActionType {
-    let active_count = ActionType::active(predation_enabled).count();
-    let buckets = active_count + 1;
-    let scaled = action_sample.clamp(0.0, 1.0 - f32::EPSILON) * buckets as f32;
-    let idx = (scaled.floor() as usize).min(buckets - 1);
-    ActionType::active(predation_enabled)
-        .nth(idx)
-        .unwrap_or(ActionType::Idle)
 }
 
 fn mix_u64(mut value: u64) -> u64 {

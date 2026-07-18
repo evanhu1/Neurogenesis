@@ -49,10 +49,7 @@ export function computeBrainLayout(
     nodes.push({
       id: neuron.neuron.neuron_id,
       type: 'sensory',
-      label:
-        neuron.receptor_type === 'RayProximity' || neuron.receptor_type === 'RayEnergyAffordance'
-          ? `${neuron.receptor_type}[${neuron.ray_offset ?? 0}]`
-          : neuron.receptor_type,
+      label: `symbol:${neuron.symbol}`,
       value: neuron.neuron.activation,
       bias: neuron.neuron.bias,
       gx: 0.5,
@@ -78,7 +75,7 @@ export function computeBrainLayout(
     nodes.push({
       id: neuron.neuron_id,
       type: 'action',
-      label: neuron.action_type,
+      label: neuron.symbol,
       value: neuron.logit,
       bias: actionBiases[actionIdx],
       gx: 8.5,

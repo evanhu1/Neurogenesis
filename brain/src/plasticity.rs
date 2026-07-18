@@ -2,7 +2,7 @@ use crate::fast_tanh;
 #[cfg(feature = "profiling")]
 use crate::profiling::{self, BrainStage};
 use crate::topology::{
-    action_array_index, constrain_weight, inter_index, refresh_action_synapse_starts_and_count,
+    action_array_index, constrain_weight, inter_index, refresh_output_synapse_starts_and_count,
     ACTION_COUNT,
 };
 use crate::BrainScratch;
@@ -88,7 +88,7 @@ pub fn compute_pending_coactivations(organism: &mut OrganismState, scratch: &mut
     // would be discarded unconditionally, so skip the covariance pass; the
     // activation means keep updating so their semantics are unchanged across
     // the juvenile/mature boundary.
-    let effective_eta = organism.genome.plasticity.hebb_eta_gain.max(0.0)
+    let effective_eta = organism.genome.plasticity.initial_learning_rate.max(0.0)
         * learning_rate_scale_at_age(&organism.genome, organism.age_turns + 1);
 
     #[cfg(feature = "profiling")]
@@ -139,7 +139,7 @@ pub fn compute_pending_coactivations(organism: &mut OrganismState, scratch: &mut
             let pre_mean = sensory_means[sensory_idx];
             compute_pending_edge_coactivations(
                 &mut sensory.synapses,
-                sensory.action_synapse_start,
+                sensory.output_synapse_start,
                 pre_signal,
                 pre_mean,
                 pre_signal,
@@ -162,7 +162,7 @@ pub fn compute_pending_coactivations(organism: &mut OrganismState, scratch: &mut
             let pre_mean = inter_means[pre_idx];
             compute_pending_edge_coactivations(
                 &mut inter.synapses,
-                inter.action_synapse_start,
+                inter.output_synapse_start,
                 pre_current,
                 pre_mean,
                 pre_current,
@@ -318,7 +318,8 @@ fn learning_rate_scale_at_age(genome: &types::OrganismGenome, age_turns: u64) ->
 
 impl PlasticityStepParams {
     fn from_organism(organism: &OrganismState) -> Self {
-        let eta = organism.genome.plasticity.hebb_eta_gain.max(0.0) * learning_rate_scale(organism);
+        let eta = organism.genome.plasticity.initial_learning_rate.max(0.0)
+            * learning_rate_scale(organism);
 
         // Within-tick energy change: post-action energy (this is the post-commit
         // plasticity pass) minus the energy stashed during this tick's sensing
@@ -353,7 +354,7 @@ impl PlasticityStepParams {
 #[allow(clippy::too_many_arguments)]
 fn compute_pending_edge_coactivations(
     edges: &mut [SynapseEdge],
-    action_synapse_start: usize,
+    output_synapse_start: usize,
     inter_pre_signal: f32,
     inter_pre_mean: f32,
     action_pre_signal: f32,
@@ -363,9 +364,9 @@ fn compute_pending_edge_coactivations(
     action_means: &[f32],
 ) {
     // Edges stay partitioned by target role (asserted where the cache is
-    // refreshed in `refresh_action_synapse_starts_and_count`), so the cached
-    // split separates the inter-targeting prefix from the action-targeting suffix.
-    let (inter_edges, action_edges) = edges.split_at_mut(action_synapse_start);
+    // refreshed in `refresh_output_synapse_starts_and_count`), so the cached
+    // split separates the inter-targeting prefix from the output-targeting suffix.
+    let (inter_edges, output_edges) = edges.split_at_mut(output_synapse_start);
 
     // Covariance rule on inter-targeting edges:
     //     pending = (pre - pre̅) * (post - post̅)
@@ -398,11 +399,11 @@ fn compute_pending_edge_coactivations(
     // The pre side uses the current activation (`action_pre_signal`) because
     // action logits are accumulated from current-tick inter activations.
     let action_pre_dev = action_pre_signal - inter_pre_mean;
-    for edge in action_edges {
-        let Some(idx) = action_array_index(edge.post_neuron_id) else {
-            continue;
-        };
-        edge.pending_coactivation = action_pre_dev * (action_activations[idx] - action_means[idx]);
+    for edge in output_edges {
+        if let Some(idx) = action_array_index(edge.post_neuron_id) {
+            edge.pending_coactivation =
+                action_pre_dev * (action_activations[idx] - action_means[idx]);
+        }
     }
 }
 
@@ -417,7 +418,10 @@ fn apply_edge_weight_update_and_fold_pending(
         // coactivations preceding an energy gain consolidate harder and those
         // preceding a loss are damped — within-life reward-learning. The
         // passive decay term toward zero is left un-modulated.
-        let uncapped_delta = params.learning_modulator * params.eta * edge.eligibility
+        let uncapped_delta = params.learning_modulator
+            * params.eta
+            * edge.plasticity_coefficient.max(0.0)
+            * edge.eligibility
             - PLASTIC_WEIGHT_DECAY * edge.weight;
         let capped_delta = uncapped_delta.clamp(
             -params.max_weight_delta_per_tick,
@@ -453,7 +457,7 @@ fn prune_low_weight_synapses(brain: &mut BrainState, threshold: f32) -> bool {
     prune_group(&mut brain.recurrent_synapses);
 
     if pruned_any {
-        refresh_action_synapse_starts_and_count(brain);
+        refresh_output_synapse_starts_and_count(brain);
     }
 
     pruned_any

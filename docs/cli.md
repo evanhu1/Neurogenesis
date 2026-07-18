@@ -1,11 +1,11 @@
-# `cli` — NEAT research interface
+# `cli` — modular NEAT interface
 
-`cli` is the sole headless research interface. Generational NEAT is its default
-mode. The lower-level stateless simulator is intentionally namespaced under
-`cli world` so an ordinary research command cannot accidentally be mistaken for
-a single-world probe.
+`cli` is the sole headless research interface. Its current default route runs
+the reference symbol-copy training task through the modular NEAT evaluator. The
+world-as-file simulator remains available only under the explicit `cli world`
+namespace and is not used for evolutionary fitness.
 
-Build it first:
+Build the release binary first:
 
 ```bash
 cargo build -p cli --release
@@ -14,291 +14,256 @@ CLI=./target/release/cli
 
 JSON is the default output. Invalid arguments fail with a structured error.
 
-## Core workflow
+## Task contract
 
-The main commands are:
+The sensor and action layers have the same fixed alphabet:
 
-- `$CLI [RUN OPTIONS]` or `$CLI run [RUN OPTIONS]`: execute one NEAT run.
-- `$CLI plan [RUN OPTIONS]`: validate the same contract without simulating.
-- `$CLI batch ... -- [RUN OPTIONS]`: execute several evolutionary seeds as one
-  reproducible experiment.
-- `$CLI summarize EXPERIMENT`: validate a batch and report contextual
-  generation-winner snapshots and structural diagnostics.
-- `$CLI analyze RESULT...`: inspect structural history and contextual snapshots;
-  it does not infer longitudinal competence.
-- `$CLI crossplay RESULT ...`: run a pairwise transfer assay over frozen
-  generation winners. This is the only command that compares competence across
-  generations.
-- `$CLI materialize RESULT --generation N --out WORLD.bin`: create a visual,
-  turn-zero clonal world from a persisted generation winner.
-- `$CLI world COMMAND ...`: use the ordinary world simulator.
+```text
+a  b  c  d  e  f  g  h  end
+```
 
-## Planning a run
+For each stream position:
 
-Always plan a nontrivial run before executing it:
+1. the current input symbol is one-hot encoded on the nine sensory neurons;
+2. the recurrent brain advances exactly once;
+3. the action neuron with the largest logit emits its symbol;
+4. fitness increases by one when the emitted symbol equals the input symbol.
+
+The score is therefore an integer in `0..=N`, where `N` is the total number of
+symbols across the training corpus. Ties between equal logits use alphabet
+order. Brain state persists within one stream and resets between streams.
+
+Every genome is evaluated independently against the same inputs. The evaluator
+contains no other organisms, match scheduler, arena, or relative scoring.
+
+The default benchmark contains 32 reproducible pseudorandom training streams
+and 32 separately seeded holdout streams. Each stream has 16 shuffled body
+symbols followed by `end` and is constructed to contain `a` through `h` at
+least once. Training fitness has a maximum of 544. The generation winner is
+also evaluated on the 544 holdout positions, but holdout performance never
+participates in selection or breeding.
+
+## Commands
+
+- `$CLI [OPTIONS]` or `$CLI run [OPTIONS]`: execute one NEAT run.
+- `$CLI plan [OPTIONS]`: validate and print the exact compute/task contract.
+- `$CLI analyze RESULT...`: read result artifacts and report fitness
+  trajectories and final outputs.
+- `$CLI hidden-string [run|plan] [OPTIONS]`: run or plan the zero-input,
+  reward-driven within-lifetime adaptation task.
+- `$CLI hidden-string resume CHECKPOINT [--generations N]`: continue from an
+  atomic generation-boundary checkpoint.
+- `$CLI hidden-string reevaluate FROZEN [OPTIONS]`: reevaluate an immutable
+  champion without evolution.
+- `$CLI hidden-string analyze RESULT...`: report training, development, sealed,
+  probe-trajectory, and anti-cheating control results for that task.
+- `$CLI hidden-string calibrate RESULT --generations G,G,G`: compare sampled
+  target/rollout contracts with the full evaluator on saved populations.
+- `$CLI hidden-string horizon RESULT`: evaluate a frozen winner at
+  8/16/32/64/128 learning attempts.
+- `$CLI world COMMAND ...`: use the separate world simulator.
+
+Pairwise evaluation, shared-population evaluation, opponent panels, crossplay,
+and world materialization are intentionally absent from the NEAT interface.
+The task boundary and extension contract are documented in
+[`evaluation-tasks.md`](evaluation-tasks.md).
+
+## Planning
 
 ```bash
 $CLI plan \
-  --population 48 \
-  --generations 40 \
-  --horizon 500 \
-  --world-seeds 11,29,47,61 \
-  --founders 96 \
-  --workers 14
+  --population 64 \
+  --generations 100
 ```
 
-`plan` loads the real world config and calls the same run-option validation used
-by execution. It prints:
+`plan` validates the same configuration used by execution and reports the
+exact training and holdout streams, symbols per genome/winner, genome
+evaluations, training and holdout comparisons, and seed-genome configuration.
+It performs no evaluations and writes no artifact.
 
-- simultaneous lineages and founders per lineage;
-- contemporary opponent exposure and scored cases per genome;
-- evaluator worlds per generation;
-- total evaluator worlds and world ticks;
-- requested/effective evaluator workers and the machine parallelism;
-- the resolved selection-score contract, seeds, horizon, width, and founder count.
+## Run options
 
-No world is simulated and no artifact is written.
-
-### Evaluation-budget terminology
-
-One world configuration produces:
-
-```text
-world seeds × horizons
-```
-
-scored cases for every lineage represented in that world. Pairwise evaluation
-repeats that case bundle for each scheduled opponent; shared-population
-evaluation scores all contemporaries together in each case.
-
-Use exactly one budget form:
-
-- `--opponents-per-genome N` directly controls the competitive panel; or
-- `--cases-per-genome N` asks the CLI to derive the exact opponent count.
-
-`--cases-per-genome` must divide evenly by the cases per opponent.
-
-### Run options
-
-- `--seed N`: evolutionary seed.
-- `--population N`: genomes in each generation.
+- `--seed N`: evolutionary run seed.
+- `--population N`: genomes per generation.
 - `--generations N`: evaluated generations.
-- `--population-checkpoint-interval N`: retain the complete evaluated
-  population every N generations; defaults to `10`. Every generation winner is
-  retained for later crossplay, and the final population is always checkpointed.
-- `--horizon N`: ticks in every evaluator world; default `500`.
-- `--evaluator pairwise|shared_population`: arrange genomes into sampled
-  two-lineage worlds or one world containing the complete contemporary
-  population. The default is `shared_population`; use `--evaluator pairwise`
-  to opt into paired matchups.
-- `--opponents-per-genome N` or `--cases-per-genome N`: evaluation budget.
-- `--world-seeds N,N`: deterministic training layouts.
-- `--cvar F`: mean only the worst-performing fraction of cases into the
-  same-generation selection score;
-  `1.0` is the ordinary mean.
-- `--workers N`: parallel evaluator groups.
-- `--founders N`: organisms divided equally among lineages.
-- `--world-width N`: width of the square axial hex world.
-- `--set key=value`: explicit world override.
-- `--config PATH`: world TOML; defaults to `config/world.toml`.
-- `--out-dir PATH`: generated result directory.
+- `--population-checkpoint-interval N`: persist the complete population every
+  N generations. The final population is always persisted.
+- `--workers N`: parallel genome evaluations. The explicitly sized local pool
+  and worker count are persisted in the NEAT contract.
+- `--threshold F`: repeatable normalized-fitness threshold for first-crossing
+  telemetry. Hidden-string defaults are `0.2`, `0.5`, `0.8`, and `0.9`.
+- `--stream SYMBOLS`: replace the default training corpus with explicit cases;
+  repeat to add cases. Accepted forms include `abc`, `a,b,c,end`, and
+  `a -> b -> c -> end`. `end` is appended when omitted. Only `a`, `b`, `c`,
+  `d`, `e`, `f`, `g`, `h`, and terminal `end` are valid. The holdout corpus is
+  unchanged.
+- `--leaky-neurons`: enable leaky hidden-neuron state during evaluation.
+- `--seed-config PATH`: founder-genome TOML; defaults to
+  `config/seed_genome.toml`.
+- `--out-dir PATH`: result directory.
+- `--param key=value`: explicit NEAT parameter override. Run `--help` for the
+  current parameter list.
 
-Pairwise evaluation requires an even genome population and an even founder
-count. Shared-population evaluation derives `population - 1` opponents, rejects
-an explicit opponent/case budget, and requires the founder count to be exactly
-divisible by the genome population. Every shared world scores every genome
-once; a shared case therefore represents all contemporaries simultaneously
-rather than one independently attributable opponent.
-NEAT parallelizes independent evaluator groups and fixes each world's internal
-intent evaluation to one thread; use `--workers`, not
-`--set intent_parallel_threads=...`.
+The default task is the canonical 32-stream training corpus plus its separate
+32-stream holdout corpus.
 
-`--param key=value` remains available for explicit mutation, speciation,
-selection, plasticity, and complexification experiments. Evaluation layout,
-contextual-score aggregation, world size, and founder count have first-class
-flags and cannot be smuggled through duplicate generic parameters.
-
-## Running one evolutionary seed
-
-Remove `plan` from a validated command and add the evolutionary seed:
+## Running
 
 ```bash
 $CLI \
   --seed 17 \
-  --population 48 \
-  --generations 40 \
-  --horizon 500 \
-  --world-seeds 11,29,47,61 \
-  --founders 96 \
-  --workers 14 \
+  --population 64 \
+  --generations 100 \
   --out-dir artifacts/research/runs
 ```
 
-Progress is JSONL on stderr. The completion JSON on stdout points to the result
-and materialized final-generation-winner world. The compressed
-`result.json.zst` persists the resolved world/NEAT contract, contextual
-generation winners, periodic complete population checkpoints, and the final
-population.
-CLI research commands read the compressed result directly.
+Progress is emitted as JSONL on stderr. Each generation record includes the
+winner's training fitness/accuracy, holdout accuracy, one example from each
+corpus, species count, and network size. Completion JSON on stdout points to a
+compressed `json.zst` result.
 
-## Reproducible multi-seed batches
+The artifact contains:
 
-`batch` owns evolutionary seeds, per-seed worker allocation, output naming,
-logs, source identity, and artifact checksums:
+- the exact training and holdout corpora and NEAT/seed-genome contract;
+- every generation winner's genome, training fitness, holdout result, examples,
+  and species summary;
+- periodic full evaluated-population checkpoints;
+- the complete final evaluated population.
 
-```bash
-$CLI batch \
-  --experiment attack-objective-ablation-control \
-  --seeds 7,17,27 \
-  --total-workers 14 \
-  --out-dir artifacts/research/runs/active \
-  -- \
-  --population 48 --generations 40 --horizon 500 \
-  --world-seeds 11,29,47,61 --founders 96
-```
+Because fitness has a fixed meaning, generation scores are directly comparable
+within and across runs that use the same corpus. The separately seeded holdout
+is the generalization assay; it is never an evolutionary objective.
 
-The machine-wide worker budget is divided deterministically in seed order.
-`batch` rejects `--seed`, `--workers`, and `--out-dir` after the `--` separator.
-Child progress is streamed live to the batch's stderr while the exact same
-JSONL is persisted in `seed-N.progress.jsonl`. Every `neat_generation` record
-includes `run_seed` and a `progress` object with completed/total generations,
-generation time, elapsed time, rolling mean seconds per generation, and ETA.
-It writes one stable experiment directory containing `manifest.json`, per-seed
-results and final-winner worlds, stdout/progress logs, source revision and dirty
-status, and SHA-256 checksums. Existing nonempty experiment directories require
-an explicit `--replace`.
-
-Summarize a completed batch:
+## Analyze
 
 ```bash
-$CLI summarize artifacts/research/runs/active/attack-objective-ablation-control
+$CLI analyze artifacts/research/runs/neat-symbol-copy-RESULT.json.zst
 ```
 
-Summarization validates result schemas, generation sequences, seeds, and
-resolved contracts. It reports each generation winner in its original
-contemporary context plus structural and behavioral observations. It does not
-compute population-mean competence, all-time champions, score deltas, tail
-slopes, or any other cross-generation performance claim. Run `crossplay` for
-that question.
+Analysis reports corpus sizes, final training fitness/accuracy, final holdout
+fitness/accuracy, and the generation-by-generation training/holdout trajectory.
 
-## Selection and observation metrics
-
-The selection objective is focal-founder alive-ticks divided by `focal founders
-× episode horizon`, aggregated over the configured lower tail of evaluation
-cases. This is a contextual, same-generation ranking signal: changing the
-contemporary opponent population changes the task. A score from generation N
-must not be interpreted as higher or lower competence than a score from
-generation M.
-
-The evaluator is a closed-transfer combat arena:
-
-- every founder begins with the same configured energy;
-- successful attacks move energy from victim to attacker without creating it;
-- passive metabolism and attack-attempt costs dissipate energy from the world.
-
-Thus stealing itself is exactly zero-sum between organisms, while the complete
-energy ledger is intentionally dissipative rather than constant-sum.
-
-In shared-population mode, all genomes receive survival and behavior facts from
-the same simulation. Results also retain each genome's case-score standard
-deviation and extrema across world seeds/scenarios/horizons. Per-opponent score
-profiles are intentionally absent because a multi-lineage result cannot be
-causally assigned to any single opponent.
-
-Energy-flow and behavior fields are diagnostics, not extra rewards:
-
-- `gross_energy_acquired` is successful attack transfer received. It excludes
-  starting energy and attack costs.
-- `attack_energy_received` is successful transfer into focal attackers.
-- `attack_energy_lost` is successful transfer out of focal victims.
-- `attack_attempt_energy_cost` is energy paid for every focal attack action,
-  including misses and blocked attempts.
-- `net_attack_energy_balance` is `received - lost - attempt cost`.
-- `net_energy_profit` is `attack energy received - attack energy lost - attack
-  attempt cost`; passive metabolism is deliberately excluded.
-- `attack_precision` is successful hits divided by all attack attempts.
-- `attack_target_evaded` counts attacks whose snapshot target moved away before
-  interaction resolution.
-- `distinct_attack_victims` counts unique organisms successfully hit.
-
-The default categorical controller samples one command from implicit idle,
-turn-left, turn-right, forward, and attack. The experimental
-`compositional_actions_enabled=true` flag keeps those same four neural logits
-but samples three independent groups: orientation (none/left/right),
-locomotion (none/forward), and interaction (none/attack). Its fixed order is
-orientation, simultaneous movement, then interaction; moves may enter cells
-vacated in that same movement phase. Consequently a policy can turn, pursue,
-and attack in one tick without adding outputs to its genome.
-
-The canonical interaction economy charges `attack_attempt_cost` for every
-attack action. A successful adjacent attack then transfers up to
-`attack_energy_transfer` from victim to attacker. The transfer is conserved;
-the attempt cost is the dissipative component. This makes misses costly and
-makes successful hunting capable of paying for unsuccessful attempts.
-
-`pillars` reports raw behavior proxies: action effectiveness, successful attack
-rate, and an age/success slope. These values are not fitness scores. Inspect real
-organisms before interpreting aggregate movement as behavioral novelty.
-
-## Frozen assays
+## Hidden-string adaptation
 
 ```bash
-$CLI crossplay artifacts/research/runs/RESULT.json.zst \
-  --checkpoints 0,5,10,15,20,25,30,35,39 \
-  --out artifacts/research/runs/crossplay-heldout.json \
-  --horizons 500 --world-seeds 101,131,151,181
+$CLI hidden-string plan --seed 101 --population 64 --generations 1000 --workers 4
+$CLI hidden-string --seed 101 --population 64 --generations 500 --workers 4 \
+  --out-dir artifacts/research/runs/active/hidden-string-greedy-prefix-v4
+$CLI hidden-string analyze \
+  artifacts/research/runs/active/hidden-string-greedy-prefix-v4/neat-hidden-string-run-*/result.json.zst
 ```
 
-`crossplay` is the sole longitudinal competence measure. It evaluates distinct
-generation-winner genomes in both founder slots and omits clone-versus-clone
-comparisons. It is useful for detecting transfer failure and retained strength
-against earlier strategies under a common pairwise validation contract. When
-training used a shared arena, crossplay is deliberately a simpler transfer
-assay rather than a reconstruction of that arena.
+This task presents no sensory stream. For each hidden four-symbol target drawn
+from `a` through `h`, the brain begins from inherited weights and receives
+immediate signed reward for each sampled output. Runtime hidden-to-action
+weights persist across 32 attempts. Evolutionary fitness is the final frozen
+probe's greedy longest-correct-prefix score. A target receives `0/4`, `1/4`,
+`2/4`, `3/4`, or `4/4` according to how many consecutive symbols are correct
+from position zero before the first error. Correct symbols after the first
+error receive no credit. Fitness is the mean prefix score across target/rollout
+cases. Hard exact-string rate remains the normalized competence score used by
+threshold telemetry; unordered per-symbol accuracy is diagnostic only.
+Training uses the calibrated 1,024-target/two-rollout panel and one frozen final
+probe. Development uses 256 disjoint targets, runs primary-only every 25
+generations plus the final generation, and reports probes at attempts
+0/8/16/32. Sealed evaluation uses 1,024 disjoint targets and two rollouts once
+for the final evolutionary winner; shuffled-reward and reset-weights controls
+run only their final probe. Panels are hash-shuffled, repeat-pattern matched,
+and exactly symbol-balanced at every position.
 
-## Explicit world-simulator mode
+Population genomes are the parallel unit. A single brain trajectory remains
+sequential because recurrent history crosses attempts and hidden nodes form a
+small current-step DAG. Fixed seed/configuration results are deterministic
+across worker counts.
 
-The ordinary simulator remains stateless and world-as-file, but every command
-is under `world`:
+### Durable hidden-string runs
+
+Each invocation creates a unique directory below `--out-dir`:
+
+```text
+neat-hidden-string-run-<unix-ms>-<pid>/
+  manifest.json
+  result.json.zst
+  checkpoints/
+    generation-000010.checkpoint.json.zst
+    latest.json
+  champions/
+    historical-generation-000003.frozen.json.zst
+    terminal.frozen.json.zst
+```
+
+Numbered checkpoints and champions are compressed, atomic, standalone JSON
+artifacts. A checkpoint with `next_generation: 10` contains the unevaluated
+population for generation 10; generations 0 through 9, breeding for generation
+10, species representatives, compatibility state, historical champion,
+threshold crossings, and cumulative deterministic work are complete.
+Population checkpoints are not embedded in lifecycle-v1 generation summaries.
+
+`SIGINT` and `SIGTERM` set a stop request. The current generation finishes, the
+continuation checkpoint is written, and the current winner receives normal
+final development and sealed evaluation. The result is marked
+`early_stopped` with `signal:SIGINT` or `signal:SIGTERM`; no I/O runs inside the
+signal handler.
+
+Resume a numbered checkpoint in the same run directory:
+
+```bash
+$CLI hidden-string resume RUN/checkpoints/generation-000500.checkpoint.json.zst
+```
+
+The stored generation budget remains the default. The only permitted semantic
+override is a terminal generation greater than the checkpoint's
+`next_generation`:
+
+```bash
+$CLI hidden-string resume RUN/checkpoints/generation-001000.checkpoint.json.zst \
+  --generations 1500
+```
+
+Task, seed-genome, run-seed, and NEAT settings are restored and incompatible
+state is rejected. Resume also rejects a checkpoint older than the run's latest
+checkpoint, preventing an accidental overwrite of a later continuation.
+Continuation is deterministic; timing and paths are observational metadata.
+
+Reevaluate a frozen champion without modifying it:
+
+```bash
+$CLI hidden-string reevaluate RUN/champions/terminal.frozen.json.zst \
+  --attempts 16,32,64,128 --panel sealed --rollouts 4 \
+  --condition primary --condition plasticity-off \
+  --condition shuffled-reward --condition reset-weights
+```
+
+Named panels reproduce the artifact's training, development, or sealed panel.
+A custom composition-matched sample must declare its provenance:
+
+```bash
+$CLI hidden-string reevaluate RUN/champions/terminal.frozen.json.zst \
+  --attempts 32,64 --panel custom --panel-seed 9001 --targets 256 \
+  --rollout-seed 11 --rollout-seed 29
+```
+
+Output records the resolved task contract, panel seed/count, rollout seeds,
+conditions, greedy-prefix scores, hard exact-string rates, diagnostic character
+accuracy, and brain synapse operations. Results also record
+hard-exact competence-threshold crossings,
+per-generation population/winner/development work, terminal sealed work, and
+per-generation, per-session, and total wall time. Winner work is a diagnostic
+subset of population work and is not double-counted in totals. See
+[`neat-run-lifecycle.md`](neat-run-lifecycle.md) for the complete contract.
+
+## Explicit world simulator
+
+The optional simulator remains stateless and world-as-file:
 
 ```bash
 $CLI world new --seed 7 --out artifacts/worlds/base.bin
 $CLI world run-to 500 --in artifacts/worlds/base.bin
-$CLI world pillars --in artifacts/worlds/base.bin
-$CLI world top energy 10 --in artifacts/worlds/base.bin
+$CLI world brain 0 --in artifacts/worlds/base.bin
 ```
 
-`new` creates `<world>.metrics`, an observational sidecar. Copy both files when
-forking a world. `pillars`, `eco`, and `timeseries` need the sidecar. The world
-state is authoritative; the sidecar never changes decisions or outcomes.
+It shares the symbolic brain representation for inspection but is not invoked
+by `evolution::run_neat` and cannot change evolutionary fitness.
 
-Available simulator commands:
-
-- mutating: `new`, `step`, `run-to`, `watch`;
-- performance and grids: `bench`, `sweep`;
-- reads: `turn`, `state`, `pillars`, `eco`, `lineage`, `genome`,
-  `timeseries`, `inspect`, `top`, `hist`, `find`, `brain`, `decide`, `query`;
-- human interactive mode: `tui`.
-
-Use `$CLI world help` for the compact command synopsis. `--in`, `--out`,
-`--metrics`, `--no-metrics`, and `--text` are world-mode flags. A mutating
-command defaults `--out` to `--in`; read commands never write.
-
-## Model invariants
-
-- A world is a finite clonal evaluator. It contains no reproduction or genome
-  mutation.
-- The evolution crate owns generations, selection, speciation, crossover, and
-  mutation.
-- The canonical tick order builds intents from a shared snapshot, applies
-  orientation, resolves movement simultaneously, resolves attacks,
-  applies optional Hebbian plasticity, and drains one passive energy from each
-  survivor.
-- With `leaky_neurons_enabled=false`, neuron leak state is disabled, but evolved
-  `previous_tick` hidden connections still carry a frozen activation vector
-  between decisions. Current-tick connections remain a feed-forward DAG.
-  `EnergyFlowLastTick` is an explicit sensor, separate from hidden state.
-- Fixed configuration plus seed must reproduce identical results.
-
-Generated worlds and datasets belong under `artifacts/`. Durable hypotheses,
-methods, conclusions, and the experiment index belong under `research/`.
+Generated results belong under `artifacts/`. Durable research records belong
+under `research/`.

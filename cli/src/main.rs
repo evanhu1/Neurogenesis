@@ -7,8 +7,8 @@
 //! See docs/cli.md (usage) and docs/cli-stateless-spec.md + SPEC.md.
 
 mod dashboards;
-mod experiment;
 mod neat;
+mod neat_hidden_string;
 mod sweep;
 mod tui;
 
@@ -78,17 +78,12 @@ fn print_help(out: &mut impl Write) -> Result<()> {
          CORE WORKFLOW\n\
          \x20 cli [RUN OPTIONS]             run one generational NEAT experiment\n\
          \x20 cli plan [RUN OPTIONS]        validate and print the resolved compute contract\n\
-         \x20 cli batch ...                 run a reproducible multi-seed experiment suite\n\
-         \x20 cli summarize ...             summarize persisted experiment results\n\
          \x20 cli analyze RESULT...         derive trajectories and diagnostics\n\
-         \x20 cli crossplay RESULT ...      pairwise transfer assay over frozen generation winners\n\
-         \x20 cli evaluate-panel ...        evaluate a frozen focal/opponent panel\n\
+         \x20 cli hidden-string ...         within-lifetime reward-learning experiment\n\
          \n\
          RUN OPTIONS\n\
-         \x20 --seed N --population N --generations N --horizon N --task NAME\n\
-         \x20 --opponents-per-genome N --world-seeds N,N\n\
-         \x20 --scenarios baseline[,scarcity,sparse_search] --workers N\n\
-         \x20 --founders N [--world-width N] [--set world_key=value]\n\
+         \x20 --seed N --population N --generations N\n\
+         \x20 --stream a,b,c,end            replace the default training corpus\n\
          \n\
          WORLD SIMULATOR\n\
          \x20 cli world <command> ...       explicit stateless world-as-file tools\n\
@@ -181,21 +176,17 @@ fn run() -> Result<()> {
         bail!("`{first}` is a world-simulator command; use `cli world {first} ...`");
     }
     // NEAT is the research default: both direct run flags (`cli --seed ...`)
-    // and analysis subcommands (`cli plan`, `cli crossplay`, ...) arrive here.
+    // and analysis subcommands (`cli plan`, `cli analyze`) arrive here.
     run_neat_mode(&argv)
 }
 
 fn run_neat_mode(argv: &[String]) -> Result<()> {
     let mut out_dir = DEFAULT_OUT_DIR.to_string();
     let mut rest = Vec::with_capacity(argv.len());
-    let batch_separator = (argv.first().map(String::as_str) == Some("batch"))
-        .then(|| argv.iter().position(|arg| arg == "--"))
-        .flatten();
     let mut index = 0usize;
     while index < argv.len() {
         let arg = &argv[index];
-        let is_batch_shared_arg = batch_separator.is_some_and(|separator| index > separator);
-        if arg == "--out-dir" && !is_batch_shared_arg {
+        if arg == "--out-dir" {
             out_dir = argv
                 .get(index + 1)
                 .ok_or_else(|| anyhow!("--out-dir needs a path"))?

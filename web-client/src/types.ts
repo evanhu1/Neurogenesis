@@ -25,6 +25,8 @@ export type ActionType =
   | 'Forward'
   | 'Attack';
 
+export type Symbol = 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'end';
+
 export type TerrainType = 'Mountain';
 
 export type NeuronType = 'Sensory' | 'Inter' | 'Action';
@@ -43,7 +45,7 @@ export type LifecycleGenes = {
 };
 
 export type PlasticityGenes = {
-  hebb_eta_gain: number;
+  initial_learning_rate: number;
   juvenile_eta_scale: number;
   eligibility_retention: number;
   max_weight_delta_per_tick: number;
@@ -55,7 +57,7 @@ export type SeedGenomeConfig = {
   num_neurons: number;
   num_synapses: number;
   plasticity_maturity_ticks: number;
-  hebb_eta_gain: number;
+  initial_learning_rate: number;
   juvenile_eta_scale: number;
   eligibility_retention: number;
   max_weight_delta_per_tick: number;
@@ -64,7 +66,6 @@ export type SeedGenomeConfig = {
 
 export type WorldConfig = {
   world_width: number;
-  vision_range: number;
   num_organisms: number;
   starting_energy: number;
   attack_energy_transfer: number;
@@ -77,7 +78,6 @@ export type WorldConfig = {
   leaky_neurons_enabled: boolean;
   predation_enabled: boolean;
   force_random_actions: boolean;
-  compositional_actions_enabled: boolean;
   seed_genome_config: SeedGenomeConfig;
 };
 
@@ -138,16 +138,12 @@ type NeuronStateOf<Id> = {
 export type ApiNeuronState = NeuronStateOf<ApiScalarId>;
 export type NeuronState = NeuronStateOf<NeuronId>;
 
-export type SensoryReceptor =
-  | { receptor_type: 'RayProximity'; ray_offset: number }
-  | { receptor_type: 'RayEnergyAffordance'; ray_offset: number }
-  | { receptor_type: 'SelfEnergy' }
-  | { receptor_type: 'EnergyFlowLastTick' };
+export type SensoryReceptor = { receptor_type: 'Symbol'; symbol: Symbol };
 
 type SensoryNeuronStateOf<Id> = {
   neuron: NeuronStateOf<Id>;
   synapses: SynapseEdgeOf<Id>[];
-  action_synapse_start: number;
+  output_synapse_start: number;
 } & SensoryReceptor;
 
 export type ApiSensoryNeuronState = SensoryNeuronStateOf<ApiScalarId>;
@@ -158,7 +154,7 @@ type InterNeuronStateOf<Id> = {
   state: number;
   alpha: number;
   synapses: SynapseEdgeOf<Id>[];
-  action_synapse_start: number;
+  output_synapse_start: number;
 };
 
 export type ApiInterNeuronState = InterNeuronStateOf<ApiScalarId>;
@@ -167,7 +163,7 @@ export type InterNeuronState = InterNeuronStateOf<NeuronId>;
 type ActionNeuronStateOf<Id> = {
   neuron_id: Id;
   logit: number;
-  action_type: ActionType;
+  symbol: Symbol;
 };
 
 export type ApiActionNeuronState = ActionNeuronStateOf<ApiScalarId>;
@@ -202,6 +198,7 @@ type OrganismStateOf<Id> = {
   energy_flow_last_tick: number;
   successful_attacks_count: number;
   last_action_taken: ActionType;
+  last_action_symbol: Symbol;
   last_action_mask: number;
   brain: BrainStateOf<Id>;
   genome: OrganismGenome;

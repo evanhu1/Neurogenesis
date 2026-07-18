@@ -1,6 +1,5 @@
 [world]
 world_width = 42 # Preserves the established arena density with one founder per genome.
-vision_range = 5 # Fixed number of cells scanned along each of the six egocentric vision rays.
 
 [population]
 num_organisms = 64 # Shared-arena baseline: exactly one founder for each genome in the NEAT pool.
@@ -22,4 +21,3 @@ runtime_plasticity_enabled = false # Whether runtime Hebbian plasticity updates 
 leaky_neurons_enabled = false # Whether feed-forward hidden units also retain explicit leaky state across ticks.
 predation_enabled = true # Enables dissipative adjacent energy theft.
 force_random_actions = false # Debug toggle that ignores policy logits and forces random actions.
-compositional_actions_enabled = true # Independently emit orientation, locomotion, and attack so pursuit does not require prey to remain still.

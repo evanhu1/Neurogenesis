@@ -4,7 +4,7 @@ pub(super) use std::collections::{HashMap, HashSet};
 pub(super) use types::{
     seed_hidden_gene_node_id, ActionType, BrainState, FacingDirection, HiddenNodeGene,
     InterNeuronState, NeuronId, NeuronState, NeuronType, Occupant, OrganismGenome, SensoryReceptor,
-    SynapseEdge,
+    Symbol, SynapseEdge,
 };
 
 mod config_and_seed;

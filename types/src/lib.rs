@@ -7,7 +7,7 @@ pub struct SeedGenomeConfig {
     pub num_neurons: u32,
     pub num_synapses: u32,
     pub plasticity_maturity_ticks: u32,
-    pub hebb_eta_gain: f32,
+    pub initial_learning_rate: f32,
     pub juvenile_eta_scale: f32,
     pub eligibility_retention: f32,
     pub max_weight_delta_per_tick: f32,
@@ -17,7 +17,6 @@ pub struct SeedGenomeConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorldConfig {
     pub world_width: u32,
-    pub vision_range: u32,
     pub num_organisms: u32,
     pub starting_energy: u32,
     pub attack_energy_transfer: u32,
@@ -30,10 +29,6 @@ pub struct WorldConfig {
     pub leaky_neurons_enabled: bool,
     pub predation_enabled: bool,
     pub force_random_actions: bool,
-    /// Interpret the five action logits as independent orientation,
-    /// locomotion, and interaction command groups instead of one categorical
-    /// action. The genome encoding and action neurons are unchanged.
-    pub compositional_actions_enabled: bool,
     pub seed_genome_config: SeedGenomeConfig,
 }
 
@@ -42,7 +37,6 @@ impl WorldConfig {
     pub fn perf_fixture() -> Self {
         Self {
             world_width: 100,
-            vision_range: 5,
             num_organisms: 2_000,
             starting_energy: 250,
             attack_energy_transfer: 40,
@@ -55,12 +49,11 @@ impl WorldConfig {
             leaky_neurons_enabled: false,
             predation_enabled: true,
             force_random_actions: false,
-            compositional_actions_enabled: false,
             seed_genome_config: SeedGenomeConfig {
                 num_neurons: 20,
                 num_synapses: 80,
                 plasticity_maturity_ticks: 0,
-                hebb_eta_gain: 0.0,
+                initial_learning_rate: 0.0,
                 juvenile_eta_scale: 2.0,
                 eligibility_retention: 0.9,
                 max_weight_delta_per_tick: 0.05,
@@ -73,7 +66,6 @@ impl WorldConfig {
     pub fn test_fixture() -> Self {
         Self {
             world_width: 10,
-            vision_range: 5,
             num_organisms: 10,
             starting_energy: 250,
             attack_energy_transfer: 40,
@@ -86,12 +78,11 @@ impl WorldConfig {
             leaky_neurons_enabled: false,
             predation_enabled: false,
             force_random_actions: false,
-            compositional_actions_enabled: false,
             seed_genome_config: SeedGenomeConfig {
                 num_neurons: 1,
                 num_synapses: 0,
                 plasticity_maturity_ticks: 0,
-                hebb_eta_gain: 0.0,
+                initial_learning_rate: 0.0,
                 juvenile_eta_scale: 0.5,
                 eligibility_retention: 0.9,
                 max_weight_delta_per_tick: 0.05,
@@ -280,6 +271,86 @@ pub const INTER_NEURON_ID_BASE: u32 = 1000;
 pub const ACTION_NEURON_ID_BASE: u32 = 2000;
 pub const ORGANISM_VISUAL_OPACITY: f32 = 0.8;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Symbol {
+    #[default]
+    A,
+    B,
+    C,
+    D,
+    E,
+    F,
+    G,
+    H,
+    End,
+}
+
+impl Symbol {
+    pub const ALL: [Self; 9] = [
+        Self::A,
+        Self::B,
+        Self::C,
+        Self::D,
+        Self::E,
+        Self::F,
+        Self::G,
+        Self::H,
+        Self::End,
+    ];
+    pub const COUNT: usize = Self::ALL.len();
+
+    pub const fn index(self) -> usize {
+        self as usize
+    }
+
+    pub const fn action_type(self) -> ActionType {
+        match self {
+            Self::A => ActionType::Idle,
+            Self::B => ActionType::TurnLeft,
+            Self::C => ActionType::TurnRight,
+            Self::D => ActionType::Forward,
+            Self::E | Self::F | Self::G | Self::H => ActionType::Idle,
+            Self::End => ActionType::Attack,
+        }
+    }
+
+    pub const fn is_action_enabled(self, predation_enabled: bool) -> bool {
+        matches!(self, Self::A | Self::B | Self::C | Self::D)
+            || (predation_enabled && matches!(self, Self::End))
+    }
+
+    pub const fn action_neuron_id(self) -> NeuronId {
+        NeuronId(ACTION_NEURON_ID_BASE + self as u32)
+    }
+
+    pub fn from_action_neuron_id(id: NeuronId) -> Option<Self> {
+        Self::ALL
+            .get(id.0.checked_sub(ACTION_NEURON_ID_BASE)? as usize)
+            .copied()
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::A => "a",
+            Self::B => "b",
+            Self::C => "c",
+            Self::D => "d",
+            Self::E => "e",
+            Self::F => "f",
+            Self::G => "g",
+            Self::H => "h",
+            Self::End => "end",
+        }
+    }
+}
+
+impl std::fmt::Display for Symbol {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, VariantArray, Default)]
 pub enum ActionType {
     #[default]
@@ -309,7 +380,7 @@ impl ActionType {
     }
 
     /// Stable per-action index used by dataset encodings and histograms:
-    /// declaration order including `Idle` (`0..=5`).
+    /// declaration order including `Idle` (`0..=4`).
     pub const fn index(self) -> usize {
         self as usize
     }
@@ -329,16 +400,6 @@ impl ActionType {
     /// initialization and evaluation failure counting.
     pub const fn can_fail(self) -> bool {
         matches!(self, ActionType::Forward | ActionType::Attack)
-    }
-
-    pub fn neuron_id(self) -> Option<NeuronId> {
-        let idx = Self::ALL.iter().position(|candidate| *candidate == self)?;
-        Some(NeuronId(ACTION_NEURON_ID_BASE + idx as u32))
-    }
-
-    pub fn from_neuron_id(id: NeuronId) -> Option<Self> {
-        let idx = id.0.checked_sub(ACTION_NEURON_ID_BASE)? as usize;
-        Self::ALL.get(idx).copied()
     }
 }
 
@@ -429,23 +490,17 @@ pub enum EntityId {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "receptor_type")]
 pub enum SensoryReceptor {
-    RayProximity { ray_offset: i8 },
-    SelfEnergy,
-    EnergyFlowLastTick,
+    Symbol { symbol: Symbol },
 }
 
 impl SensoryReceptor {
-    /// Egocentric clockwise order: forward, front-left, back-left, back,
-    /// back-right, front-right.
-    pub const RAY_OFFSETS: [i8; 6] = [0, -1, -2, 3, 2, 1];
-    pub const BASELINE_NEURON_COUNT: u32 = 8;
-    pub const TOTAL_NEURON_COUNT: u32 = 8;
+    pub const BASELINE_NEURON_COUNT: u32 = Symbol::COUNT as u32;
+    pub const TOTAL_NEURON_COUNT: u32 = Symbol::COUNT as u32;
 
     pub fn ordered() -> impl Iterator<Item = Self> {
-        Self::RAY_OFFSETS
+        Symbol::ALL
             .into_iter()
-            .map(|ray_offset| Self::RayProximity { ray_offset })
-            .chain([Self::SelfEnergy, Self::EnergyFlowLastTick])
+            .map(|symbol| Self::Symbol { symbol })
     }
 
     pub fn active(_predation_enabled: bool) -> impl Iterator<Item = Self> {
@@ -471,59 +526,54 @@ impl SensoryReceptor {
 
 #[cfg(test)]
 mod tests {
-    use super::SensoryReceptor;
+    use super::{SensoryReceptor, Symbol};
 
     #[test]
-    fn sensory_receptors_have_fixed_eight_input_order() {
+    fn sensory_receptors_match_the_symbol_alphabet() {
         let receptors = SensoryReceptor::ordered().collect::<Vec<_>>();
-        assert_eq!(receptors.len(), 8);
+        assert_eq!(receptors.len(), 9);
         assert_eq!(
             receptors,
             vec![
-                SensoryReceptor::RayProximity { ray_offset: 0 },
-                SensoryReceptor::RayProximity { ray_offset: -1 },
-                SensoryReceptor::RayProximity { ray_offset: -2 },
-                SensoryReceptor::RayProximity { ray_offset: 3 },
-                SensoryReceptor::RayProximity { ray_offset: 2 },
-                SensoryReceptor::RayProximity { ray_offset: 1 },
-                SensoryReceptor::SelfEnergy,
-                SensoryReceptor::EnergyFlowLastTick,
+                SensoryReceptor::Symbol { symbol: Symbol::A },
+                SensoryReceptor::Symbol { symbol: Symbol::B },
+                SensoryReceptor::Symbol { symbol: Symbol::C },
+                SensoryReceptor::Symbol { symbol: Symbol::D },
+                SensoryReceptor::Symbol { symbol: Symbol::E },
+                SensoryReceptor::Symbol { symbol: Symbol::F },
+                SensoryReceptor::Symbol { symbol: Symbol::G },
+                SensoryReceptor::Symbol { symbol: Symbol::H },
+                SensoryReceptor::Symbol {
+                    symbol: Symbol::End
+                },
             ]
         );
-        assert_eq!(SensoryReceptor::active(false).count(), 8);
-        assert_eq!(SensoryReceptor::active(true).count(), 8);
+        assert_eq!(SensoryReceptor::active(false).count(), 9);
+        assert_eq!(SensoryReceptor::active(true).count(), 9);
     }
 }
 
 pub fn inter_neuron_id(index: u32) -> NeuronId {
-    let dense_id = INTER_NEURON_ID_BASE
+    let mut dense_id = INTER_NEURON_ID_BASE
         .checked_add(index)
         .expect("inter-neuron index exceeds the u32 runtime ID space");
-    if dense_id < ACTION_NEURON_ID_BASE {
-        return NeuronId(dense_id);
+    if dense_id >= ACTION_NEURON_ID_BASE {
+        dense_id = dense_id
+            .checked_add(Symbol::COUNT as u32)
+            .expect("inter-neuron index exceeds the u32 runtime ID space");
     }
-
-    // Action IDs are a small, stable wire-visible island inside the runtime
-    // ID space. Skip that island instead of treating it as a hard ceiling on
-    // hidden-node growth. Existing IDs below the old 1,000-node boundary stay
-    // unchanged; later hidden nodes resume immediately after the action IDs.
-    NeuronId(
-        dense_id
-            .checked_add(ActionType::ALL.len() as u32)
-            .expect("inter-neuron index exceeds the u32 runtime ID space"),
-    )
+    NeuronId(dense_id)
 }
 
 pub fn inter_neuron_index(id: NeuronId, num_neurons: u32) -> Option<u32> {
-    let action_end = ACTION_NEURON_ID_BASE.checked_add(ActionType::ALL.len() as u32)?;
-    if (ACTION_NEURON_ID_BASE..action_end).contains(&id.0) {
+    let mut dense_id = id.0;
+    let island_end = ACTION_NEURON_ID_BASE.checked_add(Symbol::COUNT as u32)?;
+    if (ACTION_NEURON_ID_BASE..island_end).contains(&id.0) {
         return None;
     }
-    let dense_id = if id.0 >= action_end {
-        id.0.checked_sub(ActionType::ALL.len() as u32)?
-    } else {
-        id.0
-    };
+    if id.0 >= island_end {
+        dense_id = dense_id.checked_sub(Symbol::COUNT as u32)?;
+    }
     let idx = dense_id.checked_sub(INTER_NEURON_ID_BASE)?;
     (idx < num_neurons).then_some(idx)
 }
@@ -536,7 +586,7 @@ pub struct LifecycleGenes {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PlasticityGenes {
     #[serde(default)]
-    pub hebb_eta_gain: f32,
+    pub initial_learning_rate: f32,
     #[serde(default = "default_juvenile_eta_scale")]
     pub juvenile_eta_scale: f32,
     #[serde(default = "default_eligibility_retention")]
@@ -588,13 +638,13 @@ impl OrganismGenome {
     /// Callers mutate specific fields after construction as needed. Adding a new field on
     /// `OrganismGenome` means updating only this one builder.
     pub fn test_fixture() -> Self {
-        let action_count = ActionType::ALL.len();
+        let action_count = Symbol::COUNT;
         Self {
             lifecycle: LifecycleGenes {
                 plasticity_maturity_ticks: 0,
             },
             plasticity: PlasticityGenes {
-                hebb_eta_gain: 0.0,
+                initial_learning_rate: 0.0,
                 juvenile_eta_scale: 0.5,
                 eligibility_retention: 0.9,
                 max_weight_delta_per_tick: 0.05,
@@ -623,6 +673,7 @@ pub struct SynapseGene {
     pub post_node_id: GeneNodeId,
     pub timing: SynapseTiming,
     pub weight: f32,
+    pub plasticity_coefficient: f32,
     pub enabled: bool,
 }
 
@@ -636,6 +687,7 @@ pub struct SynapseEdge {
     pub pre_inter_index: Option<u32>,
     pub post_inter_index: Option<u32>,
     pub weight: f32,
+    pub plasticity_coefficient: f32,
     #[serde(default)]
     pub eligibility: f32,
     // `default` (not `skip`): normally consumed+zeroed the same tick it is set,
@@ -671,17 +723,17 @@ pub struct SensoryNeuronState {
     #[serde(flatten)]
     pub receptor: SensoryReceptor,
     pub synapses: Vec<SynapseEdge>,
-    /// Cached index of the first action-targeting edge in `synapses` (which
-    /// keep inter targets first and action targets second, with numeric post-ID
+    /// Cached index of the first output-targeting edge in `synapses` (which
+    /// keep inter targets first and output targets second, with numeric post-ID
     /// ordering inside each group). Maintained by
-    /// `refresh_action_synapse_starts_and_count` at birth and after pruning.
+    /// `refresh_output_synapse_starts_and_count` at birth and after pruning.
     //
     // `default` (not `skip`): persisted in the world blob so the post-load
     // edge split is correct without a rehydrate pass (the value is a pure
     // function of `synapses`, saved in a consistent between-tick state). Legacy
     // payloads that omit it default to 0; such a payload must be re-expressed.
     #[serde(default)]
-    pub action_synapse_start: usize,
+    pub output_synapse_start: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -692,14 +744,14 @@ pub struct InterNeuronState {
     pub alpha: f32,
     pub synapses: Vec<SynapseEdge>,
     #[serde(default)]
-    pub action_synapse_start: usize,
+    pub output_synapse_start: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ActionNeuronState {
     pub neuron_id: NeuronId,
     pub logit: f32,
-    pub action_type: ActionType,
+    pub symbol: Symbol,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -762,6 +814,7 @@ pub struct OrganismState {
     pub successful_attacks_count: u64,
     #[serde(default)]
     pub last_action_taken: ActionType,
+    pub last_action_symbol: Symbol,
     /// Every explicit motor command emitted on the most recent tick. This is a
     /// bitset built from [`ActionType::command_bit`].
     #[serde(default)]
@@ -802,6 +855,7 @@ impl OrganismState {
             energy_flow_last_tick: 0,
             successful_attacks_count,
             last_action_taken,
+            last_action_symbol: Symbol::A,
             last_action_mask: last_action_taken.command_bit(),
             #[cfg(feature = "instrumentation")]
             instrumentation: Default::default(),

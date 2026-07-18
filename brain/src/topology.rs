@@ -1,8 +1,8 @@
 use crate::genome::{SYNAPSE_STRENGTH_MAX, SYNAPSE_STRENGTH_MIN};
-use types::{ActionType, BrainState, NeuronId, SensoryReceptor, SynapseEdge};
+use types::{BrainState, NeuronId, SensoryReceptor, Symbol, SynapseEdge};
 
 pub const SENSORY_COUNT: u32 = SensoryReceptor::TOTAL_NEURON_COUNT;
-pub const ACTION_COUNT: usize = ActionType::ALL.len();
+pub const ACTION_COUNT: usize = Symbol::COUNT;
 // Single source of truth for the wire-visible neuron-ID layout lives in
 // types; these are local aliases, not independent definitions.
 pub const INTER_ID_BASE: u32 = types::INTER_NEURON_ID_BASE;
@@ -10,11 +10,8 @@ pub const ACTION_ID_BASE: u32 = types::ACTION_NEURON_ID_BASE;
 
 pub use types::inter_neuron_id;
 
-pub fn action_index(action: ActionType) -> usize {
-    ActionType::ALL
-        .iter()
-        .position(|candidate| *candidate == action)
-        .expect("idle has no action neuron")
+pub const fn action_index(symbol: Symbol) -> usize {
+    symbol.index()
 }
 
 pub fn action_neuron_id(index: usize) -> NeuronId {
@@ -41,24 +38,24 @@ pub fn constrain_weight(weight: f32) -> f32 {
             .clamp(SYNAPSE_STRENGTH_MIN, SYNAPSE_STRENGTH_MAX)
 }
 
-/// Recomputes every sensory and inter neuron's `action_synapse_start` and
+/// Recomputes every sensory and inter neuron's `output_synapse_start` and
 /// refreshes `synapse_count`. Called at birth and from the runtime prune
 /// path; allocation-free.
-pub fn refresh_action_synapse_starts_and_count(brain: &mut BrainState) {
+pub fn refresh_output_synapse_starts_and_count(brain: &mut BrainState) {
     let mut total_synapses = brain.recurrent_synapses.len();
     for sensory_neuron in brain.sensory.iter_mut() {
         debug_assert_runtime_synapse_order(&sensory_neuron.synapses);
-        sensory_neuron.action_synapse_start = sensory_neuron
+        sensory_neuron.output_synapse_start = sensory_neuron
             .synapses
-            .partition_point(|edge| action_array_index(edge.post_neuron_id).is_none());
+            .partition_point(|edge| !is_output_neuron(edge.post_neuron_id));
         total_synapses += sensory_neuron.synapses.len();
     }
 
     for inter_neuron in brain.inter.iter_mut() {
         debug_assert_runtime_synapse_order(&inter_neuron.synapses);
-        inter_neuron.action_synapse_start = inter_neuron
+        inter_neuron.output_synapse_start = inter_neuron
             .synapses
-            .partition_point(|edge| action_array_index(edge.post_neuron_id).is_none());
+            .partition_point(|edge| !is_output_neuron(edge.post_neuron_id));
         total_synapses += inter_neuron.synapses.len();
     }
 
@@ -71,7 +68,7 @@ pub fn debug_assert_runtime_synapse_order(edges: &[SynapseEdge]) {
             runtime_post_sort_key(pair[0].post_neuron_id)
                 <= runtime_post_sort_key(pair[1].post_neuron_id)
         }),
-        "outgoing synapses must keep inter targets before action targets"
+        "outgoing synapses must keep inter targets before output targets"
     );
 }
 
@@ -80,5 +77,9 @@ pub fn sort_runtime_synapses(edges: &mut [SynapseEdge]) {
 }
 
 fn runtime_post_sort_key(id: NeuronId) -> (bool, u32) {
-    (action_array_index(id).is_some(), id.0)
+    (is_output_neuron(id), id.0)
+}
+
+fn is_output_neuron(id: NeuronId) -> bool {
+    action_array_index(id).is_some()
 }

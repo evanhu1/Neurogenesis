@@ -7,18 +7,38 @@ entry; bulk outputs live under `artifacts/research/runs/` and are not tracked.
 
 | Decision | Rationale | Evidence status | Record |
 |---|---|---|---|
+| Hidden-string v4 greedy-prefix selection | Give ordered partial credit using the longest correct argmax prefix: `0/4` through `4/4`. This removes v3's probability-versus-greedy mismatch while remaining denser than all-or-nothing exact. | The 100-generation diagnostic showed seed-consistent life: sealed prefix 0.189–0.252, exact 0.54%–1.66%, low controls, and every trajectory still improving at generation 99. Advance to the matched 500-generation replication. | [diagnostic](archive/experiments/2026-07-18-hidden-string-greedy-prefix-v4-100g-diagnostic.md) · [v4 proposal](proposed/2026-07-18-hidden-string-greedy-prefix-v4.md) |
+| Hidden-string v3 smooth exact selection | Hard exact rate discarded near-correct strings and exposed evolution to only about 0.5 expected random successes across the 2,048 training cases. Select on mean complete-string probability while retaining hard exact as the competence gate. | Completed; only seed 211 passed (sealed hard exact 50.00%, 1.22%, 7.52%). Batch wall time improved 6.55x, but temperature-one soft exact changed which seed failed rather than making discovery robust. | [results](archive/experiments/2026-07-18-hidden-string-soft-exact-v3-500g.md) · [proposal](proposed/2026-07-18-hidden-string-soft-exact-v3.md) |
+| Hidden-string v2 evaluator contract | Remove routine research instrumentation from selection and use the hottest safe parallel boundary without changing results. | Runtime/evaluator optimizations implemented; 1-vs-4 worker artifacts were semantically identical and 2.9x faster. Rank calibration rejected every reduced panel, so training remains `1024x2`. The hard-exact-only selection contract was superseded before replication because it was too sparse. | [calibration](archive/experiments/2026-07-17-hidden-string-evaluator-optimization.md) · [superseded v2 proposal](proposed/2026-07-17-hidden-string-exact-string-v2.md) |
+| Hidden-string v1 exact-string task | Remove v0's repeat-composition shortcut and seed-dependent founder confound while making the behavioral objective strict. | Superseded before completion: three runs stopped without result artifacts under an inefficient, correlation-leaking evaluator. | [superseded proposal](proposed/2026-07-17-hidden-string-exact-string-v1.md) |
+| Seed 27 can reach the hidden-string gate with 500 generations | Determine whether the last observed failure is an absolute limitation or a slow-search case. | Exact-prefix extension reached 75.0% sealed accuracy with every control passing, but only exactly at threshold and on a post-hoc selected seed. | [diagnostic](archive/experiments/2026-07-17-hidden-string-seed27-500g-diagnostic.md) |
+| A 200-generation budget helps but does not fix hidden-string reliability | The 100-generation failures could reflect late structural search rather than a broken learning mechanism. | Exact-prefix reruns rescued seed 47 and strengthened seed 7, but seed 27 plateaued at 66.4%; pass count improved from 1/3 to 2/3. | [diagnostic](archive/experiments/2026-07-17-hidden-string-adaptation-200g-diagnostic.md) |
+| Hidden-string adaptation is not yet robust | The reward-driven effect should reproduce at the preregistered competence and persistence thresholds before task switches are added. | Fresh seeds 7/27/47 all adapted, but only seed 7 passed the complete sealed gate; median final accuracy was 71.9%. Sequential-target work remains gated. | [replication](archive/experiments/2026-07-17-hidden-string-adaptation-replication.md) |
+| Hidden-string adaptation v0 | Test whether evolution can shape a reward-driven runtime learning system instead of encoding each target in inherited weights. | Seed-17 existence proof passed all sealed gates: 25.0% to 77.9% accuracy; causal controls stayed below thresholds; structural evolution beat fixed topology by 32.6 points. | [experiment](archive/experiments/2026-07-17-hidden-string-adaptation-v0.md) |
+| Modular NEAT evaluation-task boundary | New tasks should own genome evaluation and task-specific results without coupling their semantics to speciation, selection, or breeding. | Implemented with `EvaluationTask`; symbol copy retained as the reference training task. | [task contract](../docs/evaluation-tasks.md) |
+| Pure single-agent symbol-copy evaluator | The current task measures a direct, absolute behavior: emit the same symbol received. Ecology and opponent context add no information to this objective. | Implemented; seed-17 diagnostic reached exact training and unseen holdout copying at generation 24. | [proposal](proposed/2026-07-17-symbol-copy-task.md) |
+| Nine-symbol brain boundary | Sensors and actions use `a` through `h` plus `end`; one brain step produces one emitted symbol. | Implemented in shared Rust and web schemas. | [proposal](proposed/2026-07-17-hidden-string-exact-string-v1.md) |
+
+## Proposed
+
+- [Pure symbol-copy baseline](proposed/2026-07-17-symbol-copy-task.md): evolve
+  exact copying across the canonical 32-stream training corpus and require
+  `544/544` on the separately seeded holdout corpus.
+- [Hidden-string greedy-prefix v4](proposed/2026-07-18-hidden-string-greedy-prefix-v4.md):
+  run a matched three-seed, 500-generation replication using ordered `0/4`
+  through `4/4` argmax-prefix fitness and the unchanged hard-exact gate.
+
+## Historical architecture decisions
+
+| Decision | Rationale | Evidence status | Record |
+|---|---|---|---|
 | Shared arena is the default evaluator | Shared-population evaluation is roughly 100x cheaper at population 16 and produces useful strategy search; paired matchups remain available explicitly for expensive grounding and reranking. | Default cutover implemented after two matched studies. Arena is a screening/search default, not evidence that its contextual score equals pairwise transfer strength. | [population-16 experiment](archive/experiments/2026-07-15-energy-stealing-p16-pairwise-vs-arena.md) |
 | Plant-free energy-stealing task | NEAT now evaluates equal-energy founders with no plant generation or Eat action; successful attacks conserve energy between organisms while metabolism and attempt costs dissipate it. | Implemented and deterministically smoke-verified. A first matched evolution test found transferable predators in two shared-arena seeds but a strong passive-survival attractor in both evaluator topologies. | [experiment](archive/experiments/2026-07-15-energy-stealing-pairwise-vs-arena.md) |
 | One-tick-cost / twenty-tick attack economy | A missed attack now loses one energy, equal to one tick of passive metabolism; a successful attack can transfer up to twenty. This reduces the penalty for exploring aggression while retaining a real spam cost. | Adopted as the canonical baseline after the first plant-free experiment exposed a passive-survival attractor under cost 10 / transfer 40; evolutionary effect not yet measured. | [canonical config](../config/world.toml) |
 | Absolute-survival objective cutover | Selection now measures only the focal genome's normalized total survival time; pairwise opponents remain ecological context rather than an explicit score multiplier. | Adopted as a clearer contract, not experimentally established as a performance improvement. | [record](archive/experiments/2026-07-14-survival-objective-causal-ablation.md) |
 | One founder per genome in shared arenas | Clone-heavy arenas let a genome interfere with itself and made score attribution depend on founder/ID slots. Shared evaluation now uses one organism per genome and rotates every genome through every slot over 64 deterministic worlds. | End-to-end population-permutation invariance and exact slot coverage pass; the 100-generation screen produced transferable adaptation in all three seeds. | [experiment](archive/experiments/2026-07-15-contextual-arena-permutation-100g.md) |
 
-## Proposed
-
-No experiment is currently preregistered. The next matched treatment should
-test a shorter founder-energy runway against the repaired one-founder arena.
-
-## Recent competitive-NEAT experiments
+## Historical competitive-NEAT experiments
 
 | Experiment | Hypothesis | Method | Result | Status / record |
 |---|---|---|---|---|

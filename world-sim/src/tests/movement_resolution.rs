@@ -17,10 +17,8 @@ fn competitive_config(world_width: u32, num_organisms: u32) -> WorldConfig {
     cfg
 }
 
-fn compositional_config(world_width: u32, num_organisms: u32) -> WorldConfig {
-    let mut cfg = competitive_config(world_width, num_organisms);
-    cfg.compositional_actions_enabled = true;
-    cfg
+fn categorical_config(world_width: u32, num_organisms: u32) -> WorldConfig {
+    competitive_config(world_width, num_organisms)
 }
 
 #[test]
@@ -30,7 +28,7 @@ fn overlapping_move_destination_uses_confidence_winner() {
     configure_sim(
         &mut sim,
         vec![
-            make_compositional_organism_with_bias(
+            make_categorical_organism_with_bias(
                 0,
                 0,
                 1,
@@ -39,7 +37,7 @@ fn overlapping_move_destination_uses_confidence_winner() {
                 100.0,
                 50,
             ),
-            make_compositional_organism_with_bias(
+            make_categorical_organism_with_bias(
                 1,
                 1,
                 0,
@@ -64,7 +62,7 @@ fn overlapping_move_destination_tie_breaks_by_lowest_id() {
     configure_sim(
         &mut sim,
         vec![
-            make_compositional_organism_with_bias(
+            make_categorical_organism_with_bias(
                 0,
                 0,
                 1,
@@ -73,7 +71,7 @@ fn overlapping_move_destination_tie_breaks_by_lowest_id() {
                 100.0,
                 50,
             ),
-            make_compositional_organism_with_bias(
+            make_categorical_organism_with_bias(
                 1,
                 1,
                 0,
@@ -93,13 +91,13 @@ fn overlapping_move_destination_tie_breaks_by_lowest_id() {
 
 #[test]
 fn occupied_target_blocks_move_when_occupant_stays() {
-    let cfg = compositional_config(6, 2);
+    let cfg = categorical_config(6, 2);
     let mut sim = Simulation::new(cfg, 15).expect("simulation should initialize");
     configure_sim(
         &mut sim,
         vec![
-            make_compositional_organism(0, 1, 1, FacingDirection::East, &[ActionType::Forward], 50),
-            make_compositional_organism(1, 2, 1, FacingDirection::East, &[], 50),
+            make_categorical_organism(0, 1, 1, FacingDirection::East, &[ActionType::Forward], 50),
+            make_categorical_organism(1, 2, 1, FacingDirection::East, &[], 50),
         ],
     );
 
@@ -110,33 +108,33 @@ fn occupied_target_blocks_move_when_occupant_stays() {
 }
 
 #[test]
-fn move_dependency_chain_enters_cell_vacated_in_same_tick() {
-    let cfg = compositional_config(6, 2);
+fn categorical_move_cannot_enter_cell_vacated_in_same_tick() {
+    let cfg = categorical_config(6, 2);
     let mut sim = Simulation::new(cfg, 16).expect("simulation should initialize");
     configure_sim(
         &mut sim,
         vec![
-            make_compositional_organism(0, 1, 1, FacingDirection::East, &[ActionType::Forward], 50),
-            make_compositional_organism(1, 2, 1, FacingDirection::East, &[ActionType::Forward], 50),
+            make_categorical_organism(0, 1, 1, FacingDirection::East, &[ActionType::Forward], 50),
+            make_categorical_organism(1, 2, 1, FacingDirection::East, &[ActionType::Forward], 50),
         ],
     );
 
     let moves = move_map(&tick_once(&mut sim));
-    assert_eq!(moves.get(&OrganismId(0)), Some(&((1, 1), (2, 1))));
+    assert_eq!(moves.get(&OrganismId(0)), None);
     assert_eq!(moves.get(&OrganismId(1)), Some(&((2, 1), (3, 1))));
     assert_no_overlap(&sim);
 }
 
 #[test]
 fn blocked_tail_blocks_entire_move_dependency_chain() {
-    let cfg = compositional_config(7, 3);
+    let cfg = categorical_config(7, 3);
     let mut sim = Simulation::new(cfg, 17).expect("simulation should initialize");
     configure_sim(
         &mut sim,
         vec![
-            make_compositional_organism(0, 1, 1, FacingDirection::East, &[ActionType::Forward], 50),
-            make_compositional_organism(1, 2, 1, FacingDirection::East, &[ActionType::Forward], 50),
-            make_compositional_organism(2, 3, 1, FacingDirection::East, &[], 50),
+            make_categorical_organism(0, 1, 1, FacingDirection::East, &[ActionType::Forward], 50),
+            make_categorical_organism(1, 2, 1, FacingDirection::East, &[ActionType::Forward], 50),
+            make_categorical_organism(2, 3, 1, FacingDirection::East, &[], 50),
         ],
     );
 
@@ -148,32 +146,31 @@ fn blocked_tail_blocks_entire_move_dependency_chain() {
 }
 
 #[test]
-fn two_organism_swap_is_atomic() {
-    let cfg = compositional_config(6, 2);
+fn categorical_two_organism_swap_is_blocked() {
+    let cfg = categorical_config(6, 2);
     let mut sim = Simulation::new(cfg, 18).expect("simulation should initialize");
     configure_sim(
         &mut sim,
         vec![
-            make_compositional_organism(0, 1, 1, FacingDirection::East, &[ActionType::Forward], 50),
-            make_compositional_organism(1, 2, 1, FacingDirection::West, &[ActionType::Forward], 50),
+            make_categorical_organism(0, 1, 1, FacingDirection::East, &[ActionType::Forward], 50),
+            make_categorical_organism(1, 2, 1, FacingDirection::West, &[ActionType::Forward], 50),
         ],
     );
 
     let moves = move_map(&tick_once(&mut sim));
-    assert_eq!(moves.get(&OrganismId(0)), Some(&((1, 1), (2, 1))));
-    assert_eq!(moves.get(&OrganismId(1)), Some(&((2, 1), (1, 1))));
+    assert!(moves.is_empty());
     assert_no_overlap(&sim);
 }
 
 #[test]
-fn three_organism_move_cycle_is_atomic() {
-    let cfg = compositional_config(6, 3);
+fn categorical_three_organism_move_cycle_is_blocked() {
+    let cfg = categorical_config(6, 3);
     let mut sim = Simulation::new(cfg, 19).expect("simulation should initialize");
     configure_sim(
         &mut sim,
         vec![
-            make_compositional_organism(0, 1, 1, FacingDirection::East, &[ActionType::Forward], 50),
-            make_compositional_organism(
+            make_categorical_organism(0, 1, 1, FacingDirection::East, &[ActionType::Forward], 50),
+            make_categorical_organism(
                 1,
                 2,
                 1,
@@ -181,7 +178,7 @@ fn three_organism_move_cycle_is_atomic() {
                 &[ActionType::Forward],
                 50,
             ),
-            make_compositional_organism(
+            make_categorical_organism(
                 2,
                 1,
                 2,
@@ -193,21 +190,19 @@ fn three_organism_move_cycle_is_atomic() {
     );
 
     let moves = move_map(&tick_once(&mut sim));
-    assert_eq!(moves.get(&OrganismId(0)), Some(&((1, 1), (2, 1))));
-    assert_eq!(moves.get(&OrganismId(1)), Some(&((2, 1), (1, 2))));
-    assert_eq!(moves.get(&OrganismId(2)), Some(&((1, 2), (1, 1))));
+    assert!(moves.is_empty());
     assert_no_overlap(&sim);
 }
 
 #[test]
 fn move_resolution_blocks_wall_cells() {
-    let cfg = compositional_config(5, 1);
+    let cfg = categorical_config(5, 1);
     let mut sim = Simulation::new(cfg, 20).expect("simulation should initialize");
     let wall_idx = sim.cell_index(2, 1);
     sim.terrain_map[wall_idx] = true;
     configure_sim(
         &mut sim,
-        vec![make_compositional_organism(
+        vec![make_categorical_organism(
             0,
             1,
             1,
@@ -230,8 +225,8 @@ fn categorical_attack_records_escape_and_still_charges_attempt() {
     configure_sim(
         &mut sim,
         vec![
-            make_compositional_organism(0, 1, 1, FacingDirection::East, &[ActionType::Attack], 50),
-            make_compositional_organism(1, 2, 1, FacingDirection::East, &[ActionType::Forward], 50),
+            make_categorical_organism(0, 1, 1, FacingDirection::East, &[ActionType::Attack], 50),
+            make_categorical_organism(1, 2, 1, FacingDirection::East, &[ActionType::Forward], 50),
         ],
     );
 
@@ -251,13 +246,13 @@ fn categorical_attack_records_escape_and_still_charges_attempt() {
 }
 
 #[test]
-fn compositional_forward_attack_pursues_fleeing_target() {
-    let cfg = compositional_config(7, 2);
+fn categorical_forward_does_not_also_attack_or_enter_an_occupied_snapshot_cell() {
+    let cfg = categorical_config(7, 2);
     let mut sim = Simulation::new(cfg, 22).expect("simulation should initialize");
     configure_sim(
         &mut sim,
         vec![
-            make_compositional_organism(
+            make_categorical_organism(
                 0,
                 1,
                 1,
@@ -265,30 +260,27 @@ fn compositional_forward_attack_pursues_fleeing_target() {
                 &[ActionType::Forward, ActionType::Attack],
                 50,
             ),
-            make_compositional_organism(1, 2, 1, FacingDirection::East, &[ActionType::Forward], 50),
+            make_categorical_organism(1, 2, 1, FacingDirection::East, &[ActionType::Forward], 50),
         ],
     );
 
     let delta = tick_once(&mut sim);
     let moves = move_map(&delta);
-    assert_eq!(moves.get(&OrganismId(0)), Some(&((1, 1), (2, 1))));
+    assert_eq!(moves.get(&OrganismId(0)), None);
     assert_eq!(moves.get(&OrganismId(1)), Some(&((2, 1), (3, 1))));
-    let event = sim.attack_events_last_turn()[0];
-    assert_eq!(event.outcome, AttackOutcome::NonlethalHit);
-    assert_eq!(event.victim_id, Some(OrganismId(1)));
-    assert_eq!(event.energy_transferred, 20);
-    assert_eq!(organism(&sim, 0).energy, 68);
-    assert_eq!(organism(&sim, 1).energy, 29);
+    assert!(sim.attack_events_last_turn().is_empty());
+    assert_eq!(organism(&sim, 0).energy, 49);
+    assert_eq!(organism(&sim, 1).energy, 49);
 }
 
 #[test]
-fn compositional_turn_move_attack_resolves_in_that_order() {
-    let cfg = compositional_config(7, 2);
+fn categorical_turn_does_not_also_move_or_attack() {
+    let cfg = categorical_config(7, 2);
     let mut sim = Simulation::new(cfg, 23).expect("simulation should initialize");
     configure_sim(
         &mut sim,
         vec![
-            make_compositional_organism(
+            make_categorical_organism(
                 0,
                 1,
                 1,
@@ -300,21 +292,16 @@ fn compositional_turn_move_attack_resolves_in_that_order() {
                 ],
                 50,
             ),
-            make_compositional_organism(1, 1, 3, FacingDirection::East, &[], 50),
+            make_categorical_organism(1, 1, 3, FacingDirection::East, &[], 50),
         ],
     );
 
     let delta = tick_once(&mut sim);
-    assert_eq!(
-        move_map(&delta).get(&OrganismId(0)),
-        Some(&((1, 1), (1, 2)))
-    );
+    assert!(move_map(&delta).is_empty());
     assert_eq!(organism(&sim, 0).facing, FacingDirection::SouthEast);
-    let event = sim.attack_events_last_turn()[0];
-    assert_eq!(event.outcome, AttackOutcome::NonlethalHit);
-    assert_eq!(event.victim_id, Some(OrganismId(1)));
-    assert_eq!(organism(&sim, 0).energy, 68);
-    assert_eq!(organism(&sim, 1).energy, 29);
+    assert!(sim.attack_events_last_turn().is_empty());
+    assert_eq!(organism(&sim, 0).energy, 49);
+    assert_eq!(organism(&sim, 1).energy, 49);
 }
 
 #[test]
@@ -324,8 +311,8 @@ fn mutual_nonlethal_attacks_both_resolve_and_conserve_transfer_energy() {
     configure_sim(
         &mut sim,
         vec![
-            make_compositional_organism(0, 1, 1, FacingDirection::East, &[ActionType::Attack], 50),
-            make_compositional_organism(1, 2, 1, FacingDirection::West, &[ActionType::Attack], 50),
+            make_categorical_organism(0, 1, 1, FacingDirection::East, &[ActionType::Attack], 50),
+            make_categorical_organism(1, 2, 1, FacingDirection::West, &[ActionType::Attack], 50),
         ],
     );
 
@@ -356,8 +343,8 @@ fn lethal_lower_id_attack_cancels_victims_queued_attack() {
     configure_sim(
         &mut sim,
         vec![
-            make_compositional_organism(0, 1, 1, FacingDirection::East, &[ActionType::Attack], 50),
-            make_compositional_organism(1, 2, 1, FacingDirection::West, &[ActionType::Attack], 20),
+            make_categorical_organism(0, 1, 1, FacingDirection::East, &[ActionType::Attack], 50),
+            make_categorical_organism(1, 2, 1, FacingDirection::West, &[ActionType::Attack], 20),
         ],
     );
 
@@ -384,8 +371,8 @@ fn multiple_attackers_share_remaining_victim_energy_in_id_order() {
     configure_sim(
         &mut sim,
         vec![
-            make_compositional_organism(0, 1, 2, FacingDirection::East, &[ActionType::Attack], 50),
-            make_compositional_organism(
+            make_categorical_organism(0, 1, 2, FacingDirection::East, &[ActionType::Attack], 50),
+            make_categorical_organism(
                 1,
                 2,
                 1,
@@ -393,7 +380,7 @@ fn multiple_attackers_share_remaining_victim_energy_in_id_order() {
                 &[ActionType::Attack],
                 50,
             ),
-            make_compositional_organism(
+            make_categorical_organism(
                 2,
                 3,
                 1,
@@ -401,7 +388,7 @@ fn multiple_attackers_share_remaining_victim_energy_in_id_order() {
                 &[ActionType::Attack],
                 50,
             ),
-            make_compositional_organism(3, 2, 2, FacingDirection::East, &[], 30),
+            make_categorical_organism(3, 2, 2, FacingDirection::East, &[], 30),
         ],
     );
 
@@ -431,13 +418,13 @@ fn multiple_attackers_share_remaining_victim_energy_in_id_order() {
 }
 
 #[test]
-fn collision_winner_moves_then_both_post_move_attacks_resolve() {
-    let cfg = compositional_config(7, 3);
+fn categorical_collision_winner_moves_without_an_additional_attack() {
+    let cfg = categorical_config(7, 3);
     let mut sim = Simulation::new(cfg, 27).expect("simulation should initialize");
     configure_sim(
         &mut sim,
         vec![
-            make_compositional_organism(
+            make_categorical_organism(
                 0,
                 1,
                 2,
@@ -445,7 +432,7 @@ fn collision_winner_moves_then_both_post_move_attacks_resolve() {
                 &[ActionType::Forward, ActionType::Attack],
                 50,
             ),
-            make_compositional_organism(
+            make_categorical_organism(
                 1,
                 2,
                 1,
@@ -453,7 +440,7 @@ fn collision_winner_moves_then_both_post_move_attacks_resolve() {
                 &[ActionType::Forward, ActionType::Attack],
                 50,
             ),
-            make_compositional_organism(2, 3, 2, FacingDirection::East, &[], 50),
+            make_categorical_organism(2, 3, 2, FacingDirection::East, &[], 50),
         ],
     );
 
@@ -462,14 +449,9 @@ fn collision_winner_moves_then_both_post_move_attacks_resolve() {
     assert_eq!(moves.len(), 1);
     assert_eq!(moves.get(&OrganismId(0)), Some(&((1, 2), (2, 2))));
     let events = sim.attack_events_last_turn();
-    assert_eq!(events.len(), 2);
-    assert_eq!(events[0].victim_id, Some(OrganismId(2)));
-    assert_eq!(events[1].victim_id, Some(OrganismId(0)));
-    assert!(events
-        .iter()
-        .all(|event| event.outcome == AttackOutcome::NonlethalHit));
-    assert_eq!(organism(&sim, 0).energy, 48);
-    assert_eq!(organism(&sim, 1).energy, 68);
-    assert_eq!(organism(&sim, 2).energy, 29);
+    assert!(events.is_empty());
+    assert_eq!(organism(&sim, 0).energy, 49);
+    assert_eq!(organism(&sim, 1).energy, 49);
+    assert_eq!(organism(&sim, 2).energy, 49);
     assert_no_overlap(&sim);
 }

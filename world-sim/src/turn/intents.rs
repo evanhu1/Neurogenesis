@@ -9,15 +9,11 @@ const UTILIZATION_THRESHOLD: f32 = 0.03;
 struct IntentBuildContext<'a> {
     world_width: i32,
     occupancy: &'a [Option<Occupant>],
-    vision_ray_table: &'a crate::sensing::VisionRayTable,
     action_temperature: f32,
     runtime_plasticity_enabled: bool,
     leaky_neurons_enabled: bool,
     predation_enabled: bool,
-    starting_energy: u32,
-    energy_flow_scale: u32,
     force_random_actions: bool,
-    compositional_actions_enabled: bool,
     sim_seed: u64,
     tick: u64,
 }
@@ -25,6 +21,7 @@ struct IntentBuildContext<'a> {
 #[derive(Clone, Copy)]
 struct SelectedActionState {
     selected_action: ActionType,
+    selected_symbol: types::Symbol,
     selected_action_mask: u8,
     forward_logit: f32,
     synapse_ops: u64,
@@ -35,22 +32,15 @@ impl Simulation {
         let context = IntentBuildContext {
             world_width,
             occupancy: &self.occupancy,
-            vision_ray_table: &self.vision_ray_table,
             action_temperature: self.config.action_temperature,
             runtime_plasticity_enabled: self.config.runtime_plasticity_enabled,
             leaky_neurons_enabled: self.config.leaky_neurons_enabled,
             predation_enabled: self.config.predation_enabled,
-            starting_energy: self.config.starting_energy,
-            energy_flow_scale: self.config.attack_energy_transfer,
             force_random_actions: self.config.force_random_actions,
-            compositional_actions_enabled: self.config.compositional_actions_enabled,
             sim_seed: self.seed,
             tick: self.turn,
         };
         let thread_pool = self.parallel_pool();
-        // Recycled buffer (see `TurnScratch`); the tick loop hands it back
-        // after the commit phase. collect_into_vec/unzip_into_vecs truncate
-        // and refill it with identical element order to a fresh collect.
         let mut intents = std::mem::take(&mut self.turn_scratch.intents);
         #[cfg(feature = "profiling")]
         let brain_eval_started = Instant::now();
@@ -86,7 +76,6 @@ impl Simulation {
 
         #[cfg(feature = "profiling")]
         profiling::record_brain_eval_total(brain_eval_started.elapsed());
-
         intents
     }
 }
@@ -97,16 +86,15 @@ fn build_intent_for_organism(
     context: IntentBuildContext<'_>,
     scratch: &mut BrainScratch,
 ) -> BuiltIntent {
-    let selected_action_state = select_action_for_organism(organism, context, scratch);
-
-    organism.last_action_taken = selected_action_state.selected_action;
-    organism.last_action_mask = selected_action_state.selected_action_mask;
-    let intent = intent_from_selected_action(idx, organism, selected_action_state, context);
-
+    let selected = select_action_for_organism(organism, context, scratch);
+    organism.last_action_taken = selected.selected_action;
+    organism.last_action_symbol = selected.selected_symbol;
+    organism.last_action_mask = selected.selected_action_mask;
+    let intent = intent_from_selected_action(idx, organism, selected, context);
     BuiltIntent {
         intent,
         #[cfg(feature = "instrumentation")]
-        action_record: Some(instrument_action_record(organism, selected_action_state)),
+        action_record: Some(instrument_action_record(organism, selected)),
     }
 }
 
@@ -115,45 +103,15 @@ fn select_action_for_organism(
     context: IntentBuildContext<'_>,
     scratch: &mut BrainScratch,
 ) -> SelectedActionState {
-    let action_samples = deterministic_action_samples(context.sim_seed, context.tick, organism.id);
-
-    if context.force_random_actions {
-        return SelectedActionState {
-            selected_action: if context.compositional_actions_enabled {
-                primary_action_from_mask(uniform_random_compositional_mask(
-                    action_samples,
-                    context.predation_enabled,
-                ))
-            } else {
-                uniform_random_action(action_samples[0], context.predation_enabled)
-            },
-            selected_action_mask: if context.compositional_actions_enabled {
-                uniform_random_compositional_mask(action_samples, context.predation_enabled)
-            } else {
-                uniform_random_action(action_samples[0], context.predation_enabled).command_bit()
-            },
-            forward_logit: 0.0,
-            synapse_ops: 0,
-        };
-    }
-
-    let ray_scans = crate::sensing::encode_sensory_inputs(
-        organism,
-        context.vision_ray_table,
-        context.occupancy,
-        context.starting_energy,
-        context.energy_flow_scale,
-        context.predation_enabled,
-    );
-    let _ = ray_scans;
+    crate::sensing::begin_sensing_tick(organism);
+    let action_sample = deterministic_action_sample(context.sim_seed, context.tick, organism.id);
+    crate::sensing::encode_sensory_symbol(organism, context.world_width, context.occupancy);
     let evaluation = evaluate_brain(
         organism,
         BrainEvalContext {
             leaky_neurons_enabled: context.leaky_neurons_enabled,
-            predation_enabled: context.predation_enabled,
             action_temperature: context.action_temperature,
-            action_samples,
-            compositional_actions_enabled: context.compositional_actions_enabled,
+            action_sample: (!context.force_random_actions).then_some(action_sample),
         },
         scratch,
     );
@@ -161,11 +119,21 @@ fn select_action_for_organism(
         compute_pending_coactivations(organism, scratch);
     }
 
-    let selected_action = evaluation.selected_action;
+    let selected_symbol = if context.force_random_actions {
+        uniform_random_action_symbol(action_sample, context.predation_enabled)
+    } else {
+        evaluation.selected_symbol
+    };
+    let selected_action = if selected_symbol.is_action_enabled(context.predation_enabled) {
+        selected_symbol.action_type()
+    } else {
+        ActionType::Idle
+    };
     SelectedActionState {
         selected_action,
-        selected_action_mask: evaluation.selected_action_mask,
-        forward_logit: evaluation.action_logits[action_index(ActionType::Forward)],
+        selected_symbol,
+        selected_action_mask: selected_action.command_bit(),
+        forward_logit: evaluation.action_logits[types::Symbol::D.index()],
         synapse_ops: evaluation.synapse_ops,
     }
 }
@@ -176,109 +144,75 @@ fn intent_from_selected_action(
     selected: SelectedActionState,
     context: IntentBuildContext<'_>,
 ) -> OrganismIntent {
-    let selected_action_mask = selected.selected_action_mask;
-    let world_width = context.world_width;
-    let compositional_actions_enabled = context.compositional_actions_enabled;
     let from = (organism.q, organism.r);
-    let current_facing = organism.facing;
-    let forward_cell = || hex_neighbor(from, current_facing, world_width);
-
+    let forward_cell = || hex_neighbor(from, organism.facing, context.world_width);
     let mut intent = OrganismIntent {
         idx,
         id: organism.id,
         from,
-        facing_after_actions: current_facing,
+        facing_after_actions: organism.facing,
         wants_move: false,
         wants_attack: false,
         move_target: None,
         interaction_target: None,
-        interaction_after_move: compositional_actions_enabled,
         snapshot_attack_target: None,
         move_confidence: 0.0,
-        command_count: selected_action_mask.count_ones() as u8,
+        command_count: u8::from(selected.selected_action != ActionType::Idle),
         synapse_ops: selected.synapse_ops,
     };
 
-    if selected_action_mask & ActionType::TurnLeft.command_bit() != 0 {
-        intent.facing_after_actions = rotate_left(current_facing);
-    } else if selected_action_mask & ActionType::TurnRight.command_bit() != 0 {
-        intent.facing_after_actions = rotate_right(current_facing);
+    match selected.selected_action {
+        ActionType::Idle => {}
+        ActionType::TurnLeft => intent.facing_after_actions = rotate_left(organism.facing),
+        ActionType::TurnRight => intent.facing_after_actions = rotate_right(organism.facing),
+        ActionType::Forward => {
+            intent.wants_move = true;
+            intent.move_target = Some(forward_cell());
+            intent.move_confidence = selected.forward_logit;
+        }
+        ActionType::Attack => {
+            intent.wants_attack = true;
+            let target = forward_cell();
+            intent.interaction_target = Some(target);
+            let target_idx = target.1 as usize * context.world_width as usize + target.0 as usize;
+            intent.snapshot_attack_target = match context.occupancy[target_idx] {
+                Some(Occupant::Organism(id)) => Some(id),
+                _ => None,
+            };
+        }
     }
-    let command_forward_cell = || hex_neighbor(from, intent.facing_after_actions, world_width);
-    if selected_action_mask & ActionType::Forward.command_bit() != 0 {
-        intent.wants_move = true;
-        intent.move_target = Some(if compositional_actions_enabled {
-            command_forward_cell()
-        } else {
-            forward_cell()
-        });
-        intent.move_confidence = selected.forward_logit;
-    }
-    if selected_action_mask & ActionType::Attack.command_bit() != 0 {
-        intent.wants_attack = true;
-        let target = if compositional_actions_enabled {
-            command_forward_cell()
-        } else {
-            forward_cell()
-        };
-        intent.interaction_target = Some(target);
-        let target_idx = target.1 as usize * world_width as usize + target.0 as usize;
-        intent.snapshot_attack_target = match context.occupancy[target_idx] {
-            Some(Occupant::Organism(id)) => Some(id),
-            _ => None,
-        };
-    }
-
     intent
 }
 
 #[cfg(feature = "instrumentation")]
 fn instrument_action_record(
     organism: &mut OrganismState,
-    selected_action_state: SelectedActionState,
+    selected: SelectedActionState,
 ) -> ActionRecord {
     ActionRecord {
         organism_id: organism.id,
-        selected_action: selected_action_state.selected_action,
-        selected_action_mask: selected_action_state.selected_action_mask,
-        failed_action_mask: selected_action_state.selected_action_mask
+        selected_action: selected.selected_action,
+        selected_action_mask: selected.selected_action_mask,
+        failed_action_mask: selected.selected_action_mask
             & (ActionType::Forward.command_bit() | ActionType::Attack.command_bit()),
-        action_failed: selected_action_state.selected_action_mask
-            & (ActionType::Forward.command_bit() | ActionType::Attack.command_bit())
-            != 0,
+        action_failed: selected.selected_action.can_fail(),
         age_turns: organism.age_turns,
         utilization: update_instrumentation_utilization(organism),
         successful_attacks_count: organism.successful_attacks_count,
     }
 }
 
-fn uniform_random_compositional_mask(samples: [f32; 3], predation_enabled: bool) -> u8 {
-    let orientation = match (samples[0].clamp(0.0, 1.0 - f32::EPSILON) * 3.0) as usize {
-        0 => ActionType::TurnLeft,
-        1 => ActionType::TurnRight,
-        _ => ActionType::Idle,
-    };
-    let locomotion = if samples[1] < 0.5 {
-        ActionType::Forward
-    } else {
-        ActionType::Idle
-    };
-    let mut interactions = [ActionType::Attack]
+fn uniform_random_action_symbol(sample: f32, predation_enabled: bool) -> types::Symbol {
+    let count = types::Symbol::ALL
         .into_iter()
-        .filter(|action| action.is_enabled(predation_enabled));
-    let interaction_count = interactions.clone().count();
-    let bucket =
-        (samples[2].clamp(0.0, 1.0 - f32::EPSILON) * (interaction_count + 1) as f32) as usize;
-    let interaction = interactions.nth(bucket).unwrap_or(ActionType::Idle);
-    orientation.command_bit() | locomotion.command_bit() | interaction.command_bit()
-}
-
-fn primary_action_from_mask(mask: u8) -> ActionType {
-    ActionType::ALL
-        .iter()
-        .copied()
-        .find(|action| mask & action.command_bit() != 0)
-        .unwrap_or(ActionType::Idle)
+        .filter(|symbol| symbol.is_action_enabled(predation_enabled))
+        .count();
+    let bucket = (sample.clamp(0.0, 1.0 - f32::EPSILON) * count as f32) as usize;
+    types::Symbol::ALL
+        .into_iter()
+        .filter(|symbol| symbol.is_action_enabled(predation_enabled))
+        .nth(bucket)
+        .unwrap_or(types::Symbol::End)
 }
 
 #[cfg(feature = "instrumentation")]
@@ -290,7 +224,6 @@ fn update_instrumentation_utilization(organism: &mut OrganismState) -> f32 {
         .map(|inter| inter.neuron.activation.abs());
     let ema = &mut organism.instrumentation.inter_ema;
     let mut inter_count = 0_usize;
-
     if ema.len() != organism.brain.inter.len() {
         ema.clear();
         ema.extend(activations);
@@ -301,13 +234,11 @@ fn update_instrumentation_utilization(organism: &mut OrganismState) -> f32 {
             inter_count += 1;
         }
     }
-
     if inter_count == 0 {
         return 0.0;
     }
-    let utilized = ema
-        .iter()
+    ema.iter()
         .filter(|value| **value > UTILIZATION_THRESHOLD)
-        .count();
-    utilized as f32 / inter_count as f32
+        .count() as f32
+        / inter_count as f32
 }

@@ -1,6 +1,6 @@
 use super::*;
 
-pub fn express_genome(genome: &OrganismGenome, predation_enabled: bool) -> BrainState {
+pub fn express_genome(genome: &OrganismGenome) -> BrainState {
     // Heritable node IDs are stable structural hashes. The runtime remains a
     // dense array machine: canonical gene order is remapped once at birth into
     // deterministic topological order for the instantaneous current-tick DAG.
@@ -12,7 +12,7 @@ pub fn express_genome(genome: &OrganismGenome, predation_enabled: bool) -> Brain
         runtime_index_by_gene_index[gene_index] = runtime_index;
     }
 
-    let sensory = sensory_receptors_in_order(predation_enabled)
+    let sensory = sensory_receptors_in_order()
         .map(|(sensory_id, receptor)| make_sensory_neuron(sensory_id, receptor))
         .collect::<Vec<_>>();
 
@@ -29,13 +29,13 @@ pub fn express_genome(genome: &OrganismGenome, predation_enabled: bool) -> Brain
             state: 0.0,
             alpha,
             synapses: Vec::new(),
-            action_synapse_start: 0,
+            output_synapse_start: 0,
         });
     }
 
     let mut action = Vec::with_capacity(ACTION_COUNT);
-    for (idx, action_type) in ActionType::ALL.iter().copied().enumerate() {
-        action.push(make_action_neuron(action_neuron_id(idx).0, action_type));
+    for symbol in Symbol::ALL {
+        action.push(make_action_neuron(symbol.action_neuron_id().0, symbol));
     }
 
     let num_sensory = sensory.len();
@@ -53,7 +53,7 @@ pub fn express_genome(genome: &OrganismGenome, predation_enabled: bool) -> Brain
         means_initialized: false,
     };
     wire_birth_synapses_from_genome(genome, &runtime_index_by_gene_index, &mut brain);
-    refresh_action_synapse_starts_and_count(&mut brain);
+    refresh_output_synapse_starts_and_count(&mut brain);
     brain
 }
 
@@ -62,22 +62,20 @@ pub fn make_sensory_neuron(id: u32, receptor: SensoryReceptor) -> SensoryNeuronS
         neuron: make_neuron(NeuronId(id), NeuronType::Sensory, 0.0),
         receptor,
         synapses: Vec::new(),
-        action_synapse_start: 0,
+        output_synapse_start: 0,
     }
 }
 
-pub fn make_action_neuron(id: u32, action_type: ActionType) -> ActionNeuronState {
+pub fn make_action_neuron(id: u32, symbol: Symbol) -> ActionNeuronState {
     ActionNeuronState {
         neuron_id: NeuronId(id),
         logit: 0.0,
-        action_type,
+        symbol,
     }
 }
 
-fn sensory_receptors_in_order(
-    predation_enabled: bool,
-) -> impl Iterator<Item = (u32, SensoryReceptor)> {
-    SensoryReceptor::active(predation_enabled).filter_map(|receptor| {
+fn sensory_receptors_in_order() -> impl Iterator<Item = (u32, SensoryReceptor)> {
+    SensoryReceptor::ordered().filter_map(|receptor| {
         receptor
             .neuron_id()
             .map(|neuron_id| (neuron_id.0, receptor))
@@ -145,9 +143,9 @@ fn wire_birth_synapses_from_genome(
     }
 
     // Innovation order is unrelated to dense runtime IDs. Restore the runtime
-    // inter-target/action-target partition required by routing. Post IDs remain
-    // ordered inside each group, but hidden IDs above the stable action-ID
-    // island are intentionally numerically greater than action IDs.
+    // inter-target/output-target partition required by routing. Post IDs remain
+    // ordered inside each group, while hidden IDs skip both stable output-ID
+    // islands.
     for neuron in brain.sensory.iter_mut() {
         crate::topology::sort_runtime_synapses(&mut neuron.synapses);
     }
@@ -162,7 +160,7 @@ fn wire_birth_synapses_from_genome(
             crate::topology::debug_assert_runtime_synapse_order(&inter_neuron.synapses);
         }
         for (pre_index, inter_neuron) in brain.inter.iter().enumerate() {
-            debug_assert!(inter_neuron.synapses[..inter_neuron.action_synapse_start]
+            debug_assert!(inter_neuron.synapses[..inter_neuron.output_synapse_start]
                 .iter()
                 .all(
                     |edge| crate::topology::inter_index(edge.post_neuron_id, brain.inter.len())
@@ -268,6 +266,7 @@ fn runtime_edge_from_gene(
         pre_inter_index: None,
         post_inter_index: None,
         weight: gene.weight,
+        plasticity_coefficient: gene.plasticity_coefficient,
         eligibility: 0.0,
         pending_coactivation: 0.0,
     }

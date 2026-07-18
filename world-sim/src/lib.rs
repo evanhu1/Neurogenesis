@@ -68,10 +68,6 @@ pub struct Simulation {
     organisms: Vec<OrganismState>,
     occupancy: Vec<Option<Occupant>>,
     terrain_map: Vec<bool>,
-    /// Immutable geometry-only acceleration table. It is derived entirely
-    /// from config, omitted from world files, and rebuilt on load.
-    #[serde(skip)]
-    vision_ray_table: sensing::VisionRayTable,
     /// Wire-format terrain cells, sorted by (q, r). Terrain is immutable after
     /// world generation, so this is built once per reset and cloned per
     /// snapshot instead of being rebuilt and re-sorted on every call.
@@ -112,7 +108,6 @@ impl Clone for Simulation {
             organisms: self.organisms.clone(),
             occupancy: self.occupancy.clone(),
             terrain_map: self.terrain_map.clone(),
-            vision_ray_table: self.vision_ray_table.clone(),
             terrain_cells: self.terrain_cells.clone(),
             #[cfg(feature = "instrumentation")]
             action_records: self.action_records.clone(),
@@ -141,8 +136,6 @@ impl Simulation {
         validate_runtime_config(&config)?;
 
         let capacity = grid::world_capacity(config.world_width);
-        let vision_ray_table =
-            sensing::VisionRayTable::new(config.world_width, config.vision_range);
         let mut sim = Self {
             config,
             experiment_scaled: false,
@@ -157,7 +150,6 @@ impl Simulation {
             occupancy: vec![None; capacity],
             terrain_cells: Vec::new(),
             terrain_map: Vec::new(),
-            vision_ray_table,
             #[cfg(feature = "instrumentation")]
             action_records: Vec::new(),
             cached_thread_pool: std::sync::OnceLock::new(),
@@ -263,7 +255,6 @@ impl Simulation {
         let mut sanitize_rng = ChaCha8Rng::seed_from_u64(self.seed ^ FOUNDER_SANITIZE_RNG_MIX);
         for genome in &mut founder_genome_pool {
             brain::genome::align_genome_vectors(genome, &mut sanitize_rng);
-            brain::genome::restrict_action_genes(genome, self.config.predation_enabled);
         }
         self.founder_genome_pool = founder_genome_pool;
         self.next_organism_id = 0;
@@ -288,8 +279,8 @@ impl Simulation {
     /// Round-trips deterministically: `save` then [`Simulation::load`] yields a
     /// world that advances byte-identically to the original (the RNG state and
     /// all id counters are persisted exactly). Transient/parallelism fields
-    /// (`turn_scratch`, `cached_thread_pool`, and the derived vision-ray table)
-    /// are not written. Instrumentation action records are observational only
+    /// (`turn_scratch` and `cached_thread_pool`) are not written.
+    /// Instrumentation action records are observational only
     /// but are persisted so post-save CLI inspection describes the last
     /// executed tick.
     pub fn save<W: std::io::Write>(&self, writer: W) -> Result<(), SimError> {
@@ -301,10 +292,8 @@ impl Simulation {
     /// a corrupt or incompatible blob fails loudly rather than ticking into
     /// undefined behavior.
     pub fn load<R: std::io::Read>(reader: R) -> Result<Self, SimError> {
-        let mut sim: Self =
+        let sim: Self =
             ciborium::from_reader(reader).map_err(|e| SimError::Serialization(e.to_string()))?;
-        sim.vision_ray_table =
-            sensing::VisionRayTable::new(sim.config.world_width, sim.config.vision_range);
         sim.validate_state()?;
         Ok(sim)
     }

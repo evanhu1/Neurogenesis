@@ -1,10 +1,11 @@
 use crate::Simulation;
 use brain::express_genome;
-use brain::genome::{generate_seed_genome, restrict_action_genes};
+use brain::genome::generate_seed_genome;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use types::{
     ActionType, FacingDirection, Occupant, OrganismGenome, OrganismId, OrganismState, SpeciesId,
+    Symbol,
 };
 
 mod organisms;

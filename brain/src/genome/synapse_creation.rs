@@ -13,7 +13,6 @@ struct Candidate {
 pub(super) fn add_synapse_genes<R: Rng + ?Sized>(
     genome: &mut OrganismGenome,
     add_count: usize,
-    predation_enabled: bool,
     rng: &mut R,
 ) {
     if add_count == 0 {
@@ -28,7 +27,7 @@ pub(super) fn add_synapse_genes<R: Rng + ?Sized>(
 
     if add_count == 1 {
         let mut best: Option<Candidate> = None;
-        for_each_candidate(genome, predation_enabled, rng, |candidate| {
+        for_each_candidate(genome, rng, |candidate| {
             if best
                 .as_ref()
                 .is_none_or(|current| candidate_cmp(&candidate, current) == Ordering::Less)
@@ -43,9 +42,7 @@ pub(super) fn add_synapse_genes<R: Rng + ?Sized>(
     }
 
     let mut weighted_candidates = Vec::new();
-    for_each_candidate(genome, predation_enabled, rng, |candidate| {
-        weighted_candidates.push(candidate)
-    });
+    for_each_candidate(genome, rng, |candidate| weighted_candidates.push(candidate));
 
     let selected: &mut [Candidate] = if add_count < weighted_candidates.len() {
         let (top, _, _) = weighted_candidates.select_nth_unstable_by(add_count, candidate_cmp);
@@ -94,6 +91,7 @@ fn insert_or_reenable<R: Rng + ?Sized>(
                 post_node_id: candidate.post,
                 timing: candidate.timing,
                 weight: sample_synapse_weight(INITIAL_SYNAPSE_EXCITATORY_PROBABILITY, rng),
+                plasticity_coefficient: 1.0,
                 enabled: true,
             },
         ),
@@ -114,17 +112,16 @@ fn candidate_cmp(a: &Candidate, b: &Candidate) -> Ordering {
 /// without manufacturing a second historical marker for the same endpoints.
 fn for_each_candidate<R: Rng + ?Sized>(
     genome: &OrganismGenome,
-    predation_enabled: bool,
     rng: &mut R,
     mut visit: impl FnMut(Candidate),
 ) {
-    let all_presynaptic = SensoryReceptor::active(predation_enabled)
+    let all_presynaptic = SensoryReceptor::ordered()
         .filter_map(SensoryReceptor::neuron_id)
         .map(|id| sensory_gene_node_id(id.0))
         .chain(genome.brain.hidden_nodes.iter().map(|node| node.id));
 
     for pre in all_presynaptic {
-        for post in post_ids(genome, predation_enabled) {
+        for post in post_ids(genome) {
             consider_candidate(
                 genome,
                 pre,
@@ -184,14 +181,11 @@ fn consider_candidate<R: Rng + ?Sized>(
     });
 }
 
-fn post_ids(
-    genome: &OrganismGenome,
-    predation_enabled: bool,
-) -> impl Iterator<Item = GeneNodeId> + '_ {
+fn post_ids(genome: &OrganismGenome) -> impl Iterator<Item = GeneNodeId> + '_ {
     genome.brain.hidden_nodes.iter().map(|node| node.id).chain(
-        ActionType::active(predation_enabled)
-            .filter_map(ActionType::neuron_id)
-            .map(|id| action_gene_node_id((id.0 - ACTION_ID_BASE) as usize)),
+        Symbol::ALL
+            .into_iter()
+            .map(|symbol| action_gene_node_id(symbol.index())),
     )
 }
 
@@ -200,7 +194,10 @@ fn uniform_priority<R: Rng + ?Sized>(rng: &mut R) -> f32 {
     -u.ln()
 }
 
-fn sample_synapse_weight<R: Rng + ?Sized>(excitatory_probability: f32, rng: &mut R) -> f32 {
+pub(super) fn sample_synapse_weight<R: Rng + ?Sized>(
+    excitatory_probability: f32,
+    rng: &mut R,
+) -> f32 {
     let z = standard_normal(rng);
     let magnitude = (SYNAPSE_WEIGHT_LOG_NORMAL_MU + SYNAPSE_WEIGHT_LOG_NORMAL_SIGMA * z)
         .exp()

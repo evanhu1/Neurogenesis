@@ -43,7 +43,6 @@ pub fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &
         }
         *bias = bias.clamp(-BIAS_MAX, BIAS_MAX);
     }
-
     sanitize_synapse_genes(genome);
 }
 

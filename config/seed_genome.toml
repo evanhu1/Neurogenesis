@@ -1,12 +1,12 @@
 # Topology
-num_neurons = 0 # Number of inter neurons in the initial seed genome.
-num_synapses = 10 # Number of synaptic connections in the initial seed genome.
+num_neurons = 1 # One recurrent hidden unit gives founders previous-tick memory.
+num_synapses = 24 # Initial symbolic input/head wiring, including recurrent memory.
 
 # Plasticity schedule
 plasticity_maturity_ticks = 50 # Age at which the mature Hebbian rate and pruning policy begin.
 
-hebb_eta_gain = 0.02 # Base Hebbian learning-rate gain used for mature organisms.
-juvenile_eta_scale = 2.0 # Multiplier applied to `hebb_eta_gain` before maturity.
+initial_learning_rate = 0.0 # v0 isolates inherited recurrent control; runtime plasticity is intentionally off.
+juvenile_eta_scale = 2.0 # Multiplier applied to `initial_learning_rate` before maturity.
 eligibility_retention = 0.95 # Exponential retention factor for eligibility traces across ticks.
 max_weight_delta_per_tick = 0.05 # Per-tick clamp on how much a synapse weight can change from plasticity.
 synapse_prune_threshold = 0.05 # Minimum absolute weight and eligibility scale required to keep a mature synapse during pruning.

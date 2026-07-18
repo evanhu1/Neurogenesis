@@ -5,6 +5,7 @@ pub use types::{SeedGenomeConfig, WorldConfig};
 
 /// Repository-relative path to the one canonical world/evolution environment.
 pub const CANONICAL_WORLD_CONFIG_PATH: &str = "config/world.toml";
+pub const CANONICAL_SEED_GENOME_CONFIG_PATH: &str = "config/seed_genome.toml";
 const DEFAULT_SEED_GENOME_CONFIG_REL_PATH: &str = "seed_genome.toml";
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
@@ -45,7 +46,6 @@ struct WorldConfigToml {
 #[serde(deny_unknown_fields)]
 struct WorldGeometryToml {
     world_width: u32,
-    vision_range: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -78,14 +78,12 @@ struct WorldFlagsToml {
     leaky_neurons_enabled: bool,
     predation_enabled: bool,
     force_random_actions: bool,
-    compositional_actions_enabled: bool,
 }
 
 impl WorldConfigToml {
     fn into_runtime(self, seed_genome_config: SeedGenomeConfig) -> WorldConfig {
         WorldConfig {
             world_width: self.world.world_width,
-            vision_range: self.world.vision_range,
             num_organisms: self.population.num_organisms,
             starting_energy: self.lifecycle.starting_energy,
             attack_energy_transfer: self.lifecycle.attack_energy_transfer,
@@ -98,7 +96,6 @@ impl WorldConfigToml {
             leaky_neurons_enabled: self.flags.leaky_neurons_enabled,
             predation_enabled: self.flags.predation_enabled,
             force_random_actions: self.flags.force_random_actions,
-            compositional_actions_enabled: self.flags.compositional_actions_enabled,
             seed_genome_config,
         }
     }
@@ -147,12 +144,17 @@ pub fn load_world_config_from_path(path: &Path) -> Result<WorldConfig> {
         .with_context(|| format!("failed to parse world config from {}", path.display()))
 }
 
+pub fn load_seed_genome_config_from_path(path: &Path) -> Result<SeedGenomeConfig> {
+    let raw = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read seed genome config from {}", path.display()))?;
+    toml::from_str(&raw)
+        .context("seed genome config TOML failed schema deserialization")
+        .with_context(|| format!("failed to parse seed genome config from {}", path.display()))
+}
+
 pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
     if config.world_width == 0 {
         return Err("world_width must be greater than zero".to_owned());
-    }
-    if config.vision_range == 0 {
-        return Err("vision_range must be greater than zero".to_owned());
     }
     if config.num_organisms == 0 {
         return Err("num_organisms must be greater than zero".to_owned());
@@ -185,6 +187,13 @@ pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
         || config.seed_genome_config.juvenile_eta_scale < 0.0
     {
         return Err("seed_genome_config.juvenile_eta_scale must be finite and >= 0".to_owned());
+    }
+    if !config.seed_genome_config.initial_learning_rate.is_finite()
+        || config.seed_genome_config.initial_learning_rate < 0.0
+    {
+        return Err(
+            "seed_genome_config.initial_learning_rate must be finite and >= 0".to_owned(),
+        );
     }
     if !config
         .seed_genome_config

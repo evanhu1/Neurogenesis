@@ -96,17 +96,9 @@ impl<'a> CommitPhaseContext<'a> {
             if !intent.wants_attack || self.dead_organisms[idx] {
                 continue;
             }
-            let interaction_target = if intent.interaction_after_move {
-                let organism = &self.sim.organisms[idx];
-                Some(hex_neighbor(
-                    (organism.q, organism.r),
-                    organism.facing,
-                    self.world_width_usize as i32,
-                ))
-            } else {
-                intent.interaction_target
-            };
-            let Some((target_q, target_r)) = interaction_target else {
+            // A single action per tick means an attacker never moved this tick,
+            // so the target computed at intent-build time is still correct.
+            let Some((target_q, target_r)) = intent.interaction_target else {
                 continue;
             };
             let target_idx = target_r as usize * self.world_width_usize + target_q as usize;
