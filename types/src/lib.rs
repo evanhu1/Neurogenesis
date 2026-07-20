@@ -10,6 +10,8 @@ pub struct SeedGenomeConfig {
     pub initial_learning_rate: f32,
     pub juvenile_eta_scale: f32,
     pub eligibility_retention: f32,
+    pub fast_weight_retention: f32,
+    pub action_temperature_scale: f32,
     pub max_weight_delta_per_tick: f32,
     pub synapse_prune_threshold: f32,
 }
@@ -56,6 +58,8 @@ impl WorldConfig {
                 initial_learning_rate: 0.0,
                 juvenile_eta_scale: 2.0,
                 eligibility_retention: 0.9,
+                fast_weight_retention: 1.0,
+                action_temperature_scale: 1.0,
                 max_weight_delta_per_tick: 0.05,
                 synapse_prune_threshold: 0.01,
             },
@@ -85,6 +89,8 @@ impl WorldConfig {
                 initial_learning_rate: 0.0,
                 juvenile_eta_scale: 0.5,
                 eligibility_retention: 0.9,
+                fast_weight_retention: 1.0,
+                action_temperature_scale: 1.0,
                 max_weight_delta_per_tick: 0.05,
                 synapse_prune_threshold: 0.01,
             },
@@ -121,9 +127,10 @@ pub struct InnovationId(pub u64);
 /// When a synapse reads its presynaptic activation.
 ///
 /// Current-tick hidden connections form the instantaneous feed-forward DAG.
-/// Previous-tick connections read a frozen hidden-state snapshot, so they may
-/// form cycles in the temporal graph without creating algebraic cycles inside
-/// one brain evaluation.
+/// Previous-tick hidden connections read a frozen hidden-state snapshot;
+/// previous-tick action-to-hidden connections read the selected-action
+/// efference copy. Both may form cycles in the temporal graph without creating
+/// algebraic cycles inside one brain evaluation.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 #[repr(u8)]
@@ -217,6 +224,16 @@ pub const fn action_gene_node_id(index: usize) -> GeneNodeId {
     GeneNodeId((ACTION_GENE_NODE_DOMAIN << GENE_NODE_DOMAIN_SHIFT) | index as u64)
 }
 
+/// Stable fixed output used by the generic reward-prediction subsystem. It
+/// shares the output-node domain but sits immediately after the motor alphabet.
+pub const fn value_gene_node_id() -> GeneNodeId {
+    action_gene_node_id(Symbol::COUNT)
+}
+
+pub const fn is_value_gene_node_id(id: GeneNodeId) -> bool {
+    id.0 == value_gene_node_id().0
+}
+
 pub const fn seed_hidden_gene_node_id(index: u32) -> GeneNodeId {
     GeneNodeId((SEED_HIDDEN_GENE_NODE_DOMAIN << GENE_NODE_DOMAIN_SHIFT) | index as u64)
 }
@@ -283,11 +300,30 @@ pub enum Symbol {
     F,
     G,
     H,
+    I,
+    J,
+    K,
+    L,
+    M,
+    N,
+    O,
+    P,
+    Q,
+    R,
+    S,
+    T,
+    U,
+    V,
+    W,
+    X,
+    Y,
+    Z,
+    Space,
     End,
 }
 
 impl Symbol {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 28] = [
         Self::A,
         Self::B,
         Self::C,
@@ -296,6 +332,25 @@ impl Symbol {
         Self::F,
         Self::G,
         Self::H,
+        Self::I,
+        Self::J,
+        Self::K,
+        Self::L,
+        Self::M,
+        Self::N,
+        Self::O,
+        Self::P,
+        Self::Q,
+        Self::R,
+        Self::S,
+        Self::T,
+        Self::U,
+        Self::V,
+        Self::W,
+        Self::X,
+        Self::Y,
+        Self::Z,
+        Self::Space,
         Self::End,
     ];
     pub const COUNT: usize = Self::ALL.len();
@@ -310,7 +365,29 @@ impl Symbol {
             Self::B => ActionType::TurnLeft,
             Self::C => ActionType::TurnRight,
             Self::D => ActionType::Forward,
-            Self::E | Self::F | Self::G | Self::H => ActionType::Idle,
+            Self::E
+            | Self::F
+            | Self::G
+            | Self::H
+            | Self::I
+            | Self::J
+            | Self::K
+            | Self::L
+            | Self::M
+            | Self::N
+            | Self::O
+            | Self::P
+            | Self::Q
+            | Self::R
+            | Self::S
+            | Self::T
+            | Self::U
+            | Self::V
+            | Self::W
+            | Self::X
+            | Self::Y
+            | Self::Z
+            | Self::Space => ActionType::Idle,
             Self::End => ActionType::Attack,
         }
     }
@@ -340,7 +417,59 @@ impl Symbol {
             Self::F => "f",
             Self::G => "g",
             Self::H => "h",
+            Self::I => "i",
+            Self::J => "j",
+            Self::K => "k",
+            Self::L => "l",
+            Self::M => "m",
+            Self::N => "n",
+            Self::O => "o",
+            Self::P => "p",
+            Self::Q => "q",
+            Self::R => "r",
+            Self::S => "s",
+            Self::T => "t",
+            Self::U => "u",
+            Self::V => "v",
+            Self::W => "w",
+            Self::X => "x",
+            Self::Y => "y",
+            Self::Z => "z",
+            Self::Space => "space",
             Self::End => "end",
+        }
+    }
+
+    pub const fn from_ascii_char(value: char) -> Option<Self> {
+        match value {
+            'a' => Some(Self::A),
+            'b' => Some(Self::B),
+            'c' => Some(Self::C),
+            'd' => Some(Self::D),
+            'e' => Some(Self::E),
+            'f' => Some(Self::F),
+            'g' => Some(Self::G),
+            'h' => Some(Self::H),
+            'i' => Some(Self::I),
+            'j' => Some(Self::J),
+            'k' => Some(Self::K),
+            'l' => Some(Self::L),
+            'm' => Some(Self::M),
+            'n' => Some(Self::N),
+            'o' => Some(Self::O),
+            'p' => Some(Self::P),
+            'q' => Some(Self::Q),
+            'r' => Some(Self::R),
+            's' => Some(Self::S),
+            't' => Some(Self::T),
+            'u' => Some(Self::U),
+            'v' => Some(Self::V),
+            'w' => Some(Self::W),
+            'x' => Some(Self::X),
+            'y' => Some(Self::Y),
+            'z' => Some(Self::Z),
+            ' ' => Some(Self::Space),
+            _ => None,
         }
     }
 }
@@ -531,7 +660,7 @@ mod tests {
     #[test]
     fn sensory_receptors_match_the_symbol_alphabet() {
         let receptors = SensoryReceptor::ordered().collect::<Vec<_>>();
-        assert_eq!(receptors.len(), 9);
+        assert_eq!(receptors.len(), Symbol::COUNT);
         assert_eq!(
             receptors,
             vec![
@@ -543,13 +672,34 @@ mod tests {
                 SensoryReceptor::Symbol { symbol: Symbol::F },
                 SensoryReceptor::Symbol { symbol: Symbol::G },
                 SensoryReceptor::Symbol { symbol: Symbol::H },
+                SensoryReceptor::Symbol { symbol: Symbol::I },
+                SensoryReceptor::Symbol { symbol: Symbol::J },
+                SensoryReceptor::Symbol { symbol: Symbol::K },
+                SensoryReceptor::Symbol { symbol: Symbol::L },
+                SensoryReceptor::Symbol { symbol: Symbol::M },
+                SensoryReceptor::Symbol { symbol: Symbol::N },
+                SensoryReceptor::Symbol { symbol: Symbol::O },
+                SensoryReceptor::Symbol { symbol: Symbol::P },
+                SensoryReceptor::Symbol { symbol: Symbol::Q },
+                SensoryReceptor::Symbol { symbol: Symbol::R },
+                SensoryReceptor::Symbol { symbol: Symbol::S },
+                SensoryReceptor::Symbol { symbol: Symbol::T },
+                SensoryReceptor::Symbol { symbol: Symbol::U },
+                SensoryReceptor::Symbol { symbol: Symbol::V },
+                SensoryReceptor::Symbol { symbol: Symbol::W },
+                SensoryReceptor::Symbol { symbol: Symbol::X },
+                SensoryReceptor::Symbol { symbol: Symbol::Y },
+                SensoryReceptor::Symbol { symbol: Symbol::Z },
+                SensoryReceptor::Symbol {
+                    symbol: Symbol::Space
+                },
                 SensoryReceptor::Symbol {
                     symbol: Symbol::End
                 },
             ]
         );
-        assert_eq!(SensoryReceptor::active(false).count(), 9);
-        assert_eq!(SensoryReceptor::active(true).count(), 9);
+        assert_eq!(SensoryReceptor::active(false).count(), Symbol::COUNT);
+        assert_eq!(SensoryReceptor::active(true).count(), Symbol::COUNT);
     }
 }
 
@@ -591,6 +741,15 @@ pub struct PlasticityGenes {
     pub juvenile_eta_scale: f32,
     #[serde(default = "default_eligibility_retention")]
     pub eligibility_retention: f32,
+    /// Per-tick retention of the learned lifetime component of a synaptic
+    /// weight. One makes learning persistent for the lifetime; smaller values
+    /// forget learned displacement toward the inherited baseline.
+    #[serde(default = "default_fast_weight_retention")]
+    pub fast_weight_retention: f32,
+    /// Heritable exploration/exploitation scale applied to an environment's
+    /// reference action temperature during within-lifetime learning.
+    #[serde(default = "default_action_temperature_scale")]
+    pub action_temperature_scale: f32,
     #[serde(default = "default_max_weight_delta_per_tick")]
     pub max_weight_delta_per_tick: f32,
     #[serde(default)]
@@ -602,6 +761,9 @@ pub struct BrainTopology {
     pub hidden_nodes: Vec<HiddenNodeGene>,
     #[serde(default)]
     pub action_biases: Vec<f32>,
+    /// Inherited starting bias for the generic reward-prediction output.
+    #[serde(default)]
+    pub value_bias: f32,
     pub edges: Vec<SynapseGene>,
 }
 
@@ -612,6 +774,10 @@ pub struct HiddenNodeGene {
     pub id: GeneNodeId,
     pub bias: f32,
     pub log_time_constant: f32,
+    /// Signed gain for the global reward-prediction-error broadcast. A zero
+    /// receptor leaves this neuron insensitive to neuromodulatory feedback.
+    #[serde(default)]
+    pub neuromodulatory_receptor: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -647,6 +813,8 @@ impl OrganismGenome {
                 initial_learning_rate: 0.0,
                 juvenile_eta_scale: 0.5,
                 eligibility_retention: 0.9,
+                fast_weight_retention: 1.0,
+                action_temperature_scale: 1.0,
                 max_weight_delta_per_tick: 0.05,
                 synapse_prune_threshold: 0.01,
             },
@@ -655,8 +823,10 @@ impl OrganismGenome {
                     id: seed_hidden_gene_node_id(0),
                     bias: 0.0,
                     log_time_constant: 0.0,
+                    neuromodulatory_receptor: 0.0,
                 }],
                 action_biases: vec![0.0; action_count],
+                value_bias: 0.0,
                 edges: Vec::new(),
             },
         }
@@ -683,9 +853,18 @@ pub struct SynapseEdge {
     pub post_neuron_id: NeuronId,
     pub timing: SynapseTiming,
     /// Zero-based hidden-layer indices compiled at expression time for the
-    /// recurrent hot path. Both are `Some` exactly for PreviousTick edges.
+    /// recurrent hot path. `pre_inter_index` is populated for hidden-source
+    /// recurrence; `pre_action_index` is populated for action efference-copy
+    /// recurrence; `post_inter_index` is populated for both.
     pub pre_inter_index: Option<u32>,
+    #[serde(default)]
+    pub pre_action_index: Option<u32>,
     pub post_inter_index: Option<u32>,
+    /// Stable inherited component copied from the expressed genome. Runtime
+    /// learning changes `weight`; retention pulls that learned displacement
+    /// back toward this baseline without altering the genome.
+    #[serde(default)]
+    pub inherited_weight: f32,
     pub weight: f32,
     pub plasticity_coefficient: f32,
     #[serde(default)]
@@ -699,6 +878,14 @@ pub struct SynapseEdge {
 
 fn default_eligibility_retention() -> f32 {
     0.95
+}
+
+fn default_fast_weight_retention() -> f32 {
+    1.0
+}
+
+fn default_action_temperature_scale() -> f32 {
+    1.0
 }
 
 fn default_juvenile_eta_scale() -> f32 {
@@ -742,6 +929,9 @@ pub struct InterNeuronState {
     #[serde(default)]
     pub state: f32,
     pub alpha: f32,
+    /// Evolvable sensitivity to the previous signed reward-prediction error.
+    #[serde(default)]
+    pub neuromodulatory_receptor: f32,
     pub synapses: Vec<SynapseEdge>,
     #[serde(default)]
     pub output_synapse_start: usize,
@@ -763,9 +953,27 @@ pub struct BrainState {
     /// from the per-neuron outgoing arrays only in the compiled runtime; the
     /// genome retains one unified connection-gene collection.
     pub recurrent_synapses: Vec<SynapseEdge>,
+    /// Previous-tick selected-action projections into hidden neurons. These
+    /// are ordinary evolvable genome edges with action sources.
+    #[serde(default)]
+    pub action_feedback_synapses: Vec<SynapseEdge>,
     /// Frozen hidden activations read by every recurrent synapse on the next
     /// evaluation tick. Persisted as live world state for exact snapshot replay.
     pub previous_inter_activations: Vec<f32>,
+    /// One-hot efference copy of the action actually selected last tick.
+    #[serde(default)]
+    pub previous_action_activations: [f32; Symbol::COUNT],
+    /// Signed reward surprise broadcast on the next recurrent step.
+    #[serde(default)]
+    pub previous_prediction_error: f32,
+    /// Runtime reward prediction bias and its decaying critic trace.
+    #[serde(default)]
+    pub value_bias: f32,
+    /// Inherited baseline for the runtime reward-prediction bias.
+    #[serde(default)]
+    pub inherited_value_bias: f32,
+    #[serde(default)]
+    pub value_bias_eligibility: f32,
     pub synapse_count: u32,
     /// Per-sensory-neuron EMA of activation used to center pending
     /// coactivations (covariance rule). Length tracks `sensory.len()`.

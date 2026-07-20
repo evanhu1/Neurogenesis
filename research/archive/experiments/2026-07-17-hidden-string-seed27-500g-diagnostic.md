@@ -105,3 +105,7 @@ Do not treat this as robust continual learning or begin sequential targets yet.
 The clean confirmation is a preregistered 500-generation suite on fresh seeds.
 A richer-founder comparison remains useful as an efficiency experiment, but is
 no longer required to show that seed 27 can eventually solve v0.
+# Architecture-audit note
+
+Invalidated as canonical-brain competence on 2026-07-18 because this evaluator
+used a task-rewritten recurrent/readout founder.

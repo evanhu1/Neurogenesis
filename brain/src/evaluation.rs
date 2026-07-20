@@ -39,6 +39,7 @@ pub fn evaluate_brain_state(
     profiling::record_brain_stage(BrainStage::InterSetup, stage_started.elapsed());
 
     let mut action_inputs = [0.0; ACTION_COUNT];
+    let mut value_input = 0.0_f32;
 
     #[cfg(feature = "profiling")]
     let stage_started = Instant::now();
@@ -56,6 +57,24 @@ pub fn evaluate_brain_state(
             edge.weight * brain.previous_inter_activations[pre_index];
         result.synapse_ops += 1;
     }
+    for edge in &brain.action_feedback_synapses {
+        let pre_index = edge
+            .pre_action_index
+            .expect("expressed efference-copy edge has a dense action index")
+            as usize;
+        let post_index = edge
+            .post_inter_index
+            .expect("expressed efference-copy edge has a dense hidden index")
+            as usize;
+        scratch.inter_inputs[post_index] +=
+            edge.weight * brain.previous_action_activations[pre_index];
+        result.synapse_ops += 1;
+    }
+    if brain.previous_prediction_error != 0.0 {
+        for (input, hidden) in scratch.inter_inputs.iter_mut().zip(&brain.inter) {
+            *input += hidden.neuromodulatory_receptor * brain.previous_prediction_error;
+        }
+    }
     for sensory in &brain.sensory {
         if sensory.neuron.activation == 0.0 {
             continue;
@@ -66,8 +85,12 @@ pub fn evaluate_brain_state(
             sensory.neuron.activation,
             &mut scratch.inter_inputs,
         );
-        result.synapse_ops +=
-            accumulate_output_inputs(output_edges, sensory.neuron.activation, &mut action_inputs);
+        result.synapse_ops += accumulate_output_inputs(
+            output_edges,
+            sensory.neuron.activation,
+            &mut action_inputs,
+            &mut value_input,
+        );
     }
     for idx in 0..brain.inter.len() {
         let activation = {
@@ -88,8 +111,12 @@ pub fn evaluate_brain_state(
         }));
         result.synapse_ops +=
             accumulate_inter_inputs(inter_edges, activation, &mut scratch.inter_inputs);
-        result.synapse_ops +=
-            accumulate_output_inputs(output_edges, activation, &mut action_inputs);
+        result.synapse_ops += accumulate_output_inputs(
+            output_edges,
+            activation,
+            &mut action_inputs,
+            &mut value_input,
+        );
     }
     #[cfg(feature = "profiling")]
     profiling::record_brain_stage(BrainStage::InterAccumulation, stage_started.elapsed());
@@ -100,6 +127,7 @@ pub fn evaluate_brain_state(
         *input += bias;
     }
     result.action_logits = action_inputs;
+    result.value_prediction = fast_tanh(value_input + brain.value_bias);
     for (idx, action) in brain.action.iter_mut().enumerate() {
         debug_assert_eq!(action.symbol.index(), idx);
         action.logit = action_inputs[idx];
@@ -184,6 +212,7 @@ fn accumulate_output_inputs(
     edges: &[SynapseEdge],
     source_activation: f32,
     action_inputs: &mut [f32; ACTION_COUNT],
+    value_input: &mut f32,
 ) -> u64 {
     if source_activation == 0.0 {
         return 0;
@@ -192,6 +221,9 @@ fn accumulate_output_inputs(
     for edge in edges {
         if let Some(idx) = crate::topology::action_array_index(edge.post_neuron_id) {
             action_inputs[idx] += source_activation * edge.weight;
+            synapse_ops += 1;
+        } else if crate::topology::is_value_neuron_id(edge.post_neuron_id) {
+            *value_input += source_activation * edge.weight;
             synapse_ops += 1;
         }
     }

@@ -11,9 +11,10 @@ Workspace crates:
   recurrent neural evaluation, and optional Hebbian plasticity.
 - `world-sim/`: deterministic simulation engine: world generation, sensory
   encoding, canonical tick pipeline, energy accounting, and spawning.
-- `evolution/`: the generational NEAT outer loop and competitive evaluator.
+- `task-library/`: brain- and optimizer-independent symbolic environments.
+- `evolution/`: the generic task adapter and asexual task-ecology search.
 - `metrics/` and `views/`: shared metric facts/derivations and presentation.
-- `cli/`: sole headless research interface, including NEAT orchestration.
+- `cli/`: sole headless research interface, including task-ecology orchestration.
 - `sim-server/`: Axum HTTP + WebSocket server.
 - `web-client/`: React + TailwindCSS + Vite canvas UI.
 
@@ -81,8 +82,8 @@ records into ignored artifact directories.
 - Do not write new tests. The human author maintains the test suite.
 - Run `cargo test --workspace` to verify existing tests still pass after changes.
 - For evolution-loop benchmarking and regression checks, run
-  `cargo run -p cli --release -- neat ...` and compare persisted results across
-  seeds/configs.
+  `cargo run -p cli --release -- ecology ...` and compare persisted results
+  across seeds/configs.
 
 ## Frontend Browser Testing
 

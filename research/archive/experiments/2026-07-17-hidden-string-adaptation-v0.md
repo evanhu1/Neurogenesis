@@ -175,3 +175,8 @@ immediate, and the learned state need not survive task switches. The next
 experiment should replicate the treatment across at least three evolutionary
 seeds before adding sequential targets with retained weights and interference
 measurements.
+# Architecture-audit note
+
+Invalidated as canonical-brain competence on 2026-07-18 because the task
+installed the recurrent/readout founder needed by the benchmark. The reward
+effect remains a historical property of that scaffolded setup only.

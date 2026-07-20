@@ -28,6 +28,7 @@ pub fn express_genome(genome: &OrganismGenome) -> BrainState {
             ),
             state: 0.0,
             alpha,
+            neuromodulatory_receptor: gene.neuromodulatory_receptor,
             synapses: Vec::new(),
             output_synapse_start: 0,
         });
@@ -45,7 +46,13 @@ pub fn express_genome(genome: &OrganismGenome) -> BrainState {
         inter,
         action,
         recurrent_synapses: Vec::new(),
+        action_feedback_synapses: Vec::new(),
         previous_inter_activations: vec![0.0; num_inter],
+        previous_action_activations: [0.0; ACTION_COUNT],
+        previous_prediction_error: 0.0,
+        value_bias: genome.brain.value_bias,
+        inherited_value_bias: genome.brain.value_bias,
+        value_bias_eligibility: 0.0,
         synapse_count: 0,
         sensory_mean_activation: vec![0.0; num_sensory],
         inter_mean_activation: vec![0.0; num_inter],
@@ -104,14 +111,20 @@ fn wire_birth_synapses_from_genome(
 
         if edge.timing == SynapseTiming::PreviousTick {
             let mut runtime_edge = runtime_edge_from_gene(edge, pre_runtime_id, post_runtime_id);
-            runtime_edge.pre_inter_index =
-                crate::topology::inter_index(pre_runtime_id, brain.inter.len())
-                    .and_then(|index| u32::try_from(index).ok());
             runtime_edge.post_inter_index =
                 crate::topology::inter_index(post_runtime_id, brain.inter.len())
                     .and_then(|index| u32::try_from(index).ok());
+            runtime_edge.pre_inter_index =
+                crate::topology::inter_index(pre_runtime_id, brain.inter.len())
+                    .and_then(|index| u32::try_from(index).ok());
+            runtime_edge.pre_action_index = crate::topology::action_array_index(pre_runtime_id)
+                .and_then(|index| u32::try_from(index).ok());
             if runtime_edge.pre_inter_index.is_some() && runtime_edge.post_inter_index.is_some() {
                 brain.recurrent_synapses.push(runtime_edge);
+            } else if runtime_edge.pre_action_index.is_some()
+                && runtime_edge.post_inter_index.is_some()
+            {
+                brain.action_feedback_synapses.push(runtime_edge);
             }
             continue;
         }
@@ -170,8 +183,17 @@ fn wire_birth_synapses_from_genome(
         debug_assert!(brain.recurrent_synapses.iter().all(|edge| {
             edge.timing == SynapseTiming::PreviousTick
                 && edge.pre_inter_index.is_some()
+                && edge.pre_action_index.is_none()
                 && edge.post_inter_index.is_some()
                 && crate::topology::inter_index(edge.pre_neuron_id, brain.inter.len()).is_some()
+                && crate::topology::inter_index(edge.post_neuron_id, brain.inter.len()).is_some()
+        }));
+        debug_assert!(brain.action_feedback_synapses.iter().all(|edge| {
+            edge.timing == SynapseTiming::PreviousTick
+                && edge.pre_inter_index.is_none()
+                && edge.pre_action_index.is_some()
+                && edge.post_inter_index.is_some()
+                && crate::topology::action_array_index(edge.pre_neuron_id).is_some()
                 && crate::topology::inter_index(edge.post_neuron_id, brain.inter.len()).is_some()
         }));
     }
@@ -184,6 +206,9 @@ fn runtime_neuron_id(
 ) -> Option<NeuronId> {
     if let Some(index) = sensory_gene_node_index(gene_id) {
         return (index < SENSORY_COUNT).then_some(NeuronId(index));
+    }
+    if types::is_value_gene_node_id(gene_id) {
+        return Some(crate::topology::value_neuron_id());
     }
     if let Some(index) = action_gene_node_index(gene_id) {
         return (index < ACTION_COUNT).then(|| action_neuron_id(index));
@@ -264,7 +289,9 @@ fn runtime_edge_from_gene(
         post_neuron_id,
         timing: gene.timing,
         pre_inter_index: None,
+        pre_action_index: None,
         post_inter_index: None,
+        inherited_weight: gene.weight,
         weight: gene.weight,
         plasticity_coefficient: gene.plasticity_coefficient,
         eligibility: 0.0,

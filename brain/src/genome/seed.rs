@@ -11,6 +11,7 @@ pub fn generate_seed_genome<R: Rng + ?Sized>(
             id: seed_hidden_gene_node_id(index as u32),
             bias: sample_initial_bias(rng),
             log_time_constant: sample_initial_log_time_constant(rng),
+            neuromodulatory_receptor: 0.0,
         })
         .collect::<Vec<_>>();
     hidden_nodes.sort_unstable_by_key(|node| node.id);
@@ -26,12 +27,15 @@ pub fn generate_seed_genome<R: Rng + ?Sized>(
             initial_learning_rate: config.initial_learning_rate,
             juvenile_eta_scale: config.juvenile_eta_scale,
             eligibility_retention: config.eligibility_retention,
+            fast_weight_retention: config.fast_weight_retention,
+            action_temperature_scale: config.action_temperature_scale,
             max_weight_delta_per_tick: config.max_weight_delta_per_tick,
             synapse_prune_threshold: config.synapse_prune_threshold,
         },
         brain: BrainTopology {
             hidden_nodes,
             action_biases,
+            value_bias: 0.0,
             edges: Vec::new(),
         },
     };

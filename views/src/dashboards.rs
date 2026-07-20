@@ -84,7 +84,9 @@ pub fn eco(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
             });
         } else {
             v["trajectory"] = Value::Null;
-            v["note"] = json!("trajectories need `record on` then advance");
+            v["note"] = json!(
+                "trajectory metrics require a metric sidecar recorded while the world advances"
+            );
         }
         return writeln!(out, "{v}").map_err(Into::into);
     }
@@ -116,7 +118,7 @@ pub fn eco(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> {
     } else {
         writeln!(
             out,
-            "  (no trajectory: `record on` then advance to populate)"
+            "  (no trajectory: advance the world with its metric sidecar enabled)"
         )?;
     }
     Ok(())
@@ -192,17 +194,10 @@ pub fn lineage(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()>
         };
         writeln!(out, "    species {sid:<6} count={c:<6} {pct:5.1}%")?;
     }
-    if ctx.recorder.is_none() {
-        writeln!(
-            out,
-            "  (generation-time needs `record on`; parent-age not tracked)"
-        )?;
-    } else {
-        writeln!(
-            out,
-            "  (generation-time: parent-age-at-reproduction not tracked by recorder)"
-        )?;
-    }
+    writeln!(
+        out,
+        "  (generation-time: parent-age-at-reproduction is not tracked)"
+    )?;
     Ok(())
 }
 
@@ -251,6 +246,12 @@ pub fn genome(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> 
         }),
         ("eligibility_retention", "plasticity", |o| {
             o.genome.plasticity.eligibility_retention as f64
+        }),
+        ("fast_weight_retention", "plasticity", |o| {
+            o.genome.plasticity.fast_weight_retention as f64
+        }),
+        ("action_temperature_scale", "plasticity", |o| {
+            o.genome.plasticity.action_temperature_scale as f64
         }),
         ("max_weight_delta_per_tick", "plasticity", |o| {
             o.genome.plasticity.max_weight_delta_per_tick as f64
@@ -376,7 +377,7 @@ pub fn timeseries(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<
 
     let rec = ctx
         .recorder
-        .ok_or_else(|| anyhow!("timeseries requires recording; `record on` then advance"))?;
+        .ok_or_else(|| anyhow!("timeseries requires a metric sidecar recorded during advance"))?;
     if rec.samples.is_empty() {
         return Err(anyhow!("no recorded samples yet; advance the sim first"));
     }

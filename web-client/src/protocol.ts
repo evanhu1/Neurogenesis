@@ -55,7 +55,13 @@ function normalizeBrainState(brain: ApiOrganismState['brain']): BrainState {
   return {
     synapse_count: brain.synapse_count,
     recurrent_synapses: normalizeSynapses(brain.recurrent_synapses),
+    action_feedback_synapses: normalizeSynapses(brain.action_feedback_synapses),
     previous_inter_activations: [...brain.previous_inter_activations],
+    previous_action_activations: [...brain.previous_action_activations],
+    previous_prediction_error: brain.previous_prediction_error,
+    value_bias: brain.value_bias,
+    inherited_value_bias: brain.inherited_value_bias,
+    value_bias_eligibility: brain.value_bias_eligibility,
     sensory_mean_activation: [...brain.sensory_mean_activation],
     inter_mean_activation: [...brain.inter_mean_activation],
     action_mean_activation: [...brain.action_mean_activation],

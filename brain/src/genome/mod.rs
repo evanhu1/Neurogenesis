@@ -10,9 +10,9 @@ use std::cmp::Ordering;
 use std::f32::consts::LN_10;
 use types::{
     action_gene_node_id, action_gene_node_index, connection_innovation_id, is_hidden_gene_node_id,
-    seed_hidden_gene_node_id, sensory_gene_node_id, sensory_gene_node_index, BrainTopology,
-    GeneNodeId, HiddenNodeGene, InnovationId, LifecycleGenes, OrganismGenome, PlasticityGenes,
-    SeedGenomeConfig, SensoryReceptor, Symbol, SynapseGene, SynapseTiming,
+    is_value_gene_node_id, seed_hidden_gene_node_id, sensory_gene_node_id, sensory_gene_node_index,
+    BrainTopology, GeneNodeId, HiddenNodeGene, InnovationId, LifecycleGenes, OrganismGenome,
+    PlasticityGenes, SeedGenomeConfig, SensoryReceptor, Symbol, SynapseGene, SynapseTiming,
 };
 
 mod sanitization;
@@ -36,6 +36,8 @@ fn align_vec_to<T>(values: &mut Vec<T>, target_len: usize, mut fill: impl FnMut(
 
 pub const SYNAPSE_STRENGTH_MAX: f32 = 1.5;
 pub const SYNAPSE_STRENGTH_MIN: f32 = 0.001;
+pub const SYNAPSE_PLASTICITY_COEFFICIENT_MAX: f32 = 2.0;
+pub const NEUROMODULATORY_RECEPTOR_MAX: f32 = 2.0;
 const BIAS_MAX: f32 = 1.0;
 
 const BIAS_PERTURBATION_STDDEV: f32 = 0.15;
@@ -64,6 +66,16 @@ fn sample_initial_bias<R: Rng + ?Sized>(rng: &mut R) -> f32 {
         BIAS_PERTURBATION_STDDEV * 2.0,
         -BIAS_MAX,
         BIAS_MAX,
+        rng,
+    )
+}
+
+fn sample_initial_neuromodulatory_receptor<R: Rng + ?Sized>(rng: &mut R) -> f32 {
+    perturb_clamped(
+        0.0,
+        BIAS_PERTURBATION_STDDEV,
+        -NEUROMODULATORY_RECEPTOR_MAX,
+        NEUROMODULATORY_RECEPTOR_MAX,
         rng,
     )
 }

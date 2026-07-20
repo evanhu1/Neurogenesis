@@ -33,48 +33,41 @@ artifacts/research/runs/
 preregister -> plan -> run -> analyze -> conclude/archive
 ```
 
-1. **Preregister.** State the symbol streams, NEAT parameters, evolutionary
+1. **Preregister.** State the task contract, search parameters, evolutionary
    seeds, compute budget, and success rule in `proposed/`.
-2. **Plan.** Run `cli plan` with the exact arguments. Verify population,
-   generations, training and holdout corpora, symbols per evaluation, total
-   genome evaluations, symbol comparisons, and seed-genome configuration.
+2. **Plan.** Run `cli ecology <task> plan` with the exact arguments. Verify population,
+   generations, panels, ticks per evaluation, total genome evaluations, work,
+   and seed-genome configuration.
 3. **Run.** Execute each evolutionary seed with the release CLI and write
    results to `artifacts/research/runs/active/<slug>/`. Preserve commands,
    source identity, progress logs, timing, and artifacts.
-4. **Analyze.** Run `cli analyze` on the result files. Fitness is an absolute
-   count under a fixed task, so trajectories are directly comparable whenever
-   corpora match. Inspect unseen holdout emissions, not only training accuracy.
+4. **Analyze.** Run `cli ecology analyze` on the result files. Results are
+   comparable only when the complete task, agent, ecology, search, and panel
+   contracts match. Inspect sealed primary and lesion controls, not only
+   training resources.
 5. **Conclude and archive.** Apply the preregistered rule, record uncertainty,
    move the record to `archive/experiments/`, move artifacts to `completed/`,
    and update `INDEX.md`.
 
-## Current evaluator contract
+## Active task-library contract
 
-- Input/output alphabet: `a` through `h`, plus `end`.
-- The current hidden-string task has no input stream and uses four-symbol
-  targets over `a`–`h`. Training uses the calibrated 1,024-target/two-rollout
-  panel; development uses 256 targets every 25 generations; sealed evaluation
-  uses 1,024 targets once after final-winner selection.
-- Hidden-string training has one frozen final probe. Development reports probes
-  at attempts 0/8/16/32 without controls; sealed controls run final-probe only.
-- Genome evaluations are parallelized by an explicit worker count. Brain steps
-  and recurrent trajectories remain sequential and deterministic.
-- One recurrent brain step and one emitted action symbol per input symbol.
-- Hidden-string selection fitness is the final mean greedy-prefix score: the
-  longest uninterrupted correct prefix divided by four. Hard greedy exact rate
-  is the competence/threshold metric; unordered character accuracy is
-  diagnostic only.
-  The separate symbol-copy reference task retains one-point-per-symbol fitness
-  and reports holdout exact matches without using them for selection.
-- Independent streams reset brain state; symbols within a stream retain it.
-- Every genome is evaluated independently. There are no opponents, pairings,
-  arenas, survival scores, or crossplay assays.
+- Shared input/output alphabet: `a` through `z`, `space`, and `end`; each task
+  enables only its declared subset.
+- Tasks expose observations, rewards, success events, semantic trial boundaries,
+  and termination only. They never inspect or modify brain state.
+- The common adapter owns panel sizes, deterministic sampling, learning,
+  boundary reset policy, lesion controls, and metrics.
+- The common ecology owns finite reproduction and all search mechanics.
+- Every genome receives the same deterministic generation panel. Development
+  and sealed panels never allocate reproduction.
 
 ## Efficiency and integrity
 
 - Use release builds for real runs.
 - Smoke-test the exact plan and determinism before a multi-seed suite.
 - Change one causal lever per matched experiment.
+- Treat any inspected development or sealed cohort as discovery evidence and
+  rotate it before a claimed confirmation.
 - Persist periodic population checkpoints rather than rerunning evolution for
   structural analysis.
 - Keep negative results indexed.

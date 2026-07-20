@@ -423,7 +423,10 @@ export function renderBrain(
   // Render them dashed and purple so temporal feedback is never mistaken for
   // a same-tick feed-forward connection.
   ctx.setLineDash([6, 4]);
-  for (const synapse of focusedBrain.recurrent_synapses) {
+  for (const synapse of [
+    ...focusedBrain.recurrent_synapses,
+    ...focusedBrain.action_feedback_synapses,
+  ]) {
     const pre = positions.get(synapse.pre_neuron_id);
     const post = positions.get(synapse.post_neuron_id);
     if (!pre || !post) continue;

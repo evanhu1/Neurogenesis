@@ -143,3 +143,7 @@ matched multi-seed comparison of the default founder against a founder with
 enough initial hidden capacity for four temporal positions would test whether
 NEAT is being asked to discover both a usable clock and a learning rule in the
 same sparse search. Any promoted treatment must then pass on fresh seeds.
+# Architecture-audit note
+
+Invalidated as canonical-brain competence on 2026-07-18 because this evaluator
+used a task-rewritten recurrent/readout founder.

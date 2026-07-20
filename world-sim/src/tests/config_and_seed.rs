@@ -32,11 +32,13 @@ fn founder_genome_pool_init_reset_and_replay_are_deterministic() {
             id: seed_hidden_gene_node_id(0),
             bias: 0.1,
             log_time_constant: 0.0,
+            neuromodulatory_receptor: 0.0,
         },
         HiddenNodeGene {
             id: seed_hidden_gene_node_id(1),
             bias: -0.2,
             log_time_constant: 0.2,
+            neuromodulatory_receptor: 0.0,
         },
     ];
 
@@ -49,6 +51,7 @@ fn founder_genome_pool_init_reset_and_replay_are_deterministic() {
             id: seed_hidden_gene_node_id(index as u32),
             bias,
             log_time_constant,
+            neuromodulatory_receptor: 0.0,
         })
         .collect();
 
@@ -93,6 +96,7 @@ fn reset_preserves_founder_genome_pool_bootstrap_behavior() {
             id: seed_hidden_gene_node_id(index as u32),
             bias: value,
             log_time_constant: value,
+            neuromodulatory_receptor: 0.0,
         })
         .collect();
 

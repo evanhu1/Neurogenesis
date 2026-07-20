@@ -11,6 +11,8 @@ const DEFAULT_SEED_GENOME_CONFIG_REL_PATH: &str = "seed_genome.toml";
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
 pub struct SeedGenomeConfigDefaults {
     pub juvenile_eta_scale: f32,
+    pub fast_weight_retention: f32,
+    pub action_temperature_scale: f32,
     pub max_weight_delta_per_tick: f32,
 }
 
@@ -22,6 +24,8 @@ pub struct TerrainGenerationPolicy {
 pub fn seed_genome_config_defaults() -> SeedGenomeConfigDefaults {
     SeedGenomeConfigDefaults {
         juvenile_eta_scale: 2.0,
+        fast_weight_retention: 1.0,
+        action_temperature_scale: 1.0,
         max_weight_delta_per_tick: 0.05,
     }
 }
@@ -191,8 +195,23 @@ pub fn validate_world_config(config: &WorldConfig) -> Result<(), String> {
     if !config.seed_genome_config.initial_learning_rate.is_finite()
         || config.seed_genome_config.initial_learning_rate < 0.0
     {
+        return Err("seed_genome_config.initial_learning_rate must be finite and >= 0".to_owned());
+    }
+    if !config.seed_genome_config.fast_weight_retention.is_finite()
+        || !(0.0..=1.0).contains(&config.seed_genome_config.fast_weight_retention)
+    {
         return Err(
-            "seed_genome_config.initial_learning_rate must be finite and >= 0".to_owned(),
+            "seed_genome_config.fast_weight_retention must be finite and in [0, 1]".to_owned(),
+        );
+    }
+    if !config
+        .seed_genome_config
+        .action_temperature_scale
+        .is_finite()
+        || config.seed_genome_config.action_temperature_scale <= 0.0
+    {
+        return Err(
+            "seed_genome_config.action_temperature_scale must be finite and positive".to_owned(),
         );
     }
     if !config

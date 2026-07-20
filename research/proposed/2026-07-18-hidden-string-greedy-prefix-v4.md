@@ -1,8 +1,7 @@
 # 2026-07-18-hidden-string-greedy-prefix-v4: ordered partial credit
 
-Status: proposed; evaluator implemented and 100-generation diagnostic passed
-the signs-of-life check. See the
-[diagnostic](../archive/experiments/2026-07-18-hidden-string-greedy-prefix-v4-100g-diagnostic.md).
+Status: completed and rejected after the 500-generation replication. See the
+[result](../archive/experiments/2026-07-18-hidden-string-greedy-prefix-v4-500g.md).
 
 ## Question
 

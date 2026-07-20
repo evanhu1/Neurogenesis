@@ -14,3 +14,4 @@ serde.workspace = true
 serde_json.workspace = true
 brain = { path = "../brain" }
 types = { path = "../types" }
+task-library = { path = "../task-library" }

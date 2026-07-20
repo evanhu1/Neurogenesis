@@ -146,3 +146,7 @@ same three seeds for 200 generations with every other contract field frozen.
 That distinguishes a too-short structural-search budget—especially for seed
 27—from a stable seed-sensitive limitation. Any promotion to a 200-generation
 baseline would still need a subsequent fresh-seed confirmation.
+# Architecture-audit note
+
+Invalidated as canonical-brain competence on 2026-07-18 because this evaluator
+used a task-rewritten recurrent/readout founder.

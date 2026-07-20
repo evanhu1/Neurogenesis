@@ -4,6 +4,7 @@ members = [
   "brain",
   "world-sim",
   "evolution",
+  "task-library",
   "metrics",
   "types",
   "sim-server",
@@ -42,4 +43,3 @@ rayon = "1.10"
 bincode = "1.3"
 ciborium = "0.2"
 zstd = "0.13"
-signal-hook = "0.3"

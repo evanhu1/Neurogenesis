@@ -7,62 +7,100 @@ pub struct TaskWorkReport {
     pub brain_synapse_operations: u64,
 }
 
-/// One independently reusable genome-evaluation task for the NEAT outer loop.
-///
-/// Implementations own the task contract and all task-specific state. The
-/// evolutionary algorithm sees only absolute fitness plus an optional
-/// normalized score for reporting. Rust monomorphizes this boundary, so task
-/// modularity does not add dynamic dispatch to the evaluation hot path.
-pub trait EvaluationTask: Sync {
-    type Config: Clone + Serialize;
-    type Evaluation: Clone + Serialize + Send + Sync;
-
-    fn name(&self) -> &'static str;
-    fn objective(&self) -> &'static str;
-    fn config(&self) -> Self::Config;
-    fn validate(&self) -> Result<()>;
-    fn evaluate(&self, genome: &OrganismGenome) -> Result<Self::Evaluation>;
-    /// Finite, nonnegative scalar used by ranking and selection.
-    fn fitness(&self, evaluation: &Self::Evaluation) -> f64;
-
-    fn normalized_fitness(&self, _evaluation: &Self::Evaluation) -> Option<f64> {
-        None
-    }
-
-    /// Deterministic task work represented by one completed evaluation.
-    /// Tasks that do not instrument brain work retain the zero-cost default.
-    fn work_report(&self, _evaluation: &Self::Evaluation) -> TaskWorkReport {
-        TaskWorkReport::default()
-    }
-
+/// Brain-interface policy used by generic structural mutation.
+pub trait GenomeTask: Sync {
     fn sensor_enabled(&self, _sensor: SensoryReceptor) -> bool {
         true
     }
 
-    /// Whether a task exposes this action output to structural mutation.
     fn action_enabled(&self, _symbol: Symbol) -> bool {
         true
     }
 
-    fn prepare_founder_genome(&self, _genome: &mut OrganismGenome) -> Result<()> {
-        Ok(())
+    fn action_feedback_enabled(&self) -> bool {
+        self.temporal_credit_enabled()
     }
 
-    /// Optional evaluation that is reported for the training winner but never
-    /// participates in ranking, selection, or breeding.
-    fn validation_evaluation(&self, _genome: &OrganismGenome) -> Result<Option<Self::Evaluation>> {
-        Ok(None)
+    fn temporal_credit_enabled(&self) -> bool {
+        false
     }
 
-    /// Whether the generation winner should receive the task's development
-    /// evaluation. The final generation should normally remain enabled so the
-    /// run artifact has a development result for its selected winner.
-    fn validation_due(&self, _generation: u32, _total_generations: u32) -> bool {
-        true
+    fn value_prediction_enabled(&self) -> bool {
+        self.temporal_credit_enabled()
     }
 
-    /// Sealed evaluation called once for the final evolutionary winner.
-    fn final_evaluation(&self, _genome: &OrganismGenome) -> Result<Option<Self::Evaluation>> {
-        Ok(None)
+    /// Whether evaluation changes expressed weights within an organism's
+    /// lifetime. This exposes no task state; it only prevents inert tasks from
+    /// consuming search variation in plasticity timescale genes.
+    fn lifetime_learning_enabled(&self) -> bool {
+        self.temporal_credit_enabled()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ResourceLifetimeContext {
+    pub generation: u32,
+    pub lifetime_ticks: usize,
+    pub individual_id: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ResourceLifetimeOutcome<E> {
+    pub evaluation: E,
+    /// Physical resource units consumed during the evaluation. Each unit is
+    /// one reproductive ticket; the outer loop never interprets task metrics.
+    pub reproductive_tickets: u64,
+    pub work: TaskWorkReport,
+}
+
+/// A task ecology emits binary, repeatable solve events rather than a scalar
+/// fitness. Each genome receives the same task-defined panel of uninterrupted
+/// physical lifetimes. Reproduction occurs only after every lifetime has ended,
+/// and offspring begin the next generation with freshly expressed runtime state.
+pub trait ResourceEcologyTask: GenomeTask {
+    type Config: Clone + Serialize;
+    type LifetimeState: Send;
+    type LifetimeEvaluation: Clone + Serialize + Send + Sync;
+    type AuditEvaluation: Clone + Serialize + Send + Sync;
+
+    fn name(&self) -> &'static str;
+    fn objective(&self) -> &'static str;
+    fn config(&self) -> Self::Config;
+    fn lifetime_ticks(&self) -> usize;
+    /// Independent physical lifetimes used to estimate one genome's resource
+    /// production. Every genome in a generation receives the same panel.
+    fn evaluation_lifetimes(&self) -> usize {
+        1
+    }
+    fn validate(&self) -> Result<()>;
+
+    fn initialize_lifetime(
+        &self,
+        genome: &OrganismGenome,
+        individual_id: u64,
+        run_seed: u64,
+        generation: u32,
+    ) -> Result<Self::LifetimeState>;
+
+    fn evaluate_lifetime(
+        &self,
+        genome: &OrganismGenome,
+        state: &mut Self::LifetimeState,
+        context: ResourceLifetimeContext,
+    ) -> Result<ResourceLifetimeOutcome<Self::LifetimeEvaluation>>;
+
+    fn audit(
+        &self,
+        genome: &OrganismGenome,
+        cohort: &str,
+        audit_seed: u64,
+    ) -> Result<Self::AuditEvaluation>;
+
+    /// Stable development score used only to retain the best observed
+    /// representative for final sealed evaluation. It never affects tickets.
+    fn audit_score(&self, audit: &Self::AuditEvaluation) -> f64;
+
+    fn audit_due(&self, generation: u32, total_generations: u32) -> bool {
+        generation + 1 == total_generations
     }
 }

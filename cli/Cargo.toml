@@ -6,16 +6,13 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-serde.workspace = true
 serde_json.workspace = true
-ciborium.workspace = true
-toml.workspace = true
 bincode.workspace = true
 zstd.workspace = true
-signal-hook.workspace = true
 ratatui = "0.30"
 config = { path = "../config" }
 evolution = { path = "../evolution" }
+task-library = { path = "../task-library" }
 world-sim = { path = "../world-sim", features = ["instrumentation"] }
 types = { path = "../types", features = ["instrumentation"] }
 metrics = { path = "../metrics" }

@@ -109,6 +109,8 @@ export function InspectorContent({
         { label: 'Initial Learning Rate', value: formatFloat(genome.plasticity.initial_learning_rate, 3) },
         { label: 'Juvenile Eta', value: formatFloat(genome.plasticity.juvenile_eta_scale, 3) },
         { label: 'Elig Ret', value: formatFloat(genome.plasticity.eligibility_retention, 3) },
+        { label: 'Fast Ret', value: formatFloat(genome.plasticity.fast_weight_retention, 3) },
+        { label: 'Temp', value: formatFloat(genome.plasticity.action_temperature_scale, 3) },
         { label: 'Prune Thr', value: formatFloat(genome.plasticity.synapse_prune_threshold, 3) },
       ] satisfies StatItem[],
     };

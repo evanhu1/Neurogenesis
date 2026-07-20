@@ -25,7 +25,10 @@ export type ActionType =
   | 'Forward'
   | 'Attack';
 
-export type Symbol = 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'end';
+export type Symbol =
+  | 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j'
+  | 'k' | 'l' | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't'
+  | 'u' | 'v' | 'w' | 'x' | 'y' | 'z' | 'space' | 'end';
 
 export type TerrainType = 'Mountain';
 
@@ -48,6 +51,8 @@ export type PlasticityGenes = {
   initial_learning_rate: number;
   juvenile_eta_scale: number;
   eligibility_retention: number;
+  fast_weight_retention: number;
+  action_temperature_scale: number;
   max_weight_delta_per_tick: number;
   synapse_prune_threshold: number;
 };
@@ -60,6 +65,8 @@ export type SeedGenomeConfig = {
   initial_learning_rate: number;
   juvenile_eta_scale: number;
   eligibility_retention: number;
+  fast_weight_retention: number;
+  action_temperature_scale: number;
   max_weight_delta_per_tick: number;
   synapse_prune_threshold: number;
 };
@@ -86,8 +93,11 @@ type SynapseEdgeOf<Id> = {
   post_neuron_id: Id;
   timing: SynapseTiming;
   pre_inter_index: number | null;
+  pre_action_index: number | null;
   post_inter_index: number | null;
+  inherited_weight: number;
   weight: number;
+  plasticity_coefficient: number;
   eligibility: number;
   pending_coactivation: number;
 };
@@ -99,6 +109,7 @@ export type HiddenNodeGene = {
   id: StableGeneId;
   bias: number;
   log_time_constant: number;
+  neuromodulatory_receptor: number;
 };
 
 // Heritable connection identity is stable across structural mutation. Runtime
@@ -109,6 +120,7 @@ export type SynapseGene = {
   post_node_id: StableGeneId;
   timing: SynapseTiming;
   weight: number;
+  plasticity_coefficient: number;
   enabled: boolean;
 };
 
@@ -117,6 +129,7 @@ export type ApiSynapseGene = SynapseGene;
 export type BrainTopologyGenes = {
   hidden_nodes: HiddenNodeGene[];
   action_biases: number[];
+  value_bias: number;
   edges: SynapseGene[];
 };
 
@@ -153,6 +166,7 @@ type InterNeuronStateOf<Id> = {
   neuron: NeuronStateOf<Id>;
   state: number;
   alpha: number;
+  neuromodulatory_receptor: number;
   synapses: SynapseEdgeOf<Id>[];
   output_synapse_start: number;
 };
@@ -174,7 +188,13 @@ type BrainStateOf<Id> = {
   inter: InterNeuronStateOf<Id>[];
   action: ActionNeuronStateOf<Id>[];
   recurrent_synapses: SynapseEdgeOf<Id>[];
+  action_feedback_synapses: SynapseEdgeOf<Id>[];
   previous_inter_activations: number[];
+  previous_action_activations: number[];
+  previous_prediction_error: number;
+  value_bias: number;
+  inherited_value_bias: number;
+  value_bias_eligibility: number;
   synapse_count: number;
   sensory_mean_activation: number[];
   inter_mean_activation: number[];

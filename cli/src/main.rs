@@ -1,14 +1,13 @@
-//! cli — NEAT research CLI for the NeuroGenesis engine.
+//! cli — task-ecology research CLI for the NeuroGenesis engine.
 //!
-//! Generational NEAT is the default mode. The lower-level stateless,
+//! Task ecology is the evolution mode. The lower-level stateless,
 //! world-as-file simulator remains available under the explicit `world`
 //! namespace. Output is JSON by default; `--text` overrides per call.
 //!
 //! See docs/cli.md (usage) and docs/cli-stateless-spec.md + SPEC.md.
 
 mod dashboards;
-mod neat;
-mod neat_hidden_string;
+mod ecology;
 mod sweep;
 mod tui;
 
@@ -73,17 +72,19 @@ fn is_read_only(cmd: &str) -> bool {
 fn print_help(out: &mut impl Write) -> Result<()> {
     writeln!(
         out,
-        "cli — deterministic NEAT research CLI. JSON output by default.\n\
+        "cli — deterministic task-ecology research CLI. JSON output by default.\n\
          \n\
-         CORE WORKFLOW\n\
-         \x20 cli [RUN OPTIONS]             run one generational NEAT experiment\n\
-         \x20 cli plan [RUN OPTIONS]        validate and print the resolved compute contract\n\
-         \x20 cli analyze RESULT...         derive trajectories and diagnostics\n\
-         \x20 cli hidden-string ...         within-lifetime reward-learning experiment\n\
+         TASK ECOLOGY\n\
+         \x20 cli ecology reaction ...      direct-reaction environment\n\
+         \x20 cli ecology memory ...        bounded sequence-memory environment\n\
+         \x20 cli ecology next-token ...    basic next-token prediction environment\n\
+         \x20 cli ecology continual ...     basic continual-learning environment\n\
+         \x20 cli ecology renewable ...     renewable hidden-resource environment\n\
+         \x20 cli ecology analyze RESULT... compare persisted runs\n\
          \n\
          RUN OPTIONS\n\
-         \x20 --seed N --population N --generations N\n\
-         \x20 --stream a,b,c,end            replace the default training corpus\n\
+         \x20 --seed N --population N --generations N [--workers N]\n\
+         \x20 add `plan` after a task name to inspect work without running\n\
          \n\
          WORLD SIMULATOR\n\
          \x20 cli world <command> ...       explicit stateless world-as-file tools\n\
@@ -175,30 +176,29 @@ fn run() -> Result<()> {
     ) {
         bail!("`{first}` is a world-simulator command; use `cli world {first} ...`");
     }
-    // NEAT is the research default: both direct run flags (`cli --seed ...`)
-    // and analysis subcommands (`cli plan`, `cli analyze`) arrive here.
-    run_neat_mode(&argv)
+    if first == "ecology" {
+        return run_ecology_mode(&argv[1..]);
+    }
+    bail!("unknown command `{first}`; expected `ecology` or `world`")
 }
 
-fn run_neat_mode(argv: &[String]) -> Result<()> {
+fn run_ecology_mode(argv: &[String]) -> Result<()> {
     let mut out_dir = DEFAULT_OUT_DIR.to_string();
     let mut rest = Vec::with_capacity(argv.len());
-    let mut index = 0usize;
+    let mut index = 0;
     while index < argv.len() {
-        let arg = &argv[index];
-        if arg == "--out-dir" {
+        if argv[index] == "--out-dir" {
             out_dir = argv
                 .get(index + 1)
                 .ok_or_else(|| anyhow!("--out-dir needs a path"))?
                 .clone();
             index += 2;
         } else {
-            rest.push(arg.as_str());
+            rest.push(argv[index].as_str());
             index += 1;
         }
     }
-    let mut out = io::stdout().lock();
-    neat::run_neat_cli(&rest, &out_dir, &mut out)
+    ecology::run_cli(&rest, &out_dir, &mut io::stdout().lock())
 }
 
 fn run_world_mode(argv: &[String]) -> Result<()> {

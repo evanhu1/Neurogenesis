@@ -101,3 +101,8 @@ Retain the lifecycle, checkpoint, telemetry, and parallel evaluator changes.
 Retain soft sequence diagnostics. Reject temperature-one soft exact alone as a
 robust solution to evolutionary discovery, and do not unlock the sequential
 continual-learning task from this result.
+# Architecture-audit note
+
+Positive competence claims in this record were invalidated on 2026-07-18
+because the task rewrote the canonical founder. Evaluator-density and runtime
+measurements remain historical evidence.

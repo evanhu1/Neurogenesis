@@ -400,7 +400,7 @@ export function FindTab({
         </div>
         <p className="text-[10px] leading-4 text-ink/30">
           Fields: id energy energy_flow age generation species attacks
-          neurons synapses vision hebb_eta. Operators: &lt; &lt;= &gt; &gt;= == != · join
+          neurons synapses vision initial_learning_rate. Operators: &lt; &lt;= &gt; &gt;= == != · join
           with and/or.
         </p>
       </div>

@@ -4,6 +4,31 @@ use super::*;
 /// mutated. Stable identities make topology lengths derived facts, so this
 /// pass never invents connections to satisfy a stale count gene.
 pub fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &mut R) {
+    if !genome.plasticity.initial_learning_rate.is_finite() {
+        genome.plasticity.initial_learning_rate = 0.0;
+    }
+    genome.plasticity.initial_learning_rate =
+        genome.plasticity.initial_learning_rate.clamp(0.0, 1.0);
+    if !genome.plasticity.eligibility_retention.is_finite() {
+        genome.plasticity.eligibility_retention = 0.95;
+    }
+    genome.plasticity.eligibility_retention =
+        genome.plasticity.eligibility_retention.clamp(0.0, 1.0);
+    if !genome.plasticity.fast_weight_retention.is_finite() {
+        genome.plasticity.fast_weight_retention = 1.0;
+    }
+    genome.plasticity.fast_weight_retention =
+        genome.plasticity.fast_weight_retention.clamp(0.0, 1.0);
+    if !genome.plasticity.action_temperature_scale.is_finite() {
+        genome.plasticity.action_temperature_scale = 1.0;
+    }
+    genome.plasticity.action_temperature_scale =
+        genome.plasticity.action_temperature_scale.clamp(0.05, 4.0);
+    if !genome.plasticity.max_weight_delta_per_tick.is_finite() {
+        genome.plasticity.max_weight_delta_per_tick = 0.05;
+    }
+    genome.plasticity.max_weight_delta_per_tick =
+        genome.plasticity.max_weight_delta_per_tick.clamp(0.0, 1.0);
     for node in &mut genome.brain.hidden_nodes {
         if !node.bias.is_finite() {
             node.bias = sample_initial_bias(rng);
@@ -11,10 +36,16 @@ pub fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &
         if !node.log_time_constant.is_finite() {
             node.log_time_constant = sample_initial_log_time_constant(rng);
         }
+        if !node.neuromodulatory_receptor.is_finite() {
+            node.neuromodulatory_receptor = sample_initial_neuromodulatory_receptor(rng);
+        }
         node.bias = node.bias.clamp(-BIAS_MAX, BIAS_MAX);
         node.log_time_constant = node
             .log_time_constant
             .clamp(INTER_LOG_TIME_CONSTANT_MIN, INTER_LOG_TIME_CONSTANT_MAX);
+        node.neuromodulatory_receptor = node
+            .neuromodulatory_receptor
+            .clamp(-NEUROMODULATORY_RECEPTOR_MAX, NEUROMODULATORY_RECEPTOR_MAX);
     }
 
     // Total ordering across malformed duplicates makes the retained allele
@@ -23,6 +54,10 @@ pub fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &
         a.id.cmp(&b.id)
             .then_with(|| a.bias.total_cmp(&b.bias))
             .then_with(|| a.log_time_constant.total_cmp(&b.log_time_constant))
+            .then_with(|| {
+                a.neuromodulatory_receptor
+                    .total_cmp(&b.neuromodulatory_receptor)
+            })
     });
     genome
         .brain
@@ -43,6 +78,10 @@ pub fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &
         }
         *bias = bias.clamp(-BIAS_MAX, BIAS_MAX);
     }
+    if !genome.brain.value_bias.is_finite() {
+        genome.brain.value_bias = 0.0;
+    }
+    genome.brain.value_bias = genome.brain.value_bias.clamp(-BIAS_MAX, BIAS_MAX);
     sanitize_synapse_genes(genome);
 }
 
@@ -52,6 +91,11 @@ pub fn align_genome_vectors<R: Rng + ?Sized>(genome: &mut OrganismGenome, rng: &
 pub(super) fn debug_assert_genome_well_formed(genome: &OrganismGenome) {
     debug_assert!(genome.brain.hidden_nodes.len() <= MAX_INTER_NEURONS as usize);
     debug_assert_eq!(genome.brain.action_biases.len(), ACTION_COUNT);
+    debug_assert!(genome.brain.value_bias.is_finite());
+    debug_assert_eq!(
+        genome.brain.value_bias,
+        genome.brain.value_bias.clamp(-BIAS_MAX, BIAS_MAX)
+    );
     debug_assert!(genome
         .brain
         .hidden_nodes
@@ -66,6 +110,11 @@ pub(super) fn debug_assert_genome_well_formed(genome: &OrganismGenome) {
                 == node
                     .log_time_constant
                     .clamp(INTER_LOG_TIME_CONSTANT_MIN, INTER_LOG_TIME_CONSTANT_MAX)
+            && node.neuromodulatory_receptor.is_finite()
+            && node.neuromodulatory_receptor
+                == node
+                    .neuromodulatory_receptor
+                    .clamp(-NEUROMODULATORY_RECEPTOR_MAX, NEUROMODULATORY_RECEPTOR_MAX)
     }));
     debug_assert_synapse_genes_well_formed(genome);
     debug_assert!(enabled_hidden_graph_is_acyclic(genome));
@@ -81,6 +130,11 @@ fn debug_assert_synapse_genes_well_formed(genome: &OrganismGenome) {
         is_valid_synapse_pair(genome, edge.pre_node_id, edge.post_node_id, edge.timing)
             && edge.weight.is_finite()
             && edge.weight == constrain_weight(edge.weight)
+            && edge.plasticity_coefficient.is_finite()
+            && edge.plasticity_coefficient
+                == edge
+                    .plasticity_coefficient
+                    .clamp(0.0, SYNAPSE_PLASTICITY_COEFFICIENT_MAX)
     }));
     debug_assert!(genome.brain.edges.iter().enumerate().all(|(index, edge)| {
         !genome.brain.edges[..index].iter().any(|previous| {
@@ -94,6 +148,7 @@ pub(super) fn sanitize_synapse_genes(genome: &mut OrganismGenome) {
     let hidden_nodes = &genome.brain.hidden_nodes;
     genome.brain.edges.retain_mut(|edge| {
         if !edge.weight.is_finite()
+            || !edge.plasticity_coefficient.is_finite()
             || !is_valid_synapse_pair_for_nodes(
                 hidden_nodes,
                 edge.pre_node_id,
@@ -104,6 +159,9 @@ pub(super) fn sanitize_synapse_genes(genome: &mut OrganismGenome) {
             return false;
         }
         edge.weight = constrain_weight(edge.weight);
+        edge.plasticity_coefficient = edge
+            .plasticity_coefficient
+            .clamp(0.0, SYNAPSE_PLASTICITY_COEFFICIENT_MAX);
         true
     });
 
@@ -281,11 +339,12 @@ pub(super) fn is_valid_synapse_pair_for_nodes(
                 && !(pre == post && is_hidden_gene_node_id(pre))
         }
         SynapseTiming::PreviousTick => {
-            is_hidden_gene_node_id(pre)
-                && is_hidden_gene_node_id(post)
+            (is_hidden_gene_node_id(pre)
                 && hidden_nodes
                     .binary_search_by_key(&pre, |node| node.id)
                     .is_ok()
+                || action_gene_node_index(pre).is_some_and(|idx| idx < ACTION_COUNT))
+                && is_hidden_gene_node_id(post)
                 && hidden_nodes
                     .binary_search_by_key(&post, |node| node.id)
                     .is_ok()
@@ -305,6 +364,7 @@ fn is_valid_post_id(hidden_nodes: &[HiddenNodeGene], id: GeneNodeId) -> bool {
         .binary_search_by_key(&id, |node| node.id)
         .is_ok()
         || action_gene_node_index(id).is_some_and(|idx| idx < ACTION_COUNT)
+        || is_value_gene_node_id(id)
 }
 
 pub(super) fn sort_synapse_genes(edges: &mut [SynapseGene]) {

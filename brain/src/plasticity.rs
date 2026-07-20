@@ -10,7 +10,6 @@ use crate::BrainScratch;
 use std::time::Instant;
 use types::{BrainState, OrganismState, SynapseEdge};
 
-const PLASTIC_WEIGHT_DECAY: f32 = 0.001;
 const SYNAPSE_PRUNE_INTERVAL_TICKS: u64 = 10;
 const PRUNE_ELIGIBILITY_MULTIPLIER: f32 = 2.0;
 
@@ -59,11 +58,12 @@ const ACTIVATION_MEAN_ALPHA: f32 = 0.05;
 
 struct PlasticityStepParams {
     eta: f32,
-    /// Bounded three-factor neuromodulator gating ONLY the learning term
-    /// (eligibility→weight). The passive decay term is left un-modulated. See
+    /// Bounded three-factor neuromodulator gating the learning term
+    /// (eligibility→weight). Fast-component retention is independent. See
     /// `energy_delta_neuromodulator`.
     learning_modulator: f32,
     eligibility_retention: f32,
+    fast_weight_retention: f32,
     max_weight_delta_per_tick: f32,
     should_prune: bool,
     weight_prune_threshold: f32,
@@ -337,6 +337,11 @@ impl PlasticityStepParams {
                 .plasticity
                 .eligibility_retention
                 .clamp(0.0, 1.0),
+            fast_weight_retention: organism
+                .genome
+                .plasticity
+                .fast_weight_retention
+                .clamp(0.0, 1.0),
             max_weight_delta_per_tick: organism
                 .genome
                 .plasticity
@@ -417,12 +422,15 @@ fn apply_edge_weight_update_and_fold_pending(
         // learning rate AND a bounded energy-delta neuromodulator so that
         // coactivations preceding an energy gain consolidate harder and those
         // preceding a loss are damped — within-life reward-learning. The
-        // passive decay term toward zero is left un-modulated.
+        // The inherited weight is stable; only learned lifetime displacement
+        // is retained or forgotten. This makes the plastic runtime component
+        // explicit instead of conflating forgetting with decay toward zero.
+        edge.weight = edge.inherited_weight
+            + params.fast_weight_retention * (edge.weight - edge.inherited_weight);
         let uncapped_delta = params.learning_modulator
             * params.eta
             * edge.plasticity_coefficient.max(0.0)
-            * edge.eligibility
-            - PLASTIC_WEIGHT_DECAY * edge.weight;
+            * edge.eligibility;
         let capped_delta = uncapped_delta.clamp(
             -params.max_weight_delta_per_tick,
             params.max_weight_delta_per_tick,

@@ -18,6 +18,14 @@ pub fn action_neuron_id(index: usize) -> NeuronId {
     NeuronId(ACTION_ID_BASE + index as u32)
 }
 
+pub const fn value_neuron_id() -> NeuronId {
+    NeuronId(u32::MAX)
+}
+
+pub const fn is_value_neuron_id(id: NeuronId) -> bool {
+    id.0 == value_neuron_id().0
+}
+
 pub fn inter_index(id: NeuronId, num_neurons: usize) -> Option<usize> {
     let num_neurons = u32::try_from(num_neurons).ok()?;
     types::inter_neuron_index(id, num_neurons).map(|index| index as usize)
@@ -42,7 +50,10 @@ pub fn constrain_weight(weight: f32) -> f32 {
 /// refreshes `synapse_count`. Called at birth and from the runtime prune
 /// path; allocation-free.
 pub fn refresh_output_synapse_starts_and_count(brain: &mut BrainState) {
-    let mut total_synapses = brain.recurrent_synapses.len();
+    let mut total_synapses = brain
+        .recurrent_synapses
+        .len()
+        .saturating_add(brain.action_feedback_synapses.len());
     for sensory_neuron in brain.sensory.iter_mut() {
         debug_assert_runtime_synapse_order(&sensory_neuron.synapses);
         sensory_neuron.output_synapse_start = sensory_neuron
@@ -81,5 +92,5 @@ fn runtime_post_sort_key(id: NeuronId) -> (bool, u32) {
 }
 
 fn is_output_neuron(id: NeuronId) -> bool {
-    action_array_index(id).is_some()
+    action_array_index(id).is_some() || is_value_neuron_id(id)
 }

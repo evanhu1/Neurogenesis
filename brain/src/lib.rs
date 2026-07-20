@@ -26,7 +26,10 @@ pub use evaluation::{evaluate_brain, evaluate_brain_state, BrainEvalContext};
 #[cfg_attr(not(test), allow(unused_imports))]
 pub use expression::{express_genome, make_action_neuron, make_sensory_neuron};
 pub use learning::{
-    apply_immediate_action_reward, reset_dynamics_preserving_weights, ImmediateLearningReport,
+    apply_immediate_action_reward, apply_target_prediction_error, apply_temporal_action_reward,
+    reset_dynamics_preserving_weights, ImmediateLearningNormalization, ImmediateLearningReport,
+    ImmediateLearningRequest, TargetPredictionLearningRequest, TemporalLearningReport,
+    TemporalLearningRequest,
 };
 pub use plasticity::{apply_runtime_weight_updates, compute_pending_coactivations};
 
@@ -57,6 +60,7 @@ pub fn fast_tanh(x: f32) -> f32 {
 pub struct BrainEvaluation {
     pub selected_symbol: Symbol,
     pub action_logits: [f32; ACTION_COUNT],
+    pub value_prediction: f32,
     pub synapse_ops: u64,
 }
 

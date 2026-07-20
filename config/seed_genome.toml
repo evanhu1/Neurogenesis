@@ -8,5 +8,7 @@ plasticity_maturity_ticks = 50 # Age at which the mature Hebbian rate and prunin
 initial_learning_rate = 0.0 # v0 isolates inherited recurrent control; runtime plasticity is intentionally off.
 juvenile_eta_scale = 2.0 # Multiplier applied to `initial_learning_rate` before maturity.
 eligibility_retention = 0.95 # Exponential retention factor for eligibility traces across ticks.
+fast_weight_retention = 1.0 # Per-tick retention of learned weight displacement from the inherited baseline.
+action_temperature_scale = 1.0 # Heritable scale on the task's reference exploration temperature.
 max_weight_delta_per_tick = 0.05 # Per-tick clamp on how much a synapse weight can change from plasticity.
 synapse_prune_threshold = 0.05 # Minimum absolute weight and eligibility scale required to keep a mature synapse during pruning.

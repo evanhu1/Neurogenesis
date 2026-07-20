@@ -176,7 +176,7 @@ pub fn decide(ctx: &ReadCtx, args: &[&str], out: &mut impl Write) -> Result<()> 
         return Ok(());
     };
 
-    // Reproduce the six-character action head's categorical softmax.
+    // Reproduce the symbolic action head's categorical softmax.
     let logits: Vec<f32> = o.brain.action.iter().map(|a| a.logit).collect();
     let temp = temperature.max(MIN_ACTION_TEMPERATURE);
     let predation_enabled = sim.config().predation_enabled;
@@ -298,7 +298,7 @@ const DEFAULT_FIND_FIELDS: &[&str] = &["id", "energy", "age", "generation", "suc
 /// All field names accepted by `find` predicates and `--fields` columns. Shown
 /// in error messages so the command is self-documenting.
 const FIND_FIELDS: &str = "id energy energy_flow age generation species \
-    successful_attacks neurons synapses hebb_eta";
+    successful_attacks neurons synapses initial_learning_rate";
 
 /// Whether `name` is a known numeric field. The same table validates both
 /// predicate fields and `--fields` columns; `org_field` maps each to a value.
@@ -313,7 +313,7 @@ fn is_field(name: &str) -> bool {
             | "successful_attacks"
             | "neurons"
             | "synapses"
-            | "hebb_eta"
+            | "initial_learning_rate"
     )
 }
 
@@ -341,7 +341,7 @@ fn field_text(o: &OrganismState, name: &str) -> String {
         | "energy_flow" => {
             format!("{}", org_field(o, name) as i64)
         }
-        "hebb_eta" => format!("{:.4}", org_field(o, name)),
+        "initial_learning_rate" => format!("{:.4}", org_field(o, name)),
         _ => format!("{:.2}", org_field(o, name)),
     }
 }
@@ -575,6 +575,7 @@ fn all_edges(o: &OrganismState) -> Vec<&SynapseEdge> {
         .flat_map(|s| s.synapses.iter())
         .chain(o.brain.inter.iter().flat_map(|n| n.synapses.iter()))
         .chain(o.brain.recurrent_synapses.iter())
+        .chain(o.brain.action_feedback_synapses.iter())
         .collect()
 }
 
@@ -609,6 +610,7 @@ fn brain_summary(
                     "post": neuron_label(e.post_neuron_id),
                     "timing": e.timing,
                     "w": round3(e.weight),
+                    "plasticity_coefficient": round3(e.plasticity_coefficient),
                     "elig": round3(e.eligibility),
                 })
             })
@@ -624,6 +626,8 @@ fn brain_summary(
                 "initial_learning_rate": g.initial_learning_rate,
                 "juvenile_eta_scale": g.juvenile_eta_scale,
                 "eligibility_retention": g.eligibility_retention,
+                "fast_weight_retention": g.fast_weight_retention,
+                "action_temperature_scale": g.action_temperature_scale,
                 "max_weight_delta_per_tick": g.max_weight_delta_per_tick,
                 "synapse_prune_threshold": g.synapse_prune_threshold,
                 "effective_eta": effective_eta_round(eta),
@@ -651,11 +655,12 @@ fn brain_summary(
     for e in &top {
         writeln!(
             out,
-            "    {:<20} -> {:<14} {:<13} w={:>7.3} elig={:>7.3}",
+            "    {:<20} -> {:<14} {:<13} w={:>7.3} plasticity={:>6.3} elig={:>7.3}",
             neuron_label(e.pre_neuron_id),
             neuron_label(e.post_neuron_id),
             timing_label(e.timing),
             e.weight,
+            e.plasticity_coefficient,
             e.eligibility
         )?;
     }
@@ -671,10 +676,12 @@ fn brain_summary(
     };
     writeln!(
         out,
-        "  plasticity: hebb_eta={:.4} juv_scale={:.3} elig_ret={:.3} max_dw={:.4} prune={:.4} -> effective_eta={:.5}{plasticity_tag}",
+        "  plasticity: initial_learning_rate={:.4} juv_scale={:.3} elig_ret={:.3} fast_ret={:.3} temp={:.3} max_dw={:.4} prune={:.4} -> effective_eta={:.5}{plasticity_tag}",
         g.initial_learning_rate,
         g.juvenile_eta_scale,
         g.eligibility_retention,
+        g.fast_weight_retention,
+        g.action_temperature_scale,
         g.max_weight_delta_per_tick,
         g.synapse_prune_threshold,
         eta
